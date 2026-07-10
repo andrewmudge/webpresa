@@ -79,7 +79,7 @@ export default function FutureSection() {
           </h2>
           <p className="text-lg text-gray-500 max-w-xl mx-auto">
             Webpresa is building the future of online presence management for
-            local businesses. Here's what's coming.
+            local businesses. Here&apos;s what&apos;s coming.
           </p>
         </motion.div>
 

@@ -72,7 +72,7 @@ export default function FounderSection() {
 
             <p className="text-lg text-gray-500 leading-relaxed mb-8">
               Local businesses are the backbone of every community. You
-              shouldn't have to choose between running your business and
+              shouldn&apos;t have to choose between running your business and
               maintaining a professional online presence. Webpresa handles the
               web so you can focus on what you do best.
             </p>
