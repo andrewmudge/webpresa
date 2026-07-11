@@ -27,7 +27,7 @@ npm install framer-motion lucide-react clsx tailwind-merge
 
 ---
 
-## 2. Config Files Modified
+## 2. Config Files Modified.
 
 ### `app/globals.css`
 
@@ -312,3 +312,548 @@ webpresa/web/
 - Wire up nav anchor links with proper `id` attributes on each section (already set on `#how-it-works`, `#examples`, `#pricing`, `#about`, `#contact`)
 - Implement dark mode (CSS variables are already structured for it in `globals.css`)
 - Add `robots.txt` and `sitemap.xml` for production SEO
+
+---
+
+---
+
+# Webpresa — GTM Repositioning & Homepage Refinement
+
+**Date:** 2026-07-10  
+**Scope:** Strategic messaging overhaul + two new sections + visual polish pass
+
+---
+
+## Overview
+
+Repositioned the entire homepage around Webpresa's actual go-to-market strategy: direct-mail postcards. Visitors arrive having already received a postcard with a QR code — they are verifying legitimacy and deciding whether to claim a preview site that may already be built for them. All copy, CTAs, section order, and new sections were updated to support this flow. Visual depth (alternating backgrounds, subtle gradients, improved mockups) was improved throughout. No redesign of the overall component architecture or visual identity.
+
+---
+
+## 1. Messaging Changes
+
+| Element | Before | After |
+|---|---|---|
+| Hero badge | "Website as a Service for Local Business" | "Managed Website Service for Local Businesses" |
+| Hero headline | "Your online presence, automated." | "We replace outdated websites for local businesses." |
+| Hero subhead | Agency/automation framing | "A professional, managed website — built, hosted, and maintained for you. Everything included. No agency process required." |
+| Primary CTA (all) | "Get My Website" | "Claim Your Website" |
+| Secondary CTA | "See Examples" → `#examples` | "See How It Works" → `#how-it-works` |
+| Trust items | "No design skills required / Hosting included / Maintenance handled" | "Hosting included / Unlimited updates / No technical skills needed" |
+| How It Works headline | "Simple. Professional. Done." | "An effortless process, start to finish." |
+| How It Works steps | "We Learn / We Build / We Keep It Working" | "Tell Us About Your Business / We Prepare Your Website / We Keep It Running" |
+| Features headline | "One subscription. Everything you need." | "One plan. Everything managed." |
+| Features column names | "Website / SEO / Management" | "Your Website / Search & Visibility / Ongoing Management" |
+| Comparison headline | "Why Webpresa makes sense." | "A simpler path to a professional website." |
+| CTA headline | "Your business deserves a better online presence." | "Ready to see what your website could look like?" |
+| Future section headline | "More than a website." | "Your website is just the beginning." |
+| Problem section headline | *(existing)* | "An outdated website costs you more than you think." |
+
+**Words removed throughout:** custom, handcrafted, dedicated designer, consultation, automated  
+**Words added throughout:** professional, managed, ready, included, maintained, hosted, reliable, simple, everything handled
+
+---
+
+## 2. New Sections
+
+### `WhyStartFromScratch.tsx` — `"use client"`
+
+New section placed after ProblemSection:
+
+- Headline: "Why start from scratch?"
+- Supporting copy about outdated websites
+- Side-by-side browser mockup comparison:
+  - **Before:** simulated outdated website (grey tones, table-style layout, no mobile consideration) with 3 red-dot bullet problems
+  - **After:** modern brand-gradient website mockup with 3 green-dot bullet wins
+- Arrow between mockups (inline on desktop, rotated 90° below the first on mobile)
+- Both mockups are pure JSX — no images
+- Section background: `bg-white`
+
+### `PreviewSection.tsx` — `"use client"`
+
+New section placed after HowItWorks; targets postcard recipients directly:
+
+- Navy gradient background (`from-[#0c3245] via-[#11455E] to-[#1a5f80]`) with subtle amber radial overlay
+- Headline: "Sometimes we build your website before you ask."
+- Copy explains the postcard-preview model — tasteful and confident, not spammy
+- Left column: browser mockup showing a preview page with an amber "Preview — not yet published" badge
+- Right column: "For Postcard Recipients" badge, headline, two copy paragraphs
+- CTAs: "View My Preview" (accent gold) + "How It Works" (ghost white)
+
+---
+
+## 3. Existing Components Updated
+
+| Component | Change |
+|---|---|
+| `Hero.tsx` | All copy updated; added postcard note: "Received a postcard? Your preview may already be ready." with link |
+| `HowItWorks.tsx` | Steps rewritten; added subtitle paragraph; background changed to `#F8FAFC` |
+| `ProblemSection.tsx` | Headline and all four card descriptions sharpened |
+| `ExamplesSection.tsx` | Replaced flat gradient preview cards with full browser mockups (chrome + nav + hero + service cards + star rating); added real business names and industry badges; gap increased to `gap-8`; section now `#F8FAFC` |
+| `FeaturesSection.tsx` | Background `bg-white` → `bg-[#F8FAFC]`; "custom" language removed; column names updated |
+| `ComparisonSection.tsx` | Background `bg-[#FAFAFA]` → `bg-white` |
+| `PricingSection.tsx` | Background `bg-white` → `bg-[#F8FAFC]`; "custom-designed" → "managed"; "Dedicated support" → "Priority support"; CTA → "Claim Your Website" |
+| `CTASection.tsx` | Headline and sub-copy updated for postcard context; CTA → "Claim Your Website" |
+| `FutureSection.tsx` | Removed "AI Agents" card (contradicts no-AI positioning); replaced with "Reputation" (automated review requests); headline updated |
+| `FAQSection.tsx` | Added first FAQ: "I received a postcard. What does that mean?"; "redesign" → "replace" throughout |
+| `FounderSection.tsx` | Background `bg-white` → `bg-[#F8FAFC]` for alternating rhythm |
+| `Navbar.tsx` | Both desktop and mobile CTAs → "Claim Your Website" |
+
+---
+
+## 4. Page Flow — Updated
+
+```
+Navbar
+└── main#main-content
+    ├── Hero                    bg-white
+    ├── ProblemSection          bg-[#F8FAFC]
+    ├── WhyStartFromScratch     bg-white          ← NEW
+    ├── HowItWorks              bg-[#F8FAFC]
+    ├── PreviewSection          bg navy gradient  ← NEW
+    ├── ExamplesSection         bg-[#F8FAFC]
+    ├── FeaturesSection         bg-[#F8FAFC]
+    ├── ComparisonSection       bg-white
+    ├── PricingSection          bg-[#F8FAFC]
+    ├── FounderSection          bg-[#F8FAFC]
+    ├── FutureSection           bg-[#FAFAFA]
+    ├── FAQSection              bg-[#FAFAFA]
+    └── CTASection              bg brand gradient
+Footer                          bg dark
+```
+
+---
+
+## 5. Runtime Fixes
+
+**Image Optimization error (`next.config.ts`):**  
+Added `images: { unoptimized: true }` — required because `output: 'export'` disables the Next.js Image Optimization API; static exports need unoptimized images.
+
+**Next.js Image aspect-ratio warning (`Navbar.tsx`):**  
+Added `style={{ width: "auto" }}` to the `<Image>` component — when CSS overrides one dimension (via `h-8`), Next.js requires the other to be explicitly set to `"auto"`.
+
+---
+
+## 6. Files Created / Modified
+
+```
+web/
+├── app/
+│   ├── page.tsx                       MODIFIED — new section order + 2 new imports
+│   └── components/
+│       ├── Navbar.tsx                 MODIFIED — CTA text, style={{ width: "auto" }}
+│       ├── Hero.tsx                   MODIFIED — full copy rewrite + postcard note
+│       ├── ProblemSection.tsx         MODIFIED — headline + card copy
+│       ├── HowItWorks.tsx             MODIFIED — steps rewrite + bg change
+│       ├── WhyStartFromScratch.tsx    NEW — before/after browser mockup section
+│       ├── PreviewSection.tsx         NEW — postcard-recipient preview section
+│       ├── ExamplesSection.tsx        MODIFIED — full browser mockup redesign
+│       ├── FeaturesSection.tsx        MODIFIED — copy + bg change
+│       ├── ComparisonSection.tsx      MODIFIED — bg change + headline
+│       ├── PricingSection.tsx         MODIFIED — copy + bg change
+│       ├── CTASection.tsx             MODIFIED — headline + copy
+│       ├── FutureSection.tsx          MODIFIED — removed AI Agents, headline
+│       ├── FAQSection.tsx             MODIFIED — postcard FAQ added
+│       └── FounderSection.tsx         MODIFIED — bg change
+└── next.config.ts                     MODIFIED — images: { unoptimized: true }
+```
+
+---
+
+---
+
+# Stage 5 — Domain Data Model
+
+**Date:** 2026-07-10  
+**Scope:** Canonical TypeScript models, Zod schemas, factories, and tests. No database infrastructure.
+
+---
+
+## Overview
+
+Created the complete domain data layer for the Webpresa platform. Pure TypeScript — no AWS, no React, no Next.js dependencies. All application code in subsequent stages imports from `@/domain/models`, `@/domain/schemas`, and `@/domain/factories`.
+
+**Note on location:** Files live at `web/domain/` (not `web/src/domain/`) because the existing `tsconfig.json` path alias `@/*` → `./` requires domain files directly under the web root to resolve as `@/domain/…`.
+
+---
+
+## 1. Dependencies Installed
+
+```bash
+npm install zod@^3.22.0
+npm install -D vitest@^3.0.0
+```
+
+| Package | Version installed | Purpose |
+|---|---|---|
+| `zod` | 3.25.76 | Runtime validation — all domain record validation |
+| `vitest` | 3.2.7 | Test runner — domain model test suite |
+
+Scripts added to `web/package.json`:
+```json
+"test": "vitest run",
+"test:watch": "vitest"
+```
+
+---
+
+## 2. Constants
+
+### `domain/constants/industries.ts`
+
+Single source of truth for all canonical industry values. TypeScript union type and Zod enum both derive from this one array.
+
+```typescript
+export const INDUSTRIES = [
+  'plumbing', 'hvac', 'electrical', 'roofing', 'landscaping',
+  'painting', 'cleaning', 'restaurant', 'bakery', 'salon',
+  'law_firm', 'accounting',
+] as const;
+
+export type Industry = (typeof INDUSTRIES)[number];
+```
+
+---
+
+## 3. Models (`domain/models/`)
+
+Pure TypeScript interfaces — no runtime dependencies.
+
+| File | Exports |
+|---|---|
+| `common.ts` | `Address`, `TimestampedRecord`, `MutableTimestampedRecord` |
+| `business.ts` | `Business`, `BUSINESS_STATUSES`, `BUSINESS_SOURCES`, `BusinessStatus`, `BusinessSource`, `BusinessScores` |
+| `site-preview.ts` | `SitePreview`, `SITE_PREVIEW_STATUSES`, `SitePreviewStatus`, `PreviewContent`, `PreviewHero`, `PreviewService`, `PreviewContact`, `PreviewTheme`, `GenerationMetadata` |
+| `scan-event.ts` | `ScanEvent`, `SCAN_STATUSES`, `ScanStatus`, `ScanScores`, `ScanStorageKeys` |
+| `postcard.ts` | `Postcard`, `POSTCARD_STATUSES`, `POSTCARD_PROVIDERS`, `PostcardStatus`, `PostcardProvider` |
+| `index.ts` | Re-exports all of the above |
+
+**Key design decisions:**
+- All main records extend `MutableTimestampedRecord` — `createdAt` and `updatedAt` are inherited, not redeclared
+- `Business.websiteUrl` and `Business.googlePlaceId` are explicitly optional — a Business is valid without either
+- `SitePreview.version` is a monotonically increasing integer — regeneration creates a new record with `version + 1`, old previews are never overwritten
+- `PreviewContent` has no arbitrary keys — AI output must conform to this exact shape before storage
+- No secrets, API keys, or credentials on any model
+
+---
+
+## 4. Schemas (`domain/schemas/`)
+
+Zod schemas for runtime validation. Schemas import status/source arrays from models (not the reverse) — models remain Zod-free.
+
+| File | Key schemas |
+|---|---|
+| `common.schema.ts` | `AddressSchema`, `IsoTimestampSchema` (`z.string().datetime()`), `ScoreSchema` (`z.number().int().min(0).max(100)`) |
+| `business.schema.ts` | `BusinessSchema` — `businessId` validated against `/^biz_[uuid]$/`; `z.enum(INDUSTRIES/BUSINESS_STATUSES/BUSINESS_SOURCES)` |
+| `site-preview.schema.ts` | `SitePreviewSchema`, `PreviewContentSchema` — strict length limits on all AI-generated text fields; `version: z.number().int().min(1)` |
+| `scan-event.schema.ts` | `ScanEventSchema` — `sourceUrl: z.string().url()`; ScoreSchema on all score fields |
+| `postcard.schema.ts` | `PostcardSchema` — `qrDestination: z.string().url()`; prefix regex on `postcardId` |
+| `index.ts` | Barrel export |
+
+---
+
+## 5. Factories (`domain/factories/`)
+
+| File | Function | Initial status | Notes |
+|---|---|---|---|
+| `utils.ts` | `generateId(prefix)`, `nowIso()` | — | `crypto.randomUUID()` global — no polyfill needed in Node 14.17+ |
+| `business.factory.ts` | `createBusiness(input)` | `'pending'` | Auto-slugifies name via `slugify()` if no slug provided |
+| `site-preview.factory.ts` | `createSitePreview(input)` | `'draft'` | Accepts `previousVersion?` — sets `version = (previousVersion ?? 0) + 1`; always generates new `previewId` |
+| `scan-event.factory.ts` | `createScanEvent(input)` | `'pending'` | Sets `startedAt` to current time |
+| `postcard.factory.ts` | `createPostcard(input)` | `'pending'` | — |
+| `index.ts` | Barrel export | — | — |
+
+All factories call `Schema.parse()` before returning — invalid input throws a `ZodError`.
+
+ID prefixes: `biz_` · `preview_` · `scan_` · `postcard_`
+
+---
+
+## 6. Tests
+
+### `domain/__tests__/domain.test.ts` — 34 tests, all passing
+
+| Group | Tests |
+|---|---|
+| Unique IDs | All 4 record types generate unique IDs across two calls |
+| `createdAt` | All 4 record types have a truthy `createdAt` |
+| `updatedAt` | All 4 mutable record types have `updatedAt` equal to `createdAt` on creation |
+| Status validation | All 4 schemas reject invalid status strings |
+| Score validation | Rejects > 100, < 0, and non-integers; accepts 0 and 100 |
+| Business optional fields | Valid without `websiteUrl`; valid without `googlePlaceId`; valid without both simultaneously |
+| AI content guard | Rejects missing `hero.headline`; rejects empty `services` array; rejects headline > 120 chars; rejects invalid hex theme colors |
+| Versioning | First preview = version 1; regenerated = version 2 with new `previewId` and same `businessId`; 3-version chain works |
+| ID prefix format | All 4 record types have the correct prefix |
+
+### `vitest.config.ts`
+
+```typescript
+resolve: { alias: { '@': path.resolve(__dirname, '.') } }
+```
+
+Mirrors the tsconfig `@/*` alias so `@/domain/…` imports resolve correctly in test runs without the Next.js bundler.
+
+---
+
+## 7. Result
+
+```
+✓ TypeScript: 0 errors (npx tsc --noEmit)
+✓ Lint: 0 errors (npm run lint)
+✓ Tests: 34 passed (npm test)
+✓ Build: production static export succeeds (npm run build)
+```
+
+---
+
+## 8. Files Created / Modified
+
+```
+web/
+├── domain/
+│   ├── constants/
+│   │   └── industries.ts              NEW
+│   ├── models/
+│   │   ├── common.ts                  NEW
+│   │   ├── business.ts                NEW
+│   │   ├── site-preview.ts            NEW
+│   │   ├── scan-event.ts              NEW
+│   │   ├── postcard.ts                NEW
+│   │   └── index.ts                   NEW
+│   ├── schemas/
+│   │   ├── common.schema.ts           NEW
+│   │   ├── business.schema.ts         NEW
+│   │   ├── site-preview.schema.ts     NEW
+│   │   ├── scan-event.schema.ts       NEW
+│   │   ├── postcard.schema.ts         NEW
+│   │   └── index.ts                   NEW
+│   ├── factories/
+│   │   ├── utils.ts                   NEW
+│   │   ├── business.factory.ts        NEW
+│   │   ├── site-preview.factory.ts    NEW
+│   │   ├── scan-event.factory.ts      NEW
+│   │   ├── postcard.factory.ts        NEW
+│   │   └── index.ts                   NEW
+│   └── __tests__/
+│       └── domain.test.ts             NEW
+├── vitest.config.ts                   NEW
+└── package.json                       MODIFIED — zod, vitest, test scripts
+```
+
+---
+
+---
+
+# Stage 6 — AWS CDK Infrastructure
+
+**Date:** 2026-07-11  
+**Scope:** DynamoDB data layer deployed to development AWS account via CDK. No application logic.
+
+---
+
+## Overview
+
+Created a standalone CDK TypeScript project in `infra/` that provisions four DynamoDB tables in the `webpresa` development AWS account. Architecture is environment-aware — the same constructs deploy to production using `--context env=prod --profile webpresa-prod` without any code changes.
+
+---
+
+## 1. AWS Account & Deployment Details
+
+| | |
+|---|---|
+| **Profile** | `webpresa` (SSO) |
+| **Account ID** | `539898341083` |
+| **Region** | `us-east-1` |
+| **Stack name** | `WebpresaDevDataStack` |
+| **Stack ARN** | `arn:aws:cloudformation:us-east-1:539898341083:stack/WebpresaDevDataStack/9abb40d0-7d1e-11f1-86b2-0affc428ba97` |
+| **Bootstrap** | Completed — `CDKToolkit` stack created |
+
+---
+
+## 2. Infrastructure Architecture
+
+```
+EnvironmentConfig (dev / prod)
+          ↓
+WebpresaTable construct   ← reusable; encapsulates all common DynamoDB config
+          ↓
+WebpresaDataStack         ← single stack; one per environment
+    ├── Businesses
+    ├── SitePreviews
+    ├── ScanEvents
+    └── Postcards
+```
+
+---
+
+## 3. Environment Configuration (`infra/lib/config/environments.ts`)
+
+Both environments are defined in code. Only `dev` is deployed in Stage 6.
+
+| Setting | dev | prod |
+|---|---|---|
+| Suffix | `dev` | `prod` |
+| Billing mode | `PAY_PER_REQUEST` | `PAY_PER_REQUEST` |
+| Point-in-time recovery | disabled | **enabled** |
+| Deletion protection | disabled | **enabled** |
+| Removal policy | `DESTROY` | `RETAIN` |
+
+To deploy production (future):
+```bash
+cdk deploy WebpresaProdDataStack --context env=prod --profile webpresa-prod
+```
+
+---
+
+## 4. Reusable `WebpresaTable` Construct (`infra/lib/constructs/webpresa-table.ts`)
+
+Every table automatically gets:
+- Full table name: `webpresa-{suffix}-{tableName}`
+- Billing mode, encryption (AWS-managed), removal policy, PITR, deletion protection — all from `EnvironmentConfig`
+- All GSIs with `ProjectionType.ALL`
+- Two CloudFormation outputs: `TableName` and `TableArn`
+
+Adding a future table requires only:
+```typescript
+new WebpresaTable(this, 'Claims', {
+  config,
+  tableName: 'claims',
+  partitionKey: { name: 'claimId', type: STRING },
+  globalSecondaryIndexes: [ ... ],
+});
+```
+
+---
+
+## 5. DynamoDB Tables Deployed
+
+### `webpresa-dev-businesses`
+
+| | |
+|---|---|
+| Partition key | `businessId` (S) |
+| GSIs | `slug-index` (PK: slug) · `google-place-id-index` (PK: googlePlaceId) · `status-index` ⚠ |
+
+### `webpresa-dev-site-previews`
+
+| | |
+|---|---|
+| Partition key | `previewId` (S) |
+| GSIs | `slug-index` (PK: slug) · `business-id-index` (PK: businessId, SK: createdAt) · `status-index` ⚠ |
+
+### `webpresa-dev-scan-events`
+
+| | |
+|---|---|
+| Partition key | `scanId` (S) |
+| GSIs | `business-id-index` (PK: businessId, SK: createdAt) · `status-index` ⚠ |
+
+### `webpresa-dev-postcards`
+
+| | |
+|---|---|
+| Partition key | `postcardId` (S) |
+| GSIs | `business-id-index` (PK: businessId, SK: createdAt) · `campaign-code-index` (PK: campaignCode) · `provider-postcard-id-index` (PK: providerPostcardId, sparse) · `status-index` ⚠ |
+
+**createdAt sort key:** The `business-id-index` on SitePreviews, ScanEvents, and Postcards uses `createdAt` as the sort key, enabling chronological queries and newest-first pagination for all records belonging to one business.
+
+**Sparse index:** `provider-postcard-id-index` only contains items where `providerPostcardId` is set (i.e. after submission to a mailing provider).
+
+> ⚠ **Pre-production note — status GSIs:** `status` is a low-cardinality attribute (4–6 values). At production write volumes, a GSI with a low-cardinality partition key creates hot partitions. These indexes must be reassessed before production deployment. Options: filter expressions on a higher-cardinality index, composite keys (`status#YYYY-MM`), or DynamoDB Streams.
+
+---
+
+## 6. CloudFormation Outputs
+
+| Export name | Value |
+|---|---|
+| `webpresa-dev-businesses-name` | `webpresa-dev-businesses` |
+| `webpresa-dev-businesses-arn` | `arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-businesses` |
+| `webpresa-dev-site-previews-name` | `webpresa-dev-site-previews` |
+| `webpresa-dev-site-previews-arn` | `arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-site-previews` |
+| `webpresa-dev-scan-events-name` | `webpresa-dev-scan-events` |
+| `webpresa-dev-scan-events-arn` | `arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-scan-events` |
+| `webpresa-dev-postcards-name` | `webpresa-dev-postcards` |
+| `webpresa-dev-postcards-arn` | `arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-postcards` |
+
+---
+
+## 7. Tags Applied to All Resources
+
+| Tag | Value |
+|---|---|
+| `Project` | `Webpresa` |
+| `Environment` | `Dev` (or `Prod` for the production stack) |
+| `ManagedBy` | `CDK` |
+
+Tags are applied inside `WebpresaDataStack` via `cdk.Tags.of(this)` — they propagate to all resources and appear in test synthesis without needing to pass them as `StackProps`.
+
+---
+
+## 8. Tests (`infra/test/data-stack.test.ts`) — 26 tests, all passing
+
+| Group | Tests |
+|---|---|
+| Table count | 4 tables created |
+| Billing mode | PAY_PER_REQUEST (dev + prod) |
+| Partition keys | All 4 tables |
+| GSI names | All expected indexes per table |
+| `createdAt` sort key | SitePreviews, ScanEvents, Postcards `business-id-index` each have `createdAt` as `RANGE` key |
+| Businesses has no `business-id-index` | Verified |
+| Dev removal policy | `DeletionPolicy: Delete` + `UpdateReplacePolicy: Delete` |
+| CloudFormation outputs | Exactly 8 outputs |
+| Tags | Project / Environment / ManagedBy on all tables |
+| Prod config (in-memory) | `DeletionPolicy: Retain`, PITR enabled, `prod` suffix on all table names, `Environment=Prod` tag |
+| GSI projection | All GSIs use `ProjectionType.ALL` |
+
+No AWS credentials required — CDK assertion tests synthesize in memory via `Template.fromStack()`.
+
+---
+
+## 9. CDK App Entry Point
+
+```typescript
+// infra/bin/webpresa.ts
+const envName = app.node.tryGetContext('env') ?? 'dev';
+const config = getEnvironmentConfig(envName);
+const label = envName[0].toUpperCase() + envName.slice(1); // 'Dev' | 'Prod'
+
+new WebpresaDataStack(app, `Webpresa${label}DataStack`, { config, env: {...} });
+```
+
+Stack name is derived at runtime: `WebpresaDevDataStack` or `WebpresaProdDataStack`.
+
+---
+
+## 10. Result
+
+```
+✓ Tests: 26 passed (npm test)
+✓ Synth: WebpresaDevDataStack template generated, no errors
+✓ Bootstrap: CDKToolkit created in 539898341083 / us-east-1
+✓ Deploy: WebpresaDevDataStack deployed in 60.6s
+```
+
+---
+
+## 11. Files Created
+
+```
+infra/
+├── bin/
+│   └── webpresa.ts                    NEW — CDK app entry point
+├── lib/
+│   ├── config/
+│   │   └── environments.ts            NEW — dev + prod EnvironmentConfig
+│   ├── constructs/
+│   │   └── webpresa-table.ts          NEW — reusable DynamoDB construct
+│   └── stacks/
+│       └── data-stack.ts              NEW — WebpresaDataStack
+├── test/
+│   └── data-stack.test.ts             NEW — 26 CDK assertion tests
+├── cdk.json                           NEW — CDK app config
+├── package.json                       NEW — aws-cdk-lib, constructs, vitest
+├── tsconfig.json                      NEW — CommonJS target for CDK
+├── vitest.config.ts                   NEW — test runner config
+└── .gitignore                         NEW
+```
