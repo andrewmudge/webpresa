@@ -85,7 +85,7 @@ export default function ComparisonSection() {
   return (
     <section
       ref={ref}
-      className="bg-[#FAFAFA] py-24 lg:py-32"
+      className="bg-white py-24 lg:py-32"
       aria-labelledby="comparison-heading"
     >
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -103,7 +103,7 @@ export default function ComparisonSection() {
             id="comparison-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight"
           >
-            Why Webpresa makes sense.
+            A simpler path to a professional website.
           </h2>
         </motion.div>
 

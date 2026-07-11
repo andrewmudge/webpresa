@@ -7,7 +7,7 @@ import {
   MapPin,
   Star,
   Building2,
-  Bot,
+  MessageSquare,
   Users,
 } from "lucide-react";
 
@@ -37,9 +37,9 @@ const products = [
     available: false,
   },
   {
-    icon: Bot,
-    title: "AI Agents",
-    description: "Automated follow-up, scheduling, and customer communication.",
+    icon: MessageSquare,
+    title: "Reputation",
+    description: "Automated review requests and reputation monitoring to build trust.",
     available: false,
   },
   {
@@ -75,11 +75,10 @@ export default function FutureSection() {
             id="future-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight mb-4"
           >
-            More than a website.
+            Your website is just the beginning.
           </h2>
           <p className="text-lg text-gray-500 max-w-xl mx-auto">
-            Webpresa is building the future of online presence management for
-            local businesses. Here&apos;s what&apos;s coming.
+            Webpresa is expanding to help local businesses manage their entire online presence — from search visibility to customer reviews.
           </p>
         </motion.div>
 

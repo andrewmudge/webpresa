@@ -37,12 +37,11 @@ export default function CTASection() {
               id="cta-heading"
               className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white leading-tight tracking-tight mb-6 max-w-3xl mx-auto"
             >
-              Your business deserves a better online presence.
+              Ready to see what your website could look like?
             </h2>
             <p className="text-lg text-white/75 max-w-xl mx-auto mb-10 leading-relaxed">
-              Join local businesses across the country that trust Webpresa to
-              build and manage their websites. Setup is fast, pricing is simple,
-              and results speak for themselves.
+              Join local businesses across the country that trust Webpresa to manage their online presence.
+              Simple pricing, everything included, and we handle all the technical work.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -51,7 +50,7 @@ export default function CTASection() {
                   href="#contact"
                   className="inline-flex items-center justify-center bg-accent text-white font-bold text-base px-8 py-4 rounded-xl shadow-lg hover:bg-accent-dark transition-colors duration-200"
                 >
-                  Get My Website
+                  Claim Your Website
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
@@ -65,7 +64,7 @@ export default function CTASection() {
             </div>
 
             <p className="text-sm text-white/50 mt-6">
-              No contracts to sign upfront · Questions?{" "}
+              No long-term contracts upfront &middot; Questions?{" "}
               <a
                 href="mailto:hello@webpresa.com"
                 className="underline hover:text-white/80 transition-colors"

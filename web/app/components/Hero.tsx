@@ -14,15 +14,15 @@ const fadeUp = {
 };
 
 const trustItems = [
-  "No design skills required",
   "Hosting included",
-  "Maintenance handled",
+  "Unlimited updates",
+  "No technical skills needed",
 ];
 
 const statusCards = [
   { icon: Wifi, label: "Mobile Optimized", color: "text-brand" },
   { icon: Search, label: "SEO Ready", color: "text-accent" },
-  { icon: Shield, label: "Hosted by Webpresa", color: "text-brand" },
+  { icon: Shield, label: "Fully Managed", color: "text-brand" },
 ];
 
 function WebsiteMockup() {
@@ -175,7 +175,7 @@ export default function Hero() {
               className="inline-flex items-center gap-2 bg-brand-muted text-brand text-xs font-semibold px-4 py-1.5 rounded-full mb-6"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-brand" />
-              Website as a Service for Local Business
+              Managed Website Service for Local Businesses
             </motion.div>
 
             {/* Headline */}
@@ -187,8 +187,8 @@ export default function Hero() {
               variants={fadeUp}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold text-gray-900 leading-[1.05] tracking-tight mb-6"
             >
-              Your online presence,{" "}
-              <span className="text-brand">automated.</span>
+              We replace outdated websites{" "}
+              <span className="text-brand">for local businesses.</span>
             </motion.h1>
 
             {/* Subheadline */}
@@ -199,9 +199,8 @@ export default function Hero() {
               variants={fadeUp}
               className="text-lg sm:text-xl text-gray-500 leading-relaxed mb-8 max-w-lg mx-auto lg:mx-0"
             >
-              Webpresa builds, hosts, and maintains professional websites for
-              local businesses—without the agency fees, technical headaches, or
-              endless back-and-forth.
+              A professional, managed website — built, hosted, and maintained
+              for you. Everything included. No agency process required.
             </motion.p>
 
             {/* CTAs */}
@@ -217,15 +216,15 @@ export default function Hero() {
                   href="#contact"
                   className="inline-flex items-center justify-center bg-brand text-white font-semibold text-base px-7 py-3.5 rounded-xl shadow-md hover:bg-brand-dark transition-colors duration-200"
                 >
-                  Get My Website
+                  Claim Your Website
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link
-                  href="#examples"
+                  href="#how-it-works"
                   className="inline-flex items-center justify-center bg-white text-gray-800 font-semibold text-base px-7 py-3.5 rounded-xl border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors duration-200"
                 >
-                  See Examples
+                  See How It Works
                 </Link>
               </motion.div>
             </motion.div>
@@ -249,6 +248,23 @@ export default function Hero() {
                 </li>
               ))}
             </motion.ul>
+
+            {/* Postcard note */}
+            <motion.p
+              custom={5}
+              initial="hidden"
+              animate="visible"
+              variants={fadeUp}
+              className="text-sm text-gray-400 text-center lg:text-left mt-2"
+            >
+              Received a postcard?{" "}
+              <Link
+                href="#contact"
+                className="text-brand hover:text-brand-dark underline underline-offset-2 transition-colors"
+              >
+                Your preview may already be ready.
+              </Link>
+            </motion.p>
           </div>
 
           {/* Right column — mockup */}

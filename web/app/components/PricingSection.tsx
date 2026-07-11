@@ -6,14 +6,14 @@ import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 
 const includes = [
-  "Professional, custom-designed website",
+  "Professional, managed website",
   "Managed hosting — fast & reliable",
   "Security monitoring & updates",
   "SEO foundation & Google indexing",
   "Analytics dashboard",
   "Unlimited content edits",
   "Mobile-optimized on all devices",
-  "Dedicated support",
+  "Priority support",
 ];
 
 export default function PricingSection() {
@@ -24,7 +24,7 @@ export default function PricingSection() {
     <section
       id="pricing"
       ref={ref}
-      className="bg-white py-24 lg:py-32"
+      className="bg-[#F8FAFC] py-24 lg:py-32"
       aria-labelledby="pricing-heading"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -46,7 +46,7 @@ export default function PricingSection() {
           </h2>
           <p className="text-lg text-gray-500 max-w-xl mx-auto">
             No setup fees. No surprise bills. Everything your business needs to
-            look professional online—for one flat monthly rate.
+            look professional online — for one flat monthly rate.
           </p>
         </motion.div>
 
@@ -98,7 +98,7 @@ export default function PricingSection() {
                   href="#contact"
                   className="flex w-full items-center justify-center bg-brand text-white font-bold text-base py-4 rounded-xl shadow-md hover:bg-brand-dark transition-colors duration-200"
                 >
-                  Get My Website
+                  Claim Your Website
                 </Link>
               </motion.div>
 

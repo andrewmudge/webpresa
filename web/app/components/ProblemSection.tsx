@@ -9,25 +9,25 @@ const problems = [
     icon: Paintbrush,
     title: "Outdated Design",
     description:
-      "First impressions happen online. An outdated website signals distrust and sends customers straight to a competitor.",
+      "First impressions happen online. An outdated website signals distrust and sends customers straight to a competitor with a better one.",
   },
   {
     icon: Smartphone,
     title: "Poor Mobile Experience",
     description:
-      "Over 60% of web traffic is mobile. If your site isn't built for phones, you're losing customers every day.",
+      "Over 60% of web traffic is mobile. If your site isn't built for phones, you're losing customers every single day.",
   },
   {
     icon: PenLine,
-    title: "Hard to Update",
+    title: "Impossible to Update",
     description:
-      "Changing your hours, menu, or services shouldn't require a developer. Your website should work for you, not the other way around.",
+      "Changing your hours, services, or pricing shouldn't require a developer. Your website should work for you, not the other way around.",
   },
   {
     icon: TrendingDown,
-    title: "Not Bringing in Customers",
+    title: "Invisible on Google",
     description:
-      "A website that doesn't show up on Google is invisible. Without SEO basics, you're paying for a digital brochure nobody reads.",
+      "A website without the basics won't show up in local search results. If customers can't find you, they'll find someone else.",
   },
 ];
 
@@ -69,8 +69,11 @@ export default function ProblemSection() {
             id="problem-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 leading-tight tracking-tight max-w-3xl mx-auto"
           >
-            Your website should help grow your business—not become another job.
+            An outdated website costs you more than you think.
           </h2>
+          <p className="mt-5 text-lg text-gray-500 max-w-2xl mx-auto">
+            Most local businesses aren&apos;t losing customers to bad service — they&apos;re losing them online, before anyone ever picks up the phone.
+          </p>
         </motion.div>
 
         {/* Cards */}

@@ -72,8 +72,9 @@ export default function Footer() {
         {/* Bottom bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-8 border-t border-gray-100">
           <p className="text-xs text-gray-400">
-            © 2026 Webpresa. All rights reserved.
+            © 2026 Webpresa. All rights reserved. 
           </p>
+          <p>V0.0.1</p>
           <p className="text-xs text-gray-400">
             Your online presence, automated.
           </p>

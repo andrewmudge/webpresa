@@ -6,9 +6,14 @@ import { Plus, Minus } from "lucide-react";
 
 const faqs = [
   {
+    question: "I received a postcard. What does that mean?",
+    answer:
+      "It means we noticed your current website could be improved, so we created a modern preview version for your business. You can view the preview, and if you like what you see, we can have it live quickly. There's no obligation — we just want you to see what's possible.",
+  },
+  {
     question: "What is Webpresa?",
     answer:
-      "Webpresa is a website-as-a-service company for local businesses. We design, build, host, and maintain your website for one flat monthly fee. You get a professional online presence without needing any technical knowledge or hiring an expensive agency.",
+      "Webpresa is a managed website service for local businesses. We build, host, and maintain professional websites for one flat monthly fee. You get a reliable online presence without any technical work on your part.",
   },
   {
     question: "Do I own my domain?",
@@ -31,9 +36,9 @@ const faqs = [
       "After the initial 12-month agreement, your subscription continues month-to-month. You can cancel anytime with 30 days' notice. If you decide to cancel, we'll help you transition your domain and content.",
   },
   {
-    question: "Can you redesign my existing website?",
+    question: "Can you replace my existing website?",
     answer:
-      "Absolutely. We can take over and redesign your current website, or start fresh from scratch. Either way, we handle the migration and make sure nothing is lost in the process.",
+      "Yes. We can take over and modernize your current website. We handle the migration, make sure nothing is lost, and have the new version ready for your review before anything goes live.",
   },
 ];
 

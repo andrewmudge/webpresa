@@ -2,31 +2,31 @@ import { CheckCircle2 } from "lucide-react";
 
 const columns = [
   {
-    title: "Website",
+    title: "Your Website",
     items: [
-      "Professional design",
+      "Professional, modern design",
       "Mobile optimized",
       "Fast loading",
-      "Contact forms",
+      "Contact forms included",
     ],
   },
   {
-    title: "SEO",
+    title: "Search & Visibility",
     items: [
       "Local search optimization",
       "Analytics dashboard",
       "Google indexing",
-      "Content structure",
+      "Proper content structure",
     ],
   },
   {
-    title: "Management",
+    title: "Ongoing Management",
     items: [
       "Managed hosting",
       "Security monitoring",
       "Ongoing maintenance",
-      "Unlimited updates",
-      "Monthly analytics",
+      "Unlimited content updates",
+      "Monthly performance review",
     ],
   },
 ];
@@ -34,7 +34,7 @@ const columns = [
 export default function FeaturesSection() {
   return (
     <section
-      className="bg-white py-24 lg:py-32"
+      className="bg-[#F8FAFC] py-24 lg:py-32"
       aria-labelledby="features-heading"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -47,7 +47,7 @@ export default function FeaturesSection() {
             id="features-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight"
           >
-            One subscription. Everything you need.
+            One plan. Everything managed.
           </h2>
         </div>
 

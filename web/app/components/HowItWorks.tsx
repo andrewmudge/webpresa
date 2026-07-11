@@ -8,23 +8,23 @@ const steps = [
   {
     number: "01",
     icon: ClipboardList,
-    title: "We Learn Your Business",
+    title: "Tell Us About Your Business",
     description:
-      "We start with a simple onboarding call to understand your services, customers, and goals. No forms to fill out, no confusing questionnaires.",
+      "A quick onboarding gives us everything we need — your services, location, and how you want customers to reach you. Simple and fast.",
   },
   {
     number: "02",
     icon: Layout,
-    title: "We Build Your Website",
+    title: "We Prepare Your Website",
     description:
-      "Our team designs and develops a professional, mobile-first website tailored to your industry. You'll see it before it goes live.",
+      "We create a modern, professional website ready for your review. You'll see exactly what your customers will see before anything goes live.",
   },
   {
     number: "03",
     icon: RefreshCw,
-    title: "We Keep It Working",
+    title: "We Keep It Running",
     description:
-      "Hosting, security updates, content changes, and performance monitoring—handled. You run your business; we handle your online presence.",
+      "Hosting, security updates, content changes, and ongoing improvements are all included. Focus on your business — we handle the rest.",
   },
 ];
 
@@ -36,7 +36,7 @@ export default function HowItWorks() {
     <section
       id="how-it-works"
       ref={ref}
-      className="bg-white py-24 lg:py-32"
+      className="bg-[#F8FAFC] py-24 lg:py-32"
       aria-labelledby="how-heading"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -54,8 +54,11 @@ export default function HowItWorks() {
             id="how-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight"
           >
-            Simple. Professional. Done.
+            An effortless process, start to finish.
           </h2>
+          <p className="mt-4 text-lg text-gray-500 max-w-xl mx-auto">
+            We handle every step. You just tell us about your business — we take care of the rest.
+          </p>
         </motion.div>
 
         {/* Steps */}

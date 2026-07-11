@@ -45,6 +45,7 @@ export default function Navbar() {
             width={140}
             height={32}
             className="h-8 w-auto"
+            style={{ width: "auto" }}
             priority
           />
         </Link>
@@ -76,7 +77,7 @@ export default function Navbar() {
               href="#contact"
               className="inline-flex items-center gap-2 bg-brand text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm hover:bg-brand-dark transition-colors duration-200"
             >
-              Get My Website
+              Claim Your Website
             </Link>
           </motion.div>
         </div>
@@ -126,7 +127,7 @@ export default function Navbar() {
               onClick={() => setMobileOpen(false)}
               className="block text-center py-2.5 px-4 rounded-xl bg-brand text-white text-sm font-semibold hover:bg-brand-dark transition-colors"
             >
-              Get My Website
+              Claim Your Website
             </Link>
           </div>
         </motion.div>

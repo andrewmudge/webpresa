@@ -13,7 +13,7 @@ export default function FounderSection() {
     <section
       id="about"
       ref={ref}
-      className="bg-white py-24 lg:py-32"
+      className="bg-[#F8FAFC] py-24 lg:py-32"
       aria-labelledby="founder-heading"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
