@@ -49,6 +49,16 @@ export interface PreviewContent {
   tagline: string;
   aboutText: string;
   contact: PreviewContact;
+  /** Cities and regions the business serves. Rendered when present. */
+  serviceAreas?: string[];
+  /**
+   * "Why choose us" differentiators shown in the WhyChooseUs section.
+   * Each entry has a short title and a one-sentence description.
+   * Do not include invented credentials, guarantees, or statistics.
+   */
+  differentiators?: { title: string; description: string }[];
+  /** Business hours as a single formatted display string, e.g. "Mon–Fri 8am–6pm, Sat 9am–2pm". */
+  hours?: string;
 }
 
 /** Visual appearance tokens applied to the preview template. */
@@ -57,6 +67,10 @@ export interface PreviewTheme {
   primaryColor: string;
   accentColor: string;
   fontFamily: string;
+  /** URL of the hero section background image. Uses a gradient fallback when absent. */
+  heroImageUrl?: string;
+  /** URL of the about/why-choose-us section image. */
+  aboutImageUrl?: string;
 }
 
 /** Metadata about the generation run that produced this preview. */

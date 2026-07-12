@@ -1,0 +1,60 @@
+import { V } from './tokens';
+
+interface Props {
+  businessName: string;
+  tagline: string;
+  aboutText: string;
+}
+
+export function AboutSection({ businessName, tagline, aboutText }: Props) {
+  return (
+    <section id="about" className="py-20 bg-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          {/* Text */}
+          <div>
+            <p className="text-xs font-bold tracking-widest uppercase mb-2" style={{ color: V.accent }}>
+              About Us
+            </p>
+            <h2
+              className="font-extrabold text-gray-900 leading-tight mb-5"
+              style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)' }}
+            >
+              {tagline}
+            </h2>
+            <p className="text-gray-500 leading-relaxed mb-7 max-w-prose">{aboutText}</p>
+            <a
+              href="#contact"
+              className="inline-flex items-center gap-2 font-bold rounded-xl px-6 py-3 text-white text-sm transition-opacity hover:opacity-90"
+              style={{ backgroundColor: V.primary }}
+            >
+              Work with {businessName}
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </a>
+          </div>
+
+          {/* Visual accent block */}
+          <div
+            className="relative hidden lg:block rounded-2xl overflow-hidden min-h-[320px]"
+            style={{ backgroundColor: V.primary }}
+          >
+            {/* Decorative concentric circles */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-10">
+              <div className="w-96 h-96 rounded-full border-2 border-white" />
+              <div className="absolute w-64 h-64 rounded-full border-2 border-white" />
+              <div className="absolute w-32 h-32 rounded-full border-2 border-white" />
+            </div>
+            <div className="relative z-10 p-10 flex flex-col justify-end h-full">
+              <blockquote className="text-white/90 text-lg font-medium italic leading-relaxed">
+                &ldquo;Our goal is simple: deliver quality work on time, every time.&rdquo;
+              </blockquote>
+              <p className="text-white/60 text-sm mt-3">— {businessName}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

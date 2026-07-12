@@ -41,6 +41,17 @@ export const PreviewContentSchema = z.object({
   tagline: z.string().min(1).max(200),
   aboutText: z.string().min(1).max(2000),
   contact: PreviewContactSchema,
+  serviceAreas: z.array(z.string().min(1).max(80)).max(10).optional(),
+  differentiators: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(80),
+        description: z.string().min(1).max(300),
+      }),
+    )
+    .max(8)
+    .optional(),
+  hours: z.string().max(200).optional(),
 });
 
 const PreviewThemeSchema = z.object({
@@ -48,6 +59,8 @@ const PreviewThemeSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   fontFamily: z.string().min(1),
+  heroImageUrl: z.string().url().optional(),
+  aboutImageUrl: z.string().url().optional(),
 });
 
 const GenerationMetadataSchema = z.object({

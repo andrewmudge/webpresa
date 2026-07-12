@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { getPreviewsBySlug } from '@/lib/db/site-previews';
 import { getBusinessById } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
-import { LocalBusinessTemplate } from './LocalBusinessTemplate';
+import { GeneratedWebsite } from './template';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +70,7 @@ export default async function PreviewPage({ params }: Props) {
   const isClaimed = business.status === 'active';
 
   return (
-    <LocalBusinessTemplate
+    <GeneratedWebsite
       preview={preview}
       businessName={business.name}
       isClaimed={isClaimed}
