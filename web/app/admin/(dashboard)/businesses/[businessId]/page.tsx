@@ -188,7 +188,7 @@ export default async function BusinessDetailPage({ params }: Props) {
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview</h3>
           <div className="flex flex-wrap items-center gap-3">
             {/* Create seed preview */}
-            <form action={createSeedPreviewAction.bind(null, business)}>
+            <form action={createSeedPreviewAction.bind(null, businessId)}>
               <button
                 type="submit"
                 className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors"

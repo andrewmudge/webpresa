@@ -182,13 +182,16 @@ const SEED_THEME = (industry: string): PreviewTheme => {
 // Server action
 // ---------------------------------------------------------------------------
 
-export async function createSeedPreviewAction(business: Business): Promise<void> {
+export async function createSeedPreviewAction(businessId: string): Promise<void> {
   const session = await getSession();
   if (!session) throw new Error('Unauthorized');
 
+  const business = await getBusinessById(businessId);
+  if (!business) throw new Error('Business not found');
+
   const content = buildSeedContent(business);
 
-  const existing = await listPreviewsForBusiness(business.businessId);
+  const existing = await listPreviewsForBusiness(businessId);
   const previousVersion = existing.length > 0 ? Math.max(...existing.map((p) => p.version)) : 0;
 
   const preview = createSitePreview({
@@ -217,7 +220,7 @@ export async function createSeedPreviewAction(business: Business): Promise<void>
  *
  * Requires an active admin session. Redirects to /admin/businesses on success.
  */
-export async function deleteBusinessAction(businessId: string): Promise<{ error: string } | never> {
+export async function deleteBusinessAction(businessId: string): Promise<{ error: string } | void> {
   const session = await getSession();
   if (!session) return { error: 'Unauthorized' };
 
