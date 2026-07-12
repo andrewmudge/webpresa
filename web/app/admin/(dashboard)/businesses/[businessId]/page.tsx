@@ -4,7 +4,9 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
+import { createSeedPreviewAction } from './actions';
 import type { Business } from '@/domain/models/business';
+import type { SitePreview } from '@/domain/models/site-preview';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,10 +173,46 @@ export default async function BusinessDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Unavailable actions notice */}
-      <div className="mt-8 rounded-xl border border-dashed border-gray-200 p-6 text-sm text-gray-400 text-center">
-        Actions — <em>Create preview, Run scan, Generate postcard, Publish preview</em> — will be
-        available in later stages.
+      {/* Actions */}
+      <div className="mt-8 space-y-4">
+        {/* Preview actions */}
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview</h3>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Create seed preview */}
+            <form action={createSeedPreviewAction.bind(null, business)}>
+              <button
+                type="submit"
+                className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors"
+              >
+                Create test preview
+              </button>
+            </form>
+            {/* Links to existing published previews */}
+            {previews.filter((p: SitePreview) => p.status === 'published').slice(0, 1).map((p: SitePreview) => (
+              <a
+                key={p.previewId}
+                href={`/b/${p.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                View preview ↗
+              </a>
+            ))}
+          </div>
+          {previews.filter((p: SitePreview) => p.status === 'published').length > 0 && (
+            <p className="mt-2 text-xs text-gray-400">
+              URL: <span className="font-mono">/b/{business.slug}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Deferred actions */}
+        <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">
+          Actions — <em>Run scan, Generate postcard, Publish preview (AI)</em> — will be
+          available in later stages.
+        </div>
       </div>
     </div>
   );

@@ -17,6 +17,28 @@ export async function getSitePreviewById(previewId: string): Promise<SitePreview
 }
 
 /**
+ * Return all SitePreview records that share a slug, sorted by version
+ * descending (highest / most recent version first).
+ *
+ * Uses the `slug-index` GSI as required by the Stage 8 spec.
+ * The caller is responsible for filtering to the desired status(es).
+ */
+export async function getPreviewsBySlug(slug: string): Promise<SitePreview[]> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_SITE_PREVIEWS(),
+      IndexName: 'slug-index',
+      KeyConditionExpression: 'slug = :slug',
+      ExpressionAttributeValues: { ':slug': slug },
+    }),
+  );
+  const items = (result.Items ?? []).map((item) => SitePreviewSchema.parse(item));
+  // Sort highest version first — GSI has no sort key, so order in code.
+  return items.sort((a, b) => b.version - a.version);
+}
+
+/**
  * List all previews for a business, ordered by `createdAt` descending (newest first).
  */
 export async function listPreviewsForBusiness(
@@ -45,3 +67,4 @@ export async function putSitePreview(preview: SitePreview): Promise<void> {
     }),
   );
 }
+
