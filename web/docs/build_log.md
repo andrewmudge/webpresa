@@ -1114,3 +1114,39 @@ webpresa/
 4. Explicit approval required before running `amplify push` or triggering a manual build.
 
 See `deployment.md` for detailed steps.
+
+
+---
+
+# Hosting Migration — Amplify to Vercel
+
+**Date:** 2026-07-12
+**Scope:** Replace AWS Amplify hosting with Vercel. No application code changes.
+
+## Reason
+
+AWS Amplify WEB_COMPUTE (SSR) requires a platform-specific deployment adapter that
+generates a deploy-manifest.json file. With a custom amplify.yml and a Next.js 16
+app, Amplify did not automatically inject the NEXT_ADAPTER_PATH environment variable
+needed to produce this file. Multiple attempts to configure the artifacts directory
+(.next, .amplify-hosting) all failed with the same error. Vercel natively supports
+Next.js 16 SSR with zero configuration beyond a rootDirectory setting.
+
+## Files changed
+
+| File | Change |
+|---|---|
+| amplify.yml | Deleted |
+| vercel.json | Created -- { "rootDirectory": "web" } |
+| web/lib/db/client.ts | Comment updated (IAM role -> IAM user for Vercel) |
+| web/.env.local.example | Added AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY fields |
+| web/docs/architecture.md | Replaced Amplify references with Vercel; fixed scrypt command |
+| web/docs/deployment.md | Replaced Amplify section with Vercel + IAM user setup |
+| web/docs/implementation.md | Stage 4 marked superseded; global rules updated |
+
+## Pending action (before first Vercel deploy)
+
+1. Create IAM user webpresa-vercel-dev with inline DynamoDB policy (see deployment.md)
+2. Import GitHub repo at vercel.com/new, set root directory to web
+3. Add all environment variables in Vercel dashboard
+4. Connect production domain

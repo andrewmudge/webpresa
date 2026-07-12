@@ -7,8 +7,9 @@ import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
  *
  * The AWS region is read from the AWS_REGION environment variable.
  * Credentials are resolved from the default SDK credential chain:
- *   - Local dev: IAM Identity Center SSO profile (AWS_PROFILE=webpresa)
- *   - Deployed:  IAM role attached to the compute resource (no keys in code)
+ *   - Local dev:  IAM Identity Center SSO profile (AWS_PROFILE=webpresa)
+ *   - Vercel:     AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY env vars
+ *                 (dedicated least-privilege IAM user — see deployment.md)
  *
  * Never expose this module or its callers to browser bundles.
  */
