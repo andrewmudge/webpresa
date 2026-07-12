@@ -8,13 +8,9 @@ applications:
         build:
           commands:
             - npm run build
-      artifacts:
-        # WEB_COMPUTE (Next.js SSR): Amplify injects NEXT_ADAPTER_PATH at build
-        # time, which causes `next build` to emit .amplify-hosting/ containing
-        # deploy-manifest.json.  Point baseDirectory here, not at .next/.
-        baseDirectory: .amplify-hosting
-        files:
-          - '**/*'
+      # No artifacts section: Amplify performs its own framework detection on
+      # the build output, sets NEXT_ADAPTER_PATH automatically for WEB_COMPUTE
+      # apps, and generates deploy-manifest.json from the .next/ directory.
       cache:
         paths:
           - node_modules/**/*
