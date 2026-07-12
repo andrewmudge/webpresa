@@ -36,8 +36,8 @@ yarn-error.log*
 # vercel
 .vercel
 
-# docs
-/docs
+# docs (not ignored — these are project documentation files)
+# /docs
 
 # typescript
 *.tsbuildinfo

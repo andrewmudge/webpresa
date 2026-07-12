@@ -1150,3 +1150,113 @@ Next.js 16 SSR with zero configuration beyond a rootDirectory setting.
 2. Import GitHub repo at vercel.com/new, set root directory to web
 3. Add all environment variables in Vercel dashboard
 4. Connect production domain
+
+
+---
+
+# Stage 8B — Premium Generated Website Template
+
+**Date:** 2026-07-12
+**Scope:** Replace monolithic LocalBusinessTemplate with a componentized, premium local-service website template. Extend PreviewContent and PreviewTheme schemas with optional fields. Update seed data generator with industry-specific content.
+
+## Schema extensions (backward-compatible, all optional)
+
+| Addition | Type | Location |
+|---|---|---|
+| `PreviewContent.serviceAreas` | `string[]` | Cities/areas served |
+| `PreviewContent.differentiators` | `{ title, description }[]` | Why-choose-us bullets |
+| `PreviewContent.hours` | `string` | Formatted hours display string |
+| `PreviewTheme.heroImageUrl` | `string` | Hero background image URL |
+| `PreviewTheme.aboutImageUrl` | `string` | About/team image URL |
+
+Existing DynamoDB records remain valid — all new fields are optional.
+
+## Component architecture
+
+`app/b/[slug]/LocalBusinessTemplate.tsx` deleted.
+`app/b/[slug]/template/` created with 11 components:
+
+| Component | Role |
+|---|---|
+| `tokens.ts` | `buildSiteTokens()` helper — sets `--site-primary`, `--site-accent` CSS vars |
+| `GeneratedSiteHeader` | Sticky nav with mobile hamburger, phone pill, quote CTA |
+| `GeneratedHero` | 88vh full-viewport, `next/image` background, gradient overlay |
+| `TrustStrip` | Compact factual-only trust badges (no invented credentials) |
+| `ServicesGrid` | Asymmetric layout: featured first card + smaller card grid |
+| `WhyChooseUs` | 2-col image + differentiator list (conditional — hidden when no data) |
+| `AboutSection` | Tagline + story with decorative accent block |
+| `ServiceAreaSection` | Pill grid (conditional) |
+| `ContactSection` | Phone/email/address cards |
+| `FinalCTA` | Full-width brand-color CTA band |
+| `GeneratedSiteFooter` | Full footer with services, areas, copyright |
+| `MobileCallBar` | Sticky bottom bar on mobile only (hidden at md+) |
+
+## Seed data
+
+`createSeedPreviewAction` updated with industry-specific fixtures for `plumbing`, `hvac`, `roofing`, `landscaping`. Other industries fall back to generic 4-service seed. All fixtures marked `DEV_FIXTURE`; images from `picsum.photos`.
+
+`next.config.ts` updated with `remotePatterns` for `picsum.photos` and `images.unsplash.com`.
+
+## Verification
+
+```
+Lint: 0 errors
+TypeCheck: 0 errors
+Tests: 69 passed
+Build: clean — /b/[slug] renders as ƒ (dynamic SSR)
+```
+
+---
+
+# Cascade Delete — Business Admin
+
+**Date:** 2026-07-12
+**Scope:** Allow admins to permanently delete a business and all downstream records from the admin dashboard.
+
+## New functions
+
+| Function | File |
+|---|---|
+| `deleteBusinessById` | `lib/db/businesses.ts` |
+| `deletePreviewById` | `lib/db/site-previews.ts` |
+| `deleteScanEventById` | `lib/db/scan-events.ts` |
+| `deletePostcardById` | `lib/db/postcards.ts` |
+| `deleteBusinessAction` | `app/admin/(dashboard)/businesses/[businessId]/actions.ts` |
+
+## Cascade delete flow
+
+1. Fetch all SitePreviews, ScanEvents, Postcards for the businessId (concurrent)
+2. Delete all downstream records (concurrent)
+3. Delete the business record
+4. Redirect to `/admin/businesses`
+
+## UI
+
+`DeleteBusinessButton.tsx` — client component on the business detail page.
+- Red "Delete" button alongside the Edit button
+- Confirmation dialog shows exact counts of downstream records to be deleted
+- Requires explicit confirmation before deletion proceeds
+- Pending state shown during deletion
+
+## Fix: server action binding
+
+`createSeedPreviewAction` changed from accepting a full `Business` object to accepting only `businessId: string` (fetches business server-side). Passing large serialized objects through Next.js server action `.bind()` closure caused 500 errors on Vercel.
+
+---
+
+# IAM Fix — Add dynamodb:DeleteItem to webpresa-vercel-dev
+
+**Date:** 2026-07-12
+**Scope:** The `webpresa-vercel-dev` IAM user policy was missing `dynamodb:DeleteItem`, which caused `AccessDeniedException` when the cascade delete action ran on Vercel.
+
+## Fix applied
+
+```bash
+aws iam put-user-policy \
+  --user-name webpresa-vercel-dev \
+  --policy-name webpresa-dev-dynamodb \
+  --policy-document '{ ... "dynamodb:DeleteItem" added to Action list ... }' \
+  --profile webpresa
+```
+
+`deployment.md` updated to include `dynamodb:DeleteItem` in the canonical policy block.
