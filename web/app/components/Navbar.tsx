@@ -42,10 +42,8 @@ export default function Navbar() {
           <Image
             src="/webpresa_logo.png"
             alt="Webpresa"
-            width={140}
-            height={32}
-            className="h-8 w-auto"
-            style={{ width: "auto" }}
+            width={40}
+            height={40}
             priority
           />
         </Link>

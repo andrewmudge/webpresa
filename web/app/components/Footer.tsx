@@ -31,9 +31,8 @@ export default function Footer() {
               <Image
                 src="/webpresa_logo.png"
                 alt="Webpresa"
-                width={128}
+                width={28}
                 height={28}
-                className="h-7 w-auto"
               />
             </Link>
             <p className="text-sm text-gray-400 leading-relaxed max-w-xs">

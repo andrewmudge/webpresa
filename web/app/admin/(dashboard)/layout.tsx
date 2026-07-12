@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { getSession } from '@/lib/auth/session';
 import { signOut } from '@/lib/auth/actions';
 
@@ -14,17 +15,26 @@ export default async function AdminDashboardLayout({ children }: AdminLayoutProp
   }
 
   return (
-    <div className="min-h-screen flex bg-[#F8FAFC]">
+    <div className="min-h-screen flex bg-[#F0F4F8]">
       {/* Sidebar */}
-      <aside className="w-56 flex-shrink-0 flex flex-col bg-white border-r border-gray-200">
+      <aside className="w-56 flex-shrink-0 flex flex-col bg-brand shadow-lg">
         {/* Brand */}
-        <div className="px-5 py-4 border-b border-gray-100">
-          <span className="text-lg font-bold text-[--color-brand]">Webpresa</span>
-          <p className="text-xs text-gray-400 mt-0.5">Admin</p>
-        </div>
+        <Link href="/admin/businesses" className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+          <Image
+            src="/webpresa_logo.png"
+            alt="Webpresa"
+            width={32}
+            height={32}
+            className="rounded"
+          />
+          <div>
+            <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
+            <p className="text-xs text-white/50 leading-none mt-0.5">Admin</p>
+          </div>
+        </Link>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1" aria-label="Admin navigation">
+        <nav className="flex-1 px-3 py-4 space-y-0.5" aria-label="Admin navigation">
           <NavLink href="/admin/businesses">Businesses</NavLink>
           <NavLink href="/admin/previews">Previews</NavLink>
           <NavLink href="/admin/scans">Scans</NavLink>
@@ -32,14 +42,14 @@ export default async function AdminDashboardLayout({ children }: AdminLayoutProp
         </nav>
 
         {/* Footer */}
-        <div className="px-3 py-4 border-t border-gray-100">
-          <p className="text-xs text-gray-400 px-2 mb-2">
-            Signed in as <span className="font-medium text-gray-600">{session.sub}</span>
+        <div className="px-3 py-4 border-t border-white/10">
+          <p className="text-xs text-white/40 px-2 mb-2">
+            Signed in as <span className="font-medium text-white/70">{session.sub}</span>
           </p>
           <form action={signOut}>
             <button
               type="submit"
-              className="w-full text-left text-sm text-gray-500 hover:text-gray-800 px-2 py-1.5 rounded transition-colors"
+              className="w-full text-left text-sm text-white/50 hover:text-white px-2 py-1.5 rounded transition-colors hover:bg-white/10"
             >
               Sign out
             </button>
@@ -61,7 +71,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="block px-2 py-1.5 rounded text-sm text-gray-600 hover:bg-gray-50 hover:text-[--color-brand] transition-colors"
+      className="block px-3 py-2 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-colors"
     >
       {children}
     </Link>

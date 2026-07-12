@@ -1,9 +1,11 @@
 'use server';
-import { timingSafeEqual } from 'crypto';
-import bcrypt from 'bcryptjs';
+import { timingSafeEqual, scrypt, randomBytes } from 'crypto';
+import { promisify } from 'util';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { createSession, deleteSession } from './session';
+
+const scryptAsync = promisify(scrypt);
 
 // ---------------------------------------------------------------------------
 // Input schemas
@@ -19,6 +21,42 @@ export type SignInState =
   | undefined;
 
 // ---------------------------------------------------------------------------
+// Password hashing — scrypt with hex output
+//
+// Hash format stored in ADMIN_PASSWORD_HASH:  <64-byte hex>:<16-byte hex salt>
+// Example:  abc123...:<salt>
+//
+// Generate with (run from web/):
+//   node -e "
+//     const {scryptSync,randomBytes}=require('crypto');
+//     const salt=randomBytes(16).toString('hex');
+//     const hash=scryptSync('YOUR_PASSWORD',salt,64).toString('hex');
+//     console.log(hash+':'+salt);
+//   "
+//
+// No \$ quoting needed — output is pure hex + colon.
+// ---------------------------------------------------------------------------
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString('hex');
+  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${derived.toString('hex')}:${salt}`;
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [hashHex, salt] = stored.split(':');
+  if (!hashHex || !salt) return false;
+  try {
+    const storedBuf = Buffer.from(hashHex, 'hex');
+    const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+    if (storedBuf.length !== derived.length) return false;
+    return timingSafeEqual(storedBuf, derived);
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Credential validation
 // ---------------------------------------------------------------------------
 
@@ -29,8 +67,6 @@ export type SignInState =
 function safeStringEqual(a: string, b: string): boolean {
   const aBuf = Buffer.from(a, 'utf8');
   const bBuf = Buffer.from(b, 'utf8');
-  // Always run a comparison of equal length so timing is consistent.
-  // If lengths differ, run a dummy comparison before returning false.
   if (aBuf.length !== bBuf.length) {
     timingSafeEqual(aBuf, aBuf); // constant-time dummy
     return false;
@@ -47,13 +83,11 @@ async function validateCredentials(username: string, password: string): Promise<
     return false;
   }
 
-  if (!safeStringEqual(username, adminUsername)) {
-    // Run bcrypt anyway to prevent timing attacks that could reveal a valid username.
-    await bcrypt.compare(password, adminPasswordHash);
-    return false;
-  }
-
-  return bcrypt.compare(password, adminPasswordHash);
+  // Always run the full scrypt derivation regardless of username match
+  // to prevent timing-based username enumeration.
+  const passwordValid = await verifyPassword(password, adminPasswordHash);
+  const usernameValid = safeStringEqual(username, adminUsername);
+  return usernameValid && passwordValid;
 }
 
 // ---------------------------------------------------------------------------
