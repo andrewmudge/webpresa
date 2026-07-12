@@ -9,10 +9,10 @@ applications:
           commands:
             - npm run build
       artifacts:
-        # Stage 7: changed from `out` (static export) to `.next` (SSR).
-        # The Amplify app must be switched to "Next.js - SSR" platform in the
-        # Amplify Console before the next production build.  See deployment.md.
-        baseDirectory: .next
+        # WEB_COMPUTE (Next.js SSR): Amplify injects NEXT_ADAPTER_PATH at build
+        # time, which causes `next build` to emit .amplify-hosting/ containing
+        # deploy-manifest.json.  Point baseDirectory here, not at .next/.
+        baseDirectory: .amplify-hosting
         files:
           - '**/*'
       cache:
