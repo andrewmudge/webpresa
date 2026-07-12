@@ -24,7 +24,19 @@ export function getDynamoDBClient(): DynamoDBDocumentClient {
     throw new Error('AWS_REGION environment variable is not set');
   }
 
-  const ddbClient = new DynamoDBClient({ region });
+  // Explicitly pass static credentials when env vars are present (Vercel).
+  // Falls back to the default SDK credential chain when they are absent
+  // (local dev uses AWS_PROFILE / SSO session instead).
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+  const ddbClient = new DynamoDBClient({
+    region,
+    ...(accessKeyId && secretAccessKey
+      ? { credentials: { accessKeyId, secretAccessKey } }
+      : {}),
+  });
+
   client = DynamoDBDocumentClient.from(ddbClient, {
     marshallOptions: {
       removeUndefinedValues: true,
