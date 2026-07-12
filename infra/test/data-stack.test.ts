@@ -1,0 +1,327 @@
+import { App } from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { WebpresaDataStack } from '../lib/stacks/data-stack';
+import { ENVIRONMENTS } from '../lib/config/environments';
+
+// ---------------------------------------------------------------------------
+// Synthesise templates once — shared across all test groups.
+// No AWS credentials are needed: CDK assertion tests work entirely in memory.
+// ---------------------------------------------------------------------------
+
+let dev: Template;
+let prod: Template;
+
+beforeAll(() => {
+  const devApp = new App();
+  dev = Template.fromStack(
+    new WebpresaDataStack(devApp, 'WebpresaDevDataStack', {
+      config: ENVIRONMENTS.dev,
+    }),
+  );
+
+  const prodApp = new App();
+  prod = Template.fromStack(
+    new WebpresaDataStack(prodApp, 'WebpresaProdDataStack', {
+      config: ENVIRONMENTS.prod,
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Table count
+// ---------------------------------------------------------------------------
+
+describe('table count', () => {
+  it('creates exactly four DynamoDB tables', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Billing mode
+// ---------------------------------------------------------------------------
+
+describe('billing mode', () => {
+  it('all dev tables use PAY_PER_REQUEST', () => {
+    dev.allResourcesProperties('AWS::DynamoDB::Table', {
+      BillingMode: 'PAY_PER_REQUEST',
+    });
+  });
+
+  it('all prod tables use PAY_PER_REQUEST', () => {
+    prod.allResourcesProperties('AWS::DynamoDB::Table', {
+      BillingMode: 'PAY_PER_REQUEST',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Partition keys
+// ---------------------------------------------------------------------------
+
+describe('partition keys', () => {
+  it('Businesses table has businessId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-businesses',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'businessId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+
+  it('SitePreviews table has previewId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-site-previews',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'previewId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+
+  it('ScanEvents table has scanId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-events',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'scanId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+
+  it('Postcards table has postcardId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-postcards',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'postcardId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GSI names
+// ---------------------------------------------------------------------------
+
+describe('GSI names', () => {
+  it('Businesses table has slug-index, google-place-id-index, status-index', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-businesses',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'slug-index' }),
+        Match.objectLike({ IndexName: 'google-place-id-index' }),
+        Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+
+  it('SitePreviews table has slug-index, business-id-index, status-index', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-site-previews',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'slug-index' }),
+        Match.objectLike({ IndexName: 'business-id-index' }),
+        Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+
+  it('ScanEvents table has business-id-index and status-index', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-events',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'business-id-index' }),
+        Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+
+  it('Postcards table has business-id-index, campaign-code-index, provider-postcard-id-index, status-index', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-postcards',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'business-id-index' }),
+        Match.objectLike({ IndexName: 'campaign-code-index' }),
+        Match.objectLike({ IndexName: 'provider-postcard-id-index' }),
+        Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createdAt sort key on businessId indexes
+// Three tables (SitePreviews, ScanEvents, Postcards) have a businessId GSI
+// with createdAt as the sort key for chronological, newest-first pagination.
+// Businesses has no businessId GSI (it IS the business record).
+// ---------------------------------------------------------------------------
+
+describe('createdAt sort key on businessId indexes', () => {
+  it('SitePreviews business-id-index has createdAt as sort key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-site-previews',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'business-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'businessId', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' },
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it('ScanEvents business-id-index has createdAt as sort key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-events',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'business-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'businessId', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' },
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it('Postcards business-id-index has createdAt as sort key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-postcards',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'business-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'businessId', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' },
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it('Businesses table does not have a business-id-index (no self-referencing GSI)', () => {
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-businesses' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes: Array<{ IndexName: string }> };
+    };
+    const indexNames = table.Properties.GlobalSecondaryIndexes.map(
+      (g) => g.IndexName,
+    );
+    expect(indexNames).not.toContain('business-id-index');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dev removal policy
+// ---------------------------------------------------------------------------
+
+describe('dev removal policy', () => {
+  it('all dev tables have DeletionPolicy: Delete', () => {
+    dev.allResources('AWS::DynamoDB::Table', {
+      DeletionPolicy: 'Delete',
+    });
+  });
+
+  it('all dev tables have UpdateReplacePolicy: Delete', () => {
+    dev.allResources('AWS::DynamoDB::Table', {
+      UpdateReplacePolicy: 'Delete',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CloudFormation outputs
+// ---------------------------------------------------------------------------
+
+describe('CloudFormation outputs', () => {
+  it('creates 8 outputs — TableName and TableArn for each of the 4 tables', () => {
+    const outputs = dev.findOutputs('*');
+    expect(Object.keys(outputs)).toHaveLength(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+describe('stack-level tags', () => {
+  it('all tables are tagged Project=Webpresa', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      Tags: Match.arrayWith([{ Key: 'Project', Value: 'Webpresa' }]),
+    });
+  });
+
+  it('all tables are tagged Environment=Dev', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      Tags: Match.arrayWith([{ Key: 'Environment', Value: 'Dev' }]),
+    });
+  });
+
+  it('all tables are tagged ManagedBy=CDK', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      Tags: Match.arrayWith([{ Key: 'ManagedBy', Value: 'CDK' }]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Production config (not deployed in Stage 6 — verified in-memory only)
+// ---------------------------------------------------------------------------
+
+describe('prod config (in-memory only — not deployed)', () => {
+  it('prod tables have DeletionPolicy: Retain', () => {
+    prod.allResources('AWS::DynamoDB::Table', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+    });
+  });
+
+  it('prod tables have point-in-time recovery enabled', () => {
+    prod.allResourcesProperties('AWS::DynamoDB::Table', {
+      PointInTimeRecoverySpecification: {
+        PointInTimeRecoveryEnabled: true,
+      },
+    });
+  });
+
+  it('prod table names carry the prod suffix', () => {
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-businesses',
+    });
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-site-previews',
+    });
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-scan-events',
+    });
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-postcards',
+    });
+  });
+
+  it('prod tables carry the Environment=Prod tag', () => {
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      Tags: Match.arrayWith([{ Key: 'Environment', Value: 'Prod' }]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GSI projection type
+// ---------------------------------------------------------------------------
+
+describe('GSI projection', () => {
+  it('all GSIs use ProjectionType.ALL', () => {
+    dev.allResourcesProperties('AWS::DynamoDB::Table', {
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          Projection: { ProjectionType: 'ALL' },
+        }),
+      ]),
+    });
+  });
+});

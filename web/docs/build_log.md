@@ -857,3 +857,260 @@ infra/
 ├── vitest.config.ts                   NEW — test runner config
 └── .gitignore                         NEW
 ```
+
+
+---
+
+# Stage 7 — Manual Admin Dashboard
+
+**Date:** 2026-07-12  
+**Scope:** Protected admin dashboard with sign-in, business CRUD, server-side DynamoDB repositories, and route protection.
+
+---
+
+## Overview
+
+Built the full manual admin dashboard.  No new AWS infrastructure was provisioned — the existing four DynamoDB tables from Stage 6 are reused.  Key changes: removed `output: 'export'` (static export incompatible with Server Actions / proxy.ts), added JWT-based authentication, created server-only DynamoDB repositories, and implemented full Business CRUD.
+
+---
+
+## 1. Dependencies Installed
+
+```bash
+npm install jose server-only @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb bcryptjs
+npm install --save-dev @types/bcryptjs
+```
+
+| Package | Purpose |
+|---|---|
+| `jose` | JWT session signing and verification |
+| `server-only` | Build-time guard — throws if a server module is imported in a client bundle |
+| `@aws-sdk/client-dynamodb` | DynamoDB low-level client |
+| `@aws-sdk/lib-dynamodb` | DynamoDB DocumentClient (marshals JS objects to/from DynamoDB format) |
+| `bcryptjs` | Admin password hashing — pure JS, no native deps |
+| `@types/bcryptjs` | TypeScript definitions for bcryptjs |
+
+---
+
+## 2. Config Changes
+
+### `next.config.ts`
+
+Removed `output: 'export'`.  Server Actions and `proxy.ts` are incompatible with static export.  Homepage pages are still statically prerendered by Next.js at build time (`○` routes).
+
+### `amplify.yml`
+
+Changed `artifacts.baseDirectory` from `out` to `.next`.  The Amplify app must be switched to **Next.js SSR** platform in the Amplify Console before the next production build.  See `deployment.md` for step-by-step instructions.
+
+---
+
+## 3. Authentication
+
+### `web/lib/auth/session.ts` — `server-only`
+
+- JWT signed with HS256 using `jose`
+- 7-day expiry, HTTP-only cookie (`SameSite=lax`)
+- Cookie is `Secure` in production only
+- Functions: `encryptSession`, `decryptSession`, `createSession`, `getSession`, `deleteSession`
+
+### `web/lib/auth/actions.ts` — `'use server'`
+
+- `signIn`: validates FormData against Zod schema, compares username with `timingSafeEqual`, verifies password with `bcrypt.compare`, creates session, redirects
+- `signOut`: deletes session cookie, redirects to sign-in
+- Always runs bcrypt on the supplied password even for invalid usernames (prevents timing-based username enumeration)
+
+### `web/proxy.ts` (replaces `middleware.ts` — renamed in Next.js 16)
+
+- Runs on all `/admin/:path*` requests
+- Decrypts session cookie
+- Unauthenticated → redirect to `/admin/sign-in?next=<path>`
+- Authenticated on sign-in page → redirect to `/admin/businesses`
+
+---
+
+## 4. DynamoDB Repositories
+
+All files in `web/lib/db/` import `server-only`.
+
+| File | Key functions |
+|---|---|
+| `client.ts` | `getDynamoDBClient()` singleton; `TABLE_*` accessors reading env vars |
+| `businesses.ts` | `listBusinesses` (scan + cursor pagination), `getBusinessById`, `getBusinessBySlug`, `putBusiness`, `updateBusiness`, `resolveUniqueSlug` |
+| `site-previews.ts` | `getSitePreviewById`, `listPreviewsForBusiness`, `putSitePreview` |
+| `scan-events.ts` | `getScanEventById`, `listScansForBusiness`, `putScanEvent` |
+| `postcards.ts` | `getPostcardById`, `listPostcardsForBusiness`, `putPostcard` |
+
+All repositories re-validate records through Zod schemas before writes.  Pagination uses DynamoDB `LastEvaluatedKey` encoded as a base64url JSON cursor.
+
+---
+
+## 5. Admin Routes
+
+### Route structure
+
+```
+app/
+  admin/
+    sign-in/
+      page.tsx        → /admin/sign-in  (public — root layout only)
+    (dashboard)/      ← route group; shared admin layout
+      layout.tsx      → sidebar + sign-out; server component reads session
+      page.tsx        → /admin → redirect to /admin/businesses
+      businesses/
+        page.tsx      → /admin/businesses (list)
+        new/
+          page.tsx    → /admin/businesses/new (create form)
+        [businessId]/
+          page.tsx    → /admin/businesses/[id] (detail)
+          edit/
+            page.tsx  → /admin/businesses/[id]/edit (edit form)
+      previews/
+        page.tsx      → /admin/previews (placeholder)
+      scans/
+        page.tsx      → /admin/scans (placeholder)
+      postcards/
+        page.tsx      → /admin/postcards (placeholder)
+```
+
+### Admin layout
+
+Server component.  Reads session and redirects if missing (defense-in-depth behind proxy.ts).  Shows: brand, nav links, signed-in username, sign-out button.
+
+### Business list (`/admin/businesses`)
+
+- Scans the businesses table with cursor pagination (50 per page)
+- Table: name + city/state, industry, status badge, source, created date
+- Links to detail page; "New business" button
+- Error and empty states handled
+
+### Business detail (`/admin/businesses/[businessId]`)
+
+- Shows all available fields: identity, contact, address, scores, Stripe IDs, timestamps
+- Preview, scan, and postcard history (newest-first; shows last 3 per category)
+- "Edit" button; disabled/placeholder action bar for future stages
+
+### Business form (shared `BusinessForm.tsx` — `'use client'`)
+
+- `useActionState` for server action integration + `useFormStatus` for submit button pending state
+- Sections: Identity, Contact (phone, email, website, Google Place ID), Address, Admin (source, status on edit)
+- Inline field errors from Zod
+- URL normalization: `https://` prepended before validation so users can type without scheme
+
+### Server actions (`businesses/actions.ts` — `'use server'`)
+
+- `createBusinessAction`: validates → resolves unique slug → creates record via factory → persists → redirects
+- `editBusinessAction`: validates → loads existing record → merges → validates full record → persists → redirects
+- Both independently verify admin session before any DB call
+
+---
+
+## 6. Tests
+
+### `web/lib/db/__tests__/businesses.test.ts` — 14 tests
+
+DynamoDB client mocked with `vi.mock`.  Covers: `getBusinessById` (found / not found / invalid record), `getBusinessBySlug`, `putBusiness` (valid / invalid), `resolveUniqueSlug` (free / taken / multi-suffix), `listBusinesses` (no cursor / with cursor), `updateBusiness` (success / not found).
+
+### `web/app/admin/(dashboard)/businesses/__tests__/actions.test.ts` — 12 tests
+
+DB and auth mocked with `vi.hoisted` (required for vitest hoisting of `vi.mock`).  Covers: `createBusinessAction` — validation errors (name / industry / email / URL), success flow (saves correct record / URL normalization / slug resolution), auth guard, DB failure.  `editBusinessAction` — success flow, not-found, auth guard.
+
+---
+
+## 7. Verification Results
+
+```
+✓ Lint:        0 errors  (npm run lint)
+✓ TypeCheck:   0 errors  (npx tsc --noEmit)
+✓ Tests:       60 passed — 34 domain + 14 DB + 12 actions  (npm test)
+✓ Build:       production build succeeds  (npm run build)
+✓ CDK tests:   26 passed  (cd infra && npm test)
+✓ CDK synth:   WebpresaDevDataStack synthesises cleanly
+```
+
+Build output:
+```
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /admin
+├ ƒ /admin/businesses
+├ ƒ /admin/businesses/[businessId]
+├ ƒ /admin/businesses/[businessId]/edit
+├ ƒ /admin/businesses/new
+├ ƒ /admin/postcards
+├ ƒ /admin/previews
+├ ƒ /admin/scans
+└ ○ /admin/sign-in
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+```
+
+---
+
+## 8. Files Created / Modified
+
+```
+webpresa/
+├── amplify.yml                                                  MODIFIED
+└── web/
+    ├── next.config.ts                                           MODIFIED — removed output: 'export'
+    ├── proxy.ts                                                 NEW — route protection
+    ├── .env.local.example                                       NEW — env var documentation
+    ├── lib/
+    │   ├── auth/
+    │   │   ├── session.ts                                       NEW
+    │   │   └── actions.ts                                       NEW
+    │   └── db/
+    │       ├── client.ts                                        NEW
+    │       ├── businesses.ts                                     NEW
+    │       ├── site-previews.ts                                 NEW
+    │       ├── scan-events.ts                                   NEW
+    │       ├── postcards.ts                                     NEW
+    │       └── __tests__/
+    │           └── businesses.test.ts                          NEW
+    ├── app/
+    │   └── admin/
+    │       ├── sign-in/
+    │       │   └── page.tsx                                     NEW
+    │       └── (dashboard)/
+    │           ├── layout.tsx                                   NEW
+    │           ├── page.tsx                                     NEW
+    │           ├── businesses/
+    │           │   ├── page.tsx                                 NEW
+    │           │   ├── BusinessForm.tsx                        NEW
+    │           │   ├── actions.ts                              NEW
+    │           │   ├── new/
+    │           │   │   └── page.tsx                            NEW
+    │           │   ├── [businessId]/
+    │           │   │   ├── page.tsx                            NEW
+    │           │   │   └── edit/
+    │           │   │       └── page.tsx                        NEW
+    │           │   └── __tests__/
+    │           │       └── actions.test.ts                     NEW
+    │           ├── previews/
+    │           │   └── page.tsx                                NEW
+    │           ├── scans/
+    │           │   └── page.tsx                                NEW
+    │           └── postcards/
+    │               └── page.tsx                                NEW
+    └── docs/
+        ├── build_log.md                                        MODIFIED
+        ├── architecture.md                                     MODIFIED
+        └── deployment.md                                       MODIFIED
+```
+
+---
+
+## 9. Deployment Gate
+
+**Not deployed.**  The following is required before the next production build can succeed:
+
+1. Switch the Amplify app from "Static web hosting" to "Next.js SSR" platform in the Amplify Console.
+2. Add environment variables: `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`, `AWS_REGION`, `BUSINESSES_TABLE_NAME`, `SITE_PREVIEWS_TABLE_NAME`, `SCAN_EVENTS_TABLE_NAME`, `POSTCARDS_TABLE_NAME`.
+3. Attach an IAM policy to the Amplify execution role granting DynamoDB read/write on the four dev tables.
+4. Explicit approval required before running `amplify push` or triggering a manual build.
+
+See `deployment.md` for detailed steps.

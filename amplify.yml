@@ -9,7 +9,10 @@ applications:
           commands:
             - npm run build
       artifacts:
-        baseDirectory: out
+        # Stage 7: changed from `out` (static export) to `.next` (SSR).
+        # The Amplify app must be switched to "Next.js - SSR" platform in the
+        # Amplify Console before the next production build.  See deployment.md.
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
