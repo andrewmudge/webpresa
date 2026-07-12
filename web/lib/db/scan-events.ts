@@ -1,5 +1,5 @@
 import 'server-only';
-import { QueryCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { ScanEvent } from '@/domain/models/scan-event';
 import { ScanEventSchema } from '@/domain/schemas/scan-event.schema';
 import { getDynamoDBClient, TABLE_SCAN_EVENTS } from './client';
@@ -40,6 +40,16 @@ export async function putScanEvent(scan: ScanEvent): Promise<void> {
     new PutCommand({
       TableName: TABLE_SCAN_EVENTS(),
       Item: scan,
+    }),
+  );
+}
+
+export async function deleteScanEventById(scanId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_SCAN_EVENTS(),
+      Key: { scanId },
     }),
   );
 }

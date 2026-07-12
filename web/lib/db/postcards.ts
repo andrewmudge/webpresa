@@ -1,5 +1,5 @@
 import 'server-only';
-import { QueryCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Postcard } from '@/domain/models/postcard';
 import { PostcardSchema } from '@/domain/schemas/postcard.schema';
 import { getDynamoDBClient, TABLE_POSTCARDS } from './client';
@@ -40,6 +40,16 @@ export async function putPostcard(postcard: Postcard): Promise<void> {
     new PutCommand({
       TableName: TABLE_POSTCARDS(),
       Item: postcard,
+    }),
+  );
+}
+
+export async function deletePostcardById(postcardId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
     }),
   );
 }

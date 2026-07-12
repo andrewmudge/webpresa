@@ -1,5 +1,5 @@
 import 'server-only';
-import { QueryCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { SitePreview } from '@/domain/models/site-preview';
 import { SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
 import { getDynamoDBClient, TABLE_SITE_PREVIEWS } from './client';
@@ -68,3 +68,13 @@ export async function putSitePreview(preview: SitePreview): Promise<void> {
   );
 }
 
+
+export async function deletePreviewById(previewId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_SITE_PREVIEWS(),
+      Key: { previewId },
+    }),
+  );
+}

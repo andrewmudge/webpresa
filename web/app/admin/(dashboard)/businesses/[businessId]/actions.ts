@@ -4,7 +4,14 @@ import type { Business } from '@/domain/models/business';
 import type { PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
 import { PreviewContentSchema } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
-import { listPreviewsForBusiness, putSitePreview } from '@/lib/db/site-previews';
+import {
+  listPreviewsForBusiness,
+  putSitePreview,
+  deletePreviewById,
+} from '@/lib/db/site-previews';
+import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
+import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
+import { deleteBusinessById, getBusinessById } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
 
 // ---------------------------------------------------------------------------
@@ -199,3 +206,40 @@ export async function createSeedPreviewAction(business: Business): Promise<void>
   redirect(`/admin/businesses/${business.businessId}`);
 }
 
+
+// ---------------------------------------------------------------------------
+// Cascade delete action
+// ---------------------------------------------------------------------------
+
+/**
+ * Permanently delete a business and all downstream records:
+ *   SitePreviews, ScanEvents, Postcards.
+ *
+ * Requires an active admin session. Redirects to /admin/businesses on success.
+ */
+export async function deleteBusinessAction(businessId: string): Promise<{ error: string } | never> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { error: 'Business not found' };
+
+  // Fetch all downstream records concurrently
+  const [previews, scans, postcards] = await Promise.all([
+    listPreviewsForBusiness(businessId),
+    listScansForBusiness(businessId),
+    listPostcardsForBusiness(businessId),
+  ]);
+
+  // Delete downstream records concurrently
+  await Promise.all([
+    ...previews.map((p) => deletePreviewById(p.previewId)),
+    ...scans.map((s) => deleteScanEventById(s.scanId)),
+    ...postcards.map((p) => deletePostcardById(p.postcardId)),
+  ]);
+
+  // Delete the business record last
+  await deleteBusinessById(businessId);
+
+  redirect('/admin/businesses');
+}

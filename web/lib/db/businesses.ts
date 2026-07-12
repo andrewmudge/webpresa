@@ -3,6 +3,7 @@ import {
   GetCommand,
   PutCommand,
   UpdateCommand,
+  DeleteCommand,
   ScanCommand,
   QueryCommand,
   type ScanCommandInput,
@@ -199,4 +200,14 @@ export async function resolveUniqueSlug(baseSlug: string): Promise<string> {
   }
 
   throw new Error(`Could not generate a unique slug for: ${baseSlug}`);
+}
+
+export async function deleteBusinessById(businessId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_BUSINESSES(),
+      Key: { businessId },
+    }),
+  );
 }

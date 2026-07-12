@@ -5,6 +5,7 @@ import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
 import { createSeedPreviewAction } from './actions';
+import { DeleteBusinessButton } from './DeleteBusinessButton';
 import type { Business } from '@/domain/models/business';
 import type { SitePreview } from '@/domain/models/site-preview';
 
@@ -52,6 +53,13 @@ export default async function BusinessDetailPage({ params }: Props) {
           >
             Edit
           </Link>
+          <DeleteBusinessButton
+            businessId={businessId}
+            businessName={business.name}
+            previewCount={previews.length}
+            scanCount={scans.length}
+            postcardCount={postcards.length}
+          />
         </div>
       </div>
 
