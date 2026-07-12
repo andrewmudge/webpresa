@@ -1260,3 +1260,123 @@ aws iam put-user-policy \
 ```
 
 `deployment.md` updated to include `dynamodb:DeleteItem` in the canonical policy block.
+
+---
+
+# Stage 9 — S3 Assets and Scan Storage
+
+**Date:** 2026-07-12
+**Scope:** Private, encrypted S3 bucket for scan artifacts, preview assets, and postcard files, plus a minimal server-side upload/download/signed-URL helper layer. No scan/screenshot/postcard workflow logic — that lands in Stages 13, 14, and 22.
+
+## Overview
+
+Provisioned a single environment-aware S3 bucket (`webpresa-{env}-assets`) via a new `WebpresaBucket` CDK construct, wired into the existing `WebpresaDataStack` alongside the four DynamoDB tables. Chose one bucket with key prefixes (`scans/`, `previews/`, `postcards/`) over three separate buckets — matches the exact key structure already documented in `implementation.md` and keeps IAM/lifecycle management centralized, confirmed with the user before implementation.
+
+## 1. Infra changes (`infra/`)
+
+### New construct — `infra/lib/constructs/webpresa-bucket.ts`
+
+Mirrors `WebpresaTable`: takes `{ config, bucketName }`, computes `fullBucketName = webpresa-{suffix}-{bucketName}`, exposes `bucket` and `fullBucketName`.
+
+Automatically configured per environment:
+
+| Setting | dev | prod |
+|---|---|---|
+| Encryption | S3-managed (SSE-S3) | S3-managed (SSE-S3) |
+| Public access | fully blocked | fully blocked |
+| SSL enforcement | required | required |
+| Versioning | disabled | **enabled** |
+| Removal policy | DESTROY | RETAIN |
+| Auto-delete objects | enabled (only safe when policy is DESTROY) | disabled |
+| Lifecycle | abort incomplete multipart uploads after 7 days; expire `retain=false`-tagged objects after 90 days | same |
+
+### `infra/lib/stacks/data-stack.ts`
+
+Added one `WebpresaBucket` instance (`bucketName: 'assets'`) inline in the existing constructor. No new stack, no `bin/webpresa.ts` changes.
+
+### IAM
+
+Added a second inline policy (`webpresa-dev-s3-assets`) to the existing `webpresa-vercel-dev` IAM user: `GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the assets bucket ARN and its objects. Documented (not created) that future Lambda roles for Stages 13/14/22 should get their own prefix-scoped policies instead of reusing this one.
+
+### Tests — `infra/test/data-stack.test.ts` (extended)
+
+Added a `describe('assets bucket', ...)` block: bucket count, naming, encryption, public-access block, SSL-enforcing bucket policy, both lifecycle rules, dev-vs-prod versioning and removal policy, tags. Updated the CloudFormation outputs count assertion from 8 to 10 (added `BucketName`/`BucketArn`).
+
+## 2. Web application changes (`web/`)
+
+### Dependencies
+
+```bash
+npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
+```
+
+### `web/lib/s3/client.ts` — `server-only`
+
+Singleton `S3Client`, same region/credential-chain pattern as `web/lib/db/client.ts` (`AWS_REGION`, `AWS_PROFILE` locally, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` on Vercel). `getAssetsBucketName()` reads `ASSETS_BUCKET_NAME`, throwing if unset.
+
+### `web/lib/s3/assets.ts` — `server-only`
+
+Generic helpers, intentionally not tied to any one domain type:
+
+- `putAsset(key, body, contentType)`
+- `getAsset(key)` — returns `null` on `NoSuchKey`
+- `getSignedAssetUrl(key, expiresInSeconds = 300)` — short-lived signed URL for private admin viewing
+
+All three validate the key starts with `scans/`, `previews/`, or `postcards/` before calling S3.
+
+### Tests — `web/lib/s3/__tests__/assets.test.ts`
+
+8 tests, S3 client and presigner mocked (`vi.mock`, same pattern as `web/lib/db/__tests__/businesses.test.ts`). Covers: put success, get success, get-missing returns `null`, signed URL with custom and default expiry, invalid-prefix rejection on all three functions before any SDK call.
+
+### Explicitly out of scope
+
+- No changes to `ScanEvent`/`Postcard`/`SitePreview` domain models or Zod schemas — `ScanEvent.storageKeys` already exists and stays unpopulated until Stage 13/14; a `Postcard` creative-file field is deferred to Stage 22.
+- `/admin/scans` and `/admin/postcards` remain placeholders.
+- No Lambda functions or Step Functions (Stages 13–16).
+
+### Env vars
+
+Added `ASSETS_BUCKET_NAME=webpresa-dev-assets` to `.env.local.example`, reusing existing AWS credential vars.
+
+## 3. Verification Results
+
+```
+✓ Infra tests:  41 passed (npm test) — 26 table tests + 15 new bucket tests
+✓ Infra synth:  cdk synth --profile webpresa clean
+✓ Web lint:     0 errors (npm run lint)
+✓ Web typecheck: 0 errors (npx tsc --noEmit)
+✓ Web tests:    77 passed (npm test) — includes 8 new S3 asset tests
+✓ Web build:    production build succeeds (npm run build)
+```
+
+## 4. Files Created / Modified
+
+```
+infra/
+├── lib/
+│   ├── constructs/
+│   │   └── webpresa-bucket.ts         NEW — WebpresaBucket construct
+│   └── stacks/
+│       └── data-stack.ts              MODIFIED — added Assets bucket
+└── test/
+    └── data-stack.test.ts             MODIFIED — bucket test coverage, output count 8→10
+
+web/
+├── package.json                       MODIFIED — @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+├── lib/
+│   └── s3/
+│       ├── client.ts                  NEW — S3Client singleton
+│       ├── assets.ts                  NEW — putAsset / getAsset / getSignedAssetUrl
+│       └── __tests__/
+│           └── assets.test.ts         NEW — 8 tests
+├── .env.local.example                 MODIFIED — ASSETS_BUCKET_NAME
+└── docs/
+    ├── build_log.md                   MODIFIED — this entry
+    ├── architecture.md                MODIFIED — S3 asset storage section
+    ├── deployment.md                  MODIFIED — IAM policy, env var, new-prefix runbook
+    └── implementation.md              MODIFIED — Stage 9 marked complete in development
+```
+
+## 5. Deployment Gate
+
+**Not deployed.** Per `AGENTS.md`, `cdk deploy` requires showing account ID, region, resources, stack name, and full `cdk diff` output, then explicit approval before running.

@@ -3,13 +3,14 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 import { WebpresaTable } from '../constructs/webpresa-table';
+import { WebpresaBucket } from '../constructs/webpresa-bucket';
 
 export interface WebpresaDataStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
 }
 
 /**
- * WebpresaDataStack — DynamoDB data layer for the Webpresa platform.
+ * WebpresaDataStack — DynamoDB and S3 data layer for the Webpresa platform.
  *
  * Instantiated with an environment-aware ID from bin/webpresa.ts:
  *   dev  →  WebpresaDevDataStack
@@ -181,6 +182,18 @@ export class WebpresaDataStack extends cdk.Stack {
           partitionKey: { name: 'status', type: S },
         },
       ],
+    });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Assets bucket — private object storage for scan artifacts, preview
+    // assets, and postcard files. Single bucket, prefix-scoped:
+    //   scans/{businessId}/{scanId}/...
+    //   previews/{businessId}/{previewId}/...
+    //   postcards/{businessId}/{postcardId}/...
+    // ───────────────────────────────────────────────────────────────────────
+    new WebpresaBucket(this, 'Assets', {
+      config,
+      bucketName: 'assets',
     });
   }
 }

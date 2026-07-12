@@ -1,7 +1,7 @@
 # Webpresa — Architecture
 
 **Last updated:** 2026-07-12  
-**Status:** Stage 8B complete — premium generated website template live; admin with cascade delete; DynamoDB tables live in `us-east-1`. Hosting on Vercel.
+**Status:** Stage 9 complete in development — premium generated website template live; admin with cascade delete; DynamoDB tables and S3 assets bucket live in `us-east-1`. Hosting on Vercel.
 
 ---
 
@@ -153,8 +153,8 @@ No account IDs are hard-coded. The CDK app resolves `CDK_DEFAULT_ACCOUNT` and `C
 
 | Stack | Deployed | Description |
 |---|---|---|
-| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables, dev settings |
-| `WebpresaProdDataStack` | ❌ not deployed | Same tables, prod settings |
+| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket, dev settings |
+| `WebpresaProdDataStack` | ❌ not deployed | Same tables and bucket, prod settings |
 
 ---
 
@@ -204,6 +204,45 @@ The `createdAt` sort key on `business-id-index` for SitePreviews, ScanEvents, an
 
 ---
 
+## S3 asset storage
+
+**Implemented in Stage 9.** Single private, encrypted bucket per environment — `webpresa-{env}-assets` — provisioned via the reusable `WebpresaBucket` construct (`infra/lib/constructs/webpresa-bucket.ts`), mirroring the `WebpresaTable` pattern. Wired into the existing `WebpresaDataStack` alongside the four tables (`infra/lib/stacks/data-stack.ts`) rather than a separate stack.
+
+### `webpresa-dev-assets`
+
+| | |
+|---|---|
+| Encryption | S3-managed (SSE-S3) |
+| Public access | fully blocked (`BLOCK_ALL`) |
+| SSL | enforced via bucket policy |
+| Versioning | disabled (dev) / **enabled** (prod) |
+| Removal policy | DESTROY (dev) / RETAIN (prod) |
+| Lifecycle | abort incomplete multipart uploads after 7 days; expire objects tagged `retain=false` after 90 days |
+
+### Key structure (single bucket, prefix-scoped)
+
+```
+scans/{businessId}/{scanId}/crawl.json
+scans/{businessId}/{scanId}/desktop.png
+scans/{businessId}/{scanId}/mobile.png
+previews/{businessId}/{previewId}/...
+postcards/{businessId}/{postcardId}/...
+```
+
+The `retain=false` object tag is *not yet written by anything* — Stage 9 only provisions the lifecycle rule. Stages 13/14 (scan artifacts) and 22 (postcards) are expected to set this tag when a scan or postcard is marked failed/obsolete, so the existing rule expires it automatically.
+
+### Application-side access
+
+- `web/lib/s3/client.ts` — `server-only` singleton `S3Client`, same region/credential pattern as `web/lib/db/client.ts` (`AWS_REGION`, `AWS_PROFILE` locally, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` on Vercel). `getAssetsBucketName()` reads `ASSETS_BUCKET_NAME`.
+- `web/lib/s3/assets.ts` — `server-only` generic helpers: `putAsset`, `getAsset` (returns `null` on `NoSuchKey`), `getSignedAssetUrl` (short-lived signed URL, 300s default, for private admin viewing). All three reject keys outside the `scans/`, `previews/`, `postcards/` prefixes before calling S3.
+- No domain-model or UI wiring yet — `ScanEvent.storageKeys`, the `/admin/scans` and `/admin/postcards` placeholder pages, and any `Postcard` creative-file field are populated by the stages that actually produce that data (13, 14, 22), not Stage 9.
+
+### IAM
+
+The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the assets bucket only. Future Lambda execution roles (Stage 13 crawler, Stage 14 screenshot capture, Stage 22 postcard service) should be scoped further, to their own prefix only (`scans/*`, `postcards/*`) rather than the whole bucket — not yet created since those roles don't exist yet.
+
+---
+
 ## Environment variables
 
 The homepage requires no environment variables. The admin dashboard requires all of the following on both the development server and the Vercel deployment.
@@ -218,6 +257,7 @@ The homepage requires no environment variables. The admin dashboard requires all
 | `SITE_PREVIEWS_TABLE_NAME` | CloudFormation export `webpresa-dev-site-previews-name` | SitePreview repository |
 | `SCAN_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-events-name` | ScanEvent repository |
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | Postcard repository |
+| `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets client (`web/lib/s3/`) |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | Admin sign-in |
 | `SESSION_SECRET` | `openssl rand -base64 32` | JWT session signing |
@@ -269,6 +309,9 @@ web/lib/
     site-previews.ts     SitePreview repository — get, listForBusiness, put
     scan-events.ts       ScanEvent repository — get, listForBusiness, put
     postcards.ts         Postcard repository — get, listForBusiness, put
+  s3/
+    client.ts            S3Client singleton (server-only) — Stage 9
+    assets.ts            Generic asset helpers — putAsset, getAsset, getSignedAssetUrl — Stage 9
 ```
 
 All repository files import `server-only` to prevent accidental bundling in client code. All functions accept and return canonical domain types from `@/domain/models`. Zod schemas are re-validated on every write.

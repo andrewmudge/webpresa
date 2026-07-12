@@ -87,6 +87,7 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `SITE_PREVIEWS_TABLE_NAME` | CloudFormation export `webpresa-dev-site-previews-name` | |
 | `SCAN_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-events-name` | |
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | |
+| `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets bucket (Stage 9) |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
@@ -155,11 +156,34 @@ aws iam put-user-policy \
     }]
   }' --profile webpresa
 
+# Attach an inline policy scoped to the assets bucket (Stage 9)
+aws iam put-user-policy \
+  --user-name webpresa-vercel-dev \
+  --policy-name webpresa-dev-s3-assets \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::webpresa-dev-assets",
+        "arn:aws:s3:::webpresa-dev-assets/*"
+      ]
+    }]
+  }' --profile webpresa
+
 # Generate access keys
 aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa
 ```
 
 The `create-access-key` response contains `AccessKeyId` and `SecretAccessKey`. Add both to Vercel immediately and do not store them anywhere else.
+
+> Future Lambda execution roles (Stage 13 crawler, Stage 14 screenshot capture, Stage 22 postcard service) should NOT reuse this broad `webpresa-dev-s3-assets` policy — each should get its own prefix-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only) once those roles are created.
 
 ---
 
@@ -329,3 +353,14 @@ aws dynamodb restore-table-to-point-in-time \
 4. Add the factory in `web/domain/factories/`.
 5. Add the corresponding `CfnOutput` export name to this document.
 6. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying.
+
+## Adding a new S3 prefix (existing assets bucket)
+
+Stage 9 provisions one bucket (`webpresa-{env}-assets`) shared across scan, preview, and postcard artifacts via key prefixes — most future work adds a prefix, not a new bucket:
+
+1. Document the new key pattern under the "S3 asset storage" section of `architecture.md`.
+2. Add the prefix to `ALLOWED_PREFIXES` in `web/lib/s3/assets.ts` if application code will write to it directly.
+3. If a new runtime (e.g. a Stage 13/14/22 Lambda) needs access, grant it a least-privilege policy scoped to that prefix only — do not reuse the broad `webpresa-vercel-dev` policy.
+4. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying if the IAM policy or bucket construct itself changed.
+
+A genuinely new bucket (rather than a prefix) would instead follow the `WebpresaBucket` construct pattern in `infra/lib/constructs/webpresa-bucket.ts`, mirroring the steps above.

@@ -238,9 +238,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 8 outputs — TableName and TableArn for each of the 4 tables', () => {
+  it('creates 10 outputs — TableName/TableArn for 4 tables, BucketName/BucketArn for 1 bucket', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(8);
+    expect(Object.keys(outputs)).toHaveLength(10);
   });
 });
 
@@ -322,6 +322,140 @@ describe('GSI projection', () => {
           Projection: { ProjectionType: 'ALL' },
         }),
       ]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Assets bucket (Stage 9)
+// ---------------------------------------------------------------------------
+
+describe('assets bucket', () => {
+  it('creates exactly one S3 bucket', () => {
+    dev.resourceCountIs('AWS::S3::Bucket', 1);
+  });
+
+  it('dev bucket is named webpresa-dev-assets', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: 'webpresa-dev-assets',
+    });
+  });
+
+  it('prod bucket is named webpresa-prod-assets', () => {
+    prod.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: 'webpresa-prod-assets',
+    });
+  });
+
+  it('bucket has S3-managed encryption enabled', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: Match.arrayWith([
+          Match.objectLike({
+            ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('bucket fully blocks public access', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      },
+    });
+  });
+
+  it('bucket policy enforces SSL', () => {
+    dev.hasResourceProperties('AWS::S3::BucketPolicy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Deny',
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('bucket has a lifecycle rule to abort incomplete multipart uploads', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([
+          Match.objectLike({
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('bucket has a lifecycle rule expiring retain=false-tagged objects after 90 days', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([
+          Match.objectLike({
+            ExpirationInDays: 90,
+            TagFilters: Match.arrayWith([
+              { Key: 'retain', Value: 'false' },
+            ]),
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('dev bucket has no versioning configured', () => {
+    const resources = dev.findResources('AWS::S3::Bucket', {
+      Properties: { BucketName: 'webpresa-dev-assets' },
+    });
+    const bucket = Object.values(resources)[0] as {
+      Properties: { VersioningConfiguration?: unknown };
+    };
+    expect(bucket.Properties.VersioningConfiguration).toBeUndefined();
+  });
+
+  it('prod bucket has versioning enabled', () => {
+    prod.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: 'webpresa-prod-assets',
+      VersioningConfiguration: { Status: 'Enabled' },
+    });
+  });
+
+  it('dev bucket has DeletionPolicy: Delete', () => {
+    dev.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Delete',
+      UpdateReplacePolicy: 'Delete',
+    });
+  });
+
+  it('prod bucket has DeletionPolicy: Retain', () => {
+    prod.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+    });
+  });
+
+  it('bucket is tagged Project=Webpresa', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      Tags: Match.arrayWith([{ Key: 'Project', Value: 'Webpresa' }]),
+    });
+  });
+
+  it('bucket is tagged Environment=Dev', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      Tags: Match.arrayWith([{ Key: 'Environment', Value: 'Dev' }]),
+    });
+  });
+
+  it('bucket is tagged ManagedBy=CDK', () => {
+    dev.hasResourceProperties('AWS::S3::Bucket', {
+      Tags: Match.arrayWith([{ Key: 'ManagedBy', Value: 'CDK' }]),
     });
   });
 });

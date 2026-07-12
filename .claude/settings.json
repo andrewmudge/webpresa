@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(AWS_PROFILE=webpresa AWS_REGION=us-east-1 ASSETS_BUCKET_NAME=webpresa-dev-assets npx tsx /tmp/claude-1000/-home-mudge-apps-webpresa/1a12cdf6-ceea-48a8-ae2d-87a95b88ef6e/scratchpad/verify-s3.ts)",
+      "Bash(AWS_PROFILE=webpresa AWS_REGION=us-east-1 ASSETS_BUCKET_NAME=webpresa-dev-assets npx tsx .stage9-verify.ts)"
+    ]
+  }
+}

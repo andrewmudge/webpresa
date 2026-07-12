@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
 **Last updated:** 2026-07-12  
-**Status:** Stages 1–8B complete. Stage 9 is next.  
+**Status:** Stages 1–9 complete in development. Stage 10 is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -659,6 +659,10 @@ Stages 5–7.
 ---
 
 # Stage 9 — S3 Assets and Scan Storage
+
+## Status
+
+Complete in development. See `build_log.md` for implementation details and `architecture.md` for the deployed bucket shape.
 
 ## Objective
 
@@ -2233,7 +2237,6 @@ Before marking any stage complete:
 - [ ] Update `architecture.md` when architecture changed.
 - [ ] Update `deployment.md` when commands, variables, stacks, or environments changed.
 - [ ] Append implementation details and verification results to `build_log.md`.
-- [ ] Update `stage_status.md`.
 - [ ] Commit the documentation updates with the implementation.
 
 ---
