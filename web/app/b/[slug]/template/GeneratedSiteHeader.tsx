@@ -1,17 +1,18 @@
 'use client';
 import { useState } from 'react';
-import { V, toTelHref, isValidPhone } from './tokens';
+import { V } from './tokens';
+import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
 
 interface Props {
   businessName: string;
-  phone?: string;
   serviceAreas?: string[];
   services?: { name: string }[];
+  primary: ResolvedCta | null;
+  secondary: ResolvedCta | null;
 }
 
-export function GeneratedSiteHeader({ businessName, phone, serviceAreas, services }: Props) {
+export function GeneratedSiteHeader({ businessName, serviceAreas, services, primary, secondary }: Props) {
   const [open, setOpen] = useState(false);
-  const hasPhone = isValidPhone(phone);
 
   const navLinks = [
     ...(services && services.length > 0 ? [{ label: 'Services', href: '#services' }] : []),
@@ -43,9 +44,10 @@ export function GeneratedSiteHeader({ businessName, phone, serviceAreas, service
 
         {/* Desktop CTAs */}
         <div className="hidden md:flex items-center gap-3">
-          {hasPhone && (
+          {secondary && (
             <a
-              href={toTelHref(phone!)}
+              href={secondary.href}
+              {...externalLinkAttrs(secondary)}
               className="flex items-center gap-1.5 text-sm font-semibold rounded-full border-2 px-4 py-1.5 transition-colors hover:text-white"
               style={{ borderColor: V.primary, color: V.primary }}
               onMouseEnter={(e) => {
@@ -57,19 +59,20 @@ export function GeneratedSiteHeader({ businessName, phone, serviceAreas, service
                 (e.currentTarget as HTMLAnchorElement).style.color = V.primary;
               }}
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-              </svg>
-              {phone}
+              <CtaIcon type={secondary.type} className="w-4 h-4" />
+              {secondary.label}
             </a>
           )}
-          <a
-            href="#contact"
-            className="text-sm font-bold rounded-full px-5 py-2 text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: V.accent }}
-          >
-            Get a Quote
-          </a>
+          {primary && (
+            <a
+              href={primary.href}
+              {...externalLinkAttrs(primary)}
+              className="text-sm font-bold rounded-full px-5 py-2 text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: V.accent }}
+            >
+              {primary.label}
+            </a>
+          )}
         </div>
 
         {/* Mobile hamburger */}
@@ -103,26 +106,29 @@ export function GeneratedSiteHeader({ businessName, phone, serviceAreas, service
             </a>
           ))}
           <div className="pt-3 flex flex-col gap-2">
-            {hasPhone && (
+            {secondary && (
               <a
-                href={toTelHref(phone!)}
+                href={secondary.href}
+                {...externalLinkAttrs(secondary)}
+                onClick={() => setOpen(false)}
                 className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white"
                 style={{ backgroundColor: V.primary }}
               >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                </svg>
-                Call {phone}
+                <CtaIcon type={secondary.type} className="w-4 h-4" />
+                {secondary.label}
               </a>
             )}
-            <a
-              href="#contact"
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-center rounded-xl py-3 text-sm font-bold text-white"
-              style={{ backgroundColor: V.accent }}
-            >
-              Get a Free Quote
-            </a>
+            {primary && (
+              <a
+                href={primary.href}
+                {...externalLinkAttrs(primary)}
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-center rounded-xl py-3 text-sm font-bold text-white"
+                style={{ backgroundColor: V.accent }}
+              >
+                {primary.label}
+              </a>
+            )}
           </div>
         </div>
       )}

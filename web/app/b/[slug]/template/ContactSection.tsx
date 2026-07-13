@@ -1,4 +1,4 @@
-import { V, toTelHref, isValidPhone, isValidEmail } from './tokens';
+import { V, toTelHref, toMailtoHref, isValidPhone, isValidEmail } from './tokens';
 
 interface Props {
   phone?: string;
@@ -44,7 +44,7 @@ export function ContactSection({ phone, email, address, hours }: Props) {
 
           {hasEmail && (
             <a
-              href={`mailto:${email}`}
+              href={toMailtoHref(email!)}
               className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 transition-all hover:scale-[1.02] hover:shadow-md border-2 text-center"
               style={{ borderColor: V.primary, color: V.primary }}
             >

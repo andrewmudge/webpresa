@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { V, isValidPhone, isValidEmail } from './tokens';
+import { V, isValidPhone, isValidEmail, toTelHref, toMailtoHref } from './tokens';
 import type { PreviewService } from '@/domain/models/site-preview';
 
 interface Props {
@@ -37,12 +37,12 @@ export function GeneratedSiteFooter({
             {address && <p className="text-sm leading-relaxed mb-2">{address}</p>}
             {hasPhone && (
               <p className="text-sm mb-1">
-                <a href={`tel:${phone}`} className="hover:text-white transition-colors">{phone}</a>
+                <a href={toTelHref(phone!)} className="hover:text-white transition-colors">{phone}</a>
               </p>
             )}
             {hasEmail && (
               <p className="text-sm">
-                <a href={`mailto:${email}`} className="hover:text-white transition-colors">{email}</a>
+                <a href={toMailtoHref(email!)} className="hover:text-white transition-colors">{email}</a>
               </p>
             )}
             {hours && <p className="text-sm mt-3 text-white/60">{hours}</p>}

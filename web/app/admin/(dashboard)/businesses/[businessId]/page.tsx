@@ -4,8 +4,10 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
-import { createSeedPreviewAction } from './actions';
+import { createSeedPreviewAction, updatePreviewCtaAction } from './actions';
+import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
+import { CtaConfigForm } from './CtaConfigForm';
 import type { Business } from '@/domain/models/business';
 import type { SitePreview } from '@/domain/models/site-preview';
 
@@ -215,6 +217,19 @@ export default async function BusinessDetailPage({ params }: Props) {
             </p>
           )}
         </div>
+
+        {/* CTA config — edits the most recent preview in place */}
+        {previews.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Preview CTA — v{previews[0].version}
+            </h3>
+            <CtaConfigForm
+              action={updatePreviewCtaAction.bind(null, previews[0].previewId)}
+              defaults={previews[0].content.cta ?? buildDefaultCta(previews[0].content.contact)}
+            />
+          </div>
+        )}
 
         {/* Deferred actions */}
         <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">

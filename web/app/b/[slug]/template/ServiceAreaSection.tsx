@@ -1,11 +1,13 @@
 import { V } from './tokens';
+import { externalLinkAttrs, type ResolvedCta } from './cta';
 
 interface Props {
   serviceAreas: string[];
+  primary: ResolvedCta | null;
 }
 
 // Only rendered when serviceAreas has entries
-export function ServiceAreaSection({ serviceAreas }: Props) {
+export function ServiceAreaSection({ serviceAreas, primary }: Props) {
   if (!serviceAreas || serviceAreas.length === 0) return null;
 
   return (
@@ -34,15 +36,18 @@ export function ServiceAreaSection({ serviceAreas }: Props) {
             </span>
           ))}
         </div>
-        <div className="mt-10">
-          <a
-            href="#contact"
-            className="text-sm font-bold transition-opacity hover:opacity-80"
-            style={{ color: V.primary }}
-          >
-            Request service in your area →
-          </a>
-        </div>
+        {primary && (
+          <div className="mt-10">
+            <a
+              href={primary.href}
+              {...externalLinkAttrs(primary)}
+              className="text-sm font-bold transition-opacity hover:opacity-80"
+              style={{ color: V.primary }}
+            >
+              {primary.label} →
+            </a>
+          </div>
+        )}
       </div>
     </section>
   );

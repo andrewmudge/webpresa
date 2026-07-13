@@ -1,12 +1,14 @@
 import { V } from './tokens';
+import { externalLinkAttrs, type ResolvedCta } from './cta';
 
 interface Props {
   businessName: string;
   tagline: string;
   aboutText: string;
+  primary: ResolvedCta | null;
 }
 
-export function AboutSection({ businessName, tagline, aboutText }: Props) {
+export function AboutSection({ businessName, tagline, aboutText, primary }: Props) {
   return (
     <section id="about" className="py-20 bg-white">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -23,16 +25,19 @@ export function AboutSection({ businessName, tagline, aboutText }: Props) {
               {tagline}
             </h2>
             <p className="text-gray-500 leading-relaxed mb-7 max-w-prose">{aboutText}</p>
-            <a
-              href="#contact"
-              className="inline-flex items-center gap-2 font-bold rounded-xl px-6 py-3 text-white text-sm transition-opacity hover:opacity-90"
-              style={{ backgroundColor: V.primary }}
-            >
-              Work with {businessName}
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-              </svg>
-            </a>
+            {primary && (
+              <a
+                href={primary.href}
+                {...externalLinkAttrs(primary)}
+                className="inline-flex items-center gap-2 font-bold rounded-xl px-6 py-3 text-white text-sm transition-opacity hover:opacity-90"
+                style={{ backgroundColor: V.primary }}
+              >
+                {primary.label}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+              </a>
+            )}
           </div>
 
           {/* Visual accent block */}

@@ -1496,3 +1496,157 @@ web/
     ├── deployment.md                  MODIFIED — IAM policy, put-secret-value runbook, new-secret runbook
     └── implementation.md              MODIFIED — Stage 10 marked complete in development
 ```
+
+---
+
+# Template Visual Refresh — Navy/Orange Theme + Featured Service Image
+
+**Date:** 2026-07-13
+**Scope:** Rebrand the `local-business-v1` template's default color theme from teal/gold to navy/orange, and give the oversized first service card a picture background on large screens. Application-layer only — no infra changes.
+
+## Theme colors
+
+`SEED_THEME()` in `app/admin/(dashboard)/businesses/[businessId]/actions.ts` — the single source of the theme every seeded preview gets — updated:
+
+| Token | Before | After |
+|---|---|---|
+| `primaryColor` | `#11455E` (teal) | `#0F356B` (navy) |
+| `accentColor` | `#CE9059` (gold) | `#ED7023` (orange) |
+
+Because every section already reads color exclusively through `var(--site-primary)` / `var(--site-accent)` (see `tokens.ts`), no component changed — the new colors apply everywhere `V.primary`/`V.accent` is used (hero, headings, nav, CTA buttons, footer) automatically.
+
+Card/section backgrounds that used Tailwind's `bg-slate-50` (`#f8fafc`, an approximation) were changed to the exact requested light-gray `bg-[#F4F7FA]` in `ContactSection`, `ServiceAreaSection`, `ServicesGrid`, `TrustStrip`, and `WhyChooseUs`. `bg-white` was left unchanged (`#FFFFFF` is already exact).
+
+The pre-existing teal/gold hex values in the public marketing homepage (`app/components/Hero.tsx`, `ExamplesSection.tsx`, `WhyStartFromScratch.tsx`, `PreviewSection.tsx`, `FounderSection.tsx`) were **not** touched — those are the Webpresa marketing site's own branding, not the generated business template, and were out of scope.
+
+## Featured service card — picture background
+
+`ServicesGrid.tsx`: the oversized first ("featured") service card now shows a background photo on `lg:` screens and up, with a flat dark overlay for text contrast; below `lg:` it renders identically to the other cards (`bg-[#F4F7FA]`, dark text) instead of a solid navy block, so there's no unstyled/empty state on mobile.
+
+The photo is a hardcoded `picsum.photos` placeholder (`DEV_FIXTURE`, matching the existing convention for `heroImageUrl`/`aboutImageUrl` in `INDUSTRY_SEEDS`) — there is no per-service image field in `PreviewService` yet. Intentionally deferred rather than adding a new domain field now: Stage 13 (Firecrawl website capture) is expected to eventually supply a real per-service photo, at which point the placeholder constant is swapped for real data with no template changes needed.
+
+## Verification
+
+```
+Lint: 0 errors
+TypeCheck: 0 errors
+Tests: 82 passed (no new tests — presentational change only)
+Build: clean
+```
+
+## Files Modified
+
+```
+web/
+├── app/
+│   ├── admin/(dashboard)/businesses/[businessId]/actions.ts   MODIFIED — SEED_THEME() colors
+│   └── b/[slug]/template/
+│       ├── ContactSection.tsx        MODIFIED — bg-slate-50 → bg-[#F4F7FA]
+│       ├── ServiceAreaSection.tsx    MODIFIED — bg-slate-50 → bg-[#F4F7FA]
+│       ├── ServicesGrid.tsx          MODIFIED — bg-[#F4F7FA] + featured-card picture background
+│       ├── TrustStrip.tsx            MODIFIED — bg-slate-50 → bg-[#F4F7FA]
+│       └── WhyChooseUs.tsx           MODIFIED — bg-slate-50 → bg-[#F4F7FA]
+```
+
+---
+
+# Configurable CTA System
+
+**Date:** 2026-07-13
+**Scope:** Replace the template's hardcoded CTA phrases ("Get a Quote", "Get a Free Quote", "Request Service", "Request a Free Estimate") with an admin-configurable primary/secondary call-to-action model, without building a hosted form system. No new template, no redesign, no CRM integration, no deployment/infra changes.
+
+## Domain model + schema (`domain/`)
+
+`domain/models/site-preview.ts` — added:
+
+```ts
+export const CTA_ACTION_TYPES = ['phone', 'email', 'sms', 'external_url', 'none'] as const;
+export type CtaActionType = (typeof CTA_ACTION_TYPES)[number];
+
+export interface PreviewCta {
+  type: CtaActionType;
+  label: string;
+  value?: string; // destination override; required for external_url
+}
+
+export interface PreviewCtaConfig {
+  primary: PreviewCta;
+  secondary?: PreviewCta;
+}
+```
+
+Added as `cta?: PreviewCtaConfig` on `PreviewContent` — **optional**, so existing DynamoDB records (which only have legacy `hero.ctaText`) remain valid with no migration.
+
+`domain/schemas/site-preview.schema.ts` — `PreviewCtaSchema` requires a non-empty `label` unless `type` is `"none"`, and requires `external_url` CTAs to carry a `value` that passes a new exported `isHttpsUrl()` check (parses with the `URL` constructor, rejects anything whose protocol isn't `https:` — blocks `http:`, `javascript:`, `data:`, etc.).
+
+## Resolver (`app/b/[slug]/template/cta.tsx` — new)
+
+Single source of truth for turning configured CTAs into renderable links — no component constructs a `tel:`/`mailto:`/`sms:`/external href itself.
+
+- `resolvePreviewCta({ cta, contact, variant })` — resolves one CTA. Phone/SMS/email fall back to `contact.phone`/`contact.email` when `cta.value` is unset; `external_url` re-validates `isHttpsUrl` at render time (defense-in-depth against stored data written before this validation existed). Returns `null` whenever the action can't be resolved (missing destination, unsafe URL, `type: "none"`) — callers never render a broken button.
+- `resolvePreviewCtaConfig(content)` — resolves the full `{ primary, secondary }` config content-wide. When `content.cta` is present it's used directly; when absent (**legacy previews**), `normalizeLegacyCtaConfig()` derives one from `hero.ctaText` (kept as the label) and `contact` (phone destination if present, else email, else the CTA is hidden entirely) — no destructive migration required. Also collapses `secondary` to `null` when it resolves to the same action type + destination as `primary`.
+- `getMobileBarActions(primary, secondary)` — pure array helper (`[]` / `[one]` / `[both]`) that the mobile sticky bar uses to decide single-vs-split-width rendering.
+- `CtaIcon` / `externalLinkAttrs` — shared per-type icon and `target="_blank" rel="noopener noreferrer"` attributes for external links.
+
+## Template wiring
+
+`index.tsx` calls `resolvePreviewCtaConfig(content)` once and passes `{ primary, secondary }` down. Updated to read from resolved CTAs instead of hardcoded copy: `GeneratedSiteHeader` (desktop pill + accent button, mobile drawer), `GeneratedHero` (primary/secondary CTA buttons), `WhyChooseUs`, `AboutSection`, `ServiceAreaSection` (all primary-only), `FinalCTA` (primary + secondary), `MobileCallBar` (primary + secondary — a lone resolved CTA now spans the full bar width instead of leaving an empty half).
+
+**Explicitly excluded**, per requirements: `ContactSection`'s phone/email contact cards and `GeneratedSiteFooter`'s contact block stay tied directly to `contact.phone`/`contact.email` — they are not routed through the CTA system. They were only touched to reuse the newly-centralized safe link builders (`toMailtoHref`, `toTelHref` — the footer previously built `mailto:`/`tel:` hrefs by hand).
+
+`tokens.ts` — added `toSmsHref` and `toMailtoHref` alongside the existing `toTelHref`.
+
+## Admin (`app/admin/(dashboard)/businesses/[businessId]/`)
+
+- `cta-defaults.ts` (new) — `buildDefaultCta(contact)`: phone present → primary `{phone, "Call Now"}` (+ secondary `{email, "Email Us"}` if email also present); email-only → primary `{email, "Contact Us"}`; neither → primary `{none, ""}`. Deliberately never defaults to "Get a Quote"/"Get a Free Quote"/"Request an Estimate"/"Request Service" — those phrases only appear when an admin explicitly types them. Kept in its own module, not `actions.ts`, because Next.js requires every export of a `'use server'` file to be an async Server Action — this is a plain sync helper.
+- `actions.ts` — `buildSeedContent` now calls `buildDefaultCta` and sets both `content.cta` and the legacy `hero.ctaText` (kept in sync with the new primary label, since some code paths still read it as a fallback). New `updatePreviewCtaAction(previewId, prevState, formData)` Server Action: Zod-validates the submitted primary/secondary fields (label required unless `none`, `https://` required for `external_url`), merges the resulting `PreviewCtaConfig` into the preview's `content`, re-validates with `PreviewContentSchema`, and `putSitePreview`s it **in place** — this edits presentation config, not generated content, so it does not create a new preview version.
+- `CtaConfigForm.tsx` (new, client component) — reuses the existing `useActionState`/`useFormStatus` form pattern from `BusinessForm.tsx`. Primary CTA (type, label, destination) always shown; secondary CTA behind an enable checkbox. Destination field hides entirely for `none`, shows "uses the preview phone/email by default" helper text for `phone`/`sms`/`email`, and is marked required for `external_url`.
+- `page.tsx` — added a "Preview CTA" card on the business detail page, editing the most recent preview version (`previews[0]`, since `listPreviewsForBusiness` returns newest-first). Form defaults to the preview's stored `content.cta`, or `buildDefaultCta(contact)` when the preview predates this feature.
+
+## Tests
+
+- `app/b/[slug]/template/__tests__/cta.test.ts` (new, 26 tests) — `resolvePreviewCta` for phone (contact fallback, override, sanitization, missing destination), email, sms, external_url (valid, `javascript:`, plain `http:`, missing value), `none`/undefined; `resolvePreviewCtaConfig` for one/two resolved CTAs, dedup of identical primary+secondary, distinct-destination non-dedup, legacy `hero.ctaText` normalization (phone fallback, email fallback, fully-hidden case); `getMobileBarActions` for 0/1/2 resolved actions.
+- `app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts` (new, 11 tests) — `updatePreviewCtaAction` validation (missing label, non-https external URL, unsafe protocol, secondary validated only when enabled), success flow (primary-only, primary+secondary with overrides, secondary omitted when disabled, rest of `content` left untouched), auth, and preview-not-found.
+
+## Verification
+
+```
+Lint: 0 errors
+TypeCheck: 0 errors
+Tests: 119 passed (37 new — 82 prior + 26 cta.test.ts + 11 admin actions.test.ts)
+Build: clean
+```
+
+## Files Created / Modified
+
+```
+web/
+├── domain/
+│   ├── models/site-preview.ts                              MODIFIED — CtaActionType, PreviewCta, PreviewCtaConfig, content.cta
+│   └── schemas/site-preview.schema.ts                       MODIFIED — PreviewCtaSchema, isHttpsUrl export
+├── app/
+│   ├── b/[slug]/template/
+│   │   ├── cta.tsx                                           NEW — resolver, icons, mobile-bar helper
+│   │   ├── tokens.ts                                         MODIFIED — toSmsHref, toMailtoHref
+│   │   ├── index.tsx                                         MODIFIED — resolves CTAs once, threads to sections
+│   │   ├── GeneratedSiteHeader.tsx                           MODIFIED
+│   │   ├── GeneratedHero.tsx                                 MODIFIED
+│   │   ├── WhyChooseUs.tsx                                   MODIFIED
+│   │   ├── AboutSection.tsx                                  MODIFIED
+│   │   ├── ServiceAreaSection.tsx                            MODIFIED
+│   │   ├── FinalCTA.tsx                                      MODIFIED
+│   │   ├── MobileCallBar.tsx                                 MODIFIED — single-CTA full-width fix
+│   │   ├── ContactSection.tsx                                MODIFIED — toMailtoHref reuse only
+│   │   ├── GeneratedSiteFooter.tsx                           MODIFIED — toTelHref/toMailtoHref reuse only
+│   │   └── __tests__/cta.test.ts                             NEW — 26 tests
+│   └── admin/(dashboard)/businesses/[businessId]/
+│       ├── cta-defaults.ts                                   NEW — buildDefaultCta
+│       ├── actions.ts                                        MODIFIED — default cta wiring, updatePreviewCtaAction
+│       ├── CtaConfigForm.tsx                                  NEW — admin CTA editor
+│       ├── page.tsx                                          MODIFIED — Preview CTA card
+│       └── __tests__/actions.test.ts                          NEW — 11 tests
+└── docs/
+    ├── build_log.md                                          MODIFIED — this entry (+ theme refresh entry)
+    ├── architecture.md                                       MODIFIED — CTA system, theme, admin, API boundaries
+    └── implementation.md                                     MODIFIED — Stage 8 status pointer, Stage 11 forward-note
+```

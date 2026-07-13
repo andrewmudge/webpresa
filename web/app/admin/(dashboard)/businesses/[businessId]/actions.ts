@@ -1,11 +1,15 @@
 'use server';
 import { redirect } from 'next/navigation';
+import { z } from 'zod';
 import type { Business } from '@/domain/models/business';
-import type { PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
-import { PreviewContentSchema } from '@/domain/schemas/site-preview.schema';
+import type { PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewTheme } from '@/domain/models/site-preview';
+import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
+import { PreviewContentSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
+import { buildDefaultCta } from './cta-defaults';
 import {
   listPreviewsForBusiness,
+  getSitePreviewById,
   putSitePreview,
   deletePreviewById,
 } from '@/lib/db/site-previews';
@@ -134,32 +138,40 @@ function buildSeedContent(business: Business): PreviewContent {
     ...(business.address?.city ? [`Surrounding ${business.address.city} area`] : []),
   ].filter(Boolean);
 
+  const contact: PreviewContact = {
+    ...(business.phone ? { phone: business.phone } : {}),
+    ...(business.email ? { email: business.email } : {}),
+    ...(business.address
+      ? {
+          address: [
+            business.address.line1,
+            business.address.city,
+            business.address.state,
+            business.address.postalCode,
+          ].filter(Boolean).join(', '),
+        }
+      : {}),
+  };
+
+  const cta = buildDefaultCta(contact);
+
   const raw: PreviewContent = {
     hero: {
       headline: business.name,
       subheadline: `Dependable ${industry.replace(/_/g, ' ')} services in ${city}. Professional results, clear communication, and no hidden fees.`,
-      ctaText: 'Get a Free Quote',
+      // Legacy field kept in sync with the primary CTA label — the template
+      // reads `content.cta` directly and only falls back to this for
+      // previews saved before CTA config existed.
+      ctaText: cta.primary.label || 'Contact Us',
     },
     services: seed.services,
     tagline: `Trusted ${industry.replace(/_/g, ' ')} services — proudly serving ${locationLabel}.`,
     aboutText: `${business.name} is a locally operated ${industry.replace(/_/g, ' ')} company dedicated to delivering quality work and exceptional service to our community. We believe in honest communication, fair pricing, and doing the job right the first time. Every project — big or small — gets our full attention and professional care.`,
-    contact: {
-      ...(business.phone ? { phone: business.phone } : {}),
-      ...(business.email ? { email: business.email } : {}),
-      ...(business.address
-        ? {
-            address: [
-              business.address.line1,
-              business.address.city,
-              business.address.state,
-              business.address.postalCode,
-            ].filter(Boolean).join(', '),
-          }
-        : {}),
-    },
+    contact,
     serviceAreas,
     differentiators: seed.differentiators,
     hours: 'Mon–Fri 8am–6pm · Sat 9am–3pm',
+    cta,
   };
 
   PreviewContentSchema.parse(raw);
@@ -209,6 +221,124 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
   redirect(`/admin/businesses/${business.businessId}`);
 }
 
+// ---------------------------------------------------------------------------
+// CTA config action
+// ---------------------------------------------------------------------------
+
+export type CtaFormState =
+  | {
+      errors?: Record<string, string[]>;
+      message?: string;
+    }
+  | undefined;
+
+const CtaTypeSchema = z.enum(CTA_ACTION_TYPES);
+
+const CtaFormSchema = z
+  .object({
+    primaryType: CtaTypeSchema,
+    primaryLabel: z.string().max(40),
+    primaryValue: z.string().optional(),
+    secondaryEnabled: z.string().optional(),
+    secondaryType: CtaTypeSchema.optional(),
+    secondaryLabel: z.string().max(40).optional(),
+    secondaryValue: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.primaryType !== 'none' && !data.primaryLabel.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['primaryLabel'], message: 'Label is required' });
+    }
+    if (data.primaryType === 'external_url' && !(data.primaryValue && isHttpsUrl(data.primaryValue.trim()))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['primaryValue'], message: 'A valid https:// URL is required' });
+    }
+    if (data.secondaryEnabled === 'on') {
+      if (!data.secondaryType) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['secondaryType'], message: 'Action type is required' });
+      } else {
+        if (data.secondaryType !== 'none' && !data.secondaryLabel?.trim()) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['secondaryLabel'], message: 'Label is required' });
+        }
+        if (
+          data.secondaryType === 'external_url' &&
+          !(data.secondaryValue && isHttpsUrl(data.secondaryValue.trim()))
+        ) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['secondaryValue'], message: 'A valid https:// URL is required' });
+        }
+      }
+    }
+  });
+
+/**
+ * Update the primary/secondary CTA config on an existing preview in place.
+ * Does not create a new preview version — this edits presentation config,
+ * not generated content — so history/versioning is unaffected.
+ */
+export async function updatePreviewCtaAction(
+  previewId: string,
+  _prevState: CtaFormState,
+  formData: FormData,
+): Promise<CtaFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const raw = {
+    primaryType: formData.get('primaryType') as string,
+    primaryLabel: (formData.get('primaryLabel') as string | null) ?? '',
+    primaryValue: coerceOptional(formData.get('primaryValue') as string | null),
+    secondaryEnabled: (formData.get('secondaryEnabled') as string | null) ?? undefined,
+    secondaryType: (formData.get('secondaryType') as string | null) ?? undefined,
+    secondaryLabel: (formData.get('secondaryLabel') as string | null) ?? undefined,
+    secondaryValue: coerceOptional(formData.get('secondaryValue') as string | null),
+  };
+
+  const parsed = CtaFormSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+  const data = parsed.data;
+
+  const primary: PreviewCta = {
+    type: data.primaryType,
+    label: data.primaryType === 'none' ? '' : data.primaryLabel.trim(),
+    ...(data.primaryValue?.trim() ? { value: data.primaryValue.trim() } : {}),
+  };
+
+  const secondary: PreviewCta | undefined =
+    data.secondaryEnabled === 'on' && data.secondaryType
+      ? {
+          type: data.secondaryType,
+          label: data.secondaryType === 'none' ? '' : (data.secondaryLabel ?? '').trim(),
+          ...(data.secondaryValue?.trim() ? { value: data.secondaryValue.trim() } : {}),
+        }
+      : undefined;
+
+  const cta: PreviewCtaConfig = { primary, ...(secondary ? { secondary } : {}) };
+
+  let businessId = '';
+  try {
+    const preview = await getSitePreviewById(previewId);
+    if (!preview) return { message: 'Preview not found' };
+    businessId = preview.businessId;
+
+    const content: PreviewContent = {
+      ...preview.content,
+      hero: { ...preview.content.hero, ctaText: primary.label || preview.content.hero.ctaText },
+      cta,
+    };
+
+    PreviewContentSchema.parse(content);
+    await putSitePreview({ ...preview, content, updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('Failed to update preview CTA:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save CTA changes. Please try again.' };
+  }
+
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+function coerceOptional(value: string | null | undefined): string | undefined {
+  return value?.trim() || undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Cascade delete action

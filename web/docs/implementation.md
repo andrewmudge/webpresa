@@ -595,7 +595,7 @@ Admin endpoints or server actions must:
 
 ## Status
 
-Complete. Template redesigned in Stage 8B revision — see `build_log.md`.
+Complete. Template redesigned in Stage 8B revision. Later revisions — see `build_log.md` — rebranded the default theme to navy/orange, added a picture background to the featured service card, and replaced hardcoded CTA copy with an admin-configurable primary/secondary CTA system (`PreviewContent.cta`).
 
 ## Objective
 
@@ -838,6 +838,8 @@ All output must:
 - be saved as a new version
 - start in a human-review state
 - remain editable before publication
+
+> **Note (added post-Stage-10):** `PreviewContentSchema` now includes an optional `cta` field (`PreviewCtaConfig` — see `build_log.md`, "Configurable CTA System"). Generated content should populate `content.cta` directly rather than relying on legacy `hero.ctaText` normalization, and must not default to generic phrases like "Get a Quote" — follow the same phone-first/email-fallback/hidden default logic as `buildDefaultCta()` in the admin seed generator unless the admin has already configured a CTA for this business.
 
 ## Acceptance criteria
 

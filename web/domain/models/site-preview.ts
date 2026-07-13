@@ -35,6 +35,35 @@ export interface PreviewContact {
   address?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Call-to-action configuration
+// ---------------------------------------------------------------------------
+
+export const CTA_ACTION_TYPES = ['phone', 'email', 'sms', 'external_url', 'none'] as const;
+export type CtaActionType = (typeof CTA_ACTION_TYPES)[number];
+
+/**
+ * A single configurable call-to-action button.
+ *
+ * `value` is an optional destination override:
+ * - `phone` / `sms`: overrides `contact.phone` when present.
+ * - `email`: overrides `contact.email` when present.
+ * - `external_url`: required — the destination the button links to
+ *   (a client's existing quote form, booking page, Calendly, etc).
+ * - `none`: not rendered; `value` is unused.
+ */
+export interface PreviewCta {
+  type: CtaActionType;
+  label: string;
+  value?: string;
+}
+
+/** The full CTA configuration for a preview: one required primary action, one optional secondary. */
+export interface PreviewCtaConfig {
+  primary: PreviewCta;
+  secondary?: PreviewCta;
+}
+
 /**
  * The complete structured content of a website preview.
  *
@@ -59,6 +88,15 @@ export interface PreviewContent {
   differentiators?: { title: string; description: string }[];
   /** Business hours as a single formatted display string, e.g. "Mon–Fri 8am–6pm, Sat 9am–2pm". */
   hours?: string;
+  /**
+   * Configurable CTA buttons rendered across the template.
+   *
+   * Optional for backward compatibility with previews saved before this
+   * field existed — absence means "derive one from `hero.ctaText` and
+   * `contact` at render time" (see `resolvePreviewCtaConfig`). New saves
+   * should always populate this.
+   */
+  cta?: PreviewCtaConfig;
 }
 
 /** Visual appearance tokens applied to the preview template. */

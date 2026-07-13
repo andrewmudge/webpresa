@@ -1,5 +1,6 @@
 import type { SitePreview } from '@/domain/models/site-preview';
 import { buildSiteTokens, isValidPhone, isValidEmail } from './tokens';
+import { resolvePreviewCtaConfig } from './cta';
 import { ClaimBanner } from '../ClaimBanner';
 import { GeneratedSiteHeader } from './GeneratedSiteHeader';
 import { GeneratedHero } from './GeneratedHero';
@@ -25,6 +26,7 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
   const { content, theme } = preview;
   const phone = isValidPhone(content.contact.phone) ? content.contact.phone : undefined;
   const email = isValidEmail(content.contact.email) ? content.contact.email : undefined;
+  const { primary, secondary } = resolvePreviewCtaConfig(content);
 
   return (
     <div style={{ ...buildSiteTokens(theme), fontFamily: theme.fontFamily }} className="min-h-screen">
@@ -41,19 +43,20 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
       {/* Navigation */}
       <GeneratedSiteHeader
         businessName={businessName}
-        phone={phone}
         serviceAreas={content.serviceAreas}
         services={content.services}
+        primary={primary}
+        secondary={secondary}
       />
 
       {/* Hero */}
       <GeneratedHero
         headline={content.hero.headline}
         subheadline={content.hero.subheadline}
-        ctaText={content.hero.ctaText}
-        phone={phone}
         serviceArea={content.serviceAreas?.[0]}
         heroImageUrl={theme.heroImageUrl}
+        primary={primary}
+        secondary={secondary}
       />
 
       {/* Trust strip */}
@@ -68,6 +71,7 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
           differentiators={content.differentiators}
           aboutImageUrl={theme.aboutImageUrl}
           businessName={businessName}
+          primary={primary}
         />
       )}
 
@@ -76,15 +80,16 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
         businessName={businessName}
         tagline={content.tagline}
         aboutText={content.aboutText}
+        primary={primary}
       />
 
       {/* Service areas (conditional) */}
       {content.serviceAreas && content.serviceAreas.length > 0 && (
-        <ServiceAreaSection serviceAreas={content.serviceAreas} />
+        <ServiceAreaSection serviceAreas={content.serviceAreas} primary={primary} />
       )}
 
       {/* Final CTA */}
-      <FinalCTA ctaText={content.hero.ctaText} phone={phone} />
+      <FinalCTA primary={primary} secondary={secondary} />
 
       {/* Contact */}
       <ContactSection
@@ -107,10 +112,10 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
       />
 
       {/* Mobile sticky CTA bar */}
-      <MobileCallBar phone={phone} ctaText={content.hero.ctaText} />
+      <MobileCallBar primary={primary} secondary={secondary} />
 
       {/* Bottom padding on mobile to keep content above the sticky bar */}
-      {phone && <div className="h-16 md:hidden" />}
+      {(primary || secondary) && <div className="h-16 md:hidden" />}
     </div>
   );
 }

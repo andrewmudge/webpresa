@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { V } from './tokens';
+import { externalLinkAttrs, type ResolvedCta } from './cta';
 
 interface Differentiator {
   title: string;
@@ -10,10 +11,11 @@ interface Props {
   differentiators: Differentiator[];
   aboutImageUrl?: string;
   businessName: string;
+  primary: ResolvedCta | null;
 }
 
 // Only rendered when differentiators data is present
-export function WhyChooseUs({ differentiators, aboutImageUrl, businessName }: Props) {
+export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, primary }: Props) {
   if (!differentiators || differentiators.length === 0) return null;
 
   return (
@@ -80,18 +82,21 @@ export function WhyChooseUs({ differentiators, aboutImageUrl, businessName }: Pr
                 </li>
               ))}
             </ul>
-            <div className="mt-8">
-              <a
-                href="#contact"
-                className="inline-flex items-center gap-2 text-sm font-bold"
-                style={{ color: V.primary }}
-              >
-                Request a free estimate
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                </svg>
-              </a>
-            </div>
+            {primary && (
+              <div className="mt-8">
+                <a
+                  href={primary.href}
+                  {...externalLinkAttrs(primary)}
+                  className="inline-flex items-center gap-2 text-sm font-bold"
+                  style={{ color: V.primary }}
+                >
+                  {primary.label}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                  </svg>
+                </a>
+              </div>
+            )}
           </div>
         </div>
       </div>

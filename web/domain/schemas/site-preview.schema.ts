@@ -1,6 +1,20 @@
 import { z } from 'zod';
-import { SITE_PREVIEW_STATUSES } from '@/domain/models/site-preview';
+import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { IsoTimestampSchema } from './common.schema';
+
+/**
+ * True only for a well-formed `https://` URL. Used to gate `external_url`
+ * CTA destinations — rejects `http:`, `javascript:`, `data:`, and any other
+ * unsafe or non-HTTPS protocol. Exported so render-time CTA resolution can
+ * apply the same check to data that predates this validation.
+ */
+export function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Nested content schemas
@@ -28,6 +42,32 @@ const PreviewContactSchema = z.object({
 });
 
 /**
+ * A single configurable CTA button. `label` is required unless `type` is
+ * `none` (an unrendered CTA has nothing to label). `external_url` CTAs must
+ * carry a safe `https://` `value` — every other type resolves its
+ * destination from `contact` at render time unless `value` overrides it.
+ */
+const PreviewCtaSchema = z
+  .object({
+    type: z.enum(CTA_ACTION_TYPES),
+    label: z.string().max(40),
+    value: z.string().max(500).optional(),
+  })
+  .refine((cta) => cta.type === 'none' || cta.label.trim().length > 0, {
+    message: 'label is required unless type is "none"',
+    path: ['label'],
+  })
+  .refine((cta) => cta.type !== 'external_url' || (!!cta.value && isHttpsUrl(cta.value)), {
+    message: 'external_url requires a valid https:// value',
+    path: ['value'],
+  });
+
+const PreviewCtaConfigSchema = z.object({
+  primary: PreviewCtaSchema,
+  secondary: PreviewCtaSchema.optional(),
+});
+
+/**
  * The canonical content schema for a website preview.
  *
  * This schema is the enforcement point for all AI-generated text.
@@ -52,6 +92,7 @@ export const PreviewContentSchema = z.object({
     .max(8)
     .optional(),
   hours: z.string().max(200).optional(),
+  cta: PreviewCtaConfigSchema.optional(),
 });
 
 const PreviewThemeSchema = z.object({

@@ -24,6 +24,17 @@ export function toTelHref(phone: string): string {
   return `tel:${digits.startsWith('1') ? '+' : '+1'}${digits}`;
 }
 
+/** Normalize a phone string to digits only for an sms: link */
+export function toSmsHref(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  return `sms:${digits.startsWith('1') ? '+' : '+1'}${digits}`;
+}
+
+/** Build a mailto: link — centralized so every section constructs it the same way */
+export function toMailtoHref(email: string): string {
+  return `mailto:${email}`;
+}
+
 export function isValidPhone(phone: string | undefined): phone is string {
   if (!phone) return false;
   return phone.replace(/\D/g, '').length >= 7;
