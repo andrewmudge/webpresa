@@ -1,9 +1,14 @@
+import Image from 'next/image';
 import { V } from './tokens';
 import type { PreviewService } from '@/domain/models/site-preview';
 
 interface Props {
   services: PreviewService[];
 }
+
+// DEV_FIXTURE: picsum.photos placeholder — replace with a Firecrawl-sourced
+// service photo once website scanning supplies real images (Stage 13).
+const FEATURED_SERVICE_IMAGE_URL = 'https://picsum.photos/id/1040/800/1000';
 
 export function ServicesGrid({ services }: Props) {
   const [featured, ...rest] = services;
@@ -66,31 +71,38 @@ export function ServicesGrid({ services }: Props) {
 function ServiceCard({ service, featured = false }: { service: PreviewService; featured?: boolean }) {
   return (
     <div
-      className={`rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md ${
-        featured
-          ? 'text-white min-h-[200px]'
-          : 'bg-[#F4F7FA] border border-slate-100'
+      className={`relative overflow-hidden rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md bg-[#F4F7FA] border border-slate-100 ${
+        featured ? 'min-h-[200px] lg:border-0' : ''
       }`}
-      style={featured ? { backgroundColor: V.primary } : undefined}
     >
+      {/* Picture background on large displays only — matches the other cards below lg */}
+      {featured && (
+        <>
+          <Image
+            src={FEATURED_SERVICE_IMAGE_URL}
+            alt=""
+            fill
+            className="hidden lg:block object-cover object-center"
+            sizes="(min-width: 1024px) 40vw, 0px"
+          />
+          <div className="hidden lg:block absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} />
+        </>
+      )}
+
       {/* Icon circle */}
       <div
-        className="w-10 h-10 rounded-full flex items-center justify-center mb-4 text-sm font-bold flex-shrink-0"
-        style={
-          featured
-            ? { backgroundColor: 'rgba(255,255,255,0.15)', color: '#fff' }
-            : { backgroundColor: V.accent, color: '#fff' }
-        }
+        className="relative z-10 w-10 h-10 rounded-full flex items-center justify-center mb-4 text-sm font-bold flex-shrink-0"
+        style={{ backgroundColor: V.accent, color: '#fff' }}
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
         </svg>
       </div>
-      <h3 className={`font-bold text-lg mb-2 ${featured ? 'text-white' : 'text-gray-900'}`}>
+      <h3 className={`relative z-10 font-bold text-lg mb-2 text-gray-900 ${featured ? 'lg:text-white' : ''}`}>
         {service.name}
       </h3>
-      <p className={`text-sm leading-relaxed flex-1 ${featured ? 'text-white/80' : 'text-gray-500'}`}>
+      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-gray-500 ${featured ? 'lg:text-white/80' : ''}`}>
         {service.description}
       </p>
     </div>
