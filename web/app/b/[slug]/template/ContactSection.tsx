@@ -59,7 +59,7 @@ export function ContactSection({ phone, email, address, hours }: Props) {
 
           {(address || hours) && (
             <div
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 bg-slate-50 border border-slate-100 text-center"
+              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 bg-[#F4F7FA] border border-slate-100 text-center"
             >
               <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

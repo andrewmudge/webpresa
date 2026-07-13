@@ -169,8 +169,8 @@ function buildSeedContent(business: Business): PreviewContent {
 const SEED_THEME = (industry: string): PreviewTheme => {
   const seed = INDUSTRY_SEEDS[industry] ?? DEFAULT_SEED;
   return {
-    primaryColor: '#11455E',
-    accentColor: '#CE9059',
+    primaryColor: '#0F356B',
+    accentColor: '#ED7023',
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     // DEV_FIXTURE: picsum.photos placeholder — replace with S3 URLs in Stage 9
     heroImageUrl: seed.heroImageUrl,

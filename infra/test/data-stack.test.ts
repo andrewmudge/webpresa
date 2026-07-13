@@ -238,9 +238,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 10 outputs — TableName/TableArn for 4 tables, BucketName/BucketArn for 1 bucket', () => {
+  it('creates 15 outputs — 8 table outputs, 2 bucket outputs, 5 secret ARN outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(10);
+    expect(Object.keys(outputs)).toHaveLength(15);
   });
 });
 
@@ -455,6 +455,92 @@ describe('assets bucket', () => {
 
   it('bucket is tagged ManagedBy=CDK', () => {
     dev.hasResourceProperties('AWS::S3::Bucket', {
+      Tags: Match.arrayWith([{ Key: 'ManagedBy', Value: 'CDK' }]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Secrets (Stage 10)
+// ---------------------------------------------------------------------------
+
+describe('secrets', () => {
+  it('creates exactly five secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 5);
+  });
+
+  const devSecretNames = [
+    'webpresa-dev-openai',
+    'webpresa-dev-firecrawl',
+    'webpresa-dev-google-places',
+    'webpresa-dev-stripe',
+    'webpresa-dev-lob',
+  ];
+
+  it.each(devSecretNames)('dev secret %s exists', (name) => {
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: name,
+    });
+  });
+
+  it('prod secret names carry the prod suffix', () => {
+    prod.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'webpresa-prod-openai',
+    });
+    prod.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'webpresa-prod-stripe',
+    });
+  });
+
+  it('single-key secrets generate a random apiKey placeholder', () => {
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'webpresa-dev-openai',
+      GenerateSecretString: Match.objectLike({
+        GenerateStringKey: 'apiKey',
+        SecretStringTemplate: '{}',
+      }),
+    });
+  });
+
+  it('the Stripe secret generates secretKey and seeds an empty webhookSecret placeholder', () => {
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'webpresa-dev-stripe',
+      GenerateSecretString: Match.objectLike({
+        GenerateStringKey: 'secretKey',
+        SecretStringTemplate: JSON.stringify({ webhookSecret: '' }),
+      }),
+    });
+  });
+
+  it('no secret has a plaintext SecretString property', () => {
+    const secrets = dev.findResources('AWS::SecretsManager::Secret');
+    for (const secret of Object.values(secrets) as Array<{
+      Properties: Record<string, unknown>;
+    }>) {
+      expect(secret.Properties.SecretString).toBeUndefined();
+    }
+  });
+
+  it('dev secrets have DeletionPolicy: Delete', () => {
+    dev.allResources('AWS::SecretsManager::Secret', {
+      DeletionPolicy: 'Delete',
+    });
+  });
+
+  it('prod secrets have DeletionPolicy: Retain', () => {
+    prod.allResources('AWS::SecretsManager::Secret', {
+      DeletionPolicy: 'Retain',
+    });
+  });
+
+  it('secrets are tagged Project=Webpresa, Environment=Dev, ManagedBy=CDK', () => {
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Tags: Match.arrayWith([{ Key: 'Project', Value: 'Webpresa' }]),
+    });
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Tags: Match.arrayWith([{ Key: 'Environment', Value: 'Dev' }]),
+    });
+    dev.hasResourceProperties('AWS::SecretsManager::Secret', {
       Tags: Match.arrayWith([{ Key: 'ManagedBy', Value: 'CDK' }]),
     });
   });

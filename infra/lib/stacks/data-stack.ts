@@ -4,13 +4,15 @@ import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 import { WebpresaTable } from '../constructs/webpresa-table';
 import { WebpresaBucket } from '../constructs/webpresa-bucket';
+import { WebpresaSecret } from '../constructs/webpresa-secret';
 
 export interface WebpresaDataStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
 }
 
 /**
- * WebpresaDataStack — DynamoDB and S3 data layer for the Webpresa platform.
+ * WebpresaDataStack — DynamoDB, S3, and Secrets Manager data layer for the
+ * Webpresa platform.
  *
  * Instantiated with an environment-aware ID from bin/webpresa.ts:
  *   dev  →  WebpresaDevDataStack
@@ -194,6 +196,48 @@ export class WebpresaDataStack extends cdk.Stack {
     new WebpresaBucket(this, 'Assets', {
       config,
       bucketName: 'assets',
+    });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Secrets — third-party API credentials. Created with a random
+    // placeholder value only; real values are populated out-of-band once
+    // each integration stage (11 OpenAI, 12 Google Places, 13 Firecrawl,
+    // 18 Stripe, 22 Lob) actually needs them. See architecture.md for the
+    // documented JSON shape and owner of each secret.
+    // ───────────────────────────────────────────────────────────────────────
+    new WebpresaSecret(this, 'OpenAiSecret', {
+      config,
+      secretName: 'openai',
+      description: 'OpenAI API credentials (Stage 11 — AI preview generation)',
+      jsonKeys: ['apiKey'],
+    });
+
+    new WebpresaSecret(this, 'FirecrawlSecret', {
+      config,
+      secretName: 'firecrawl',
+      description: 'Firecrawl API credentials (Stage 13 — website capture)',
+      jsonKeys: ['apiKey'],
+    });
+
+    new WebpresaSecret(this, 'GooglePlacesSecret', {
+      config,
+      secretName: 'google-places',
+      description: 'Google Places API credentials (Stage 12 — business discovery)',
+      jsonKeys: ['apiKey'],
+    });
+
+    new WebpresaSecret(this, 'StripeSecret', {
+      config,
+      secretName: 'stripe',
+      description: 'Stripe API credentials (Stage 18 — subscriptions)',
+      jsonKeys: ['secretKey', 'webhookSecret'],
+    });
+
+    new WebpresaSecret(this, 'LobSecret', {
+      config,
+      secretName: 'lob',
+      description: 'Lob API credentials (Stage 22 — postcard integration)',
+      jsonKeys: ['apiKey'],
     });
   }
 }

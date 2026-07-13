@@ -1,7 +1,7 @@
 # Webpresa — Architecture
 
 **Last updated:** 2026-07-12  
-**Status:** Stage 9 complete in development — premium generated website template live; admin with cascade delete; DynamoDB tables and S3 assets bucket live in `us-east-1`. Hosting on Vercel.
+**Status:** Stage 10 complete in development — premium generated website template live; admin with cascade delete; DynamoDB tables, S3 assets bucket, and Secrets Manager secrets live in `us-east-1`. Hosting on Vercel.
 
 ---
 
@@ -153,8 +153,8 @@ No account IDs are hard-coded. The CDK app resolves `CDK_DEFAULT_ACCOUNT` and `C
 
 | Stack | Deployed | Description |
 |---|---|---|
-| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket, dev settings |
-| `WebpresaProdDataStack` | ❌ not deployed | Same tables and bucket, prod settings |
+| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket + 5 Secrets Manager secrets, dev settings |
+| `WebpresaProdDataStack` | ❌ not deployed | Same tables, bucket, and secrets, prod settings |
 
 ---
 
@@ -243,6 +243,30 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 
 ---
 
+## Secrets Manager
+
+**Implemented in Stage 10.** Five secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
+
+| Secret name | JSON shape | Owner (stage) |
+|---|---|---|
+| `webpresa-{env}-openai` | `{ apiKey }` | Stage 11 — AI preview generation |
+| `webpresa-{env}-firecrawl` | `{ apiKey }` | Stage 13 — website capture |
+| `webpresa-{env}-google-places` | `{ apiKey }` | Stage 12 — business discovery |
+| `webpresa-{env}-stripe` | `{ secretKey, webhookSecret }` | Stage 18 — subscriptions |
+| `webpresa-{env}-lob` | `{ apiKey }` | Stage 22 — postcard integration |
+
+### Application-side access
+
+- `web/lib/secrets/client.ts` — `server-only` singleton `SecretsManagerClient`, same region/credential pattern as `web/lib/db/client.ts` and `web/lib/s3/client.ts`. `getSecretJson(secretName)` fetches and JSON-parses a secret's `SecretString`, caching the result **indefinitely for the lifetime of the process** (matches Vercel's serverless function instance reuse — a fresh cold start re-fetches). Automated rotation is deferred work; today, rotating a secret requires a redeploy or cold start to take effect.
+- `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
+- No caller code exists yet — these are foundation for Stages 11, 12, 13, 18, and 22. Never log a secret's parsed value or raw `SecretString`.
+
+### IAM
+
+The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `secretsmanager:GetSecretValue` scoped to the 5 dev secret ARNs. As with the S3 bucket, future dedicated Lambda execution roles (Stages 13, 18, 22) should be scoped to only the one secret each integration needs, not this broad grant.
+
+---
+
 ## Environment variables
 
 The homepage requires no environment variables. The admin dashboard requires all of the following on both the development server and the Vercel deployment.
@@ -258,6 +282,11 @@ The homepage requires no environment variables. The admin dashboard requires all
 | `SCAN_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-events-name` | ScanEvent repository |
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | Postcard repository |
 | `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets client (`web/lib/s3/`) |
+| `OPENAI_SECRET_NAME` | Deterministic — `webpresa-dev-openai` | Secrets client (`web/lib/secrets/`) |
+| `FIRECRAWL_SECRET_NAME` | Deterministic — `webpresa-dev-firecrawl` | Secrets client (`web/lib/secrets/`) |
+| `GOOGLE_PLACES_SECRET_NAME` | Deterministic — `webpresa-dev-google-places` | Secrets client (`web/lib/secrets/`) |
+| `STRIPE_SECRET_NAME` | Deterministic — `webpresa-dev-stripe` | Secrets client (`web/lib/secrets/`) |
+| `LOB_SECRET_NAME` | Deterministic — `webpresa-dev-lob` | Secrets client (`web/lib/secrets/`) |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | Admin sign-in |
 | `SESSION_SECRET` | `openssl rand -base64 32` | JWT session signing |
@@ -312,6 +341,9 @@ web/lib/
   s3/
     client.ts            S3Client singleton (server-only) — Stage 9
     assets.ts            Generic asset helpers — putAsset, getAsset, getSignedAssetUrl — Stage 9
+  secrets/
+    client.ts            SecretsManagerClient singleton + cached getSecretJson (server-only) — Stage 10
+    index.ts              Typed wrappers — getOpenAiSecret, getStripeSecret, etc. — Stage 10
 ```
 
 All repository files import `server-only` to prevent accidental bundling in client code. All functions accept and return canonical domain types from `@/domain/models`. Zod schemas are re-validated on every write.

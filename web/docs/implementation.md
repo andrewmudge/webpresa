@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
 **Last updated:** 2026-07-12  
-**Status:** Stages 1–9 complete in development. Stage 10 is next.  
+**Status:** Stages 1–10 complete in development. Stage 11 is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -728,6 +728,10 @@ postcards/{businessId}/{postcardId}/
 ---
 
 # Stage 10 — Secrets Management
+
+## Status
+
+Complete in development. See `build_log.md` for implementation details and `architecture.md` for the documented secret names, JSON shapes, and owners.
 
 ## Objective
 

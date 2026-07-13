@@ -69,7 +69,7 @@ function ServiceCard({ service, featured = false }: { service: PreviewService; f
       className={`rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md ${
         featured
           ? 'text-white min-h-[200px]'
-          : 'bg-slate-50 border border-slate-100'
+          : 'bg-[#F4F7FA] border border-slate-100'
       }`}
       style={featured ? { backgroundColor: V.primary } : undefined}
     >

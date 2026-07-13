@@ -9,7 +9,7 @@ export function ServiceAreaSection({ serviceAreas }: Props) {
   if (!serviceAreas || serviceAreas.length === 0) return null;
 
   return (
-    <section id="areas" className="py-20 bg-slate-50">
+    <section id="areas" className="py-20 bg-[#F4F7FA]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 text-center">
         <p className="text-xs font-bold tracking-widest uppercase mb-2" style={{ color: V.accent }}>
           Coverage

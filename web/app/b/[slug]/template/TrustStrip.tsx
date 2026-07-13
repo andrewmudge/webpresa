@@ -35,7 +35,7 @@ const TRUST_ITEMS = [
 
 export function TrustStrip() {
   return (
-    <div className="bg-slate-50 border-b border-slate-100">
+    <div className="bg-[#F4F7FA] border-b border-slate-100">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4">
         <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
           {TRUST_ITEMS.map((item) => (

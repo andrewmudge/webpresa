@@ -88,6 +88,11 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `SCAN_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-events-name` | |
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | |
 | `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets bucket (Stage 9) |
+| `OPENAI_SECRET_NAME` | Deterministic name — `webpresa-dev-openai` | Secrets Manager (Stage 10) |
+| `FIRECRAWL_SECRET_NAME` | Deterministic name — `webpresa-dev-firecrawl` | Secrets Manager (Stage 10) |
+| `GOOGLE_PLACES_SECRET_NAME` | Deterministic name — `webpresa-dev-google-places` | Secrets Manager (Stage 10) |
+| `STRIPE_SECRET_NAME` | Deterministic name — `webpresa-dev-stripe` | Secrets Manager (Stage 10) |
+| `LOB_SECRET_NAME` | Deterministic name — `webpresa-dev-lob` | Secrets Manager (Stage 10) |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
@@ -177,13 +182,54 @@ aws iam put-user-policy \
     }]
   }' --profile webpresa
 
+# Attach an inline policy scoped to the 5 Stage 10 secrets
+aws iam put-user-policy \
+  --user-name webpresa-vercel-dev \
+  --policy-name webpresa-dev-secrets \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": [
+        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-openai-*",
+        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-firecrawl-*",
+        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-google-places-*",
+        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-stripe-*",
+        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-lob-*"
+      ]
+    }]
+  }' --profile webpresa
+
 # Generate access keys
 aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa
 ```
 
 The `create-access-key` response contains `AccessKeyId` and `SecretAccessKey`. Add both to Vercel immediately and do not store them anywhere else.
 
-> Future Lambda execution roles (Stage 13 crawler, Stage 14 screenshot capture, Stage 22 postcard service) should NOT reuse this broad `webpresa-dev-s3-assets` policy — each should get its own prefix-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only) once those roles are created.
+> Future Lambda execution roles (Stage 13 crawler, Stage 14 screenshot capture, Stage 22 postcard service) should NOT reuse the broad `webpresa-dev-s3-assets` or `webpresa-dev-secrets` policies — each should get its own prefix/secret-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only, or `secretsmanager:GetSecretValue` on just its one secret) once those roles are created.
+
+## Populating a real secret value (Stage 10)
+
+Secrets are created by CDK with a random placeholder only — never a real value. Populate the real value out-of-band once the stage that needs it is being implemented:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-openai \
+  --secret-string '{"apiKey":"sk-..."}' \
+  --profile webpresa
+```
+
+For the two-key Stripe secret, include both keys:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-stripe \
+  --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
+  --profile webpresa
+```
+
+Because CloudFormation only touches a secret's value when the CDK construct's `jsonKeys` change, running `cdk deploy` afterward does not overwrite a value set this way. Never paste real secret values into a commit, a CDK construct prop, or this document.
 
 ---
 
@@ -364,3 +410,13 @@ Stage 9 provisions one bucket (`webpresa-{env}-assets`) shared across scan, prev
 4. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying if the IAM policy or bucket construct itself changed.
 
 A genuinely new bucket (rather than a prefix) would instead follow the `WebpresaBucket` construct pattern in `infra/lib/constructs/webpresa-bucket.ts`, mirroring the steps above.
+
+## Adding a new secret
+
+1. Add a `WebpresaSecret` instance in `infra/lib/stacks/data-stack.ts` with the short name, description, and `jsonKeys` shape.
+2. Document the secret name, JSON shape, and owning stage in the "Secrets Manager" section of `architecture.md`.
+3. Add the corresponding `*_SECRET_NAME` env var to `.env.local.example` and this document's env var table.
+4. Add a typed wrapper in `web/lib/secrets/index.ts` if application code will read it.
+5. Extend the `webpresa-dev-secrets` IAM policy above with the new secret's ARN.
+6. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying.
+7. After deploy, populate the real value with `aws secretsmanager put-secret-value` (see above) once the owning stage actually needs it — not before.
