@@ -2017,3 +2017,35 @@ web/
     ├── generate-preview.ts                                      MODIFIED — resolvePhotoSlot(), override-aware slot derivation
     └── __tests__/generate-preview.test.ts                       MODIFIED — 2 new tests
 ```
+
+---
+
+# Hero Industry Watermark Icon
+
+**Date:** 2026-07-14
+**Scope:** Improves the hero's no-photo fallback (gradient/pattern/solid) with a large, low-opacity industry-specific icon, per user decision after weighing it against per-industry stock photography (rejected: licensing overhead, and — since this app's actual customer base is competing local businesses in the same city/industry receiving postcards — the real risk of two competitors ending up with the identical stock photo).
+
+- `app/b/[slug]/template/industry-icons.tsx` — `INDUSTRY_HERO_ICONS: Record<Industry, LucideIcon>` (Wrench/plumbing, Fan/hvac, Zap/electrical, HardHat/roofing, Trees/landscaping, PaintRoller/painting, SprayCan/cleaning, UtensilsCrossed/restaurant, Croissant/bakery, Scissors/salon, Scale/law_firm, Calculator/accounting), `getHeroIcon(industry)` with a `Sparkles` default. Uses `lucide-react`, already a dependency.
+- `GeneratedHero.tsx` — new optional `industry` prop; when there's no hero photo (`!showImage`, i.e. gradient/pattern/solid styles), renders the mapped icon as a large (`32rem`) `text-white/10` watermark, positioned off the right edge, hidden below `lg:` to avoid mobile clutter. Rendered via `createElement` rather than a JSX `<Icon />` tag — assigning a dynamically-selected component to a capitalized variable and using it as a JSX element trips ESLint's `react-hooks/static-components` rule (a known false positive for "select one of several static components," but `createElement` sidesteps the JSX-tag pattern it matches on cleanly).
+- Wired `business.industry` through `/b/[slug]/page.tsx` → `GeneratedWebsite` (`template/index.tsx`) → `GeneratedHero`.
+
+## Verification
+
+```
+✓ Lint:        0 errors  (npm run lint)
+✓ TypeCheck:   0 errors  (npx tsc --noEmit) — Record<Industry, LucideIcon> is exhaustive by construction
+✓ Tests:       230 passed  (npm test)
+✓ Build:       production build succeeds  (npm run build)
+```
+
+## Files changed
+
+```
+web/
+└── app/b/[slug]/
+    ├── page.tsx                                                 MODIFIED — passes business.industry through
+    └── template/
+        ├── industry-icons.tsx                                   NEW
+        ├── GeneratedHero.tsx                                     MODIFIED — industry prop, watermark icon via createElement
+        └── index.tsx                                             MODIFIED — industry prop wiring
+```

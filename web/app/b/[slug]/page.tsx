@@ -74,6 +74,7 @@ export default async function PreviewPage({ params }: Props) {
       preview={preview}
       businessName={business.name}
       logoUrl={business.logoUrl}
+      industry={business.industry}
       isClaimed={isClaimed}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}

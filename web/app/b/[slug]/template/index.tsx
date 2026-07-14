@@ -1,4 +1,5 @@
 import type { SitePreview } from '@/domain/models/site-preview';
+import type { Industry } from '@/domain/constants/industries';
 import { buildSiteTokens, isValidPhone, isValidEmail } from './tokens';
 import { resolvePreviewCtaConfig } from './cta';
 import { ClaimBanner } from '../ClaimBanner';
@@ -18,12 +19,13 @@ interface Props {
   preview: SitePreview;
   businessName: string;
   logoUrl?: string;
+  industry?: Industry;
   isClaimed: boolean;
   isDraft: boolean;
   isAdmin: boolean;
 }
 
-export function GeneratedWebsite({ preview, businessName, logoUrl, isClaimed, isDraft, isAdmin }: Props) {
+export function GeneratedWebsite({ preview, businessName, logoUrl, industry, isClaimed, isDraft, isAdmin }: Props) {
   const { content, theme } = preview;
   const phone = isValidPhone(content.contact.phone) ? content.contact.phone : undefined;
   const email = isValidEmail(content.contact.email) ? content.contact.email : undefined;
@@ -61,6 +63,7 @@ export function GeneratedWebsite({ preview, businessName, logoUrl, isClaimed, is
         serviceArea={content.serviceAreas?.[0]}
         heroImageUrl={theme.heroImageUrl}
         heroStyle={theme.heroStyle}
+        industry={industry}
         primary={primary}
         secondary={secondary}
       />

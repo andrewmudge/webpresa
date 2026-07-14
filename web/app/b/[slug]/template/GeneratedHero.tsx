@@ -1,7 +1,10 @@
+import { createElement } from 'react';
 import Image from 'next/image';
 import { V } from './tokens';
 import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
+import { getHeroIcon } from './industry-icons';
 import type { HeroStyle } from '@/domain/models/site-preview';
+import type { Industry } from '@/domain/constants/industries';
 
 interface Props {
   headline: string;
@@ -10,6 +13,8 @@ interface Props {
   heroImageUrl?: string;
   /** Falls back to `heroImageUrl ? 'image' : 'solid'` when absent (legacy previews). */
   heroStyle?: HeroStyle;
+  /** Drives the industry watermark icon shown when there's no hero photo. */
+  industry?: Industry;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -20,6 +25,7 @@ export function GeneratedHero({
   serviceArea,
   heroImageUrl,
   heroStyle,
+  industry,
   primary,
   secondary,
 }: Props) {
@@ -59,6 +65,17 @@ export function GeneratedHero({
       ) : (
         <div className="absolute inset-0" style={{ backgroundColor: V.primary }} />
       )}
+
+      {/* Industry watermark icon — only when there's no hero photo; adds visual
+          interest to the gradient/pattern/solid fallback without pretending
+          to be a real photo of the business (see industry-icons.tsx). */}
+      {!showImage &&
+        createElement(getHeroIcon(industry), {
+          className: 'hidden lg:block absolute -right-16 top-1/2 -translate-y-1/2 text-white/10',
+          style: { width: '32rem', height: '32rem' },
+          strokeWidth: 1,
+          'aria-hidden': true,
+        })}
 
       {/* Dark gradient overlay — always present for text readability */}
       <div
