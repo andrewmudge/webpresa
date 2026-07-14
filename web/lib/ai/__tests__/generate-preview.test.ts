@@ -102,16 +102,47 @@ describe('generatePreviewContent — success', () => {
     expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
   });
 
-  it('reuses uploaded photos for the about and services image slots, preferring later photos', async () => {
+  it('reuses uploaded photos for the about/why-choose-us/services image slots, preferring later photos', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({
-      photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', '/api/assets/businesses/biz_1/assets/photos/1.jpg', '/api/assets/businesses/biz_1/assets/photos/2.jpg'],
+      photoUrls: [
+        '/api/assets/businesses/biz_1/assets/photos/0.jpg',
+        '/api/assets/businesses/biz_1/assets/photos/1.jpg',
+        '/api/assets/businesses/biz_1/assets/photos/2.jpg',
+        '/api/assets/businesses/biz_1/assets/photos/3.jpg',
+      ],
     });
 
     const result = await generatePreviewContent(business);
 
     expect(result.theme.aboutImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
     expect(result.theme.servicesImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/2.jpg');
+    expect(result.theme.aboutSectionImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/3.jpg');
+  });
+
+  it('lets an admin override pin a specific photo to a slot, ignoring the automatic pick', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({
+      photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', '/api/assets/businesses/biz_1/assets/photos/1.jpg'],
+      heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
+    });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
+  });
+
+  it('lets an admin override force no photo for a slot via "none", even when photos exist', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({
+      photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'],
+      heroPhotoUrl: 'none',
+    });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.heroImageUrl).toBeUndefined();
+    expect(result.theme.heroStyle).toBe('gradient');
   });
 
   it('falls back to reusing earlier photos for services/about when fewer than 3 were uploaded', async () => {

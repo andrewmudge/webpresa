@@ -14,6 +14,12 @@ export const BusinessScoresSchema = z.object({
 });
 
 /**
+ * A photo-slot assignment override: either a URL from `photoUrls`, or the
+ * reserved literal `'none'` forcing that slot's non-photo fallback.
+ */
+const PhotoSlotOverrideSchema = z.union([UrlOrPathSchema, z.literal('none')]).optional();
+
+/**
  * Runtime validation schema for the Business record.
  *
  * Key constraints enforced here:
@@ -53,6 +59,10 @@ export const BusinessSchema = z.object({
   notes: z.string().max(2000).optional(),
   logoUrl: UrlOrPathSchema.optional(),
   photoUrls: z.array(UrlOrPathSchema).max(6).optional(),
+  heroPhotoUrl: PhotoSlotOverrideSchema,
+  aboutPhotoUrl: PhotoSlotOverrideSchema,
+  whyChooseUsPhotoUrl: PhotoSlotOverrideSchema,
+  servicesPhotoUrl: PhotoSlotOverrideSchema,
   theme: z.enum(THEME_NAMES).optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,

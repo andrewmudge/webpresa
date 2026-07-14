@@ -117,6 +117,7 @@ const PreviewThemeSchema = z
     fontFamily: z.string().min(1),
     heroImageUrl: UrlOrPathSchema.optional(),
     aboutImageUrl: UrlOrPathSchema.optional(),
+    aboutSectionImageUrl: UrlOrPathSchema.optional(),
     servicesImageUrl: UrlOrPathSchema.optional(),
     heroStyle: z.enum(HERO_STYLES).optional(),
   })

@@ -77,6 +77,21 @@ function linesFrom(text: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Resolves one photo-slot assignment: an explicit admin `override` wins
+ * outright (the reserved value `'none'` forces "no photo for this slot",
+ * even when uploaded photos exist); otherwise the first defined value in
+ * `autoFallbacks` is used (the automatic, upload-order-based assignment).
+ */
+function resolvePhotoSlot(
+  override: string | undefined,
+  ...autoFallbacks: (string | undefined)[]
+): string | undefined {
+  if (override === 'none') return undefined;
+  if (override) return override;
+  return autoFallbacks.find((url): url is string => !!url);
+}
+
 function buildPrompt(business: Business): { system: string; user: string } {
   const services = linesFrom(business.servicesOffered);
   const serviceAreas = linesFrom(business.serviceAreas);
@@ -187,10 +202,30 @@ export async function generatePreviewContent(business: Business): Promise<Genera
     secondary: output.secondaryCtaLabel,
   });
 
-  // --- Hero/about/services: uploaded photos always win over placeholders. ---
-  const heroImageUrl = business.photoUrls?.[0];
-  const aboutImageUrl = business.photoUrls?.[1] ?? business.photoUrls?.[0];
-  const servicesImageUrl = business.photoUrls?.[2] ?? business.photoUrls?.[1] ?? business.photoUrls?.[0];
+  // --- Hero/about/services: uploaded photos always win over placeholders.
+  // Each slot prefers a distinct photo so more of what was uploaded actually
+  // gets used, falling back to reusing an earlier one when fewer exist.
+  // An admin override (see Business model) takes priority over the
+  // automatic pick; overriding to 'none' forces that slot's non-photo
+  // fallback even when photos exist. ---
+  const heroImageUrl = resolvePhotoSlot(business.heroPhotoUrl, business.photoUrls?.[0]);
+  const aboutImageUrl = resolvePhotoSlot(
+    business.whyChooseUsPhotoUrl,
+    business.photoUrls?.[1],
+    business.photoUrls?.[0],
+  );
+  const servicesImageUrl = resolvePhotoSlot(
+    business.servicesPhotoUrl,
+    business.photoUrls?.[2],
+    business.photoUrls?.[1],
+    business.photoUrls?.[0],
+  );
+  const aboutSectionImageUrl = resolvePhotoSlot(
+    business.aboutPhotoUrl,
+    business.photoUrls?.[3],
+    business.photoUrls?.[1],
+    business.photoUrls?.[0],
+  );
 
   const content: PreviewContent = {
     hero: { ...output.hero, ctaText: cta.primary.label || 'Contact Us' },
@@ -209,6 +244,7 @@ export async function generatePreviewContent(business: Business): Promise<Genera
     fontFamily: output.fontFamily,
     ...(heroImageUrl ? { heroImageUrl, heroStyle: 'image' as const } : { heroStyle: output.heroStyle }),
     ...(aboutImageUrl ? { aboutImageUrl } : {}),
+    ...(aboutSectionImageUrl ? { aboutSectionImageUrl } : {}),
     ...(servicesImageUrl ? { servicesImageUrl } : {}),
   };
 

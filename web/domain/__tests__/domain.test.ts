@@ -269,6 +269,24 @@ describe('Business — website generation fields', () => {
     const result = BusinessSchema.safeParse({ ...biz, theme: 'neonPink' });
     expect(result.success).toBe(false);
   });
+
+  it('accepts a photo-slot override pinned to an uploaded photo URL', () => {
+    const biz = createBusiness({ name: 'Slot Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/0.jpg' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the reserved "none" value for a photo-slot override', () => {
+    const biz = createBusiness({ name: 'Slot Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, servicesPhotoUrl: 'none' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a photo-slot override that is neither a URL nor "none"', () => {
+    const biz = createBusiness({ name: 'Slot Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, aboutPhotoUrl: 'some plain text' });
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

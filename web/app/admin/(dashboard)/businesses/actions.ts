@@ -25,6 +25,19 @@ const WEBSITE_GENERATION_FIELDS = {
   theme: z.enum(THEME_NAMES).optional(),
 };
 
+/**
+ * Photo-slot assignment overrides (see PhotoSlotField in BusinessForm.tsx).
+ * Each value is either a URL taken from the business's own `photoUrls`, the
+ * reserved literal `'none'`, or empty ("Auto" — undefined, keep the
+ * automatic upload-order assignment).
+ */
+const PHOTO_SLOT_FIELDS = {
+  heroPhotoUrl: z.string().optional(),
+  aboutPhotoUrl: z.string().optional(),
+  whyChooseUsPhotoUrl: z.string().optional(),
+  servicesPhotoUrl: z.string().optional(),
+};
+
 const CreateBusinessFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   industry: z.enum(INDUSTRIES),
@@ -39,6 +52,7 @@ const CreateBusinessFormSchema = z.object({
   addressState: z.string().optional(),
   addressPostalCode: z.string().optional(),
   ...WEBSITE_GENERATION_FIELDS,
+  ...PHOTO_SLOT_FIELDS,
 });
 
 const EditBusinessFormSchema = z.object({
@@ -55,6 +69,7 @@ const EditBusinessFormSchema = z.object({
   addressState: z.string().optional(),
   addressPostalCode: z.string().optional(),
   ...WEBSITE_GENERATION_FIELDS,
+  ...PHOTO_SLOT_FIELDS,
 });
 
 export type BusinessFormState =
@@ -91,6 +106,10 @@ function websiteGenerationFields(formData: FormData) {
     brandTone: (formData.get('brandTone') as string) || undefined,
     notes: coerceOptional(formData.get('notes') as string | undefined),
     theme: (formData.get('theme') as string) || undefined,
+    heroPhotoUrl: (formData.get('heroPhotoUrl') as string) || undefined,
+    aboutPhotoUrl: (formData.get('aboutPhotoUrl') as string) || undefined,
+    whyChooseUsPhotoUrl: (formData.get('whyChooseUsPhotoUrl') as string) || undefined,
+    servicesPhotoUrl: (formData.get('servicesPhotoUrl') as string) || undefined,
   };
 }
 
@@ -215,6 +234,10 @@ export async function createBusinessAction(
       brandTone: data.brandTone,
       notes: data.notes,
       theme: data.theme,
+      heroPhotoUrl: data.heroPhotoUrl,
+      aboutPhotoUrl: data.aboutPhotoUrl,
+      whyChooseUsPhotoUrl: data.whyChooseUsPhotoUrl,
+      servicesPhotoUrl: data.servicesPhotoUrl,
       ...assets,
     });
   } catch (err) {
@@ -302,6 +325,10 @@ export async function editBusinessAction(
       brandTone: data.brandTone,
       notes: data.notes,
       theme: data.theme,
+      heroPhotoUrl: data.heroPhotoUrl,
+      aboutPhotoUrl: data.aboutPhotoUrl,
+      whyChooseUsPhotoUrl: data.whyChooseUsPhotoUrl,
+      servicesPhotoUrl: data.servicesPhotoUrl,
       ...assets,
       updatedAt: new Date().toISOString(),
     });

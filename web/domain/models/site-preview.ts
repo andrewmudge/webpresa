@@ -135,8 +135,15 @@ export interface PreviewTheme {
   fontFamily: string;
   /** URL of the hero section background image. Uses a gradient fallback when absent. */
   heroImageUrl?: string;
-  /** URL of the about/why-choose-us section image. */
+  /**
+   * URL of the WhyChooseUs section image. Name predates that component's
+   * current title — kept as-is to avoid another breaking rename; see
+   * `aboutSectionImageUrl` for the image actually shown in the AboutSection
+   * (titled "About Us").
+   */
   aboutImageUrl?: string;
+  /** URL of the image shown in the AboutSection (titled "About Us"). */
+  aboutSectionImageUrl?: string;
   /** URL of the featured-service-card background image. Falls back to a DEV_FIXTURE placeholder when absent. */
   servicesImageUrl?: string;
   /**

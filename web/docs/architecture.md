@@ -105,7 +105,7 @@ TypeScript interfaces only. No runtime code.
 
 | Model | Key fields |
 |---|---|
-| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), and `theme?` (the stored Brand Theme System preset) |
+| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), photo-slot overrides (`heroPhotoUrl?`, `aboutPhotoUrl?`, `whyChooseUsPhotoUrl?`, `servicesPhotoUrl?` — see "Photo slot assignment" below), and `theme?` (the stored Brand Theme System preset) |
 | `SitePreview` | `previewId`, `businessId`, `slug`, `version` (monotonic), `status`, `templateId`, `content` (strict shape, includes optional `cta` — see `PreviewCtaConfig`), `theme` (`PreviewTheme.themeName` — see "Brand Theme System") |
 | `ScanEvent` | `scanId`, `businessId`, `status`, `sourceUrl`, `scores?`, `storageKeys?`, `startedAt`, `completedAt?` |
 | `Postcard` | `postcardId`, `businessId`, `previewId`, `provider`, `campaignCode`, `qrDestination`, `status`, `mailedAt?`, `deliveredAt?` |
@@ -302,6 +302,21 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 
 - **Firecrawl re-detection** (Stage 13): when a scan discovers an existing logo/branding, compare it against the current theme and auto-switch + regenerate if it differs significantly. Not implemented — Stage 13 doesn't exist yet.
 - Logo color detection is an average-pixel approximation, not a true dominant-color histogram; good enough for family classification (which hue band a logo falls into), not exact-shade matching.
+
+---
+
+## Photo slot assignment
+
+**Implemented 2026-07-14.** Uploaded business photos (`Business.photoUrls`) are auto-assigned to four template image slots by upload order — hero background, About Us section, WhyChooseUs section, and the featured service card — each preferring a distinct photo and falling back to reusing an earlier one when fewer than four were uploaded. This is a positional guess with no way to know whether a given photo actually suits a given slot (e.g. an odd crop that works for "About Us" can look awkward as a full-bleed hero background).
+
+- `resolvePhotoSlot(override, ...autoFallbacks)` (`lib/ai/generate-preview.ts`) is the single resolution point: an explicit override wins outright; the reserved value `'none'` forces that slot's non-photo fallback (hero's gradient/pattern, About/WhyChooseUs's decorative box, or Services' `picsum` `DEV_FIXTURE`) even though photos exist; otherwise the first defined value in the automatic upload-order chain is used.
+- `Business.heroPhotoUrl` / `aboutPhotoUrl` / `whyChooseUsPhotoUrl` / `servicesPhotoUrl` — optional per-slot overrides, each either a URL from the business's own `photoUrls` or the literal `'none'`. Left unset ("Auto"), the automatic assignment applies.
+- Admin UI: `BusinessForm.tsx`'s "Photo Assignment" section — a numbered thumbnail grid of the business's uploaded photos plus one `<select>` per slot (Auto / No photo / each numbered photo). Only rendered once at least one photo exists (i.e. practically only on the edit form, since overrides reference photos that must already have URLs) so admins can correct a specific bad auto-pick without re-architecting the whole upload flow.
+- `AboutSection.tsx` (the section literally titled "About Us") previously never rendered any photo at all — it and `WhyChooseUs.tsx` both trace back to the same historically-misnamed `PreviewTheme.aboutImageUrl` field (which actually only ever fed `WhyChooseUs`). Fixed by adding a distinct `aboutSectionImageUrl` field for the literal About section rather than renaming the existing field (avoids another breaking schema change on top of the Brand Theme System's).
+
+### Deferred
+
+- No smarter crop/composition awareness beyond `object-top` positioning on people-photo containers (`WhyChooseUs`, `AboutSection`) — a photo with a genuinely bad composition for a given slot still requires an admin to notice and either override the slot or set it to `'none'`.
 
 ---
 

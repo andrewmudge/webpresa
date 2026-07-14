@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { V } from './tokens';
 import { externalLinkAttrs, type ResolvedCta } from './cta';
 
@@ -6,9 +7,10 @@ interface Props {
   tagline: string;
   aboutText: string;
   primary: ResolvedCta | null;
+  imageUrl?: string;
 }
 
-export function AboutSection({ businessName, tagline, aboutText, primary }: Props) {
+export function AboutSection({ businessName, tagline, aboutText, primary, imageUrl }: Props) {
   return (
     <section id="about" className="py-20 bg-(--site-background)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -40,17 +42,31 @@ export function AboutSection({ businessName, tagline, aboutText, primary }: Prop
             )}
           </div>
 
-          {/* Visual accent block */}
-          <div
-            className="relative hidden lg:block rounded-2xl overflow-hidden min-h-[320px]"
-            style={{ backgroundColor: V.primary }}
-          >
-            {/* Decorative concentric circles */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-10">
-              <div className="w-96 h-96 rounded-full border-2 border-white" />
-              <div className="absolute w-64 h-64 rounded-full border-2 border-white" />
-              <div className="absolute w-32 h-32 rounded-full border-2 border-white" />
-            </div>
+          {/* Visual accent block — an uploaded photo always wins over the decorative fallback */}
+          <div className="relative hidden lg:block rounded-2xl overflow-hidden min-h-[320px]">
+            {imageUrl ? (
+              <>
+                <Image
+                  src={imageUrl}
+                  alt={`${businessName} team`}
+                  fill
+                  className="object-cover object-top"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                />
+                {/* Scrim for text legibility over an arbitrary photo */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+              </>
+            ) : (
+              <>
+                <div className="absolute inset-0" style={{ backgroundColor: V.primary }} />
+                {/* Decorative concentric circles */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-10">
+                  <div className="w-96 h-96 rounded-full border-2 border-white" />
+                  <div className="absolute w-64 h-64 rounded-full border-2 border-white" />
+                  <div className="absolute w-32 h-32 rounded-full border-2 border-white" />
+                </div>
+              </>
+            )}
             <div className="relative z-10 p-10 flex flex-col justify-end h-full">
               <blockquote className="text-white/90 text-lg font-medium italic leading-relaxed">
                 &ldquo;Our goal is simple: deliver quality work on time, every time.&rdquo;

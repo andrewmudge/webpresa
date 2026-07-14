@@ -1938,3 +1938,82 @@ web/
     ├── generate-preview.ts                                      MODIFIED — servicesImageUrl derivation
     └── __tests__/generate-preview.test.ts                       MODIFIED — 3 new tests
 ```
+
+---
+
+# Photo Slot Assignment + Admin CSS Bracket-Syntax Sweep + Input Text Color Fix
+
+**Date:** 2026-07-14
+**Scope:** Follow-up from live testing after the Brand Theme System fixes. Four items: a repo-wide sweep of the same Tailwind bracket-syntax bug found in the template, an unreadable-input-text bug with the same root cause, a clarification on `brandTone`'s actual effect, and a new photo-slot-assignment feature addressing "About Us has no image", "only 3 of 5 uploaded photos get used", and "the hero image crop looks awkward".
+
+## 1. Admin-wide Tailwind bracket-syntax sweep
+
+The same `[--color-brand]` bracket-syntax bug fixed in the template (see the prior "Brand Theme System Live Testing" entry) was present throughout the admin dashboard — `BusinessForm.tsx`, `CtaConfigForm.tsx`, the business list/detail/edit pages, `previews/page.tsx`, and `sign-in/page.tsx`. Converted every occurrence (`text-`, `ring-`, `bg-`, `border-` variants of `--color-brand`/`--color-brand-dark`/`--color-border`) from `[--color-*]` to `(--color-*)`. The admin's brand-blue buttons, links, and focus rings likely never actually rendered blue before this fix.
+
+## 2. Unreadable input text (same root cause as the black background)
+
+`Field` and `TextareaField` in `BusinessForm.tsx`, the plain label/destination `<input>`s in `CtaConfigForm.tsx`, and the sign-in page's username/password inputs never set an explicit text/background color. Without one they inherit `color: var(--foreground)` from `<body>` (`app/globals.css`) — near-white (`#ededed`) under `prefers-color-scheme: dark` — making typed text and placeholders unreadable in a dark-mode browser. Added explicit `bg-white text-gray-900` to all of them.
+
+## 3. Brand Tone — clarified, not changed
+
+Confirmed `Business.brandTone` is included as one free-text line (`Brand tone: ${business.brandTone}`) in both OpenAI prompts (`lib/ai/generate-preview.ts` content generation and `lib/theme/select-theme.ts` theme selection) — it's a soft stylistic hint the model may or may not lean into, not a hard constraint on copy, CTA logic, or theme choice. No code change; reported to the user for awareness.
+
+## 4. Photo slot assignment
+
+Real bugs found via live testing with 5 uploaded photos:
+
+- **`AboutSection.tsx` (titled "About Us") never rendered any photo**, always showing a static decorative box + hardcoded quote regardless of uploads. Root cause: `PreviewTheme.aboutImageUrl` — despite its name and doc comment ("about/why-choose-us section image") — was only ever wired into `WhyChooseUs.tsx`, never `AboutSection.tsx`. Fixed by giving `AboutSection` its own `imageUrl` prop (rendered with a dark-to-transparent scrim over the photo so the quote stays legible, falling back to the original decorative box when absent) fed by a **new** `PreviewTheme.aboutSectionImageUrl` field — added rather than renaming the existing (if confusingly-named) `aboutImageUrl`, to avoid another breaking schema change so soon after the Brand Theme System's.
+- **Only 3 of 5 uploaded photos were ever used** — the hero/about(WhyChooseUs)/services slots pulled from `photoUrls[0/1/2]` only, with no 4th slot. Adding the About section's own image slot (`photoUrls[3]`, falling back to `[1]`/`[0]`) bumped usable slots from 3 to 4.
+- **Awkward crops/cut-off heads**: `WhyChooseUs`'s photo container used `object-cover` with default (center) positioning, which can crop a person's head out of frame in a portrait-oriented photo. Changed to `object-cover object-top` for `WhyChooseUs` and the new `AboutSection` image. The hero's crop was deliberately left alone — see below.
+- **Hero image "awkwardness"** (a photo with no real "hero" composition, forced into a full-bleed wide/short background): discussed with the user as a design question rather than silently tweaked, since the root problem is that photos are assigned to slots purely by upload position with no way to know if a photo actually *suits* that slot. Presented three options (cheap crop tuning only / full manual per-photo role picker / hybrid). **User chose the hybrid: keep automatic upload-order assignment as the default, add optional per-slot overrides.**
+
+### Hybrid override implementation
+
+- `Business` gains four optional fields: `heroPhotoUrl`, `aboutPhotoUrl`, `whyChooseUsPhotoUrl`, `servicesPhotoUrl`. Each is either a URL from the business's own `photoUrls`, or the reserved literal `'none'` (forces that slot's non-photo fallback — e.g. the hero's existing gradient/pattern/solid styles — even though photos exist), or unset (`'Auto'`, keep the automatic pick). Schema: `PhotoSlotOverrideSchema = z.union([UrlOrPathSchema, z.literal('none')]).optional()`.
+- `resolvePhotoSlot(override, ...autoFallbacks)` (`lib/ai/generate-preview.ts`) is the single point every slot's URL is resolved through — override wins, `'none'` forces `undefined`, otherwise the first defined value in the automatic upload-order fallback chain.
+- `BusinessForm.tsx` — new "Photo Assignment" section: a numbered thumbnail grid of the business's uploaded photos, plus one `<select>` per slot (Hero background / About Us section / Why Choose Us section / Featured service card), each offering Auto / No photo / one option per uploaded photo. Only rendered once `defaults?.photoUrls` has entries — practically only on the edit form, since an override has to reference a photo that's already been uploaded and has a URL (the create form can't offer this in the same submission that uploads the photos).
+- `businesses/actions.ts` — `createBusinessAction`/`editBusinessAction` persist the four override fields (empty select value → `undefined`, i.e. "Auto").
+
+## Verification
+
+```
+✓ Lint:        0 errors  (npm run lint)
+✓ TypeCheck:   0 errors  (npx tsc --noEmit)
+✓ Tests:       230 passed  (npm test) — 7 new tests (override pinning, 'none' sentinel, schema validation, form persistence)
+✓ Build:       production build succeeds  (npm run build)
+```
+
+## Deferred
+
+- No composition-quality awareness beyond `object-top` — a photo can still be a poor fit for a slot; the override lets an admin fix it manually, nothing automatic detects it.
+
+## Files changed
+
+```
+web/
+├── app/admin/
+│   ├── (dashboard)/businesses/
+│   │   ├── BusinessForm.tsx                                    MODIFIED — parens syntax, input text color, PhotoSlotField + Photo Assignment section
+│   │   ├── actions.ts                                          MODIFIED — PHOTO_SLOT_FIELDS parsed + persisted, parens syntax
+│   │   ├── __tests__/actions.test.ts                           MODIFIED — 2 new tests
+│   │   ├── page.tsx                                            MODIFIED — parens syntax
+│   │   └── [businessId]/
+│   │       ├── CtaConfigForm.tsx                                MODIFIED — parens syntax, input text color
+│   │       ├── page.tsx                                        MODIFIED — parens syntax
+│   │       └── edit/page.tsx                                    MODIFIED — parens syntax
+│   ├── (dashboard)/previews/page.tsx                             MODIFIED — parens syntax
+│   └── sign-in/page.tsx                                         MODIFIED — parens syntax, input text color
+├── app/b/[slug]/template/
+│   ├── AboutSection.tsx                                        MODIFIED — renders imageUrl, scrim, decorative fallback preserved
+│   ├── WhyChooseUs.tsx                                          MODIFIED — object-top crop
+│   └── index.tsx                                                MODIFIED — aboutSectionImageUrl wiring
+├── domain/
+│   ├── models/business.ts                                      MODIFIED — 4 photo-slot override fields
+│   ├── models/site-preview.ts                                   MODIFIED — PreviewTheme.aboutSectionImageUrl
+│   ├── schemas/business.schema.ts                               MODIFIED — PhotoSlotOverrideSchema
+│   ├── schemas/site-preview.schema.ts                            MODIFIED — aboutSectionImageUrl field
+│   └── __tests__/domain.test.ts                                 MODIFIED — 3 new tests
+└── lib/ai/
+    ├── generate-preview.ts                                      MODIFIED — resolvePhotoSlot(), override-aware slot derivation
+    └── __tests__/generate-preview.test.ts                       MODIFIED — 2 new tests
+```

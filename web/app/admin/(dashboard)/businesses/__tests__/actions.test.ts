@@ -194,6 +194,32 @@ describe('createBusinessAction — success flow', () => {
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.theme).toBeUndefined();
   });
+
+  it('persists an explicit photo-slot override', async () => {
+    const fd = makeFormData({
+      ...VALID_BUSINESS_FIELDS,
+      heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
+      servicesPhotoUrl: 'none',
+    });
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.heroPhotoUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
+    expect(saved.servicesPhotoUrl).toBe('none');
+  });
+
+  it('leaves photo-slot overrides undefined ("Auto") when none are selected', async () => {
+    const fd = makeFormData(VALID_BUSINESS_FIELDS);
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.heroPhotoUrl).toBeUndefined();
+    expect(saved.aboutPhotoUrl).toBeUndefined();
+    expect(saved.whyChooseUsPhotoUrl).toBeUndefined();
+    expect(saved.servicesPhotoUrl).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

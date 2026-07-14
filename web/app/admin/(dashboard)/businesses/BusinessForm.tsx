@@ -1,6 +1,7 @@
 'use client';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
+import Image from 'next/image';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
@@ -208,6 +209,50 @@ function ThemeField({ label, name, defaultValue, errors }: ThemeFieldProps) {
   );
 }
 
+interface PhotoSlotFieldProps {
+  label: string;
+  name: string;
+  photoUrls: string[];
+  defaultValue?: string;
+  errors?: string[];
+}
+
+/**
+ * Per-slot photo assignment override. "Auto" (default) keeps generation's
+ * automatic upload-order assignment; "No photo" forces that section's
+ * non-photo fallback (e.g. the hero's gradient/pattern background) even
+ * though photos exist — useful when an uploaded photo doesn't suit that
+ * section. Only rendered once at least one photo is uploaded.
+ */
+function PhotoSlotField({ label, name, photoUrls, defaultValue, errors }: PhotoSlotFieldProps) {
+  return (
+    <div>
+      <label htmlFor={name} className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+      </label>
+      <select
+        id={name}
+        name={name}
+        defaultValue={defaultValue ?? ''}
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent bg-white"
+      >
+        <option value="">Auto (recommended)</option>
+        <option value="none">No photo — use themed fallback</option>
+        {photoUrls.map((url, i) => (
+          <option key={url} value={url}>
+            Photo {i + 1}
+          </option>
+        ))}
+      </select>
+      {errors?.map((e) => (
+        <p key={e} className="mt-1 text-xs text-red-600">
+          {e}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Submit button
 // ---------------------------------------------------------------------------
@@ -400,6 +445,60 @@ export function BusinessForm({ action, defaults, submitLabel = 'Save' }: Busines
           />
         </div>
       </section>
+
+      {/* Photo assignment — optional per-section override; only meaningful once photos already exist */}
+      {defaults?.photoUrls && defaults.photoUrls.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+            Photo Assignment
+          </h2>
+          <p className="text-xs text-gray-400 mb-3">
+            Uploaded photos are assigned to sections automatically, in upload order. Override a
+            section below to pin a specific photo there, or choose &quot;No photo&quot; to use
+            that section&apos;s themed fallback instead.
+          </p>
+          <div className="flex flex-wrap gap-3 mb-4">
+            {defaults.photoUrls.map((url, i) => (
+              <div key={url} className="flex flex-col items-center gap-1">
+                <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
+                  <Image src={url} alt={`Photo ${i + 1}`} fill className="object-cover" sizes="64px" />
+                </div>
+                <span className="text-[11px] text-gray-400">Photo {i + 1}</span>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <PhotoSlotField
+              label="Hero background"
+              name="heroPhotoUrl"
+              photoUrls={defaults.photoUrls}
+              defaultValue={defaults?.heroPhotoUrl}
+              errors={errors.heroPhotoUrl}
+            />
+            <PhotoSlotField
+              label="About Us section"
+              name="aboutPhotoUrl"
+              photoUrls={defaults.photoUrls}
+              defaultValue={defaults?.aboutPhotoUrl}
+              errors={errors.aboutPhotoUrl}
+            />
+            <PhotoSlotField
+              label="Why Choose Us section"
+              name="whyChooseUsPhotoUrl"
+              photoUrls={defaults.photoUrls}
+              defaultValue={defaults?.whyChooseUsPhotoUrl}
+              errors={errors.whyChooseUsPhotoUrl}
+            />
+            <PhotoSlotField
+              label="Featured service card"
+              name="servicesPhotoUrl"
+              photoUrls={defaults.photoUrls}
+              defaultValue={defaults?.servicesPhotoUrl}
+              errors={errors.servicesPhotoUrl}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Admin metadata */}
       <section>

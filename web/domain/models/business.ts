@@ -106,6 +106,22 @@ export interface Business extends MutableTimestampedRecord {
   photoUrls?: string[];
 
   // -------------------------------------------------------------------------
+  // Photo slot assignment overrides
+  //
+  // Generation auto-assigns uploaded photos to template slots by upload
+  // order (see `generatePreviewContent` in lib/ai/generate-preview.ts). Each
+  // of these optionally overrides one slot: set to one of `photoUrls` to pin
+  // a specific photo there, or the literal `'none'` to force that slot's
+  // non-photo fallback (e.g. the hero's gradient/pattern background) even
+  // though photos exist. Leaving a field unset keeps the automatic pick.
+  // -------------------------------------------------------------------------
+
+  heroPhotoUrl?: string;
+  aboutPhotoUrl?: string;
+  whyChooseUsPhotoUrl?: string;
+  servicesPhotoUrl?: string;
+
+  // -------------------------------------------------------------------------
   // Brand Theme System
   //
   // The curated theme preset (see `lib/themes.ts`) selected for this

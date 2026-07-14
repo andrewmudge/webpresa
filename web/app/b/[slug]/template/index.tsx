@@ -86,6 +86,7 @@ export function GeneratedWebsite({ preview, businessName, logoUrl, isClaimed, is
         businessName={businessName}
         tagline={content.tagline}
         aboutText={content.aboutText}
+        imageUrl={theme.aboutSectionImageUrl}
         primary={primary}
       />
 
