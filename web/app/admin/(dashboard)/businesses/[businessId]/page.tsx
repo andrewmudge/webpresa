@@ -8,6 +8,7 @@ import { createSeedPreviewAction, updatePreviewCtaAction } from './actions';
 import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
+import { GenerateWebsiteButton } from './GenerateWebsiteButton';
 import type { Business } from '@/domain/models/business';
 import type { SitePreview } from '@/domain/models/site-preview';
 
@@ -193,11 +194,16 @@ export default async function BusinessDetailPage({ params }: Props) {
             <form action={createSeedPreviewAction.bind(null, businessId)}>
               <button
                 type="submit"
-                className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors"
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Create test preview
               </button>
             </form>
+            {/* Generate a real AI website (Stage 11) — must match MAX_AI_GENERATIONS in actions.ts */}
+            <GenerateWebsiteButton
+              businessId={businessId}
+              capReached={previews.filter((p: SitePreview) => p.generationMetadata).length >= 3}
+            />
             {/* Links to existing published previews */}
             {previews.filter((p: SitePreview) => p.status === 'published').slice(0, 1).map((p: SitePreview) => (
               <a
@@ -210,6 +216,17 @@ export default async function BusinessDetailPage({ params }: Props) {
                 View preview ↗
               </a>
             ))}
+            {/* Review the latest AI-generated draft before publishing */}
+            {previews[0]?.status === 'draft' && (
+              <a
+                href={`/b/${previews[0].slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 hover:bg-amber-100 transition-colors"
+              >
+                Review draft (v{previews[0].version}) ↗
+              </a>
+            )}
           </div>
           {previews.filter((p: SitePreview) => p.status === 'published').length > 0 && (
             <p className="mt-2 text-xs text-gray-400">

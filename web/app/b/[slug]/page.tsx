@@ -48,8 +48,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const isClaimed = business?.status === 'active';
 
   return {
-    title: preview.content.hero.headline,
-    description: preview.content.hero.subheadline,
+    title: preview.content.seo?.title ?? preview.content.hero.headline,
+    description: preview.content.seo?.description ?? preview.content.hero.subheadline,
     robots: isClaimed ? 'index, follow' : 'noindex, nofollow',
   };
 }

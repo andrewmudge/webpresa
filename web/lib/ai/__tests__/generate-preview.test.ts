@@ -1,0 +1,129 @@
+/**
+ * Unit tests for generatePreviewContent.
+ * The OpenAI client is mocked — no real API calls.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockParse = vi.hoisted(() => vi.fn());
+const mockGetOpenAiClient = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/ai/client', () => ({
+  getOpenAiClient: mockGetOpenAiClient,
+  getOpenAiModel: () => 'gpt-4o-mini',
+}));
+
+vi.mock('server-only', () => ({}));
+
+import { generatePreviewContent } from '@/lib/ai/generate-preview';
+import type { Business } from '@/domain/models/business';
+
+function makeBusiness(overrides: Partial<Business> = {}): Business {
+  return {
+    businessId: 'biz_00000000-0000-0000-0000-000000000001',
+    slug: 'acme-plumbing',
+    name: 'Acme Plumbing',
+    industry: 'plumbing',
+    source: 'manual',
+    status: 'pending',
+    servicesOffered: 'Drain cleaning\nWater heater repair',
+    phone: '512-555-0100',
+    email: 'hello@acme.com',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+const VALID_MODEL_OUTPUT = {
+  hero: { headline: 'Reliable Plumbing, Done Right', subheadline: 'Fast, honest service across the area.' },
+  services: [
+    { name: 'Drain Cleaning', description: 'Fast, thorough drain clearing.' },
+    { name: 'Water Heater Repair', description: 'Same-day water heater diagnostics and repair.' },
+  ],
+  tagline: "Austin's trusted local plumber.",
+  aboutText: 'Acme Plumbing has served the community for years with honest, reliable work.',
+  differentiators: [{ title: 'Upfront Pricing', description: 'No surprises — you approve the price first.' }],
+  primaryCtaLabel: 'Call Now',
+  secondaryCtaLabel: 'Email Us',
+  primaryColor: '#123456',
+  accentColor: '#ABCDEF',
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+  heroStyle: 'gradient' as const,
+  seoTitle: 'Acme Plumbing — Austin Plumber',
+  seoDescription: 'Reliable plumbing repair and installation across Austin, TX.',
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockGetOpenAiClient.mockResolvedValue({
+    chat: { completions: { parse: mockParse } },
+  });
+});
+
+describe('generatePreviewContent — precondition', () => {
+  it('throws when the business has no services listed', async () => {
+    const business = makeBusiness({ servicesOffered: undefined });
+    await expect(generatePreviewContent(business)).rejects.toThrow(/at least one service/i);
+    expect(mockGetOpenAiClient).not.toHaveBeenCalled();
+  });
+
+  it('throws when servicesOffered is only whitespace', async () => {
+    const business = makeBusiness({ servicesOffered: '   \n  ' });
+    await expect(generatePreviewContent(business)).rejects.toThrow(/at least one service/i);
+  });
+});
+
+describe('generatePreviewContent — success', () => {
+  it('derives contact and CTA from the verified business record, not the model', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness();
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.content.contact).toEqual({ phone: '512-555-0100', email: 'hello@acme.com' });
+    expect(result.content.cta).toEqual({
+      primary: { type: 'phone', label: 'Call Now' },
+      secondary: { type: 'email', label: 'Email Us' },
+    });
+    expect(result.content.hero.ctaText).toBe('Call Now');
+  });
+
+  it('uses the first uploaded photo as the hero image and overrides the model heroStyle', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.heroStyle).toBe('image');
+    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+  });
+
+  it('uses the model-chosen heroStyle when no photo was uploaded', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: undefined });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.heroStyle).toBe('gradient');
+    expect(result.theme.heroImageUrl).toBeUndefined();
+  });
+
+  it('includes generationMetadata with the resolved model name', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const result = await generatePreviewContent(makeBusiness());
+    expect(result.metadata.model).toBe('gpt-4o-mini');
+    expect(result.metadata.durationMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('generatePreviewContent — model failure handling', () => {
+  it('throws a clear error when the model returns no parsable output', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: null } }] });
+    await expect(generatePreviewContent(makeBusiness())).rejects.toThrow(/no parsable structured output/i);
+  });
+
+  it('propagates errors from the OpenAI client rather than swallowing them', async () => {
+    mockParse.mockRejectedValueOnce(new Error('OpenAI API error: rate limited'));
+    await expect(generatePreviewContent(makeBusiness())).rejects.toThrow(/rate limited/);
+  });
+});

@@ -22,3 +22,15 @@ export const IsoTimestampSchema = z.string().datetime();
  * Used for all website quality metrics.
  */
 export const ScoreSchema = z.number().int().min(0).max(100);
+
+/**
+ * A displayable image reference — either a full absolute URL (`https://...`,
+ * e.g. a picsum.photos seed fixture) or a root-relative app path
+ * (`/api/assets/...`, e.g. the business-asset proxy route). Plain `.url()`
+ * rejects the latter since it has no protocol/host.
+ */
+export const UrlOrPathSchema = z
+  .string()
+  .refine((value) => /^https?:\/\//.test(value) || value.startsWith('/'), {
+    message: 'Must be a valid URL or an absolute path starting with "/"',
+  });

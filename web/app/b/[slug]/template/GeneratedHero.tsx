@@ -1,12 +1,15 @@
 import Image from 'next/image';
 import { V } from './tokens';
 import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
+import type { HeroStyle } from '@/domain/models/site-preview';
 
 interface Props {
   headline: string;
   subheadline: string;
   serviceArea?: string;
   heroImageUrl?: string;
+  /** Falls back to `heroImageUrl ? 'image' : 'solid'` when absent (legacy previews). */
+  heroStyle?: HeroStyle;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -16,20 +19,42 @@ export function GeneratedHero({
   subheadline,
   serviceArea,
   heroImageUrl,
+  heroStyle,
   primary,
   secondary,
 }: Props) {
+  const resolvedStyle: HeroStyle = heroStyle ?? (heroImageUrl ? 'image' : 'solid');
+  const showImage = resolvedStyle === 'image' && !!heroImageUrl;
+
   return (
     <section className="relative flex items-center min-h-[88vh] overflow-hidden">
-      {/* Background image or primary-color gradient fallback */}
-      {heroImageUrl ? (
+      {/* Background: photo, CSS gradient, CSS dot pattern, or a flat primary-color fallback */}
+      {showImage ? (
         <Image
-          src={heroImageUrl}
+          src={heroImageUrl!}
           alt=""
           fill
           className="object-cover object-center"
           priority
           sizes="100vw"
+        />
+      ) : resolvedStyle === 'gradient' ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(135deg, var(--site-primary) 0%, color-mix(in srgb, var(--site-primary) 55%, var(--site-accent)) 100%)',
+          }}
+        />
+      ) : resolvedStyle === 'pattern' ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundColor: V.primary,
+            backgroundImage:
+              'radial-gradient(circle, color-mix(in srgb, var(--site-accent) 40%, transparent) 2px, transparent 2px)',
+            backgroundSize: '28px 28px',
+          }}
         />
       ) : (
         <div className="absolute inset-0" style={{ backgroundColor: V.primary }} />
@@ -39,7 +64,7 @@ export function GeneratedHero({
       <div
         className="absolute inset-0"
         style={{
-          background: heroImageUrl
+          background: showImage
             ? 'linear-gradient(to right, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.45) 60%, rgba(0,0,0,0.15) 100%)'
             : 'linear-gradient(135deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.15) 100%)',
         }}

@@ -1,4 +1,5 @@
 import type { Industry } from '@/domain/constants/industries';
+import type { BrandTone } from '@/domain/constants/brand-tone';
 import type { Address, MutableTimestampedRecord } from './common';
 
 // ---------------------------------------------------------------------------
@@ -72,4 +73,34 @@ export interface Business extends MutableTimestampedRecord {
   stripeCustomerId?: string;
   /** Active Stripe Subscription ID. */
   stripeSubscriptionId?: string;
+
+  // -------------------------------------------------------------------------
+  // Website generation inputs (Stage 11)
+  //
+  // Free-text fields captured on the business creation/edit form and fed to
+  // the AI generation prompt — never rendered directly, so they're kept as
+  // plain multi-line strings rather than structured arrays. Persisted here
+  // (not ephemeral) so an admin can revisit and re-run generation later
+  // without re-entering data.
+  // -------------------------------------------------------------------------
+
+  /** Multi-line free text, one service per line. */
+  servicesOffered?: string;
+  /** Multi-line free text, one area per line. */
+  serviceAreas?: string;
+  description?: string;
+  /** Multi-line free text. */
+  differentiators?: string;
+  brandTone?: BrandTone;
+  notes?: string;
+
+  // -------------------------------------------------------------------------
+  // Uploaded assets (Stage 9 `businesses/` prefix)
+  //
+  // Both fields store the public `/api/assets/...` proxy URL, never a raw
+  // S3 URL — the assets bucket is fully private.
+  // -------------------------------------------------------------------------
+
+  logoUrl?: string;
+  photoUrls?: string[];
 }

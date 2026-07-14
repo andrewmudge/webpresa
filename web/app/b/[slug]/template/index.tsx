@@ -55,6 +55,7 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
         subheadline={content.hero.subheadline}
         serviceArea={content.serviceAreas?.[0]}
         heroImageUrl={theme.heroImageUrl}
+        heroStyle={theme.heroStyle}
         primary={primary}
         secondary={secondary}
       />

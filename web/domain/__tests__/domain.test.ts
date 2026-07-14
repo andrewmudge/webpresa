@@ -214,6 +214,52 @@ describe('Business — optional fields', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Website-generation input fields + asset URLs (Stage 11 foundation)
+// ---------------------------------------------------------------------------
+
+describe('Business — website generation fields', () => {
+  it('is valid with all website-generation fields populated', () => {
+    const biz = createBusiness({ name: 'Full Co', industry: 'plumbing' });
+    const withFields = {
+      ...biz,
+      servicesOffered: 'Drain cleaning\nWater heater repair',
+      serviceAreas: 'Austin\nRound Rock',
+      description: 'A trusted local plumber.',
+      differentiators: 'Same-day service\nUpfront pricing',
+      brandTone: 'friendly' as const,
+      notes: 'Prefers morning calls.',
+      logoUrl: 'https://example.com/api/assets/businesses/biz_1/assets/logo.png',
+      photoUrls: ['https://example.com/api/assets/businesses/biz_1/assets/photos/1.png'],
+    };
+    expect(BusinessSchema.safeParse(withFields).success).toBe(true);
+  });
+
+  it('is valid with all website-generation fields absent', () => {
+    const biz = createBusiness({ name: 'Bare Co', industry: 'hvac' });
+    expect(BusinessSchema.safeParse(biz).success).toBe(true);
+  });
+
+  it('rejects an invalid brandTone', () => {
+    const biz = createBusiness({ name: 'Bad Tone Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, brandTone: 'flamboyant' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects more than 6 photoUrls', () => {
+    const biz = createBusiness({ name: 'Too Many Photos Co', industry: 'hvac' });
+    const photoUrls = Array.from({ length: 7 }, (_, i) => `https://example.com/photo-${i}.png`);
+    const result = BusinessSchema.safeParse({ ...biz, photoUrls });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-URL logoUrl', () => {
+    const biz = createBusiness({ name: 'Bad Logo Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, logoUrl: 'not-a-url' });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8. Malformed AI preview content is rejected
 // ---------------------------------------------------------------------------
 
@@ -255,6 +301,26 @@ describe('PreviewContent validation — AI output guard', () => {
 
   it('accepts valid structured content', () => {
     expect(PreviewContentSchema.safeParse(validContent).success).toBe(true);
+  });
+
+  it('accepts a theme with a valid heroStyle', () => {
+    const theme: PreviewTheme = { ...validTheme, heroStyle: 'gradient' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(true);
+  });
+
+  it('rejects a theme with an invalid heroStyle', () => {
+    const theme = { ...validTheme, heroStyle: 'sparkles' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(false);
+  });
+
+  it('accepts content with valid seo metadata', () => {
+    const withSeo = { ...validContent, seo: { title: 'Best Plumber in Austin', description: 'Fast, reliable plumbing service across Austin, TX.' } };
+    expect(PreviewContentSchema.safeParse(withSeo).success).toBe(true);
+  });
+
+  it('rejects seo metadata with an overlong title', () => {
+    const withSeo = { ...validContent, seo: { title: 'A'.repeat(61), description: 'Valid description.' } };
+    expect(PreviewContentSchema.safeParse(withSeo).success).toBe(false);
   });
 });
 

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { INDUSTRIES } from '@/domain/constants/industries';
+import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { BUSINESS_STATUSES, BUSINESS_SOURCES } from '@/domain/models/business';
-import { AddressSchema, IsoTimestampSchema, ScoreSchema } from './common.schema';
+import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 
 export const BusinessScoresSchema = z.object({
   overall: ScoreSchema.optional(),
@@ -43,6 +44,14 @@ export const BusinessSchema = z.object({
   currentPreviewId: z.string().optional(),
   stripeCustomerId: z.string().optional(),
   stripeSubscriptionId: z.string().optional(),
+  servicesOffered: z.string().max(2000).optional(),
+  serviceAreas: z.string().max(2000).optional(),
+  description: z.string().max(2000).optional(),
+  differentiators: z.string().max(2000).optional(),
+  brandTone: z.enum(BRAND_TONES).optional(),
+  notes: z.string().max(2000).optional(),
+  logoUrl: UrlOrPathSchema.optional(),
+  photoUrls: z.array(UrlOrPathSchema).max(6).optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

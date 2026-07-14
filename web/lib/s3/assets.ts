@@ -14,13 +14,14 @@ import { getAssetsBucketName, getS3Client } from './client';
  *   scans/{businessId}/{scanId}/...
  *   previews/{businessId}/{previewId}/...
  *   postcards/{businessId}/{postcardId}/...
+ *   businesses/{businessId}/assets/...
  *
  * These helpers are intentionally generic — domain-specific helpers
  * (e.g. uploading a scan screenshot) belong to the stages that produce
  * that data (Stages 13, 14, 22), not here.
  */
 
-const ALLOWED_PREFIXES = ['scans/', 'previews/', 'postcards/'];
+const ALLOWED_PREFIXES = ['scans/', 'previews/', 'postcards/', 'businesses/'];
 
 function assertAllowedKey(key: string): void {
   if (!ALLOWED_PREFIXES.some((prefix) => key.startsWith(prefix))) {

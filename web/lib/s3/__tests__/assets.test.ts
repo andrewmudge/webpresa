@@ -59,6 +59,12 @@ describe('putAsset', () => {
     ).rejects.toThrow(/Invalid asset key/);
     expect(mockSend).not.toHaveBeenCalled();
   });
+
+  it('accepts a key under the businesses/ prefix', async () => {
+    mockSend.mockResolvedValueOnce({});
+    await putAsset('businesses/biz_1/assets/logo.png', Buffer.from('x'), 'image/png');
+    expect(mockSend).toHaveBeenCalledOnce();
+  });
 });
 
 // ---------------------------------------------------------------------------

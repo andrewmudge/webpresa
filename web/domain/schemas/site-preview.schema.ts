@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES } from '@/domain/models/site-preview';
-import { IsoTimestampSchema } from './common.schema';
+import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES, HERO_STYLES } from '@/domain/models/site-preview';
+import { IsoTimestampSchema, UrlOrPathSchema } from './common.schema';
 
 /**
  * True only for a well-formed `https://` URL. Used to gate `external_url`
@@ -92,6 +92,12 @@ export const PreviewContentSchema = z.object({
     .max(8)
     .optional(),
   hours: z.string().max(200).optional(),
+  seo: z
+    .object({
+      title: z.string().min(1).max(60),
+      description: z.string().min(1).max(160),
+    })
+    .optional(),
   cta: PreviewCtaConfigSchema.optional(),
 });
 
@@ -100,8 +106,9 @@ const PreviewThemeSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   fontFamily: z.string().min(1),
-  heroImageUrl: z.string().url().optional(),
-  aboutImageUrl: z.string().url().optional(),
+  heroImageUrl: UrlOrPathSchema.optional(),
+  aboutImageUrl: UrlOrPathSchema.optional(),
+  heroStyle: z.enum(HERO_STYLES).optional(),
 });
 
 const GenerationMetadataSchema = z.object({

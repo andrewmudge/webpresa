@@ -88,6 +88,11 @@ export interface PreviewContent {
   differentiators?: { title: string; description: string }[];
   /** Business hours as a single formatted display string, e.g. "Mon–Fri 8am–6pm, Sat 9am–2pm". */
   hours?: string;
+  /** Search-engine metadata. Falls back to business-name-derived defaults when absent. */
+  seo?: {
+    title: string;
+    description: string;
+  };
   /**
    * Configurable CTA buttons rendered across the template.
    *
@@ -99,6 +104,9 @@ export interface PreviewContent {
   cta?: PreviewCtaConfig;
 }
 
+export const HERO_STYLES = ['image', 'gradient', 'pattern', 'solid'] as const;
+export type HeroStyle = (typeof HERO_STYLES)[number];
+
 /** Visual appearance tokens applied to the preview template. */
 export interface PreviewTheme {
   /** CSS hex color string, e.g. `#11455E`. */
@@ -109,6 +117,12 @@ export interface PreviewTheme {
   heroImageUrl?: string;
   /** URL of the about/why-choose-us section image. */
   aboutImageUrl?: string;
+  /**
+   * Hero presentation style. Optional for backward compatibility — legacy
+   * previews without this field are inferred as `'image'` when
+   * `heroImageUrl` is set, else `'solid'` (see `GeneratedHero.tsx`).
+   */
+  heroStyle?: HeroStyle;
 }
 
 /** Metadata about the generation run that produced this preview. */

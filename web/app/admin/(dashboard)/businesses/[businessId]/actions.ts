@@ -6,6 +6,7 @@ import type { PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, Prev
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { PreviewContentSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
+import { generatePreviewContent } from '@/lib/ai/generate-preview';
 import { buildDefaultCta } from './cta-defaults';
 import {
   listPreviewsForBusiness,
@@ -219,6 +220,69 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
   await putSitePreview(published);
 
   redirect(`/admin/businesses/${business.businessId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Manual AI website generation (Stage 11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft cap on real OpenAI generations per business — the free seed action
+ * above is unaffected. Not exported: every export of a `'use server'` file
+ * must be an async Server Action (see cta-defaults.ts for the same
+ * constraint) — `page.tsx` duplicates this literal, kept in sync by comment.
+ */
+const MAX_AI_GENERATIONS = 3;
+
+export type GenerateWebsiteState = { message?: string } | undefined;
+
+export async function generateWebsiteAction(
+  businessId: string,
+  // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _prevState: GenerateWebsiteState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _formData: FormData,
+): Promise<GenerateWebsiteState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { message: 'Business not found' };
+
+  if (!business.servicesOffered?.trim()) {
+    return { message: 'Add at least one service under "Services offered" before generating a website.' };
+  }
+
+  const existing = await listPreviewsForBusiness(businessId);
+  const priorGenerations = existing.filter((p) => p.generationMetadata).length;
+  if (priorGenerations >= MAX_AI_GENERATIONS) {
+    return { message: `This business has reached the limit of ${MAX_AI_GENERATIONS} AI-generated websites.` };
+  }
+  const previousVersion = existing.length > 0 ? Math.max(...existing.map((p) => p.version)) : 0;
+
+  try {
+    const { content, theme, metadata } = await generatePreviewContent(business);
+
+    const preview = createSitePreview({
+      businessId: business.businessId,
+      slug: business.slug,
+      templateId: 'local-business-v1',
+      content,
+      theme,
+      generationMetadata: metadata,
+      previousVersion,
+    });
+
+    // Status stays the factory default ('draft') — generated websites always
+    // require admin review before publication, never auto-published.
+    await putSitePreview(preview);
+  } catch (err) {
+    console.error('Failed to generate website:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to generate website. Please try again.' };
+  }
+
+  redirect(`/admin/businesses/${businessId}`);
 }
 
 // ---------------------------------------------------------------------------

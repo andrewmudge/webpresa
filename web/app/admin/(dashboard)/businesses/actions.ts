@@ -2,14 +2,25 @@
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { INDUSTRIES } from '@/domain/constants/industries';
+import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import { createBusiness, type CreateBusinessInput } from '@/domain/factories/business.factory';
 import { putBusiness, resolveUniqueSlug, getBusinessById } from '@/lib/db/businesses';
+import { putAsset } from '@/lib/s3/assets';
 import { getSession } from '@/lib/auth/session';
 
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
+
+const WEBSITE_GENERATION_FIELDS = {
+  servicesOffered: z.string().max(2000).optional(),
+  serviceAreas: z.string().max(2000).optional(),
+  description: z.string().max(2000).optional(),
+  differentiators: z.string().max(2000).optional(),
+  brandTone: z.enum(BRAND_TONES).optional(),
+  notes: z.string().max(2000).optional(),
+};
 
 const CreateBusinessFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -24,6 +35,7 @@ const CreateBusinessFormSchema = z.object({
   addressCity: z.string().optional(),
   addressState: z.string().optional(),
   addressPostalCode: z.string().optional(),
+  ...WEBSITE_GENERATION_FIELDS,
 });
 
 const EditBusinessFormSchema = z.object({
@@ -39,6 +51,7 @@ const EditBusinessFormSchema = z.object({
   addressCity: z.string().optional(),
   addressState: z.string().optional(),
   addressPostalCode: z.string().optional(),
+  ...WEBSITE_GENERATION_FIELDS,
 });
 
 export type BusinessFormState =
@@ -64,6 +77,59 @@ function normalizeUrl(raw: string | undefined): string | undefined {
 
 function coerceOptional(value: string | undefined): string | undefined {
   return value?.trim() || undefined;
+}
+
+function websiteGenerationFields(formData: FormData) {
+  return {
+    servicesOffered: coerceOptional(formData.get('servicesOffered') as string | undefined),
+    serviceAreas: coerceOptional(formData.get('serviceAreas') as string | undefined),
+    description: coerceOptional(formData.get('description') as string | undefined),
+    differentiators: coerceOptional(formData.get('differentiators') as string | undefined),
+    brandTone: (formData.get('brandTone') as string) || undefined,
+    notes: coerceOptional(formData.get('notes') as string | undefined),
+  };
+}
+
+function fileExtension(file: File): string {
+  const fromName = file.name.split('.').pop();
+  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
+  return file.type.split('/').pop() || 'bin';
+}
+
+async function uploadBusinessAsset(businessId: string, file: File, filename: string): Promise<string> {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const key = `businesses/${businessId}/assets/${filename}`;
+  await putAsset(key, buffer, file.type || 'application/octet-stream');
+  return `/api/assets/${key}`;
+}
+
+/**
+ * Uploads any logo/photo files present in the form to S3 and returns the
+ * resulting public proxy URLs. Returns an empty object for a field when no
+ * new file was chosen, so callers can spread the result over existing
+ * values without clobbering them.
+ */
+async function uploadBusinessAssets(
+  businessId: string,
+  formData: FormData,
+): Promise<{ logoUrl?: string; photoUrls?: string[] }> {
+  const result: { logoUrl?: string; photoUrls?: string[] } = {};
+
+  const logo = formData.get('logo');
+  if (logo instanceof File && logo.size > 0) {
+    result.logoUrl = await uploadBusinessAsset(businessId, logo, `logo.${fileExtension(logo)}`);
+  }
+
+  const photos = formData
+    .getAll('photos')
+    .filter((f): f is File => f instanceof File && f.size > 0);
+  if (photos.length > 0) {
+    result.photoUrls = await Promise.all(
+      photos.map((file, i) => uploadBusinessAsset(businessId, file, `photos/${i}.${fileExtension(file)}`)),
+    );
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +158,7 @@ export async function createBusinessAction(
     addressCity: coerceOptional(formData.get('addressCity') as string | undefined),
     addressState: coerceOptional(formData.get('addressState') as string | undefined),
     addressPostalCode: coerceOptional(formData.get('addressPostalCode') as string | undefined),
+    ...websiteGenerationFields(formData),
   };
 
   const parsed = CreateBusinessFormSchema.safeParse(raw);
@@ -133,7 +200,18 @@ export async function createBusinessAction(
         data.googlePlaceId;
     }
 
-    await putBusiness(finalBusiness);
+    const assets = await uploadBusinessAssets(finalBusiness.businessId, formData);
+
+    await putBusiness({
+      ...finalBusiness,
+      servicesOffered: data.servicesOffered,
+      serviceAreas: data.serviceAreas,
+      description: data.description,
+      differentiators: data.differentiators,
+      brandTone: data.brandTone,
+      notes: data.notes,
+      ...assets,
+    });
   } catch (err) {
     console.error('Failed to create business:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save business. Please try again.' };
@@ -170,6 +248,7 @@ export async function editBusinessAction(
     addressCity: coerceOptional(formData.get('addressCity') as string | undefined),
     addressState: coerceOptional(formData.get('addressState') as string | undefined),
     addressPostalCode: coerceOptional(formData.get('addressPostalCode') as string | undefined),
+    ...websiteGenerationFields(formData),
   };
 
   const parsed = EditBusinessFormSchema.safeParse(raw);
@@ -196,6 +275,10 @@ export async function editBusinessAction(
           }
         : existing.address;
 
+    // Only replaces logoUrl/photoUrls when a new file was chosen; existing
+    // values are preserved via the `...existing` spread otherwise.
+    const assets = await uploadBusinessAssets(businessId, formData);
+
     await putBusiness({
       ...existing,
       name: data.name,
@@ -207,6 +290,13 @@ export async function editBusinessAction(
       websiteUrl: data.websiteUrl || undefined,
       googlePlaceId: data.googlePlaceId,
       address,
+      servicesOffered: data.servicesOffered,
+      serviceAreas: data.serviceAreas,
+      description: data.description,
+      differentiators: data.differentiators,
+      brandTone: data.brandTone,
+      notes: data.notes,
+      ...assets,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {

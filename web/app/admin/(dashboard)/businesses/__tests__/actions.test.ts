@@ -9,18 +9,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // vi.mock() factories run (vi.mock is hoisted to the top by vitest).
 // ---------------------------------------------------------------------------
 
-const { mockPutBusiness, mockResolveUniqueSlug, mockGetBusinessById, mockGetSession } =
+const { mockPutBusiness, mockResolveUniqueSlug, mockGetBusinessById, mockGetSession, mockPutAsset } =
   vi.hoisted(() => ({
     mockPutBusiness: vi.fn(),
     mockResolveUniqueSlug: vi.fn(),
     mockGetBusinessById: vi.fn(),
     mockGetSession: vi.fn(),
+    mockPutAsset: vi.fn(),
   }));
 
 vi.mock('@/lib/db/businesses', () => ({
   putBusiness: mockPutBusiness,
   resolveUniqueSlug: mockResolveUniqueSlug,
   getBusinessById: mockGetBusinessById,
+}));
+
+vi.mock('@/lib/s3/assets', () => ({
+  putAsset: mockPutAsset,
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -52,6 +57,19 @@ function makeFormData(fields: Record<string, string>): FormData {
   return fd;
 }
 
+function makeFormDataWithFiles(
+  fields: Record<string, string>,
+  files: Record<string, File | File[]>,
+): FormData {
+  const fd = makeFormData(fields);
+  for (const [k, v] of Object.entries(files)) {
+    for (const file of Array.isArray(v) ? v : [v]) {
+      fd.append(k, file);
+    }
+  }
+  return fd;
+}
+
 const VALID_BUSINESS_FIELDS = {
   name: 'Green Leaf Landscaping',
   industry: 'landscaping',
@@ -66,6 +84,7 @@ beforeEach(() => {
   mockResolveUniqueSlug.mockImplementation(async (slug: string) => slug);
   // Default: put succeeds
   mockPutBusiness.mockResolvedValue(undefined);
+  mockPutAsset.mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -135,6 +154,72 @@ describe('createBusinessAction — success flow', () => {
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.slug).toBe('green-leaf-landscaping-2');
   });
+
+  it('persists website-generation fields', async () => {
+    const fd = makeFormData({
+      ...VALID_BUSINESS_FIELDS,
+      servicesOffered: 'Lawn care\nTree trimming',
+      serviceAreas: 'Austin',
+      description: 'A trusted local landscaper.',
+      differentiators: 'Same-day quotes',
+      brandTone: 'friendly',
+      notes: 'Prefers email contact.',
+    });
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.servicesOffered).toBe('Lawn care\nTree trimming');
+    expect(saved.serviceAreas).toBe('Austin');
+    expect(saved.description).toBe('A trusted local landscaper.');
+    expect(saved.differentiators).toBe('Same-day quotes');
+    expect(saved.brandTone).toBe('friendly');
+    expect(saved.notes).toBe('Prefers email contact.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Asset uploads
+// ---------------------------------------------------------------------------
+
+describe('createBusinessAction — asset uploads', () => {
+  it('uploads a logo and sets logoUrl to the proxy path', async () => {
+    const logo = new File(['fake-bytes'], 'logo.png', { type: 'image/png' });
+    const fd = makeFormDataWithFiles(VALID_BUSINESS_FIELDS, { logo });
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutAsset).toHaveBeenCalledOnce();
+    const [key, , contentType] = mockPutAsset.mock.calls[0];
+    expect(key).toMatch(/^businesses\/biz_.+\/assets\/logo\.png$/);
+    expect(contentType).toBe('image/png');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBe(`/api/assets/${key}`);
+  });
+
+  it('uploads multiple photos and sets photoUrls', async () => {
+    const photos = [
+      new File(['a'], 'a.jpg', { type: 'image/jpeg' }),
+      new File(['b'], 'b.jpg', { type: 'image/jpeg' }),
+    ];
+    const fd = makeFormDataWithFiles(VALID_BUSINESS_FIELDS, { photos });
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutAsset).toHaveBeenCalledTimes(2);
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.photoUrls).toHaveLength(2);
+    expect(saved.photoUrls[0]).toMatch(/^\/api\/assets\/businesses\/biz_.+\/assets\/photos\/0\.jpg$/);
+  });
+
+  it('does not call putAsset when no files are chosen', async () => {
+    const fd = makeFormData(VALID_BUSINESS_FIELDS);
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+    expect(mockPutAsset).not.toHaveBeenCalled();
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBeUndefined();
+  });
 });
 
 describe('createBusinessAction — auth', () => {
@@ -192,6 +277,46 @@ describe('editBusinessAction — success flow', () => {
     expect(saved.industry).toBe('hvac');
     expect(saved.status).toBe('active');
     expect(saved.businessId).toBe(EXISTING_BUSINESS.businessId);
+  });
+
+  it('preserves the existing logoUrl when no new file is chosen', async () => {
+    mockGetBusinessById.mockResolvedValueOnce({
+      ...EXISTING_BUSINESS,
+      logoUrl: '/api/assets/businesses/biz_00000000-0000-0000-0000-000000000001/assets/logo.png',
+    });
+
+    const fd = makeFormData({ name: 'Acme HVAC', industry: 'hvac', status: 'active', source: 'manual' });
+
+    await expect(
+      editBusinessAction(EXISTING_BUSINESS.businessId, undefined, fd),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutAsset).not.toHaveBeenCalled();
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBe(
+      '/api/assets/businesses/biz_00000000-0000-0000-0000-000000000001/assets/logo.png',
+    );
+  });
+
+  it('replaces the logoUrl when a new logo is uploaded', async () => {
+    mockGetBusinessById.mockResolvedValueOnce({
+      ...EXISTING_BUSINESS,
+      logoUrl: '/api/assets/businesses/biz_00000000-0000-0000-0000-000000000001/assets/logo.png',
+    });
+    const newLogo = new File(['new'], 'new-logo.png', { type: 'image/png' });
+    const fd = makeFormDataWithFiles(
+      { name: 'Acme HVAC', industry: 'hvac', status: 'active', source: 'manual' },
+      { logo: newLogo },
+    );
+
+    await expect(
+      editBusinessAction(EXISTING_BUSINESS.businessId, undefined, fd),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutAsset).toHaveBeenCalledOnce();
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toMatch(/logo\.png$/);
+    expect(saved.logoUrl).toContain(EXISTING_BUSINESS.businessId);
   });
 });
 

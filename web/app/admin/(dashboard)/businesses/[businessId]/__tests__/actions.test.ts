@@ -20,6 +20,7 @@ const {
   mockGetBusinessById,
   mockDeleteBusinessById,
   mockGetSession,
+  mockGeneratePreviewContent,
 } = vi.hoisted(() => ({
   mockGetSitePreviewById: vi.fn(),
   mockPutSitePreview: vi.fn(),
@@ -32,6 +33,11 @@ const {
   mockGetBusinessById: vi.fn(),
   mockDeleteBusinessById: vi.fn(),
   mockGetSession: vi.fn(),
+  mockGeneratePreviewContent: vi.fn(),
+}));
+
+vi.mock('@/lib/ai/generate-preview', () => ({
+  generatePreviewContent: mockGeneratePreviewContent,
 }));
 
 vi.mock('@/lib/db/site-previews', () => ({
@@ -70,8 +76,9 @@ vi.mock('next/navigation', () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { updatePreviewCtaAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
+import { updatePreviewCtaAction, generateWebsiteAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
 import type { SitePreview } from '@/domain/models/site-preview';
+import type { Business } from '@/domain/models/business';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -104,11 +111,136 @@ const EXISTING_PREVIEW: SitePreview = {
   updatedAt: new Date().toISOString(),
 };
 
+const EXISTING_BUSINESS: Business = {
+  businessId: 'biz_00000000-0000-0000-0000-000000000001',
+  slug: 'acme-plumbing',
+  name: 'Acme Plumbing',
+  industry: 'plumbing',
+  source: 'manual',
+  status: 'pending',
+  servicesOffered: 'Drain cleaning\nWater heater repair',
+  phone: '512-555-0100',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const GENERATED = {
+  content: {
+    hero: { headline: 'Reliable Plumbing', subheadline: 'Fast, honest service.', ctaText: 'Call Now' },
+    services: [{ name: 'Drain Cleaning', description: 'Fast drain service.' }],
+    tagline: 'Trusted local plumbing.',
+    aboutText: 'We are Acme Plumbing.',
+    contact: { phone: '512-555-0100' },
+    cta: { primary: { type: 'phone' as const, label: 'Call Now' } },
+  },
+  theme: { primaryColor: '#0F356B', accentColor: '#ED7023', fontFamily: 'sans-serif', heroStyle: 'solid' as const },
+  metadata: { model: 'gpt-4o-mini', promptVersion: '2026-07-13', generatedAt: new Date().toISOString(), durationMs: 500 },
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetSession.mockResolvedValue({ sub: 'admin', expiresAt: new Date().toISOString() });
   mockGetSitePreviewById.mockResolvedValue(EXISTING_PREVIEW);
   mockPutSitePreview.mockResolvedValue(undefined);
+  mockGetBusinessById.mockResolvedValue(EXISTING_BUSINESS);
+  mockListPreviewsForBusiness.mockResolvedValue([]);
+  mockGeneratePreviewContent.mockResolvedValue(GENERATED);
+});
+
+// ---------------------------------------------------------------------------
+// generateWebsiteAction
+// ---------------------------------------------------------------------------
+
+describe('generateWebsiteAction — success flow', () => {
+  it('creates a draft SitePreview with generationMetadata and redirects', async () => {
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow(`REDIRECT:/admin/businesses/${EXISTING_BUSINESS.businessId}`);
+
+    expect(mockPutSitePreview).toHaveBeenCalledOnce();
+    const saved = mockPutSitePreview.mock.calls[0][0];
+    expect(saved.status).toBe('draft');
+    expect(saved.generationMetadata).toEqual(GENERATED.metadata);
+    expect(saved.content.hero.headline).toBe('Reliable Plumbing');
+  });
+
+  it('increments the version from the highest existing preview', async () => {
+    mockListPreviewsForBusiness.mockResolvedValueOnce([
+      { ...EXISTING_PREVIEW, version: 1 },
+      { ...EXISTING_PREVIEW, version: 3 },
+    ]);
+
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutSitePreview.mock.calls[0][0];
+    expect(saved.version).toBe(4);
+  });
+});
+
+describe('generateWebsiteAction — validation', () => {
+  it('rejects when the business has no services listed', async () => {
+    mockGetBusinessById.mockResolvedValueOnce({ ...EXISTING_BUSINESS, servicesOffered: undefined });
+
+    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+
+    expect(result?.message).toMatch(/at least one service/i);
+    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
+    expect(mockPutSitePreview).not.toHaveBeenCalled();
+  });
+
+  it('enforces the AI generation cap', async () => {
+    mockListPreviewsForBusiness.mockResolvedValueOnce([
+      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
+      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
+      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
+    ]);
+
+    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+
+    expect(result?.message).toMatch(/limit/i);
+    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
+  });
+
+  it('does not count seed previews (no generationMetadata) toward the cap', async () => {
+    mockListPreviewsForBusiness.mockResolvedValueOnce([
+      { ...EXISTING_PREVIEW },
+      { ...EXISTING_PREVIEW },
+      { ...EXISTING_PREVIEW },
+    ]);
+
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockGeneratePreviewContent).toHaveBeenCalledOnce();
+  });
+});
+
+describe('generateWebsiteAction — auth and error handling', () => {
+  it('returns Unauthorized when session is missing', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+    expect(result?.message).toBe('Unauthorized');
+    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
+  });
+
+  it('returns a not-found message when the business does not exist', async () => {
+    mockGetBusinessById.mockResolvedValueOnce(null);
+    const result = await generateWebsiteAction('biz_notfound', undefined, new FormData());
+    expect(result?.message).toBe('Business not found');
+  });
+
+  it('returns a safe generic message when generation throws, without leaking the raw error', async () => {
+    mockGeneratePreviewContent.mockRejectedValueOnce(new Error('OpenAI rate limit exceeded: sk-abc123'));
+
+    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+
+    expect(result?.message).toBe('Failed to generate website. Please try again.');
+    expect(result?.message).not.toContain('sk-abc123');
+    expect(mockPutSitePreview).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

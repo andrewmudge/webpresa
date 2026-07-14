@@ -1,6 +1,6 @@
 # Webpresa Implementation Plan
 
-**Last updated:** 2026-07-12  
+**Last updated:** 2026-07-13  
 **Status:** Stages 1–10 complete in development. Stage 11 is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
@@ -331,6 +331,7 @@ Stages 1–2.
 - Validate all AI-generated preview content before persistence.
 - Preserve previous preview versions.
 - Do not store third-party secrets in domain records.
+- `Business` is extended with optional website-generation input fields (services offered, service areas, description, differentiators, brand tone, notes) and asset references (logo, photos) once Stage 11 is implemented — see Stage 7's business creation form and Stage 9's asset key structure for the authoritative field list.
 
 ## Acceptance criteria
 
@@ -494,20 +495,40 @@ Repository functions must:
 
 ### Business creation
 
-The form should support:
+The form is the single entry point for both business record creation and — later — the inputs Stage 11 needs to generate a website for a business with no usable existing presence. It should collect:
 
+**Identity**
 - business name
 - industry
-- existing website
+
+**Contact**
 - phone
 - email
-- street address
+- existing website URL (optional)
+- Google Place ID (optional)
+
+**Address**
+- street
 - city
 - state
 - postal code
+
+**Website generation** (optional at creation time; the fields Stage 11 reads when generating)
+- services offered (multi-line text)
+- service areas (multi-line text)
+- business description
+- differentiators
+- brand tone (e.g. Professional, Friendly, Luxury, Modern, Traditional)
+- additional notes
+
+**Assets** (optional)
+- logo upload
+- business photo uploads
+
+**Admin**
 - source
-- Google Place ID
-- internal notes, if the domain model is intentionally extended
+
+The Website generation and Assets fields are **persisted on the `Business` record** as new optional fields (extends the Stage 5 domain model — see Stage 5's Implementation requirements) rather than being ephemeral form-only inputs. This lets an admin revisit and re-run Stage 11 generation later without re-entering data, and both sections remain editable from the business edit form after creation, not just at creation time. Logo and photo uploads go to S3 under `businesses/{businessId}/assets/` (Stage 9); the resulting keys/URLs are what's stored on `Business`, never the file payloads themselves.
 
 On submission:
 
@@ -517,6 +538,7 @@ On submission:
 - generate a location-aware slug
 - check slug uniqueness
 - add a deterministic suffix when needed
+- upload any provided logo/photo assets to S3
 - create the canonical record
 - save it to DynamoDB
 - redirect to the detail page
@@ -692,6 +714,8 @@ scans/{businessId}/{scanId}/desktop.png
 scans/{businessId}/{scanId}/mobile.png
 previews/{businessId}/{previewId}/
 postcards/{businessId}/{postcardId}/
+businesses/{businessId}/assets/logo.*
+businesses/{businessId}/assets/photos/{n}.*
 ```
 
 ## Implementation requirements
@@ -705,6 +729,7 @@ postcards/{businessId}/{postcardId}/
 - Grant each runtime only the prefixes it needs.
 - Use signed URLs for private admin viewing.
 - Store S3 keys in DynamoDB, not large file payloads.
+- Support admin-uploaded business assets (logo, photos) under the `businesses/` prefix, with the resulting keys stored on the `Business` record. This is an internal admin operation during business creation/editing (Stage 7/11) — distinct from the "Customer uploads" item below, which refers to end-customer self-service uploads after purchase and remains deferred.
 
 ## Acceptance criteria
 
@@ -781,40 +806,96 @@ Production equivalents must be represented in infrastructure but not necessarily
 
 ---
 
-# Stage 11 — Manual AI Preview Generation
+# Stage 11 — Manual AI Website Generation
 
 ## Objective
 
-Allow an administrator to generate structured preview content from manually entered business information before automated website scanning exists.
+Allow an administrator to generate a complete website — content, theme, and hero presentation — from manually entered business information, without requiring an existing website. This stage primarily supports:
+
+- new businesses
+- businesses with no website
+- Facebook-only businesses
+- Google Business Profile–only businesses
+- businesses with an outdated or unusable website
 
 ## Dependencies
 
-Stages 5, 7, 8, and 10.
+Stages 5, 7, 9, and 10.
 
 ## Major deliverables
 
-- Admin generation form or action
+- Admin generation form or action ("Generate Website" on the business detail page)
 - Server-side OpenAI client
 - Configurable model selection
 - Versioned prompt
-- Structured output schema
-- PreviewContent validation
-- New SitePreview record creation
+- Structured output schema, covering content, CTA configuration, theme, and hero presentation
+- `PreviewContent` validation
+- New `SitePreview` record creation
 - Human review state
 - Admin preview editor
 - Manual publication
+- Automatic theme (color/font) and hero-presentation selection
 
 ## Implementation requirements
 
-Generation input should include verified facts such as:
+### Workflow
+
+```text
+Create Business
+        ↓
+Enter business information
+        ↓
+Click Generate Website
+        ↓
+OpenAI generates structured PreviewContent
+        ↓
+Validate with PreviewContentSchema
+        ↓
+Save new SitePreview version
+        ↓
+Open Preview (/b/{slug})
+        ↓
+Admin reviews and edits
+        ↓
+Publish
+```
+
+### OpenAI receives
+
+Only verified admin-entered information (see Stage 7's business creation form):
 
 - business name
 - industry
-- city and state
-- phone
-- known services
-- brand notes
-- known differentiators
+- address
+- contact information
+- services offered
+- service areas
+- business description
+- differentiators
+- brand tone
+- additional notes
+- uploaded logo/photo asset references, if present
+
+OpenAI does not crawl the website during Stage 11 — see Stage 13 for that.
+
+### OpenAI generates
+
+- hero copy
+- navigation (which sections are present, driven by which content the template already renders conditionally)
+- about section
+- services
+- trust section
+- CTA configuration (`content.cta` — see `PreviewCtaConfig` in `build_log.md`, "Configurable CTA System"; must not default to generic phrases like "Get a Quote" — follow the same phone-first/email-fallback/hidden-CTA logic as `buildDefaultCta()` in the admin seed generator unless the admin already configured a CTA)
+- contact section
+- SEO metadata
+- theme selection (color palette, font)
+- hero presentation selection
+
+### Hero selection
+
+Use uploaded logo/photo assets for the hero when present. Otherwise automatically select a non-image hero style — gradient, pattern, or solid color. The generated website must never require a full-width hero image; the template's hero must render acceptably with no image at all.
+
+### Guardrails
 
 The model must not invent:
 
@@ -839,27 +920,26 @@ All output must:
 - start in a human-review state
 - remain editable before publication
 
-> **Note (added post-Stage-10):** `PreviewContentSchema` now includes an optional `cta` field (`PreviewCtaConfig` — see `build_log.md`, "Configurable CTA System"). Generated content should populate `content.cta` directly rather than relying on legacy `hero.ctaText` normalization, and must not default to generic phrases like "Get a Quote" — follow the same phone-first/email-fallback/hidden default logic as `buildDefaultCta()` in the admin seed generator unless the admin has already configured a CTA for this business.
-
 ## Acceptance criteria
 
-- An admin can request generation.
+- An admin can create a business.
+- An admin can generate a website from it.
+- AI creates unique `PreviewContent` (including CTA, theme, and hero presentation).
 - Loading and failure states are visible.
-- Valid structured output creates a new preview record.
+- The preview opens at `/b/{slug}`.
 - Invalid output is rejected and not persisted.
 - The new preview remains unpublished.
-- Every generated field can be reviewed and edited.
+- Every generated field, including theme and CTA, can be reviewed and edited.
+- A new `SitePreview` version is created; existing previews remain unchanged.
 - Publishing requires an explicit admin action.
-- Previous preview versions remain intact.
 - Unsupported claims do not appear in test generations.
 - Integration errors are logged safely.
 
 ## Deferred work
 
-- Generation from scan results
+- Generation from scan results — this is now Stage 13's responsibility (Firecrawl Website Enrichment), not Stage 11's
 - Industry-specific prompts
-- Automatic theme generation
-- Image generation
+- AI-generated imagery (distinct from admin-uploaded photos, which are in scope)
 - Automatic publication
 - Prompt experimentation dashboard
 - Cost tracking
@@ -925,41 +1005,90 @@ Stages 7 and 10.
 
 ---
 
-# Stage 13 — Firecrawl Website Capture
+# Stage 13 — Firecrawl Website Enrichment
 
 ## Objective
 
-Scrape a known business homepage and store structured crawl output for later analysis.
+Improve an already-generated website by extracting information from a business's existing website and re-running generation with that additional context. Stage 13 is not responsible for creating the first website — that's Stage 11. It enriches businesses that already have an existing website.
 
 ## Dependencies
 
-Stages 7, 9, 10, and 12.
+Stages 7, 9, 10, 11, and 12.
 
 ## Major deliverables
 
 - Server-side Firecrawl client
-- Manual “Scan Website” admin action
-- ScanEvent lifecycle updates
+- Manual "Generate From Existing Website" admin action
+- `ScanEvent` lifecycle updates
 - Raw crawl output in S3
-- Extracted metadata
+- Extracted structured business information
+- OpenAI merge step (`Business` record + Firecrawl content → improved `PreviewContent`)
+- Conflict-resolution rule (admin-entered data always wins)
+- New `SitePreview` version creation, comparable side-by-side with the Stage 11 version
 - Retry support
 - Safe failure recording
 
 ## Implementation requirements
 
+### Workflow
+
+```text
+Existing Website URL
+        ↓
+Click "Generate From Existing Website"
+        ↓
+Firecrawl crawls website
+        ↓
+Raw crawl stored in S3
+        ↓
+Structured business information extracted
+        ↓
+OpenAI combines:
+    • Business record
+    • Firecrawl content
+        ↓
+Generate improved PreviewContent
+        ↓
+Create new SitePreview version
+        ↓
+Preview
+```
+
 Initial scope is one homepage per scan.
 
-Store or derive:
+### Firecrawl extracts
 
-- title
-- meta description
-- markdown or primary text
-- links
-- image references
-- status code
-- final URL
-- crawl timestamp
-- raw provider output key
+Examples:
+
+- business description
+- services
+- service areas
+- about page
+- contact information
+- FAQ
+- mission statement
+- existing CTAs
+- navigation
+- branding language
+
+Also store or derive, as before: title, meta description, markdown or primary text, links, image references, status code, final URL, crawl timestamp, and the raw provider output key. Raw crawl artifacts are stored in S3.
+
+### OpenAI receives
+
+- the `Business` record
+- Firecrawl-extracted content
+
+OpenAI should not read the website directly — Firecrawl remains responsible for retrieval.
+
+### Conflict resolution
+
+Admin-entered information always takes priority. For example, if the admin entered phone `850-555-1234` and Firecrawl finds `850-555-1111` on the site, do not overwrite the admin value. Instead: keep the verified admin value, surface the conflict for review, and use Firecrawl primarily to fill information the admin left blank.
+
+### Output
+
+Create a new `SitePreview` version. Do not overwrite the Stage 11 (or prior Stage 13) version — this lets the admin compare the Manual AI Generation and the Firecrawl-Enriched Generation before publishing.
+
+### Failure handling
 
 Handle:
 
@@ -973,18 +1102,19 @@ Handle:
 - empty responses
 - redirects and loops
 
-Businesses without a website must follow a separate `no website` path and must not be treated as permanent scan failures.
+Businesses without a website must follow a separate `no website` path and must not be treated as permanent scan failures — Stage 13 simply isn't available for them; Stage 11 remains their generation path.
 
 ## Acceptance criteria
 
-- An admin can start a homepage crawl.
-- A ScanEvent is created.
-- Status transitions are recorded.
-- Raw output is saved privately in S3.
-- The ScanEvent stores the S3 key.
-- Failed scans store a safe failure reason.
-- Failed scans can be retried.
+- An admin can start a crawl of an existing website.
+- A `ScanEvent` is created and its status transitions are recorded.
+- Raw output is saved privately in S3; the `ScanEvent` stores the S3 key.
+- Failed scans store a safe failure reason and can be retried.
 - One failed scan does not permanently invalidate the business.
+- OpenAI combines the `Business` record and Firecrawl content into a new `SitePreview` version.
+- Admin-entered fields are never overwritten by Firecrawl-discovered values.
+- The new version does not overwrite the Stage 11–generated version — both remain viewable for comparison.
+- Publishing still requires an explicit admin action.
 - API credentials remain server-side.
 
 ## Deferred work
@@ -994,6 +1124,7 @@ Businesses without a website must follow a separate `no website` path and must n
 - Content-diff detection
 - Robots-policy reporting
 - Crawl-cost tracking
+- Dedicated side-by-side conflict-diff UI (v1 relies on comparing two full `SitePreview` versions, not a field-level diff)
 
 ---
 
@@ -2190,7 +2321,7 @@ Stages 12–15.
 
 Outcome:
 
-- Admins can discover businesses, capture their websites, and prioritize prospects.
+- Admins can discover businesses, capture and enrich generated previews from their existing websites (Stage 13), and prioritize prospects.
 
 ## Milestone 7 — Workflow automation
 
