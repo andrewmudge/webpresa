@@ -12,7 +12,7 @@ export default function PreviewsPage() {
       </p>
       <div className="rounded-xl border border-dashed border-gray-200 p-10 text-center text-sm text-gray-400">
         To create a preview, go to{' '}
-        <Link href="/admin/businesses" className="text-[--color-brand] underline">Businesses</Link>
+        <Link href="/admin/businesses" className="text-(--color-brand) underline">Businesses</Link>
         {' '}→ click a business → &ldquo;Create test preview&rdquo;.
       </div>
     </div>

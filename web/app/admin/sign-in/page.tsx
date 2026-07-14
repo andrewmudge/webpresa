@@ -8,10 +8,10 @@ export default function SignInPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
       <div className="w-full max-w-sm">
-        <div className="bg-white rounded-2xl shadow-sm border border-[--color-border] p-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-(--color-border) p-8">
           {/* Logo / brand */}
           <div className="mb-8 text-center">
-            <span className="text-2xl font-bold text-[--color-brand]">Webpresa</span>
+            <span className="text-2xl font-bold text-(--color-brand)">Webpresa</span>
             <p className="text-sm text-gray-500 mt-1">Admin Dashboard</p>
           </div>
 
@@ -40,7 +40,7 @@ export default function SignInPage() {
                 type="text"
                 autoComplete="username"
                 required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
               />
               {state?.errors?.username && (
                 <p className="mt-1 text-xs text-red-600">{state.errors.username[0]}</p>
@@ -61,7 +61,7 @@ export default function SignInPage() {
                 type="password"
                 autoComplete="current-password"
                 required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
               />
               {state?.errors?.password && (
                 <p className="mt-1 text-xs text-red-600">{state.errors.password[0]}</p>
@@ -71,7 +71,7 @@ export default function SignInPage() {
             <button
               type="submit"
               disabled={pending}
-              className="w-full rounded-lg bg-[--color-brand] text-white py-2.5 text-sm font-medium hover:bg-[--color-brand-dark] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {pending ? 'Signing in…' : 'Sign in'}
             </button>

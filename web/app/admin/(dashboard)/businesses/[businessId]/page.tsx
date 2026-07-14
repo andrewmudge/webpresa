@@ -34,7 +34,7 @@ export default async function BusinessDetailPage({ params }: Props) {
     <div className="p-8 max-w-5xl">
       {/* Breadcrumb */}
       <nav className="text-sm text-gray-400 mb-6">
-        <Link href="/admin/businesses" className="hover:text-[--color-brand]">
+        <Link href="/admin/businesses" className="hover:text-(--color-brand)">
           Businesses
         </Link>
         <span className="mx-2">/</span>
@@ -88,7 +88,7 @@ export default async function BusinessDetailPage({ params }: Props) {
                   href={business.websiteUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-[--color-brand] hover:underline truncate max-w-xs"
+                  className="text-sm text-(--color-brand) hover:underline truncate max-w-xs"
                 >
                   {business.websiteUrl}
                 </a>
@@ -318,7 +318,7 @@ function ScoreRow({ label, value }: { label: string; value: number }) {
       </div>
       <div className="h-1.5 rounded-full bg-gray-100">
         <div
-          className="h-full rounded-full bg-[--color-brand]"
+          className="h-full rounded-full bg-(--color-brand)"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -356,7 +356,7 @@ function HistoryCard({
         </ul>
       )}
       {count > 3 && (
-        <Link href={viewAllHref} className="mt-2 block text-xs text-[--color-brand] hover:underline">
+        <Link href={viewAllHref} className="mt-2 block text-xs text-(--color-brand) hover:underline">
           View all {count} →
         </Link>
       )}

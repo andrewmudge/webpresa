@@ -23,11 +23,11 @@ export default async function EditBusinessPage({ params }: Props) {
     <div className="p-8 max-w-3xl">
       {/* Breadcrumb */}
       <nav className="text-sm text-gray-400 mb-6">
-        <Link href="/admin/businesses" className="hover:text-[--color-brand]">
+        <Link href="/admin/businesses" className="hover:text-(--color-brand)">
           Businesses
         </Link>
         <span className="mx-2">/</span>
-        <Link href={`/admin/businesses/${businessId}`} className="hover:text-[--color-brand]">
+        <Link href={`/admin/businesses/${businessId}`} className="hover:text-(--color-brand)">
           {business.name}
         </Link>
         <span className="mx-2">/</span>

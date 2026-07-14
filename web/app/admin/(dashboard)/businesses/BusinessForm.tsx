@@ -42,7 +42,7 @@ function Field({
         type={type}
         defaultValue={defaultValue ?? ''}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent"
+        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
       />
       {errors?.map((e) => (
         <p key={e} className="mt-1 text-xs text-red-600">
@@ -74,7 +74,7 @@ function TextareaField({ label, name, defaultValue, errors, placeholder, rows = 
         rows={rows}
         defaultValue={defaultValue ?? ''}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent"
+        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
       />
       {errors?.map((e) => (
         <p key={e} className="mt-1 text-xs text-red-600">
@@ -146,7 +146,7 @@ function SelectField({ label, name, options, defaultValue, errors, required }: S
         id={name}
         name={name}
         defaultValue={defaultValue}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent bg-white"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent bg-white"
       >
         {options.map((opt) => (
           <option key={opt} value={opt}>
@@ -187,7 +187,7 @@ function ThemeField({ label, name, defaultValue, errors }: ThemeFieldProps) {
         id={name}
         name={name}
         defaultValue={defaultValue ?? ''}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent bg-white"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent bg-white"
       >
         <option value="">Auto — chosen from logo color or brand personality</option>
         {THEME_OPTIONS.map((t) => (

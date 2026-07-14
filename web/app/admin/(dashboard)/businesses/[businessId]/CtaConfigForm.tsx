@@ -91,7 +91,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
               name="primaryType"
               defaultValue={defaults.primary.type}
               onChange={(e) => setPrimaryType(e.target.value as CtaActionType)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
             >
               {CTA_ACTION_TYPES.map((t) => (
                 <option key={t} value={t}>{ACTION_TYPE_LABELS[t]}</option>
@@ -111,7 +111,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                 maxLength={40}
                 defaultValue={defaults.primary.label}
                 placeholder="Call Now"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
               />
               <FieldErrors errors={errors.primaryLabel} />
             </div>
@@ -127,7 +127,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                 type="text"
                 defaultValue={defaults.primary.value ?? ''}
                 placeholder={primaryType === 'external_url' ? 'https://…' : undefined}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
               />
               {destinationHelp(primaryType) && (
                 <p className="mt-1 text-xs text-gray-400">{destinationHelp(primaryType)}</p>
@@ -147,7 +147,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
             type="checkbox"
             defaultChecked={!!defaults.secondary}
             onChange={(e) => setSecondaryEnabled(e.target.checked)}
-            className="rounded border-gray-300 text-[--color-brand] focus:ring-[--color-brand]"
+            className="rounded border-gray-300 text-(--color-brand) focus:ring-(--color-brand)"
           />
           <label htmlFor="secondaryEnabled" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Secondary CTA
@@ -164,7 +164,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                 name="secondaryType"
                 defaultValue={secondaryDefaults.type}
                 onChange={(e) => setSecondaryType(e.target.value as CtaActionType)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
               >
                 {CTA_ACTION_TYPES.map((t) => (
                   <option key={t} value={t}>{ACTION_TYPE_LABELS[t]}</option>
@@ -184,7 +184,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                   maxLength={40}
                   defaultValue={secondaryDefaults.label}
                   placeholder="Email Us"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
                 />
                 <FieldErrors errors={errors.secondaryLabel} />
               </div>
@@ -200,7 +200,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                   type="text"
                   defaultValue={secondaryDefaults.value ?? ''}
                   placeholder={secondaryType === 'external_url' ? 'https://…' : undefined}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[--color-brand]"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
                 />
                 {destinationHelp(secondaryType) && (
                   <p className="mt-1 text-xs text-gray-400">{destinationHelp(secondaryType)}</p>

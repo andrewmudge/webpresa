@@ -37,7 +37,7 @@ export default async function BusinessListPage({ searchParams }: Props) {
         </div>
         <Link
           href="/admin/businesses/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-[--color-brand] text-white px-4 py-2 text-sm font-medium hover:bg-[--color-brand-dark] transition-colors"
+          className="inline-flex items-center gap-2 rounded-lg bg-(--color-brand) text-white px-4 py-2 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
         >
           + New business
         </Link>
@@ -57,7 +57,7 @@ export default async function BusinessListPage({ searchParams }: Props) {
       {!loadError && items.length === 0 && (
         <div className="text-center py-20 text-gray-400">
           <p className="text-lg mb-2">No businesses yet</p>
-          <Link href="/admin/businesses/new" className="text-sm text-[--color-brand] hover:underline">
+          <Link href="/admin/businesses/new" className="text-sm text-(--color-brand) hover:underline">
             Add the first business →
           </Link>
         </div>
@@ -90,7 +90,7 @@ export default async function BusinessListPage({ searchParams }: Props) {
         <div className="mt-6 text-center">
           <Link
             href={`/admin/businesses?cursor=${encodeURIComponent(nextCursor)}`}
-            className="text-sm text-[--color-brand] hover:underline"
+            className="text-sm text-(--color-brand) hover:underline"
           >
             Load more →
           </Link>
@@ -106,7 +106,7 @@ function BusinessRow({ business: b }: { business: Business }) {
       <td className="px-4 py-3">
         <Link
           href={`/admin/businesses/${b.businessId}`}
-          className="font-medium text-gray-900 hover:text-[--color-brand] hover:underline"
+          className="font-medium text-gray-900 hover:text-(--color-brand) hover:underline"
         >
           {b.name}
         </Link>
