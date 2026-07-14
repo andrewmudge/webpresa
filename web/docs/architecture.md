@@ -1,7 +1,7 @@
 # Webpresa — Architecture
 
-**Last updated:** 2026-07-13  
-**Status:** Stage 10 complete in development — premium generated website template live, now with a navy/orange theme, a configurable primary/secondary CTA system, and a picture background on the featured service card; admin with cascade delete; DynamoDB tables, S3 assets bucket, and Secrets Manager secrets live in `us-east-1`. Hosting on Vercel.
+**Last updated:** 2026-07-14  
+**Status:** Stage 10 complete in development. **Stage 11 (Manual AI Website Generation) foundation implemented and live-tested in development** — an admin can enter verified business facts, upload a logo/photos, and generate a real `SitePreview` (content, CTA, theme, hero presentation) via the OpenAI API; generated previews stay in draft until manually published. **Brand Theme System implemented** — AI (and admins) select from 10 curated theme presets by name only; no free-form color generation remains anywhere in the app. Premium generated website template live with a configurable primary/secondary CTA system and a picture background on the featured service card; admin with cascade delete; DynamoDB tables, S3 assets bucket, and Secrets Manager secrets live in `us-east-1`. Hosting on Vercel.
 
 ---
 
@@ -52,6 +52,8 @@ Protected internal dashboard for operating Webpresa manually. Built in Stage 7; 
 - **Business cascade delete** — removes the business record plus all SitePreviews, ScanEvents, and Postcards for that business
 - **Create test preview** action on the business detail page — seeds a published `SitePreview` from the business record
 - **Preview CTA editor** on the business detail page — configure the primary/secondary CTA (action type, label, destination override) on the most recent preview version; edits the preview in place, no new version created
+- **Website Generation + Assets** — the business creation/edit form (`BusinessForm.tsx`) captures free-text generation inputs (services offered, service areas, description, differentiators, brand tone, notes) and logo/photo uploads, persisted on the `Business` record so generation can be re-run later without re-entering data
+- **Generate Website** action on the business detail page — calls the OpenAI API to produce a complete draft `SitePreview` (content, CTA, theme, hero presentation) from the business's verified fields; soft-capped at 3 real generations per business (the free seed-preview action is unaffected); always saves as `draft`, never auto-published
 - Preview history, scan history, and postcard history on the business detail page
 - Placeholder pages for `/admin/previews`, `/admin/scans`, `/admin/postcards`
 
@@ -70,14 +72,15 @@ Customer-facing route that renders a `SitePreview` record as a professional loca
 
 - `/b/[slug]` — server-rendered (`force-dynamic`), queries the `slug-index` GSI on `webpresa-dev-site-previews`
 - Draft / ready previews visible to authenticated admins only; published visible publicly; archived returns 404
-- `generateMetadata` sets `noindex, nofollow` on unclaimed previews (`Business.status !== 'active'`)
+- `generateMetadata` sets `noindex, nofollow` on unclaimed previews (`Business.status !== 'active'`); prefers `content.seo.title`/`description` when an AI-generated preview supplied them, falling back to the hero headline/subheadline otherwise
 - Dismissible claim banner shown on published-but-unclaimed previews
-- Theme colors applied via CSS custom properties (`--site-primary`, `--site-accent`) set on the root wrapper; all child sections reference `var(--site-primary)` via inline styles. Default seed theme is navy (`#0F356B`) / orange (`#ED7023`)
+- Theme colors applied via CSS custom properties (`--site-primary`, `--site-accent`, `--site-background`, `--site-surface`, `--site-text`, `--site-muted`, `--site-border`, `--site-success`, `--site-warning`, `--site-danger`) set on the root wrapper by `buildSiteTokens()` (`template/tokens.ts`), which resolves the preview's `PreviewTheme` to a full `BrandTheme` palette via `resolveThemePalette()` (`lib/themes.ts`) — see "Brand Theme System" below. All child sections reference `var(--site-*)`, either via Tailwind v4's `bg-(--site-*)`/`text-(--site-*)`/`border-(--site-*)` CSS-variable shorthand (parentheses, not square brackets — bracket arbitrary-value syntax emits the variable name as a literal, invalid value; see `build_log.md`, "Bug Fix — Tailwind CSS-variable syntax") or inline styles through the `V` shorthand object. No template component contains a hardcoded branding color.
 - Template: `app/b/[slug]/template/` — 11 rendering components plus a shared `cta.tsx` resolver:
   `GeneratedSiteHeader`, `GeneratedHero`, `TrustStrip`, `ServicesGrid`, `WhyChooseUs`, `AboutSection`, `ServiceAreaSection`, `ContactSection`, `FinalCTA`, `GeneratedSiteFooter`, `MobileCallBar`
 - Sections with no data are hidden via conditional rendering (no hardcoded copy)
 - **Configurable CTA system:** `PreviewContent.cta` (`PreviewCtaConfig` — optional primary + secondary `PreviewCta`, each with an action `type` of `phone` / `email` / `sms` / `external_url` / `none`, a `label`, and an optional destination `value`) replaces hardcoded button copy across the template. `cta.tsx`'s `resolvePreviewCtaConfig()` is the single place that resolves configured CTAs into renderable links — phone/SMS/email fall back to `SitePreview.content.contact`, `external_url` requires a safe `https://` destination, and previews saved before this field existed (no `content.cta`) are normalized from the legacy `hero.ctaText` + `contact` at render time rather than migrated. Header, hero, Why Choose Us, About, Service Areas, the final CTA band, and the mobile sticky bar all read from the same resolved `{ primary, secondary }` pair; the phone/email cards in `ContactSection` and the footer stay tied directly to `contact` and are not part of the CTA system.
 - `ServicesGrid`'s featured (first) service card shows a picture background on `lg:`+ screens (currently a `picsum.photos` `DEV_FIXTURE` placeholder — intended to be replaced by a real per-service photo once Stage 13 supplies one) and matches the other cards' styling below `lg:`
+- **Hero presentation:** `PreviewTheme.heroStyle` (`image` / `gradient` / `pattern` / `solid`) drives `GeneratedHero`'s background — an uploaded photo always renders as `image`; otherwise a CSS `linear-gradient` or radial-gradient dot pattern (both built from `color-mix()` over the theme's primary/accent CSS variables — no new image assets) or a flat fallback. Legacy previews without `heroStyle` are inferred as `image` (if `heroImageUrl` is set) or `solid`.
 - Industry-specific seed content generated by `createSeedPreviewAction` in the admin, including a default CTA derived from the business's phone/email (`buildDefaultCta()` in `cta-defaults.ts`) — never defaults to generic phrases like "Get a Quote"
 
 ---
@@ -94,14 +97,16 @@ Pure TypeScript — no AWS, no React, no runtime framework dependencies. Importe
 
 `domain/constants/industries.ts` — canonical `INDUSTRIES` array and `Industry` union type. Single source of truth used by models, schemas, and the database.
 
+`domain/constants/themes.ts` — canonical `THEME_NAMES` array and `ThemeName` union type (the 10 approved Brand Theme System preset identifiers) plus `DEFAULT_THEME_NAME`. The actual color palettes live in `lib/themes.ts`, not here — see "Brand Theme System" above.
+
 ### Models (`domain/models/`)
 
 TypeScript interfaces only. No runtime code.
 
 | Model | Key fields |
 |---|---|
-| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs |
-| `SitePreview` | `previewId`, `businessId`, `slug`, `version` (monotonic), `status`, `templateId`, `content` (strict shape, includes optional `cta` — see `PreviewCtaConfig`), `theme` |
+| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), and `theme?` (the stored Brand Theme System preset) |
+| `SitePreview` | `previewId`, `businessId`, `slug`, `version` (monotonic), `status`, `templateId`, `content` (strict shape, includes optional `cta` — see `PreviewCtaConfig`), `theme` (`PreviewTheme.themeName` — see "Brand Theme System") |
 | `ScanEvent` | `scanId`, `businessId`, `status`, `sourceUrl`, `scores?`, `storageKeys?`, `startedAt`, `completedAt?` |
 | `Postcard` | `postcardId`, `businessId`, `previewId`, `provider`, `campaignCode`, `qrDestination`, `status`, `mailedAt?`, `deliveredAt?` |
 
@@ -230,14 +235,18 @@ scans/{businessId}/{scanId}/desktop.png
 scans/{businessId}/{scanId}/mobile.png
 previews/{businessId}/{previewId}/...
 postcards/{businessId}/{postcardId}/...
+businesses/{businessId}/assets/logo.{ext}
+businesses/{businessId}/assets/photos/{n}.{ext}
 ```
+
+The `businesses/` prefix (added in the Stage 11 foundation work) is the only one with a public-facing read path: `app/api/assets/[...key]/route.ts` — the app's first Route Handler — proxies `GET` requests for that prefix only, streaming via `getAsset()` with a one-year `Cache-Control`. Every other prefix stays fully private; there is deliberately no general-purpose public route into the bucket.
 
 The `retain=false` object tag is *not yet written by anything* — Stage 9 only provisions the lifecycle rule. Stages 13/14 (scan artifacts) and 22 (postcards) are expected to set this tag when a scan or postcard is marked failed/obsolete, so the existing rule expires it automatically.
 
 ### Application-side access
 
 - `web/lib/s3/client.ts` — `server-only` singleton `S3Client`, same region/credential pattern as `web/lib/db/client.ts` (`AWS_REGION`, `AWS_PROFILE` locally, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` on Vercel). `getAssetsBucketName()` reads `ASSETS_BUCKET_NAME`.
-- `web/lib/s3/assets.ts` — `server-only` generic helpers: `putAsset`, `getAsset` (returns `null` on `NoSuchKey`), `getSignedAssetUrl` (short-lived signed URL, 300s default, for private admin viewing). All three reject keys outside the `scans/`, `previews/`, `postcards/` prefixes before calling S3.
+- `web/lib/s3/assets.ts` — `server-only` generic helpers: `putAsset`, `getAsset` (returns `null` on `NoSuchKey`), `getSignedAssetUrl` (short-lived signed URL, 300s default, for private admin viewing). All three reject keys outside the `scans/`, `previews/`, `postcards/`, `businesses/` prefixes before calling S3.
 - No domain-model or UI wiring yet — `ScanEvent.storageKeys`, the `/admin/scans` and `/admin/postcards` placeholder pages, and any `Postcard` creative-file field are populated by the stages that actually produce that data (13, 14, 22), not Stage 9.
 
 ### IAM
@@ -262,11 +271,50 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 
 - `web/lib/secrets/client.ts` — `server-only` singleton `SecretsManagerClient`, same region/credential pattern as `web/lib/db/client.ts` and `web/lib/s3/client.ts`. `getSecretJson(secretName)` fetches and JSON-parses a secret's `SecretString`, caching the result **indefinitely for the lifetime of the process** (matches Vercel's serverless function instance reuse — a fresh cold start re-fetches). Automated rotation is deferred work; today, rotating a secret requires a redeploy or cold start to take effect.
 - `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
-- No caller code exists yet — these are foundation for Stages 11, 12, 13, 18, and 22. Never log a secret's parsed value or raw `SecretString`.
+- `getOpenAiSecret()` got its first real caller in Stage 11 (see "AI / OpenAI integration" below). Firecrawl, Google Places, Stripe, and Lob remain foundation-only for their respective later stages. Never log a secret's parsed value or raw `SecretString`.
 
 ### IAM
 
 The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `secretsmanager:GetSecretValue` scoped to the 5 dev secret ARNs. As with the S3 bucket, future dedicated Lambda execution roles (Stages 13, 18, 22) should be scoped to only the one secret each integration needs, not this broad grant.
+
+---
+
+## Brand Theme System
+
+**Implemented 2026-07-14.** Replaces free-form AI-generated hex colors with a curated set of 10 professionally designed theme presets. No code path — AI or otherwise — may invent, blend, or free-type a color; the only decision anyone (a person or the model) makes is *which preset name* to use.
+
+- `web/domain/constants/themes.ts` — `THEME_NAMES` (the 10 approved preset identifiers) and `DEFAULT_THEME_NAME` (`'classicBlue'`). Single source of truth for which names are valid, imported by both schemas and models — mirrors the `industries.ts` / `brand-tone.ts` pattern.
+- `web/lib/themes.ts` — `THEMES: Record<ThemeName, BrandTheme>`, the actual palettes. Every `BrandTheme` carries `primary`, `accent`, `background`, `surface`, `text`, `mutedText`, `border`, `success`, `warning`, `danger` (all validated hex in tests), plus `displayName` and `bestFor` (the industries each preset is designed for — shown in the admin theme picker and fed to the AI selection prompt). `resolveThemePalette(theme)` is the single render-time lookup: it resolves `PreviewTheme.themeName` directly, or — for previews saved before this system existed — falls back to the default preset's neutrals with the legacy `primaryColor`/`accentColor` substituted in.
+- `PreviewTheme.themeName` (`domain/models/site-preview.ts`) replaces free-form `primaryColor`/`accentColor` as the source of a preview's brand colors. The legacy fields remain on the type and schema (`PreviewThemeSchema` requires one or the other via `.refine()`) purely for backward compatibility with previews generated before this system — no code path may set them on a new preview.
+- `Business.theme` (`domain/models/business.ts`) — the resolved preset persisted on the business record, so every regeneration reuses it instead of re-deriving it. Editable via the "Theme" field on `BusinessForm.tsx` (an "Auto" option plus the 10 named presets); leaving it on Auto clears any stored override and lets selection run again on the next generation.
+
+### Selection logic (`web/lib/theme/`)
+
+- `logo-color.ts` — `detectLogoThemeFamily(logoUrl)` (Step 1: existing branding). Reads the logo from S3 via `getAsset()`, uses `sharp` to flatten transparency onto white and downsample to a single pixel (a cheap stand-in for a full dominant-color histogram), converts that average RGB to HSL, and classifies the hue/saturation/lightness into the closest preset family (`classifyHsl()`, exported for testing). Returns `null` — never a guess — when the logo can't be read or its color is too neutral to signal a brand family.
+- `select-theme.ts`:
+  - `pickStoredOrLogoTheme(business)` — Steps 3 (reuse) + 1 (logo), shared by both paths below; never calls OpenAI.
+  - `pickThemeViaOpenAi(business)` — Step 2 (no logo, no stored preference). Sends brand personality signals (industry, description, brand tone, differentiators, notes) plus each preset's name/`bestFor` list to OpenAI, constrained via `zodResponseFormat` to an enum of `THEME_NAMES` — the model literally cannot return anything outside the 10 approved names, let alone a color.
+  - `resolveBusinessTheme(business)` — full selection for real AI generation: stored/logo, else OpenAI.
+  - `resolveBusinessThemeForSeed(business)` — selection for the free, no-cost seed-preview path: stored/logo, else a deterministic `INDUSTRY_THEME_DEFAULTS` map (`industry-defaults.ts`, derived from each preset's `bestFor` list). Never calls OpenAI, so "Create test preview" stays free and instant.
+- Both `generateWebsiteAction` and `createSeedPreviewAction` persist a newly resolved theme back onto the `Business` record (only when `business.theme` was previously unset) so every future regeneration reuses it — Step 3 of the spec.
+
+### Deferred
+
+- **Firecrawl re-detection** (Stage 13): when a scan discovers an existing logo/branding, compare it against the current theme and auto-switch + regenerate if it differs significantly. Not implemented — Stage 13 doesn't exist yet.
+- Logo color detection is an average-pixel approximation, not a true dominant-color histogram; good enough for family classification (which hue band a logo falls into), not exact-shade matching.
+
+---
+
+## AI / OpenAI integration
+
+**Implemented in the Stage 11 foundation work.** Live-tested against the real OpenAI API — real usage costs apply per generation.
+
+- `web/lib/ai/client.ts` — `server-only` singleton `OpenAI` client, built from `getOpenAiSecret()` (fetched once, cached for the process lifetime via the Secrets layer's own caching). Model is read from `OPENAI_MODEL` (env var, default `gpt-4o-mini`) rather than hardcoded.
+- `web/lib/ai/generate-preview.ts` — `generatePreviewContent(business)` makes one structured-output request (`chat.completions.parse` + the `openai/helpers/zod` `zodResponseFormat` helper) covering hero copy, services, tagline, about text, differentiators, CTA button *labels*, font, and hero-style choice, run in parallel with the Brand Theme System's `resolveBusinessTheme(business)` (see above) — theme selection is a separate, independent OpenAI concern that never shares a response schema with content generation.
+  - **Design invariant:** contact info, service areas, and CTA *type/destination* are always derived in code from the verified `Business` record — never trusted from the model. The model only supplies CTA labels, which are merged into a type/destination structure computed by `buildDefaultCta()` (same phone-first/email-fallback/hidden-CTA priority used by the CTA system's admin default). An uploaded photo always wins over the model's hero-style pick. Brand colors are never trusted from the model either — see "Brand Theme System" above.
+  - Output is re-validated against `PreviewContentSchema` / the theme schema before being returned — defense in depth beyond the API's own schema enforcement.
+- `generateWebsiteAction` (`app/admin/(dashboard)/businesses/[businessId]/actions.ts`) — soft-capped at 3 real generations per business; always saves the result as a `draft` `SitePreview`, never auto-published.
+- OpenAI's strict structured-output mode has real constraints worth knowing about if this prompt/schema changes: it rejects `"` characters inside enum string literals (bit the font-family list on first live test — see `build_log.md`, "Bug Fixes — Live Generation Testing").
 
 ---
 
@@ -286,6 +334,7 @@ The homepage requires no environment variables. The admin dashboard requires all
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | Postcard repository |
 | `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets client (`web/lib/s3/`) |
 | `OPENAI_SECRET_NAME` | Deterministic — `webpresa-dev-openai` | Secrets client (`web/lib/secrets/`) |
+| `OPENAI_MODEL` | Configurable — default `gpt-4o-mini` | AI client (`web/lib/ai/client.ts`) |
 | `FIRECRAWL_SECRET_NAME` | Deterministic — `webpresa-dev-firecrawl` | Secrets client (`web/lib/secrets/`) |
 | `GOOGLE_PLACES_SECRET_NAME` | Deterministic — `webpresa-dev-google-places` | Secrets client (`web/lib/secrets/`) |
 | `STRIPE_SECRET_NAME` | Deterministic — `webpresa-dev-stripe` | Secrets client (`web/lib/secrets/`) |
@@ -321,9 +370,11 @@ Admin mutations use **Next.js Server Actions** (`'use server'` modules):
 
 - `web/lib/auth/actions.ts` — `signIn`, `signOut`
 - `web/app/admin/(dashboard)/businesses/actions.ts` — `createBusinessAction`, `editBusinessAction`
-- `web/app/admin/(dashboard)/businesses/[businessId]/actions.ts` — `createSeedPreviewAction`, `updatePreviewCtaAction`, `deleteBusinessAction`
+- `web/app/admin/(dashboard)/businesses/[businessId]/actions.ts` — `createSeedPreviewAction`, `updatePreviewCtaAction`, `generateWebsiteAction`, `deleteBusinessAction`
 
 All actions validate input with Zod and verify the admin session before any DynamoDB call. No raw DynamoDB code in UI components — all reads and writes go through the repository layer.
+
+The one exception to the Server Action pattern: `web/app/api/assets/[...key]/route.ts` is a Next.js Route Handler (not a Server Action) — it needs to be a real HTTP `GET` endpoint so `<Image>`/`<img>` tags can address it directly by URL. It's intentionally public (no session check) but scoped to only the `businesses/` S3 prefix.
 
 ---
 
@@ -348,6 +399,11 @@ web/lib/
   secrets/
     client.ts            SecretsManagerClient singleton + cached getSecretJson (server-only) — Stage 10
     index.ts              Typed wrappers — getOpenAiSecret, getStripeSecret, etc. — Stage 10
+  themes.ts              Brand Theme System — the 10 curated palettes + resolveThemePalette()
+  theme/
+    logo-color.ts         Logo dominant-color detection (server-only, sharp) — Brand Theme System Step 1
+    industry-defaults.ts  Deterministic industry → theme fallback for the free seed path
+    select-theme.ts       Selection orchestration (stored → logo → OpenAI) — Brand Theme System
 ```
 
 All repository files import `server-only` to prevent accidental bundling in client code. All functions accept and return canonical domain types from `@/domain/models`. Zod schemas are re-validated on every write.

@@ -176,6 +176,24 @@ describe('createBusinessAction — success flow', () => {
     expect(saved.brandTone).toBe('friendly');
     expect(saved.notes).toBe('Prefers email contact.');
   });
+
+  it('persists an explicit theme override', async () => {
+    const fd = makeFormData({ ...VALID_BUSINESS_FIELDS, theme: 'green' });
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.theme).toBe('green');
+  });
+
+  it('leaves theme undefined ("Auto") when no theme is selected', async () => {
+    const fd = makeFormData(VALID_BUSINESS_FIELDS);
+
+    await expect(createBusinessAction(undefined, fd)).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.theme).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

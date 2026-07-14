@@ -7,6 +7,7 @@ import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { PreviewContentSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 import { generatePreviewContent } from '@/lib/ai/generate-preview';
+import { resolveBusinessThemeForSeed } from '@/lib/theme/select-theme';
 import { buildDefaultCta } from './cta-defaults';
 import {
   listPreviewsForBusiness,
@@ -16,7 +17,7 @@ import {
 } from '@/lib/db/site-previews';
 import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
-import { deleteBusinessById, getBusinessById } from '@/lib/db/businesses';
+import { deleteBusinessById, getBusinessById, updateBusiness } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
 
 // ---------------------------------------------------------------------------
@@ -179,17 +180,17 @@ function buildSeedContent(business: Business): PreviewContent {
   return raw;
 }
 
-const SEED_THEME = (industry: string): PreviewTheme => {
-  const seed = INDUSTRY_SEEDS[industry] ?? DEFAULT_SEED;
+async function buildSeedTheme(business: Business): Promise<PreviewTheme> {
+  const seed = INDUSTRY_SEEDS[business.industry] ?? DEFAULT_SEED;
+  const themeName = await resolveBusinessThemeForSeed(business);
   return {
-    primaryColor: '#0F356B',
-    accentColor: '#ED7023',
+    themeName,
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     // DEV_FIXTURE: picsum.photos placeholder — replace with S3 URLs in Stage 9
     heroImageUrl: seed.heroImageUrl,
     aboutImageUrl: seed.aboutImageUrl,
   };
-};
+}
 
 // ---------------------------------------------------------------------------
 // Server action
@@ -203,6 +204,7 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
   if (!business) throw new Error('Business not found');
 
   const content = buildSeedContent(business);
+  const theme = await buildSeedTheme(business);
 
   const existing = await listPreviewsForBusiness(businessId);
   const previousVersion = existing.length > 0 ? Math.max(...existing.map((p) => p.version)) : 0;
@@ -212,12 +214,18 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
     slug: business.slug,
     templateId: 'local-business-v1',
     content,
-    theme: SEED_THEME(business.industry),
+    theme,
     previousVersion,
   });
 
   const published = { ...preview, status: 'published' as const, updatedAt: new Date().toISOString() };
   await putSitePreview(published);
+
+  // Brand Theme System Step 3 — persist the resolved theme so every future
+  // regeneration reuses it instead of re-deriving it.
+  if (!business.theme && theme.themeName) {
+    await updateBusiness(business.businessId, { theme: theme.themeName });
+  }
 
   redirect(`/admin/businesses/${business.businessId}`);
 }
@@ -277,6 +285,12 @@ export async function generateWebsiteAction(
     // Status stays the factory default ('draft') — generated websites always
     // require admin review before publication, never auto-published.
     await putSitePreview(preview);
+
+    // Brand Theme System Step 3 — persist the resolved theme so every future
+    // regeneration reuses it instead of re-deriving it.
+    if (!business.theme && theme.themeName) {
+      await updateBusiness(business.businessId, { theme: theme.themeName });
+    }
   } catch (err) {
     console.error('Failed to generate website:', err instanceof Error ? err.message : err);
     return { message: 'Failed to generate website. Please try again.' };

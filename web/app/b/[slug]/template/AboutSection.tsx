@@ -10,7 +10,7 @@ interface Props {
 
 export function AboutSection({ businessName, tagline, aboutText, primary }: Props) {
   return (
-    <section id="about" className="py-20 bg-white">
+    <section id="about" className="py-20 bg-(--site-background)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           {/* Text */}
@@ -19,12 +19,12 @@ export function AboutSection({ businessName, tagline, aboutText, primary }: Prop
               About Us
             </p>
             <h2
-              className="font-extrabold text-gray-900 leading-tight mb-5"
+              className="font-extrabold text-(--site-text) leading-tight mb-5"
               style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)' }}
             >
               {tagline}
             </h2>
-            <p className="text-gray-500 leading-relaxed mb-7 max-w-prose">{aboutText}</p>
+            <p className="text-(--site-muted) leading-relaxed mb-7 max-w-prose">{aboutText}</p>
             {primary && (
               <a
                 href={primary.href}

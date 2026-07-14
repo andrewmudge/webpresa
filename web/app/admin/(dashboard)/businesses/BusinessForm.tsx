@@ -5,6 +5,7 @@ import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import type { Business } from '@/domain/models/business';
+import { THEME_OPTIONS } from '@/lib/themes';
 import type { BusinessFormState } from './actions';
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,51 @@ function SelectField({ label, name, options, defaultValue, errors, required }: S
           </option>
         ))}
       </select>
+      {errors?.map((e) => (
+        <p key={e} className="mt-1 text-xs text-red-600">
+          {e}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+interface ThemeFieldProps {
+  label: string;
+  name: string;
+  defaultValue?: string;
+  errors?: string[];
+}
+
+/**
+ * Brand Theme System override. Left on "Auto" (the default), the theme is
+ * derived from the business's logo color or, absent a logo, from an
+ * OpenAI personality-based pick — see `lib/theme/select-theme.ts`. Only
+ * the 10 curated presets in `lib/themes.ts` are selectable here; there is
+ * no free-color input, by design.
+ */
+function ThemeField({ label, name, defaultValue, errors }: ThemeFieldProps) {
+  return (
+    <div className="md:col-span-2">
+      <label htmlFor={name} className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+      </label>
+      <select
+        id={name}
+        name={name}
+        defaultValue={defaultValue ?? ''}
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[--color-brand] focus:border-transparent bg-white"
+      >
+        <option value="">Auto — chosen from logo color or brand personality</option>
+        {THEME_OPTIONS.map((t) => (
+          <option key={t.name} value={t.name}>
+            {t.displayName} — best for {t.bestFor.join(', ')}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-xs text-gray-400">
+        Regenerating a website always reuses the stored theme unless you change it here.
+      </p>
       {errors?.map((e) => (
         <p key={e} className="mt-1 text-xs text-red-600">
           {e}
@@ -329,6 +375,12 @@ export function BusinessForm({ action, defaults, submitLabel = 'Save' }: Busines
               errors={errors.notes}
             />
           </div>
+          <ThemeField
+            label="Theme"
+            name="theme"
+            defaultValue={defaults?.theme}
+            errors={errors.theme}
+          />
         </div>
       </section>
 

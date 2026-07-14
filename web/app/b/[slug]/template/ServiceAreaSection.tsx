@@ -11,15 +11,15 @@ export function ServiceAreaSection({ serviceAreas, primary }: Props) {
   if (!serviceAreas || serviceAreas.length === 0) return null;
 
   return (
-    <section id="areas" className="py-20 bg-[#F4F7FA]">
+    <section id="areas" className="py-20 bg-(--site-surface)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 text-center">
         <p className="text-xs font-bold tracking-widest uppercase mb-2" style={{ color: V.accent }}>
           Coverage
         </p>
-        <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3">
+        <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) mb-3">
           Areas We Serve
         </h2>
-        <p className="text-gray-500 mb-10 max-w-md mx-auto">
+        <p className="text-(--site-muted) mb-10 max-w-md mx-auto">
           Providing fast, reliable service across the region.
         </p>
         <div className="flex flex-wrap justify-center gap-3">

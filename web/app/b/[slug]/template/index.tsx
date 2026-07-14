@@ -17,19 +17,23 @@ import { MobileCallBar } from './MobileCallBar';
 interface Props {
   preview: SitePreview;
   businessName: string;
+  logoUrl?: string;
   isClaimed: boolean;
   isDraft: boolean;
   isAdmin: boolean;
 }
 
-export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, isAdmin }: Props) {
+export function GeneratedWebsite({ preview, businessName, logoUrl, isClaimed, isDraft, isAdmin }: Props) {
   const { content, theme } = preview;
   const phone = isValidPhone(content.contact.phone) ? content.contact.phone : undefined;
   const email = isValidEmail(content.contact.email) ? content.contact.email : undefined;
   const { primary, secondary } = resolvePreviewCtaConfig(content);
 
   return (
-    <div style={{ ...buildSiteTokens(theme), fontFamily: theme.fontFamily }} className="min-h-screen">
+    <div
+      style={{ ...buildSiteTokens(theme), fontFamily: theme.fontFamily }}
+      className="min-h-screen bg-(--site-background) text-(--site-text)"
+    >
       {/* Admin draft indicator */}
       {isDraft && isAdmin && (
         <div className="bg-yellow-400 text-yellow-900 text-center text-xs font-bold py-2 px-4 sticky top-0 z-[60]">
@@ -43,6 +47,7 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
       {/* Navigation */}
       <GeneratedSiteHeader
         businessName={businessName}
+        logoUrl={logoUrl}
         serviceAreas={content.serviceAreas}
         services={content.services}
         primary={primary}
@@ -64,7 +69,7 @@ export function GeneratedWebsite({ preview, businessName, isClaimed, isDraft, is
       <TrustStrip />
 
       {/* Services */}
-      <ServicesGrid services={content.services} />
+      <ServicesGrid services={content.services} featuredImageUrl={theme.servicesImageUrl} />
 
       {/* Why choose us (conditional: only when differentiators data present) */}
       {content.differentiators && content.differentiators.length > 0 && (

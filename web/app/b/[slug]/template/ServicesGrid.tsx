@@ -4,27 +4,30 @@ import type { PreviewService } from '@/domain/models/site-preview';
 
 interface Props {
   services: PreviewService[];
+  /** An uploaded business photo always wins over the placeholder below. */
+  featuredImageUrl?: string;
 }
 
-// DEV_FIXTURE: picsum.photos placeholder — replace with a Firecrawl-sourced
+// DEV_FIXTURE: picsum.photos placeholder, used only when the business has no
+// uploaded photo available for this slot — replace with a Firecrawl-sourced
 // service photo once website scanning supplies real images (Stage 13).
 const FEATURED_SERVICE_IMAGE_URL = 'https://picsum.photos/id/1040/800/1000';
 
-export function ServicesGrid({ services }: Props) {
+export function ServicesGrid({ services, featuredImageUrl }: Props) {
   const [featured, ...rest] = services;
 
   return (
-    <section id="services" className="py-20 bg-white">
+    <section id="services" className="py-20 bg-(--site-background)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         {/* Section header */}
         <div className="mb-12">
           <p className="text-xs font-bold tracking-widest uppercase mb-2" style={{ color: V.accent }}>
             Our Services
           </p>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 max-w-xl leading-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) max-w-xl leading-tight">
             Professional work, done right
           </h2>
-          <p className="mt-3 text-gray-500 max-w-lg">
+          <p className="mt-3 text-(--site-muted) max-w-lg">
             From routine maintenance to complex projects — we handle it all with expertise and care.
           </p>
         </div>
@@ -32,7 +35,7 @@ export function ServicesGrid({ services }: Props) {
         {/* Services layout */}
         {services.length === 1 ? (
           // Single service: full-width
-          <ServiceCard service={featured} featured />
+          <ServiceCard service={featured} featured imageUrl={featuredImageUrl} />
         ) : services.length === 2 ? (
           // Two services: equal columns
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -43,7 +46,7 @@ export function ServicesGrid({ services }: Props) {
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
             {/* Featured service */}
             <div className="lg:col-span-2">
-              <ServiceCard service={featured} featured />
+              <ServiceCard service={featured} featured imageUrl={featuredImageUrl} />
             </div>
             {/* Rest */}
             <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
@@ -53,8 +56,8 @@ export function ServicesGrid({ services }: Props) {
         )}
 
         {/* CTA row */}
-        <div className="mt-10 flex items-center justify-between border-t border-gray-100 pt-8">
-          <p className="text-sm text-gray-400">Ready to get started?</p>
+        <div className="mt-10 flex items-center justify-between border-t border-(--site-border) pt-8">
+          <p className="text-sm text-(--site-muted)">Ready to get started?</p>
           <a
             href="#contact"
             className="text-sm font-bold rounded-xl px-5 py-2.5 text-white transition-opacity hover:opacity-90"
@@ -68,10 +71,18 @@ export function ServicesGrid({ services }: Props) {
   );
 }
 
-function ServiceCard({ service, featured = false }: { service: PreviewService; featured?: boolean }) {
+function ServiceCard({
+  service,
+  featured = false,
+  imageUrl,
+}: {
+  service: PreviewService;
+  featured?: boolean;
+  imageUrl?: string;
+}) {
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md bg-[#F4F7FA] border border-slate-100 ${
+      className={`relative overflow-hidden rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md bg-(--site-surface) border border-(--site-border) ${
         featured ? 'min-h-[200px] lg:border-0' : ''
       }`}
     >
@@ -79,7 +90,7 @@ function ServiceCard({ service, featured = false }: { service: PreviewService; f
       {featured && (
         <>
           <Image
-            src={FEATURED_SERVICE_IMAGE_URL}
+            src={imageUrl || FEATURED_SERVICE_IMAGE_URL}
             alt=""
             fill
             className="hidden lg:block object-cover object-center"
@@ -99,10 +110,10 @@ function ServiceCard({ service, featured = false }: { service: PreviewService; f
             d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
         </svg>
       </div>
-      <h3 className={`relative z-10 font-bold text-lg mb-2 text-gray-900 ${featured ? 'lg:text-white' : ''}`}>
+      <h3 className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${featured ? 'lg:text-white' : ''}`}>
         {service.name}
       </h3>
-      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-gray-500 ${featured ? 'lg:text-white/80' : ''}`}>
+      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-(--site-muted) ${featured ? 'lg:text-white/80' : ''}`}>
         {service.description}
       </p>
     </div>

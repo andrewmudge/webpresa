@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
+import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_STATUSES, BUSINESS_SOURCES } from '@/domain/models/business';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 
@@ -52,6 +53,7 @@ export const BusinessSchema = z.object({
   notes: z.string().max(2000).optional(),
   logoUrl: UrlOrPathSchema.optional(),
   photoUrls: z.array(UrlOrPathSchema).max(6).optional(),
+  theme: z.enum(THEME_NAMES).optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

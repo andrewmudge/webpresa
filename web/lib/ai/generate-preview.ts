@@ -5,6 +5,7 @@ import type { Business } from '@/domain/models/business';
 import type { GenerationMetadata, PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
 import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
 import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]/cta-defaults';
+import { resolveBusinessTheme } from '@/lib/theme/select-theme';
 import { getOpenAiClient, getOpenAiModel } from './client';
 
 // ---------------------------------------------------------------------------
@@ -43,8 +44,6 @@ const GenerationOutputSchema = z.object({
   primaryCtaLabel: z.string().min(1).max(40),
   /** Label for the secondary CTA, used only when the business has a second contact channel. */
   secondaryCtaLabel: z.string().min(1).max(40),
-  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   fontFamily: z.enum(FONT_STACKS),
   /** Only used when the business has no uploaded photo — an uploaded photo always wins. */
   heroStyle: z.enum(['gradient', 'pattern', 'solid']),
@@ -93,7 +92,6 @@ function buildPrompt(business: Business): { system: string; user: string } {
     'Write one service entry for each service the business owner listed — do not add extra services.',
     'Write one differentiator entry for each differentiator listed — do not add extra ones. If none were listed, return an empty array.',
     'CTA labels should be short (2-4 words) action phrases appropriate to the brand tone, e.g. "Call Now", "Get a Free Estimate", "Book Online" — never invent unrelated claims in them.',
-    'Pick a primaryColor/accentColor pair that is harmonious, readable as white text over primaryColor, and fits the brand tone.',
   ].join('\n');
 
   const user = [
@@ -143,14 +141,19 @@ export async function generatePreviewContent(business: Business): Promise<Genera
   const { system, user } = buildPrompt(business);
   const startedAt = Date.now();
 
-  const completion = await client.chat.completions.parse({
-    model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    response_format: zodResponseFormat(GenerationOutputSchema, RESPONSE_FORMAT_NAME),
-  });
+  // Content copy and theme-preset selection are independent OpenAI concerns
+  // (see lib/theme/select-theme.ts — the model never invents a color here).
+  const [completion, themeName] = await Promise.all([
+    client.chat.completions.parse({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      response_format: zodResponseFormat(GenerationOutputSchema, RESPONSE_FORMAT_NAME),
+    }),
+    resolveBusinessTheme(business),
+  ]);
 
   const output = completion.choices[0]?.message.parsed;
   if (!output) {
@@ -184,9 +187,10 @@ export async function generatePreviewContent(business: Business): Promise<Genera
     secondary: output.secondaryCtaLabel,
   });
 
-  // --- Hero: an uploaded photo always wins over the model's style pick. ---
+  // --- Hero/about/services: uploaded photos always win over placeholders. ---
   const heroImageUrl = business.photoUrls?.[0];
   const aboutImageUrl = business.photoUrls?.[1] ?? business.photoUrls?.[0];
+  const servicesImageUrl = business.photoUrls?.[2] ?? business.photoUrls?.[1] ?? business.photoUrls?.[0];
 
   const content: PreviewContent = {
     hero: { ...output.hero, ctaText: cta.primary.label || 'Contact Us' },
@@ -201,11 +205,11 @@ export async function generatePreviewContent(business: Business): Promise<Genera
   };
 
   const theme: PreviewTheme = {
-    primaryColor: output.primaryColor,
-    accentColor: output.accentColor,
+    themeName,
     fontFamily: output.fontFamily,
     ...(heroImageUrl ? { heroImageUrl, heroStyle: 'image' as const } : { heroStyle: output.heroStyle }),
     ...(aboutImageUrl ? { aboutImageUrl } : {}),
+    ...(servicesImageUrl ? { servicesImageUrl } : {}),
   };
 
   // Defense in depth — never persist output that didn't pass the model's own

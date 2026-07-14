@@ -1650,3 +1650,291 @@ web/
     ├── architecture.md                                       MODIFIED — CTA system, theme, admin, API boundaries
     └── implementation.md                                     MODIFIED — Stage 8 status pointer, Stage 11 forward-note
 ```
+
+---
+
+# Stage 11 Foundation — Website Generation Inputs, Assets, and Manual AI Generation
+
+**Date:** 2026-07-14
+**Scope:** Implement the plan from the prior session's `implementation.md` rewrite — extend the `Business` domain model and creation form to capture website-generation inputs and uploaded assets (Stages 5, 7, 9), and build the real "Generate Website" pipeline against the live OpenAI API (Stage 11). Stage 13 (Firecrawl enrichment) remains out of scope — it depends on this being stable first.
+
+## Domain model (`domain/`)
+
+- `domain/constants/brand-tone.ts` (new) — `BRAND_TONES` (`professional`, `friendly`, `luxury`, `modern`, `traditional`, `bold`, `warm`), mirroring `industries.ts`'s `as const` array + derived union pattern.
+- `domain/models/business.ts` — new optional `Business` fields: `servicesOffered`, `serviceAreas`, `differentiators` (multi-line free text — one item per line, parsed only at prompt-construction time, never rendered directly), `description`, `brandTone`, `notes`, `logoUrl`, `photoUrls`. All optional; existing records remain valid.
+- `domain/models/site-preview.ts` — `HERO_STYLES = ['image', 'gradient', 'pattern', 'solid']` + `HeroStyle` type, added as optional `PreviewTheme.heroStyle` (legacy previews without it are inferred as `'image'` when `heroImageUrl` is set, else `'solid'`); optional `PreviewContent.seo: { title, description }`.
+- Corresponding Zod schema updates in `business.schema.ts` and `site-preview.schema.ts` (length caps on the new free-text fields, `photoUrls` capped at 6, `seo.title`/`seo.description` capped at 60/160 chars for SEO-tag length limits).
+
+## Form + asset uploads (`app/admin/(dashboard)/businesses/`)
+
+- `BusinessForm.tsx` — new **Website Generation** section (services offered / service areas / description / differentiators as `<textarea>`, brand tone as a `<select>` over `BRAND_TONES`, notes) and **Assets** section (`<input type="file">` for logo, `multiple` for photos), placed between the existing Address and Admin sections. New `TextareaField`/`FileField` helpers alongside the existing `Field`/`SelectField`.
+- `actions.ts` — `createBusinessAction`/`editBusinessAction` extended: new Zod fields (shared `WEBSITE_GENERATION_FIELDS` object spread into both the create and edit schemas), and a new `uploadBusinessAssets(businessId, formData)` helper that reads `File` entries from `FormData`, converts via `file.arrayBuffer()` → `Buffer`, and calls `putAsset()`. Edit preserves the existing `logoUrl`/`photoUrls` when no new file is chosen (upload only replaces what's actually re-submitted).
+- `lib/s3/assets.ts` — added `'businesses/'` to `ALLOWED_PREFIXES`. Keys: `businesses/{businessId}/assets/logo.{ext}`, `businesses/{businessId}/assets/photos/{n}.{ext}`.
+- `app/api/assets/[...key]/route.ts` (new) — the app's **first Route Handler** (everything else is Server Actions/pages). Public `GET` proxy: streams the object via the existing `getAsset()` with a one-year `Cache-Control`, but only for keys under `businesses/` — scans/previews/postcards stay private. This is what `logoUrl`/`photoUrls` actually point at (never a raw S3 URL, since the bucket has no public/CDN path).
+
+## OpenAI client (`lib/ai/client.ts`)
+
+`npm install openai`. Singleton `OpenAI` client built from `getOpenAiSecret()` (Stage 10's secrets layer — its first real caller), mirroring the exact singleton pattern used by `lib/s3/client.ts` / `lib/secrets/client.ts`. Model is read from `OPENAI_MODEL` (new env var, default `gpt-4o-mini`) rather than hardcoded, per Stage 11's explicit requirement.
+
+## Generation pipeline (`lib/ai/generate-preview.ts`, `[businessId]/actions.ts`)
+
+- `generatePreviewContent(business)` — one structured-output call (`chat.completions.parse` + `zodResponseFormat`) returns hero copy, services, tagline, about text, differentiators, CTA *labels*, theme colors/font, and hero-style choice. **Contact info, service areas, and CTA type/destination are always code-derived from the verified `Business` record, never trusted from the model** — `buildDefaultCta()` (from the CTA-system work) was extended to accept optional `labels`, so the model only supplies copy while code retains sole authority over which contact channel becomes primary/secondary. An uploaded photo always wins over the model's hero-style pick. Output is re-validated against `PreviewContentSchema`/the theme schema before being returned (defense in depth beyond the model's own schema guarantee).
+- `generateWebsiteAction(businessId)` (new) — auth check, precondition check (must have at least one service listed, checked before calling OpenAI), 3-generation soft cap (counts previews with `generationMetadata` set — the free seed action is unaffected), creates a new `SitePreview` via the existing `createSitePreview` factory. **Status stays `draft`** — never auto-published, unlike the seed action.
+- `GenerateWebsiteButton.tsx` (new) — admin UI, `useActionState` + pending state, disabled once the cap is hit. `page.tsx` also gained a "Review draft" link when the latest preview is unpublished.
+- `GeneratedHero.tsx` — now branches on `theme.heroStyle`: `image` (existing photo + overlay), `gradient` (CSS `linear-gradient` between primary/accent via `color-mix()`), `pattern` (CSS radial-gradient dot grid, also via `color-mix()`), `solid` (existing flat fallback). No new image assets for gradient/pattern.
+- `/b/[slug]/page.tsx` — `generateMetadata` prefers `content.seo.title`/`description` when present, falling back to the existing hero-derived defaults.
+
+## Tests
+
+158 total (was 119, +39 new): domain tests for the new `Business`/theme/content fields; `lib/s3/__tests__/assets.test.ts` gained a `businesses/` prefix case; new `app/api/assets/[...key]/__tests__/route.test.ts` (4 tests — content-type inference, 404 on missing object, prefix rejection); new `lib/ai/__tests__/client.test.ts` (3) and `generate-preview.test.ts` (8 — precondition, contact/CTA derivation from the business record not the model, hero-image override, model-failure handling); extended `businesses/__tests__/actions.test.ts` (uploads, website-generation fields) and `[businessId]/__tests__/actions.test.ts` (`generateWebsiteAction` success/validation/cap/auth, including a test asserting a raw OpenAI error message is never leaked to the admin-facing response).
+
+## Verification
+
+```
+Lint: 0 errors
+TypeCheck: 0 errors
+Tests: 158 passed (39 new)
+Build: clean — new routes: /api/assets/[...key] (ƒ)
+```
+
+## Files Created / Modified
+
+```
+web/
+├── domain/
+│   ├── constants/brand-tone.ts                                NEW — BRAND_TONES
+│   ├── models/business.ts                                     MODIFIED — website-generation + asset fields
+│   ├── models/site-preview.ts                                 MODIFIED — HeroStyle, PreviewTheme.heroStyle, PreviewContent.seo
+│   ├── schemas/business.schema.ts                              MODIFIED
+│   └── schemas/site-preview.schema.ts                          MODIFIED
+├── lib/
+│   ├── s3/assets.ts                                            MODIFIED — businesses/ prefix
+│   └── ai/
+│       ├── client.ts                                           NEW — OpenAI singleton, OPENAI_MODEL
+│       ├── generate-preview.ts                                 NEW — generatePreviewContent
+│       └── __tests__/{client,generate-preview}.test.ts         NEW — 11 tests
+├── app/
+│   ├── api/assets/[...key]/
+│   │   ├── route.ts                                            NEW — public businesses/ asset proxy
+│   │   └── __tests__/route.test.ts                             NEW — 4 tests
+│   ├── admin/(dashboard)/businesses/
+│   │   ├── BusinessForm.tsx                                    MODIFIED — Website Generation + Assets sections
+│   │   ├── actions.ts                                          MODIFIED — new fields, uploadBusinessAssets
+│   │   ├── __tests__/actions.test.ts                           MODIFIED
+│   │   └── [businessId]/
+│   │       ├── cta-defaults.ts                                 MODIFIED — buildDefaultCta labels param
+│   │       ├── actions.ts                                      MODIFIED — generateWebsiteAction
+│   │       ├── GenerateWebsiteButton.tsx                       NEW
+│   │       ├── page.tsx                                        MODIFIED — Generate Website button, draft link
+│   │       └── __tests__/actions.test.ts                       MODIFIED
+│   └── b/[slug]/
+│       ├── page.tsx                                            MODIFIED — SEO metadata
+│       └── template/GeneratedHero.tsx                          MODIFIED — heroStyle branching
+└── .env.local(.example)                                        MODIFIED — OPENAI_MODEL
+```
+
+---
+
+# Bug Fixes — Live Generation Testing
+
+**Date:** 2026-07-14
+**Scope:** Two real bugs surfaced by manually testing Stage 11 end-to-end against the live OpenAI API and a real business record — neither was caught by the mocked test suite, since both depend on real external-system behavior no mock reproduces.
+
+## Fix 1 — Asset URLs rejected by strict `.url()` validation
+
+`Business.logoUrl`/`photoUrls` and `PreviewTheme.heroImageUrl`/`aboutImageUrl` were validated with plain `z.string().url()`, which requires a full absolute URL (protocol + host). The asset-proxy upload flow (see above) actually produces root-relative paths like `/api/assets/businesses/{id}/assets/logo.png` — the bucket has no public/CDN path, so there's no absolute URL to point at. Every business-asset upload or AI-generated hero image would have failed schema validation at save time.
+
+Added `UrlOrPathSchema` to `domain/schemas/common.schema.ts` — accepts either a full `https?://` URL (e.g. existing `picsum.photos` seed fixtures) or a string starting with `/`. Applied to all four fields in place of `.url()`.
+
+## Fix 2 — OpenAI strict structured-output schema rejected the font-family enum
+
+First live generation attempt failed with:
+```
+400 Invalid schema for response_format 'webpresa_generated_website': In context=('properties', 'fontFamily'), " is not allowed in string literals for structured outputs (strict=true).
+```
+`FONT_STACKS` in `lib/ai/generate-preview.ts` used double-quoted font names (`'system-ui, ..., "Segoe UI", sans-serif'`) — OpenAI's strict JSON-schema mode for structured outputs rejects `"` characters inside enum literal values. Switched to single-quoted font names (CSS accepts either quote style identically), with a comment explaining why double quotes are off-limits there specifically.
+
+## Known gap — not fixed here
+
+AI-selected `primaryColor`/`accentColor` have **no contrast or saturation constraint** beyond "is a valid 6-digit hex code" (`^#[0-9a-fA-F]{6}$`). The prompt's only guidance is "pick a primaryColor/accentColor pair that is harmonious, readable as white text over primaryColor, and fits the brand tone" — free-text instruction, not a verified constraint. Live testing produced a washed-out light-blue/light-yellow pair for `brandTone: 'professional'`. Selection is also non-deterministic — the same business/tone regenerated can yield a different palette. Documented as a Stage 11 deferred item (see `implementation.md`); not addressed in this session.
+
+## Verification
+
+Both fixes covered by the existing domain test suite (`UrlOrPathSchema` exercised via the `logoUrl`/`photoUrls` and theme tests added in the Stage 11 Foundation entry above) and confirmed against the live API — a real `generateWebsiteAction` run completed successfully after both fixes, producing a published-ready draft `SitePreview` with a working hero image from an uploaded photo.
+
+---
+
+# Brand Theme System
+
+**Date:** 2026-07-14
+**Scope:** Replaces free-form AI-generated hex colors with 10 curated, professionally designed theme presets. Neither OpenAI nor any admin form can invent, blend, or free-type a color anymore — the only decision made anywhere in the app is *which preset name* to use. Resolves the "Known gap" documented in the Bug Fixes entry above (no contrast/saturation guardrail, non-deterministic palette selection) by removing free-form color generation entirely rather than constraining it further.
+
+## 1. Dependencies installed
+
+```bash
+npm install sharp
+```
+
+| Package | Purpose |
+|---|---|
+| `sharp` | Server-side image processing — used only to downsample an uploaded logo to a single average-color pixel for theme-family classification (`lib/theme/logo-color.ts`). |
+
+## 2. New domain constants and library
+
+- `domain/constants/themes.ts` — `THEME_NAMES` (10 approved identifiers: `classicBlue`, `premiumNavy`, `contractor`, `modern`, `green`, `orange`, `modernDark`, `warmPremium`, `purple`, `red`) and `DEFAULT_THEME_NAME` (`'classicBlue'`). Mirrors the existing `industries.ts` / `brand-tone.ts` single-source-of-truth pattern.
+- `lib/themes.ts` — `THEMES: Record<ThemeName, BrandTheme>`, the actual palettes (exact hex values as specified — `primary`, `accent`, `background`, `surface`, `text`, `mutedText`, `border`, `success`, `warning`, `danger` per preset), plus `displayName`/`bestFor` metadata, `getTheme()`, `isThemeName()`, `THEME_OPTIONS` (array form for UI), and `resolveThemePalette(theme)` — the one render-time function allowed to read a preview's colors. It resolves `themeName` directly for new previews, or falls back to the default preset's neutrals with legacy `primaryColor`/`accentColor` substituted in for previews saved before this system existed.
+
+## 3. Domain model / schema changes
+
+- `PreviewTheme` (`domain/models/site-preview.ts`) gains `themeName?: ThemeName` — the new source of truth. `primaryColor?`/`accentColor?` remain on the type and schema, now marked `@deprecated`, solely for backward compatibility with previews generated before this change (this is a dev-only breaking change in practice — the field shape changed, but nothing is silently migrated or destroyed; old previews keep rendering via the legacy fallback in `resolveThemePalette`).
+- `PreviewThemeSchema` (`domain/schemas/site-preview.schema.ts`) uses `.refine()` to require either `themeName` or both legacy hex fields — a theme with neither is rejected.
+- `Business.theme?: ThemeName` (`domain/models/business.ts` + `business.schema.ts`) — the resolved preset persisted on the business record, so regeneration reuses it instead of re-deriving it (spec Step 3), and so an admin's manual override sticks.
+
+## 4. Selection logic (`lib/theme/`)
+
+- `logo-color.ts` — `detectLogoThemeFamily(logoUrl)`: reads the logo from S3 (`getAsset`), flattens transparency onto white with `sharp`, downsamples to a 1×1 pixel to get an average RGB, converts to HSL, and classifies the hue/saturation/lightness into the closest preset family via the exported `classifyHsl()`. Returns `null` (never a guess) when the asset is missing, unreadable, or too neutral to signal a brand family — hue bands: red/burgundy 345–15°, orange 15–50°, green 50–170°, teal 170–195°, blue/navy 195–255°, purple 255–345°; very-low-saturation colors split on lightness into `modernDark` (dark) or `null` (light/no signal).
+- `industry-defaults.ts` — `INDUSTRY_THEME_DEFAULTS`, a deterministic `Industry → ThemeName` map derived from each preset's documented "best for" industries, used only by the free seed path so it never needs an OpenAI call.
+- `select-theme.ts`:
+  - `pickStoredOrLogoTheme(business)` — Steps 3 + 1, shared by both callers below.
+  - `pickThemeViaOpenAi(business)` — Step 2. One structured-output call (`zodResponseFormat` against a `z.object({ theme: z.enum(THEME_NAMES) })` schema) fed brand personality signals (industry, description, brand tone, differentiators, notes) plus each preset's name and `bestFor` list — the model can only return one of the 10 approved names.
+  - `resolveBusinessTheme(business)` — full path for real AI generation (stored/logo, else OpenAI).
+  - `resolveBusinessThemeForSeed(business)` — free-path version (stored/logo, else the deterministic industry map, else `DEFAULT_THEME_NAME`) — never calls OpenAI.
+
+## 5. Wiring into generation and the admin UI
+
+- `lib/ai/generate-preview.ts` — `GenerationOutputSchema` no longer has `primaryColor`/`accentColor` fields, and the prompt's color-pairing instruction was removed. `generatePreviewContent()` now runs the content-generation OpenAI call and `resolveBusinessTheme(business)` concurrently (`Promise.all`) since they're independent concerns, and sets `theme.themeName` from the latter.
+- `app/admin/(dashboard)/businesses/[businessId]/actions.ts` — `generateWebsiteAction` and `createSeedPreviewAction` (via a new `buildSeedTheme()` helper using `resolveBusinessThemeForSeed`) both persist the resolved theme onto `Business.theme` via `updateBusiness()` when it wasn't already stored.
+- `app/admin/(dashboard)/businesses/BusinessForm.tsx` — new "Theme" field (a `<select>` with an "Auto" option plus the 10 named presets, each showing its `bestFor` industries). Wired through `businesses/actions.ts`'s `WEBSITE_GENERATION_FIELDS`/`websiteGenerationFields()` and persisted on both create and edit.
+
+## 6. Template rendering (`app/b/[slug]/template/`)
+
+- `tokens.ts` — `buildSiteTokens()` now resolves the full `BrandTheme` palette via `resolveThemePalette()` and sets 10 CSS custom properties (`--site-primary/accent/background/surface/text/muted/border/success/warning/danger`) instead of 2. The `V` shorthand object grew matching entries.
+- Root wrapper (`template/index.tsx`) now sets `bg-(--site-background) text-(--site-text)` instead of leaving those to per-section hardcoded colors.
+- All 11 template components audited and every hardcoded neutral (`bg-white`, `bg-[#F4F7FA]`, `text-gray-900/700/500/400`, `border-slate-100`/`border-gray-100`, `bg-slate-200`) replaced with the corresponding `--site-*` CSS variable via Tailwind v4's `bg-(--site-*)`/`text-(--site-*)`/`border-(--site-*)` CSS-variable shorthand. White-on-color decorative elements (translucent badges/circles over a colored hero or CTA band) were deliberately left as `white` — they're a contrast choice, not a hardcoded brand color, and read correctly against every preset.
+- Fixed a latent bug in `WhyChooseUs.tsx` found while touching this code: `` `${V.primary}1A` `` string-concatenation for a 10%-opacity icon background doesn't work once `V.primary` is a CSS `var()` reference rather than a raw hex string (it already was, before this change, so this predates the Brand Theme System but produced invalid CSS). Replaced with `color-mix(in srgb, var(--site-primary) 10%, transparent)`.
+
+## 7. Tests added / updated
+
+- `lib/__tests__/themes.test.ts` — every preset has all 10 required colors as valid hex, correct `name`/`displayName`/`bestFor`, `getTheme`/`isThemeName`/`resolveThemePalette` behavior including the legacy-hex fallback path.
+- `lib/theme/__tests__/logo-color.test.ts` — `classifyHsl` across all hue bands and the achromatic branch; `detectLogoThemeFamily` with `sharp` and `getAsset` mocked (missing asset, corrupt image, non-proxy URL, successful classification).
+- `lib/theme/__tests__/select-theme.test.ts` — stored-theme reuse, logo fallback, OpenAI fallback (mocked), and the seed path's industry-default fallback, all with the OpenAI client mocked.
+- `domain/__tests__/domain.test.ts` — `PreviewThemeSchema` accepts `themeName`, rejects a theme with neither `themeName` nor legacy colors, rejects an unapproved preset name; same three cases added for `BusinessSchema.theme`.
+- `lib/ai/__tests__/generate-preview.test.ts` — updated to mock `resolveBusinessTheme`; new assertion that `theme.themeName` is set and `primaryColor`/`accentColor` are absent from generated output.
+- `app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts` — `updateBusiness` mocked; new tests confirming `generateWebsiteAction` persists a newly resolved theme only when `business.theme` was previously unset.
+- `app/admin/(dashboard)/businesses/__tests__/actions.test.ts` — new tests confirming an explicit theme override is saved and that leaving the field on "Auto" persists no `theme` value.
+
+## 8. Verification
+
+```
+✓ Lint:        0 errors  (npm run lint)
+✓ TypeCheck:   0 errors  (npx tsc --noEmit)
+✓ Tests:       220 passed  (npm test)
+✓ Build:       production build succeeds  (npm run build)
+✓ Infra tests: 54 passed, unaffected — no infrastructure changes in this session
+```
+
+## 9. Deferred
+
+- **Firecrawl re-detection** (Stage 13, not yet built): detect a logo discovered by a website crawl, compare it against the currently stored theme, and auto-switch + regenerate if branding differs significantly. The spec's Step 4 — intentionally out of scope until Stage 13 exists.
+- Logo color detection is an average-pixel approximation (resize-to-1×1), not a true dominant-color histogram — sufficient for classifying which hue family a logo belongs to, not for extracting an exact brand shade.
+
+## 10. Files changed / created
+
+```
+web/
+├── domain/
+│   ├── constants/themes.ts                                     NEW — THEME_NAMES, ThemeName, DEFAULT_THEME_NAME
+│   ├── models/business.ts                                      MODIFIED — theme? field
+│   ├── models/site-preview.ts                                   MODIFIED — PreviewTheme.themeName, deprecated legacy fields
+│   ├── schemas/business.schema.ts                               MODIFIED — theme enum
+│   ├── schemas/site-preview.schema.ts                            MODIFIED — PreviewThemeSchema refine
+│   └── __tests__/domain.test.ts                                 MODIFIED — new theme schema tests
+├── lib/
+│   ├── themes.ts                                                NEW — 10 curated presets + resolveThemePalette
+│   ├── __tests__/themes.test.ts                                 NEW
+│   ├── theme/
+│   │   ├── logo-color.ts                                        NEW
+│   │   ├── industry-defaults.ts                                 NEW
+│   │   ├── select-theme.ts                                      NEW
+│   │   └── __tests__/{logo-color,select-theme}.test.ts          NEW — 25 tests
+│   └── ai/
+│       ├── generate-preview.ts                                  MODIFIED — removed color generation, added theme selection
+│       └── __tests__/generate-preview.test.ts                   MODIFIED
+├── app/
+│   ├── admin/(dashboard)/businesses/
+│   │   ├── BusinessForm.tsx                                     MODIFIED — Theme field
+│   │   ├── actions.ts                                           MODIFIED — theme persisted on create/edit
+│   │   ├── __tests__/actions.test.ts                            MODIFIED
+│   │   └── [businessId]/
+│   │       ├── actions.ts                                       MODIFIED — theme resolution + persistence
+│   │       └── __tests__/actions.test.ts                        MODIFIED
+│   └── b/[slug]/template/
+│       ├── tokens.ts                                            MODIFIED — full CSS variable palette
+│       ├── index.tsx                                            MODIFIED — themed root background/text
+│       ├── GeneratedSiteHeader.tsx                               MODIFIED — themed colors
+│       ├── TrustStrip.tsx                                        MODIFIED
+│       ├── ServicesGrid.tsx                                      MODIFIED
+│       ├── WhyChooseUs.tsx                                       MODIFIED — themed colors + color-mix fix
+│       ├── AboutSection.tsx                                      MODIFIED
+│       ├── ServiceAreaSection.tsx                                MODIFIED
+│       └── ContactSection.tsx                                   MODIFIED
+└── package.json                                                 MODIFIED — sharp
+```
+
+---
+
+# Bug Fixes — Brand Theme System Live Testing
+
+**Date:** 2026-07-14
+**Scope:** Three real bugs surfaced by generating a real business website end-to-end after the Brand Theme System landed. All three were reported by a user testing locally, not caught by the mocked test suite.
+
+## Fix 1 — Tailwind CSS-variable syntax: bracket vs. parentheses
+
+Every template component converted to theme CSS variables in the Brand Theme System change used Tailwind's *bracket* arbitrary-value syntax (`bg-[--site-background]`), following what looked like an established pattern in `BusinessForm.tsx` (`focus:ring-[--color-brand]`). In Tailwind v4.3.2 (this project's version), bracket syntax treats the bracketed content as a literal CSS value — it does **not** wrap it in `var()`. Confirmed by inspecting the compiled output: `bg-[--site-background]` generated `background-color:--site-background`, which is invalid CSS and silently dropped by the browser. The correct Tailwind v4 syntax for referencing a custom property is *parentheses*: `bg-(--site-background)` correctly compiles to `background-color:var(--site-background)` (verified the same way).
+
+Because every themed section's background rule was invalid and dropped, every section fell through to whichever background was actually painted underneath — in this case `body`'s `background: var(--background)` (`app/globals.css`), which resolves to `#0a0a0a` (near-black) under `@media (prefers-color-scheme: dark)`. This is why the generated site rendered with a solid black background regardless of which theme preset was selected (navy, in the report) — none of the preset's actual colors were ever reaching the page; the browser was just showing through to the dark-mode page background.
+
+Fixed by converting every `[--site-*]` bracket reference to `(--site-*)` parentheses across all template components (`GeneratedSiteHeader.tsx`, `TrustStrip.tsx`, `ServicesGrid.tsx`, `WhyChooseUs.tsx`, `AboutSection.tsx`, `ServiceAreaSection.tsx`, `ContactSection.tsx`, `index.tsx`). Verified against the actual compiled CSS output (`background-color:var(--site-background)`), not just visually.
+
+**Known related issue, not fixed here:** the same broken bracket syntax (`text-[--color-brand]`, `ring-[--color-brand]`, `bg-[--color-brand]`) appears throughout the admin dashboard (`BusinessForm.tsx`, `CtaConfigForm.tsx`, business list/detail pages, sign-in page) — the admin app's brand-blue color and focus rings have likely never actually rendered. Pre-existing, unrelated to the Brand Theme System, and out of scope for this fix — flagged for a follow-up pass.
+
+## Fix 2 — Uploaded logo never rendered anywhere
+
+`Business.logoUrl` was captured on upload and (as of the Brand Theme System change) used for logo-color theme detection, but no template component ever rendered it as an image — the header always showed the business name as plain text. Added an optional `logoUrl` prop threaded through `/b/[slug]/page.tsx` → `GeneratedWebsite` (`template/index.tsx`) → `GeneratedSiteHeader.tsx`: when present, the header renders the logo image in place of the text business name via `next/image`; falls back to the text name exactly as before when absent.
+
+## Fix 3 — Featured service card ignored uploaded photos
+
+`ServicesGrid.tsx`'s featured-service picture background was unconditionally a hardcoded `picsum.photos` `DEV_FIXTURE`, even when the business had real uploaded photos already available (the hero and about sections already reused `business.photoUrls[0]`/`[1]`, but nothing wired a third slot to the services grid). Added `PreviewTheme.servicesImageUrl` (mirrors `heroImageUrl`/`aboutImageUrl`), populated in `generatePreviewContent()` from `business.photoUrls[2] ?? photoUrls[1] ?? photoUrls[0]` (reuses an earlier photo rather than falling back to the picsum placeholder whenever at least one real photo exists), and threaded through `ServicesGrid`'s new `featuredImageUrl` prop. The picsum fixture now only appears when the business has uploaded zero photos at all.
+
+## Verification
+
+```
+✓ Lint:        0 errors  (npm run lint)
+✓ TypeCheck:   0 errors  (npx tsc --noEmit)
+✓ Tests:       223 passed  (npm test) — 3 new assertions for the photo-reuse fallback chain
+✓ Build:       production build succeeds  (npm run build)
+✓ Compiled CSS manually inspected to confirm `bg-(--site-background)` now emits `var(...)`, not a literal
+```
+
+## Files changed
+
+```
+web/
+├── app/b/[slug]/
+│   ├── page.tsx                                                MODIFIED — passes business.logoUrl through
+│   └── template/
+│       ├── index.tsx                                           MODIFIED — logoUrl + servicesImageUrl wiring, parens syntax
+│       ├── GeneratedSiteHeader.tsx                              MODIFIED — renders logo image, parens syntax
+│       ├── ServicesGrid.tsx                                     MODIFIED — featuredImageUrl prop, falls back to picsum only when unset
+│       ├── TrustStrip.tsx                                       MODIFIED — parens syntax
+│       ├── WhyChooseUs.tsx                                      MODIFIED — parens syntax
+│       ├── AboutSection.tsx                                     MODIFIED — parens syntax
+│       ├── ServiceAreaSection.tsx                                MODIFIED — parens syntax
+│       └── ContactSection.tsx                                   MODIFIED — parens syntax
+├── domain/
+│   ├── models/site-preview.ts                                   MODIFIED — PreviewTheme.servicesImageUrl
+│   └── schemas/site-preview.schema.ts                            MODIFIED — servicesImageUrl schema field
+└── lib/ai/
+    ├── generate-preview.ts                                      MODIFIED — servicesImageUrl derivation
+    └── __tests__/generate-preview.test.ts                       MODIFIED — 3 new tests
+```

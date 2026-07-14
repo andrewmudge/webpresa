@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
-**Last updated:** 2026-07-13  
-**Status:** Stages 1–10 complete in development. Stage 11 is next.  
+**Last updated:** 2026-07-14  
+**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API — see its Status field below and `build_log.md`. Stage 12 onward is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -331,7 +331,7 @@ Stages 1–2.
 - Validate all AI-generated preview content before persistence.
 - Preserve previous preview versions.
 - Do not store third-party secrets in domain records.
-- `Business` is extended with optional website-generation input fields (services offered, service areas, description, differentiators, brand tone, notes) and asset references (logo, photos) once Stage 11 is implemented — see Stage 7's business creation form and Stage 9's asset key structure for the authoritative field list.
+- `Business` is extended with optional website-generation input fields (services offered, service areas, description, differentiators, brand tone, notes) and asset references (logo, photos) — implemented as part of the Stage 11 foundation work; see Stage 7's business creation form and Stage 9's asset key structure for the authoritative field list.
 
 ## Acceptance criteria
 
@@ -808,6 +808,10 @@ Production equivalents must be represented in infrastructure but not necessarily
 
 # Stage 11 — Manual AI Website Generation
 
+## Status
+
+In development — implemented and manually tested against the real OpenAI API (a business was created with full generation inputs and uploaded assets, a real website was generated, and the result reviewed as a draft preview). See `build_log.md`, "Stage 11 Foundation — Website Generation Inputs, Assets, and Manual AI Generation" and "Bug Fixes — Live Generation Testing" for the implementation record and two bugs found/fixed during that testing.
+
 ## Objective
 
 Allow an administrator to generate a complete website — content, theme, and hero presentation — from manually entered business information, without requiring an existing website. This stage primarily supports:
@@ -888,7 +892,7 @@ OpenAI does not crawl the website during Stage 11 — see Stage 13 for that.
 - CTA configuration (`content.cta` — see `PreviewCtaConfig` in `build_log.md`, "Configurable CTA System"; must not default to generic phrases like "Get a Quote" — follow the same phone-first/email-fallback/hidden-CTA logic as `buildDefaultCta()` in the admin seed generator unless the admin already configured a CTA)
 - contact section
 - SEO metadata
-- theme selection (color palette, font)
+- theme selection — **not a color palette.** As of the Brand Theme System (2026-07-14), OpenAI selects only a preset *name* from `THEME_NAMES` (`domain/constants/themes.ts`); it never generates a hex value. See `architecture.md`, "Brand Theme System" and `lib/theme/select-theme.ts`. Font family remains a small model-chosen enum (not a color, so out of scope for that system).
 - hero presentation selection
 
 ### Hero selection
@@ -943,6 +947,7 @@ All output must:
 - Automatic publication
 - Prompt experimentation dashboard
 - Cost tracking
+- ~~Color contrast/saturation guardrails for the AI-selected theme~~ — resolved by the Brand Theme System (2026-07-14): AI no longer generates colors at all, only a preset name from a curated, pre-validated set. See `architecture.md`, "Brand Theme System".
 
 ---
 

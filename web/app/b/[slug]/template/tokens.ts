@@ -1,13 +1,25 @@
 import type { PreviewTheme } from '@/domain/models/site-preview';
+import { resolveThemePalette } from '@/lib/themes';
 
 /**
- * Converts a PreviewTheme into CSS custom property style object.
- * Apply to the root wrapper so child components can use var(--site-primary) etc.
+ * Converts a PreviewTheme's resolved Brand Theme palette into a CSS custom
+ * property style object. Apply to the root wrapper so every child component
+ * can consume `var(--site-*)` — this is the only place a preview's colors
+ * are ever read out of `lib/themes.ts`.
  */
 export function buildSiteTokens(theme: PreviewTheme): React.CSSProperties {
+  const palette = resolveThemePalette(theme);
   return {
-    '--site-primary': theme.primaryColor,
-    '--site-accent': theme.accentColor,
+    '--site-primary': palette.primary,
+    '--site-accent': palette.accent,
+    '--site-background': palette.background,
+    '--site-surface': palette.surface,
+    '--site-text': palette.text,
+    '--site-muted': palette.mutedText,
+    '--site-border': palette.border,
+    '--site-success': palette.success,
+    '--site-warning': palette.warning,
+    '--site-danger': palette.danger,
     '--site-font': theme.fontFamily,
   } as React.CSSProperties;
 }
@@ -16,6 +28,14 @@ export function buildSiteTokens(theme: PreviewTheme): React.CSSProperties {
 export const V = {
   primary: 'var(--site-primary)',
   accent: 'var(--site-accent)',
+  background: 'var(--site-background)',
+  surface: 'var(--site-surface)',
+  text: 'var(--site-text)',
+  muted: 'var(--site-muted)',
+  border: 'var(--site-border)',
+  success: 'var(--site-success)',
+  warning: 'var(--site-warning)',
+  danger: 'var(--site-danger)',
 } as const;
 
 /** Normalize a phone string to digits only for a tel: link */

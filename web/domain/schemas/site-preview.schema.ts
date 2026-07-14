@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES, HERO_STYLES } from '@/domain/models/site-preview';
+import { THEME_NAMES } from '@/domain/constants/themes';
 import { IsoTimestampSchema, UrlOrPathSchema } from './common.schema';
 
 /**
@@ -101,15 +102,28 @@ export const PreviewContentSchema = z.object({
   cta: PreviewCtaConfigSchema.optional(),
 });
 
-const PreviewThemeSchema = z.object({
-  /** Six-digit CSS hex color, e.g. `#11455E`. */
-  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  fontFamily: z.string().min(1),
-  heroImageUrl: UrlOrPathSchema.optional(),
-  aboutImageUrl: UrlOrPathSchema.optional(),
-  heroStyle: z.enum(HERO_STYLES).optional(),
-});
+/**
+ * Brand Theme System: `themeName` is the only source of brand colors for
+ * new previews — it selects one of the curated presets in `lib/themes.ts`.
+ * `primaryColor`/`accentColor` (six-digit CSS hex) are accepted only for
+ * backward compatibility with previews saved before the preset system
+ * existed; the refine below requires one or the other to be present.
+ */
+const PreviewThemeSchema = z
+  .object({
+    themeName: z.enum(THEME_NAMES).optional(),
+    primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    fontFamily: z.string().min(1),
+    heroImageUrl: UrlOrPathSchema.optional(),
+    aboutImageUrl: UrlOrPathSchema.optional(),
+    servicesImageUrl: UrlOrPathSchema.optional(),
+    heroStyle: z.enum(HERO_STYLES).optional(),
+  })
+  .refine((theme) => !!theme.themeName || (!!theme.primaryColor && !!theme.accentColor), {
+    message: 'theme requires either a curated themeName or legacy primaryColor/accentColor',
+    path: ['themeName'],
+  });
 
 const GenerationMetadataSchema = z.object({
   model: z.string().min(1),

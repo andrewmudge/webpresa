@@ -1,3 +1,4 @@
+import type { ThemeName } from '@/domain/constants/themes';
 import type { MutableTimestampedRecord } from './common';
 
 // ---------------------------------------------------------------------------
@@ -107,16 +108,37 @@ export interface PreviewContent {
 export const HERO_STYLES = ['image', 'gradient', 'pattern', 'solid'] as const;
 export type HeroStyle = (typeof HERO_STYLES)[number];
 
-/** Visual appearance tokens applied to the preview template. */
+/**
+ * Visual appearance tokens applied to the preview template.
+ *
+ * Brand Theme System (2026-07-14): colors are never invented by AI or
+ * free-typed by an admin. `themeName` selects one of the curated presets in
+ * `lib/themes.ts` — that file is the only source of the actual hex values.
+ */
 export interface PreviewTheme {
-  /** CSS hex color string, e.g. `#11455E`. */
-  primaryColor: string;
-  accentColor: string;
+  /**
+   * The curated preset this preview uses. Required for every preview
+   * created after the Brand Theme System — see `lib/theme/select-theme.ts`
+   * for how it's chosen (existing logo color, stored business preference,
+   * or an AI pick constrained to this enum).
+   */
+  themeName?: ThemeName;
+  /**
+   * @deprecated Free-form hex colors from previews generated before the
+   * curated preset system. Only ever present on legacy records — new saves
+   * must set `themeName` instead, never these. Read via
+   * `resolveThemePalette()`, never directly.
+   */
+  primaryColor?: string;
+  /** @deprecated See `primaryColor`. */
+  accentColor?: string;
   fontFamily: string;
   /** URL of the hero section background image. Uses a gradient fallback when absent. */
   heroImageUrl?: string;
   /** URL of the about/why-choose-us section image. */
   aboutImageUrl?: string;
+  /** URL of the featured-service-card background image. Falls back to a DEV_FIXTURE placeholder when absent. */
+  servicesImageUrl?: string;
   /**
    * Hero presentation style. Optional for backward compatibility — legacy
    * previews without this field are inferred as `'image'` when

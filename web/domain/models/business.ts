@@ -1,5 +1,6 @@
 import type { Industry } from '@/domain/constants/industries';
 import type { BrandTone } from '@/domain/constants/brand-tone';
+import type { ThemeName } from '@/domain/constants/themes';
 import type { Address, MutableTimestampedRecord } from './common';
 
 // ---------------------------------------------------------------------------
@@ -103,4 +104,15 @@ export interface Business extends MutableTimestampedRecord {
 
   logoUrl?: string;
   photoUrls?: string[];
+
+  // -------------------------------------------------------------------------
+  // Brand Theme System
+  //
+  // The curated theme preset (see `lib/themes.ts`) selected for this
+  // business — never a raw color. Once set, every regeneration reuses it
+  // (see `lib/theme/select-theme.ts`) instead of re-deriving it, unless an
+  // admin explicitly picks a different preset on the business form.
+  // -------------------------------------------------------------------------
+
+  theme?: ThemeName;
 }

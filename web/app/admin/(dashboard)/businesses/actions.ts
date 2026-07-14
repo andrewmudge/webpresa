@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
+import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import { createBusiness, type CreateBusinessInput } from '@/domain/factories/business.factory';
 import { putBusiness, resolveUniqueSlug, getBusinessById } from '@/lib/db/businesses';
@@ -20,6 +21,8 @@ const WEBSITE_GENERATION_FIELDS = {
   differentiators: z.string().max(2000).optional(),
   brandTone: z.enum(BRAND_TONES).optional(),
   notes: z.string().max(2000).optional(),
+  /** Manual Brand Theme System override — undefined means "Auto" (see ThemeField in BusinessForm.tsx). */
+  theme: z.enum(THEME_NAMES).optional(),
 };
 
 const CreateBusinessFormSchema = z.object({
@@ -87,6 +90,7 @@ function websiteGenerationFields(formData: FormData) {
     differentiators: coerceOptional(formData.get('differentiators') as string | undefined),
     brandTone: (formData.get('brandTone') as string) || undefined,
     notes: coerceOptional(formData.get('notes') as string | undefined),
+    theme: (formData.get('theme') as string) || undefined,
   };
 }
 
@@ -210,6 +214,7 @@ export async function createBusinessAction(
       differentiators: data.differentiators,
       brandTone: data.brandTone,
       notes: data.notes,
+      theme: data.theme,
       ...assets,
     });
   } catch (err) {
@@ -296,6 +301,7 @@ export async function editBusinessAction(
       differentiators: data.differentiators,
       brandTone: data.brandTone,
       notes: data.notes,
+      theme: data.theme,
       ...assets,
       updatedAt: new Date().toISOString(),
     });

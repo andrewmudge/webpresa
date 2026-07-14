@@ -19,6 +19,7 @@ const {
   mockDeletePostcardById,
   mockGetBusinessById,
   mockDeleteBusinessById,
+  mockUpdateBusiness,
   mockGetSession,
   mockGeneratePreviewContent,
 } = vi.hoisted(() => ({
@@ -32,12 +33,17 @@ const {
   mockDeletePostcardById: vi.fn(),
   mockGetBusinessById: vi.fn(),
   mockDeleteBusinessById: vi.fn(),
+  mockUpdateBusiness: vi.fn(),
   mockGetSession: vi.fn(),
   mockGeneratePreviewContent: vi.fn(),
 }));
 
 vi.mock('@/lib/ai/generate-preview', () => ({
   generatePreviewContent: mockGeneratePreviewContent,
+}));
+
+vi.mock('@/lib/theme/select-theme', () => ({
+  resolveBusinessThemeForSeed: vi.fn(),
 }));
 
 vi.mock('@/lib/db/site-previews', () => ({
@@ -60,6 +66,7 @@ vi.mock('@/lib/db/postcards', () => ({
 vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
   deleteBusinessById: mockDeleteBusinessById,
+  updateBusiness: mockUpdateBusiness,
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -133,7 +140,7 @@ const GENERATED = {
     contact: { phone: '512-555-0100' },
     cta: { primary: { type: 'phone' as const, label: 'Call Now' } },
   },
-  theme: { primaryColor: '#0F356B', accentColor: '#ED7023', fontFamily: 'sans-serif', heroStyle: 'solid' as const },
+  theme: { themeName: 'classicBlue' as const, fontFamily: 'sans-serif', heroStyle: 'solid' as const },
   metadata: { model: 'gpt-4o-mini', promptVersion: '2026-07-13', generatedAt: new Date().toISOString(), durationMs: 500 },
 };
 
@@ -145,6 +152,7 @@ beforeEach(() => {
   mockGetBusinessById.mockResolvedValue(EXISTING_BUSINESS);
   mockListPreviewsForBusiness.mockResolvedValue([]);
   mockGeneratePreviewContent.mockResolvedValue(GENERATED);
+  mockUpdateBusiness.mockResolvedValue(EXISTING_BUSINESS);
 });
 
 // ---------------------------------------------------------------------------
@@ -162,6 +170,24 @@ describe('generateWebsiteAction — success flow', () => {
     expect(saved.status).toBe('draft');
     expect(saved.generationMetadata).toEqual(GENERATED.metadata);
     expect(saved.content.hero.headline).toBe('Reliable Plumbing');
+  });
+
+  it('persists the resolved theme onto the business when it has none stored yet', async () => {
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, { theme: 'classicBlue' });
+  });
+
+  it('does not overwrite a business theme that is already stored', async () => {
+    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, theme: 'green' });
+
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockUpdateBusiness).not.toHaveBeenCalled();
   });
 
   it('increments the version from the highest existing preview', async () => {

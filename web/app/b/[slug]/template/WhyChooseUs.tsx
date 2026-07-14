@@ -19,12 +19,12 @@ export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, prim
   if (!differentiators || differentiators.length === 0) return null;
 
   return (
-    <section className="py-20 bg-[#F4F7FA]">
+    <section className="py-20 bg-(--site-surface)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           {/* Image column */}
           <div className="relative">
-            <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-200">
+            <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-(--site-border)">
               {aboutImageUrl ? (
                 <Image
                   src={aboutImageUrl}
@@ -61,7 +61,7 @@ export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, prim
             <p className="text-xs font-bold tracking-widest uppercase mb-2" style={{ color: V.accent }}>
               Why Choose Us
             </p>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 leading-tight mb-8">
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) leading-tight mb-8">
               The experience your property deserves
             </h2>
             <ul className="space-y-5">
@@ -69,15 +69,15 @@ export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, prim
                 <li key={i} className="flex items-start gap-4">
                   <div
                     className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center mt-0.5"
-                    style={{ backgroundColor: `${V.primary}1A` }}
+                    style={{ backgroundColor: 'color-mix(in srgb, var(--site-primary) 10%, transparent)' }}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: V.primary }}>
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
                   <div>
-                    <p className="font-bold text-gray-900">{d.title}</p>
-                    <p className="text-sm text-gray-500 mt-0.5 leading-relaxed">{d.description}</p>
+                    <p className="font-bold text-(--site-text)">{d.title}</p>
+                    <p className="text-sm text-(--site-muted) mt-0.5 leading-relaxed">{d.description}</p>
                   </div>
                 </li>
               ))}

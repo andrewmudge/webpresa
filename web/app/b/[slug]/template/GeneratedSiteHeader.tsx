@@ -1,17 +1,19 @@
 'use client';
 import { useState } from 'react';
+import Image from 'next/image';
 import { V } from './tokens';
 import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
 
 interface Props {
   businessName: string;
+  logoUrl?: string;
   serviceAreas?: string[];
   services?: { name: string }[];
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
 
-export function GeneratedSiteHeader({ businessName, serviceAreas, services, primary, secondary }: Props) {
+export function GeneratedSiteHeader({ businessName, logoUrl, serviceAreas, services, primary, secondary }: Props) {
   const [open, setOpen] = useState(false);
 
   const navLinks = [
@@ -22,11 +24,24 @@ export function GeneratedSiteHeader({ businessName, serviceAreas, services, prim
   ];
 
   return (
-    <header className="sticky top-0 z-50 bg-white border-b border-gray-100 shadow-sm">
+    <header className="sticky top-0 z-50 bg-(--site-background) border-b border-(--site-border) shadow-sm">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
-        {/* Logo / name */}
-        <a href="#" className="font-extrabold text-lg tracking-tight" style={{ color: V.primary }}>
-          {businessName}
+        {/* Logo / name — an uploaded logo always wins over the plain text name */}
+        <a href="#" className="flex items-center shrink-0">
+          {logoUrl ? (
+            <Image
+              src={logoUrl}
+              alt={businessName}
+              width={160}
+              height={40}
+              className="h-8 sm:h-9 w-auto object-contain"
+              priority
+            />
+          ) : (
+            <span className="font-extrabold text-lg tracking-tight" style={{ color: V.primary }}>
+              {businessName}
+            </span>
+          )}
         </a>
 
         {/* Desktop nav */}
@@ -35,7 +50,7 @@ export function GeneratedSiteHeader({ businessName, serviceAreas, services, prim
             <a
               key={l.href}
               href={l.href}
-              className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+              className="text-sm font-medium text-(--site-muted) hover:text-(--site-text) transition-colors"
             >
               {l.label}
             </a>
@@ -77,7 +92,7 @@ export function GeneratedSiteHeader({ businessName, serviceAreas, services, prim
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100"
+          className="md:hidden p-2 rounded-lg text-(--site-muted) hover:bg-(--site-surface)"
           onClick={() => setOpen(!open)}
           aria-label={open ? 'Close menu' : 'Open menu'}
           aria-expanded={open}
@@ -94,13 +109,13 @@ export function GeneratedSiteHeader({ businessName, serviceAreas, services, prim
 
       {/* Mobile drawer */}
       {open && (
-        <div className="md:hidden border-t border-gray-100 bg-white px-4 pb-4 pt-2 space-y-1">
+        <div className="md:hidden border-t border-(--site-border) bg-(--site-background) px-4 pb-4 pt-2 space-y-1">
           {navLinks.map((l) => (
             <a
               key={l.href}
               href={l.href}
               onClick={() => setOpen(false)}
-              className="block py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900"
+              className="block py-2.5 text-sm font-medium text-(--site-muted) hover:text-(--site-text)"
             >
               {l.label}
             </a>

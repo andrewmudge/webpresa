@@ -6,10 +6,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockParse = vi.hoisted(() => vi.fn());
 const mockGetOpenAiClient = vi.hoisted(() => vi.fn());
+const mockResolveBusinessTheme = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/ai/client', () => ({
   getOpenAiClient: mockGetOpenAiClient,
   getOpenAiModel: () => 'gpt-4o-mini',
+}));
+
+vi.mock('@/lib/theme/select-theme', () => ({
+  resolveBusinessTheme: mockResolveBusinessTheme,
 }));
 
 vi.mock('server-only', () => ({}));
@@ -45,8 +50,6 @@ const VALID_MODEL_OUTPUT = {
   differentiators: [{ title: 'Upfront Pricing', description: 'No surprises — you approve the price first.' }],
   primaryCtaLabel: 'Call Now',
   secondaryCtaLabel: 'Email Us',
-  primaryColor: '#123456',
-  accentColor: '#ABCDEF',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   heroStyle: 'gradient' as const,
   seoTitle: 'Acme Plumbing — Austin Plumber',
@@ -58,6 +61,7 @@ beforeEach(() => {
   mockGetOpenAiClient.mockResolvedValue({
     chat: { completions: { parse: mockParse } },
   });
+  mockResolveBusinessTheme.mockResolvedValue('classicBlue');
 });
 
 describe('generatePreviewContent — precondition', () => {
@@ -98,6 +102,37 @@ describe('generatePreviewContent — success', () => {
     expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
   });
 
+  it('reuses uploaded photos for the about and services image slots, preferring later photos', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({
+      photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', '/api/assets/businesses/biz_1/assets/photos/1.jpg', '/api/assets/businesses/biz_1/assets/photos/2.jpg'],
+    });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.aboutImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
+    expect(result.theme.servicesImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/2.jpg');
+  });
+
+  it('falls back to reusing earlier photos for services/about when fewer than 3 were uploaded', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.aboutImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+    expect(result.theme.servicesImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+  });
+
+  it('leaves servicesImageUrl unset when no photo was uploaded', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: undefined });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.servicesImageUrl).toBeUndefined();
+  });
+
   it('uses the model-chosen heroStyle when no photo was uploaded', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: undefined });
@@ -113,6 +148,17 @@ describe('generatePreviewContent — success', () => {
     const result = await generatePreviewContent(makeBusiness());
     expect(result.metadata.model).toBe('gpt-4o-mini');
     expect(result.metadata.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('sets theme.themeName from the Brand Theme System selection, never a raw color', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    mockResolveBusinessTheme.mockResolvedValueOnce('green');
+
+    const result = await generatePreviewContent(makeBusiness());
+
+    expect(result.theme.themeName).toBe('green');
+    expect(result.theme).not.toHaveProperty('primaryColor');
+    expect(result.theme).not.toHaveProperty('accentColor');
   });
 });
 

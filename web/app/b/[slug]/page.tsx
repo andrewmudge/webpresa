@@ -73,6 +73,7 @@ export default async function PreviewPage({ params }: Props) {
     <GeneratedWebsite
       preview={preview}
       businessName={business.name}
+      logoUrl={business.logoUrl}
       isClaimed={isClaimed}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}

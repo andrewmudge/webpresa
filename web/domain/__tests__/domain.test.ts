@@ -257,6 +257,18 @@ describe('Business — website generation fields', () => {
     const result = BusinessSchema.safeParse({ ...biz, logoUrl: 'not-a-url' });
     expect(result.success).toBe(false);
   });
+
+  it('accepts a curated Brand Theme System preset name', () => {
+    const biz = createBusiness({ name: 'Themed Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, theme: 'premiumNavy' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an unapproved theme name', () => {
+    const biz = createBusiness({ name: 'Bad Theme Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, theme: 'neonPink' });
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -310,6 +322,21 @@ describe('PreviewContent validation — AI output guard', () => {
 
   it('rejects a theme with an invalid heroStyle', () => {
     const theme = { ...validTheme, heroStyle: 'sparkles' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(false);
+  });
+
+  it('accepts a Brand Theme System preset name in place of legacy hex colors', () => {
+    const theme: PreviewTheme = { themeName: 'classicBlue', fontFamily: 'Inter' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(true);
+  });
+
+  it('rejects a theme with neither a themeName nor legacy primary/accent colors', () => {
+    const theme = { fontFamily: 'Inter' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(false);
+  });
+
+  it('rejects a theme with an unapproved preset name', () => {
+    const theme = { themeName: 'neonPink', fontFamily: 'Inter' };
     expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(false);
   });
 
