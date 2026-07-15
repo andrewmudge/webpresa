@@ -4,13 +4,25 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
-import { createSeedPreviewAction, updatePreviewCtaAction } from './actions';
+import {
+  // createSeedPreviewAction, — unused now that "Create test preview" is disabled (see Preview actions card below)
+  updatePreviewCtaAction,
+  updateBusinessDetailsAction,
+  updatePhotosAction,
+  saveWebsiteSectionsAction,
+  applyRecommendedSectionsAction,
+  resetWebsiteSectionsAction,
+} from './actions';
 import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
-import type { Business } from '@/domain/models/business';
+import { SectionConfigForm } from './SectionConfigForm';
+import { BusinessDetailsForm } from '../BusinessDetailsForm';
+import { PhotosForm } from '../PhotosForm';
 import type { SitePreview } from '@/domain/models/site-preview';
+import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
+import { computeSectionAvailability, hasResolvableCta } from '@/lib/website-sections/availability';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +41,20 @@ export default async function BusinessDetailPage({ params }: Props) {
   ]);
 
   if (!business) notFound();
+
+  const detailPageUrl = `/admin/businesses/${businessId}`;
+
+  // Website section configuration (Stage 11.x) — resolved against the
+  // business's most recent preview content when one exists, so admin
+  // warnings ("enabled, but hidden — no content available yet") match what
+  // the public preview would actually show.
+  const latestContent = previews[0]?.content;
+  const sectionAvailability = computeSectionAvailability({
+    business,
+    content: latestContent,
+    hasCta: hasResolvableCta(business, latestContent),
+  });
+  const resolvedSections = resolveStoredOrDefaultSections(business.websiteSections);
 
   return (
     <div className="p-8 max-w-5xl">
@@ -49,148 +75,151 @@ export default async function BusinessDetailPage({ params }: Props) {
             {business.industry.replace('_', ' ')} · {business.slug}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link
-            href={`/admin/businesses/${businessId}/edit`}
-            className="inline-flex items-center rounded-lg border border-gray-200 bg-white text-gray-700 px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            Edit
-          </Link>
-          <DeleteBusinessButton
-            businessId={businessId}
-            businessName={business.name}
-            previewCount={previews.length}
-            scanCount={scans.length}
-            postcardCount={postcards.length}
-          />
-        </div>
+        <DeleteBusinessButton
+          businessId={businessId}
+          businessName={business.name}
+          previewCount={previews.length}
+          scanCount={scans.length}
+          postcardCount={postcards.length}
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column — identity & contact */}
-        <div className="lg:col-span-2 space-y-6">
-          <DetailCard title="Identity">
-            <DetailRow label="Name" value={business.name} />
-            {business.legalName && <DetailRow label="Legal name" value={business.legalName} />}
-            <DetailRow label="Industry" value={business.industry.replace('_', ' ')} />
-            <DetailRow label="Slug" value={business.slug} />
-            <DetailRow label="Source" value={business.source} />
-            <StatusRow status={business.status} />
-          </DetailCard>
+      {/* Meta info */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <DetailCard title="Timestamps">
+          <DetailRow label="Created" value={new Date(business.createdAt).toLocaleString()} />
+          <DetailRow label="Updated" value={new Date(business.updatedAt).toLocaleString()} />
+        </DetailCard>
 
-          <DetailCard title="Contact">
-            {business.phone ? <DetailRow label="Phone" value={business.phone} /> : <Empty label="Phone" />}
-            {business.email ? <DetailRow label="Email" value={business.email} /> : <Empty label="Email" />}
-            {business.websiteUrl ? (
-              <div className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-                <span className="text-sm text-gray-500">Website</span>
-                <a
-                  href={business.websiteUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-(--color-brand) hover:underline truncate max-w-xs"
-                >
-                  {business.websiteUrl}
-                </a>
-              </div>
-            ) : (
-              <Empty label="Website" />
+        {business.scores && (
+          <DetailCard title="Scores">
+            {Object.entries(business.scores)
+              .filter(([, v]) => v !== undefined)
+              .map(([k, v]) => (
+                <ScoreRow key={k} label={k} value={v as number} />
+              ))}
+          </DetailCard>
+        )}
+
+        {(business.stripeCustomerId || business.stripeSubscriptionId) && (
+          <DetailCard title="Billing">
+            {business.stripeCustomerId && (
+              <DetailRow label="Stripe customer" value={business.stripeCustomerId} mono />
             )}
-            {business.googlePlaceId ? (
-              <DetailRow label="Google Place ID" value={business.googlePlaceId} />
-            ) : (
-              <Empty label="Google Place ID" />
+            {business.stripeSubscriptionId && (
+              <DetailRow label="Subscription" value={business.stripeSubscriptionId} mono />
             )}
           </DetailCard>
+        )}
+      </div>
 
-          {business.address && (
-            <DetailCard title="Address">
-              <DetailRow label="Line 1" value={business.address.line1} />
-              {business.address.line2 && <DetailRow label="Line 2" value={business.address.line2} />}
-              <DetailRow label="City" value={business.address.city} />
-              <DetailRow label="State" value={business.address.state} />
-              <DetailRow label="Postal code" value={business.address.postalCode} />
-              <DetailRow label="Country" value={business.address.country} />
-            </DetailCard>
-          )}
+      {/* History */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <HistoryCard
+          title="Previews"
+          count={previews.length}
+          viewAllHref="/admin/previews"
+          items={previews.slice(0, 3).map((p) => ({
+            id: p.previewId,
+            label: `v${p.version} — ${p.status}`,
+            date: p.createdAt,
+          }))}
+        />
+        <HistoryCard
+          title="Scans"
+          count={scans.length}
+          viewAllHref="/admin/scans"
+          items={scans.slice(0, 3).map((s) => ({
+            id: s.scanId,
+            label: s.status,
+            date: s.createdAt,
+          }))}
+        />
+        <HistoryCard
+          title="Postcards"
+          count={postcards.length}
+          viewAllHref="/admin/postcards"
+          items={postcards.slice(0, 3).map((p) => ({
+            id: p.postcardId,
+            label: p.status,
+            date: p.createdAt,
+          }))}
+        />
+      </div>
 
-          {/* Scores */}
-          {business.scores && (
-            <DetailCard title="Scores">
-              {Object.entries(business.scores)
-                .filter(([, v]) => v !== undefined)
-                .map(([k, v]) => (
-                  <ScoreRow key={k} label={k} value={v as number} />
-                ))}
-            </DetailCard>
-          )}
-        </div>
+      {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Business Details</h3>
+        <BusinessDetailsForm
+          action={updateBusinessDetailsAction.bind(null, businessId, detailPageUrl)}
+          defaults={business}
+          submitLabel="Save Details"
+        />
+      </div>
 
-        {/* Right column — history & IDs */}
-        <div className="space-y-6">
-          {/* Timestamps */}
-          <DetailCard title="Timestamps">
-            <DetailRow label="Created" value={new Date(business.createdAt).toLocaleString()} />
-            <DetailRow label="Updated" value={new Date(business.updatedAt).toLocaleString()} />
-          </DetailCard>
-
-          {/* Stripe */}
-          {(business.stripeCustomerId || business.stripeSubscriptionId) && (
-            <DetailCard title="Billing">
-              {business.stripeCustomerId && (
-                <DetailRow label="Stripe customer" value={business.stripeCustomerId} mono />
-              )}
-              {business.stripeSubscriptionId && (
-                <DetailRow label="Subscription" value={business.stripeSubscriptionId} mono />
-              )}
-            </DetailCard>
-          )}
-
-          {/* Previews summary */}
-          <HistoryCard
-            title="Previews"
-            count={previews.length}
-            viewAllHref="/admin/previews"
-            items={previews.slice(0, 3).map((p) => ({
-              id: p.previewId,
-              label: `v${p.version} — ${p.status}`,
-              date: p.createdAt,
-            }))}
-          />
-
-          {/* Scans summary */}
-          <HistoryCard
-            title="Scans"
-            count={scans.length}
-            viewAllHref="/admin/scans"
-            items={scans.slice(0, 3).map((s) => ({
-              id: s.scanId,
-              label: s.status,
-              date: s.createdAt,
-            }))}
-          />
-
-          {/* Postcards summary */}
-          <HistoryCard
-            title="Postcards"
-            count={postcards.length}
-            viewAllHref="/admin/postcards"
-            items={postcards.slice(0, 3).map((p) => ({
-              id: p.postcardId,
-              label: p.status,
-              date: p.createdAt,
-            }))}
-          />
-        </div>
+      {/* Photos */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Photos</h3>
+        <PhotosForm
+          action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
+          defaults={business}
+          submitLabel="Save Photos"
+        />
       </div>
 
       {/* Actions */}
-      <div className="mt-8 space-y-4">
-        {/* Preview actions */}
+      <div className="space-y-4">
+        {/* CTA config — edits the most recent preview in place */}
+        {previews.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Preview CTA — v{previews[0].version}
+            </h3>
+            <CtaConfigForm
+              action={updatePreviewCtaAction.bind(null, previews[0].previewId)}
+              defaults={previews[0].content.cta ?? buildDefaultCta(previews[0].content.contact)}
+            />
+          </div>
+        )}
+
+        {/* Website section configuration */}
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Website Sections</h3>
+            <div className="flex gap-2">
+              <form action={applyRecommendedSectionsAction.bind(null, businessId)}>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Apply Recommended Sections
+                </button>
+              </form>
+              <form action={resetWebsiteSectionsAction.bind(null, businessId)}>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+              </form>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            Required sections always render. Enable or disable optional sections and set their display order.
+          </p>
+          <SectionConfigForm
+            action={saveWebsiteSectionsAction.bind(null, businessId)}
+            sections={resolvedSections}
+            availability={sectionAvailability}
+          />
+        </div>
+
+        {/* Preview actions — kept last: the thing you look at once everything above is set up */}
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview</h3>
           <div className="flex flex-wrap items-center gap-3">
-            {/* Create seed preview */}
+            {/* Create seed preview — disabled now that Generate Website is live.
             <form action={createSeedPreviewAction.bind(null, businessId)}>
               <button
                 type="submit"
@@ -199,12 +228,13 @@ export default async function BusinessDetailPage({ params }: Props) {
                 Create test preview
               </button>
             </form>
+            */}
             {/* Generate a real AI website (Stage 11) — must match MAX_AI_GENERATIONS in actions.ts */}
             <GenerateWebsiteButton
               businessId={businessId}
-              capReached={previews.filter((p: SitePreview) => p.generationMetadata).length >= 3}
+              capReached={previews.filter((p: SitePreview) => p.generationMetadata).length >= 10}
             />
-            {/* Links to existing published previews */}
+            {/* Links to existing published previews — disabled now that Generate Website is live.
             {previews.filter((p: SitePreview) => p.status === 'published').slice(0, 1).map((p: SitePreview) => (
               <a
                 key={p.previewId}
@@ -216,6 +246,7 @@ export default async function BusinessDetailPage({ params }: Props) {
                 View preview ↗
               </a>
             ))}
+            */}
             {/* Review the latest AI-generated draft before publishing */}
             {previews[0]?.status === 'draft' && (
               <a
@@ -234,19 +265,6 @@ export default async function BusinessDetailPage({ params }: Props) {
             </p>
           )}
         </div>
-
-        {/* CTA config — edits the most recent preview in place */}
-        {previews.length > 0 && (
-          <div className="rounded-xl border border-gray-200 bg-white p-5">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              Preview CTA — v{previews[0].version}
-            </h3>
-            <CtaConfigForm
-              action={updatePreviewCtaAction.bind(null, previews[0].previewId)}
-              defaults={previews[0].content.cta ?? buildDefaultCta(previews[0].content.contact)}
-            />
-          </div>
-        )}
 
         {/* Deferred actions */}
         <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">
@@ -277,32 +295,6 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
       <span className="text-sm text-gray-500 shrink-0 mr-4">{label}</span>
       <span className={`text-sm text-gray-900 truncate text-right ${mono ? 'font-mono text-xs' : ''}`}>
         {value}
-      </span>
-    </div>
-  );
-}
-
-function Empty({ label }: { label: string }) {
-  return (
-    <div className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-sm text-gray-500">{label}</span>
-      <span className="text-sm text-gray-300 italic">not set</span>
-    </div>
-  );
-}
-
-function StatusRow({ status }: { status: Business['status'] }) {
-  const colors: Record<Business['status'], string> = {
-    active: 'text-green-700 bg-green-50',
-    pending: 'text-yellow-700 bg-yellow-50',
-    inactive: 'text-gray-600 bg-gray-50',
-    archived: 'text-red-600 bg-red-50',
-  };
-  return (
-    <div className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-sm text-gray-500">Status</span>
-      <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${colors[status]}`}>
-        {status}
       </span>
     </div>
   );

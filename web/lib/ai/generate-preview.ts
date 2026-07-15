@@ -11,10 +11,13 @@ import { getOpenAiClient, getOpenAiModel } from './client';
 // ---------------------------------------------------------------------------
 // Structured output schema
 //
-// The model only supplies copy, palette, and hero-style choice. Everything
-// structural or fact-derived — contact info, service areas, CTA type and
-// destination — is computed in code from verified Business fields, never
-// trusted from model output. See the "must not invent" guardrail list below.
+// The model only supplies copy and font choice — hero presentation style is
+// never AI-chosen (an uploaded photo always renders as 'image'; otherwise
+// the theme-matched 'illustration' fallback is used deterministically, see
+// the `theme` assembly below). Everything structural or fact-derived —
+// contact info, service areas, CTA type and destination — is computed in
+// code from verified Business fields, never trusted from model output. See
+// the "must not invent" guardrail list below.
 // ---------------------------------------------------------------------------
 
 // Single-quoted font names (not double-quoted) — OpenAI's strict structured-output
@@ -45,8 +48,6 @@ const GenerationOutputSchema = z.object({
   /** Label for the secondary CTA, used only when the business has a second contact channel. */
   secondaryCtaLabel: z.string().min(1).max(40),
   fontFamily: z.enum(FONT_STACKS),
-  /** Only used when the business has no uploaded photo — an uploaded photo always wins. */
-  heroStyle: z.enum(['gradient', 'pattern', 'solid']),
   seoTitle: z.string().min(1).max(60),
   seoDescription: z.string().min(1).max(160),
 });
@@ -242,7 +243,9 @@ export async function generatePreviewContent(business: Business): Promise<Genera
   const theme: PreviewTheme = {
     themeName,
     fontFamily: output.fontFamily,
-    ...(heroImageUrl ? { heroImageUrl, heroStyle: 'image' as const } : { heroStyle: output.heroStyle }),
+    // Never AI-chosen: a photo always wins, otherwise the theme-matched
+    // illustration fallback is used — see template/hero-illustrations.ts.
+    ...(heroImageUrl ? { heroImageUrl, heroStyle: 'image' as const } : { heroStyle: 'illustration' as const }),
     ...(aboutImageUrl ? { aboutImageUrl } : {}),
     ...(aboutSectionImageUrl ? { aboutSectionImageUrl } : {}),
     ...(servicesImageUrl ? { servicesImageUrl } : {}),

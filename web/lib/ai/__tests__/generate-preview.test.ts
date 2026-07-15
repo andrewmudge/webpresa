@@ -51,7 +51,6 @@ const VALID_MODEL_OUTPUT = {
   primaryCtaLabel: 'Call Now',
   secondaryCtaLabel: 'Email Us',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-  heroStyle: 'gradient' as const,
   seoTitle: 'Acme Plumbing — Austin Plumber',
   seoDescription: 'Reliable plumbing repair and installation across Austin, TX.',
 };
@@ -92,7 +91,7 @@ describe('generatePreviewContent — success', () => {
     expect(result.content.hero.ctaText).toBe('Call Now');
   });
 
-  it('uses the first uploaded photo as the hero image and overrides the model heroStyle', async () => {
+  it('uses the first uploaded photo as the hero image, setting heroStyle to image', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
 
@@ -142,7 +141,7 @@ describe('generatePreviewContent — success', () => {
     const result = await generatePreviewContent(business);
 
     expect(result.theme.heroImageUrl).toBeUndefined();
-    expect(result.theme.heroStyle).toBe('gradient');
+    expect(result.theme.heroStyle).toBe('illustration');
   });
 
   it('falls back to reusing earlier photos for services/about when fewer than 3 were uploaded', async () => {
@@ -164,13 +163,13 @@ describe('generatePreviewContent — success', () => {
     expect(result.theme.servicesImageUrl).toBeUndefined();
   });
 
-  it('uses the model-chosen heroStyle when no photo was uploaded', async () => {
+  it('deterministically uses the illustration heroStyle when no photo was uploaded (never AI-chosen)', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: undefined });
 
     const result = await generatePreviewContent(business);
 
-    expect(result.theme.heroStyle).toBe('gradient');
+    expect(result.theme.heroStyle).toBe('illustration');
     expect(result.theme.heroImageUrl).toBeUndefined();
   });
 

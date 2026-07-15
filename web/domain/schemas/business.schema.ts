@@ -4,6 +4,7 @@ import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_STATUSES, BUSINESS_SOURCES } from '@/domain/models/business';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
+import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 
 export const BusinessScoresSchema = z.object({
   overall: ScoreSchema.optional(),
@@ -64,6 +65,21 @@ export const BusinessSchema = z.object({
   whyChooseUsPhotoUrl: PhotoSlotOverrideSchema,
   servicesPhotoUrl: PhotoSlotOverrideSchema,
   theme: z.enum(THEME_NAMES).optional(),
+  googleRating: z.number().min(0).max(5).optional(),
+  googleReviewCount: z.number().int().min(0).optional(),
+  testimonials: z
+    .array(z.object({ author: z.string().min(1).max(100), quote: z.string().min(1).max(500) }))
+    .max(20)
+    .optional(),
+  faqItems: z
+    .array(z.object({ question: z.string().min(1).max(200), answer: z.string().min(1).max(1000) }))
+    .max(30)
+    .optional(),
+  processSteps: z
+    .array(z.object({ title: z.string().min(1).max(80), description: z.string().min(1).max(300) }))
+    .max(10)
+    .optional(),
+  websiteSections: WebsiteSectionsConfigSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

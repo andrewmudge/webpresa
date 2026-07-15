@@ -105,7 +105,7 @@ export interface PreviewContent {
   cta?: PreviewCtaConfig;
 }
 
-export const HERO_STYLES = ['image', 'gradient', 'pattern', 'solid'] as const;
+export const HERO_STYLES = ['image', 'illustration', 'gradient', 'pattern', 'solid'] as const;
 export type HeroStyle = (typeof HERO_STYLES)[number];
 
 /**
@@ -147,9 +147,15 @@ export interface PreviewTheme {
   /** URL of the featured-service-card background image. Falls back to a DEV_FIXTURE placeholder when absent. */
   servicesImageUrl?: string;
   /**
-   * Hero presentation style. Optional for backward compatibility — legacy
-   * previews without this field are inferred as `'image'` when
-   * `heroImageUrl` is set, else `'solid'` (see `GeneratedHero.tsx`).
+   * Hero presentation style. Never AI-chosen — `'image'` is hardcoded in
+   * code whenever a hero photo resolves, `'illustration'` (a theme-matched
+   * static graphic, see `template/hero-illustrations.ts`) whenever it
+   * doesn't. `gradient`/`pattern`/`solid` are legacy values only — no new
+   * preview generates them, but previews saved before `'illustration'`
+   * existed keep rendering with them unchanged. Optional for backward
+   * compatibility — previews saved before `heroStyle` existed at all are
+   * inferred as `'image'` when `heroImageUrl` is set, else `'illustration'`
+   * (see `GeneratedHero.tsx`).
    */
   heroStyle?: HeroStyle;
 }

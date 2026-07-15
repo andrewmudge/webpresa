@@ -338,6 +338,11 @@ describe('PreviewContent validation — AI output guard', () => {
     expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(true);
   });
 
+  it('accepts a theme with the illustration heroStyle', () => {
+    const theme: PreviewTheme = { ...validTheme, heroStyle: 'illustration' };
+    expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(true);
+  });
+
   it('rejects a theme with an invalid heroStyle', () => {
     const theme = { ...validTheme, heroStyle: 'sparkles' };
     expect(SitePreviewSchema.shape.theme.safeParse(theme).success).toBe(false);

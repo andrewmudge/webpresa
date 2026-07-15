@@ -17,8 +17,209 @@ import {
 } from '@/lib/db/site-previews';
 import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
-import { deleteBusinessById, getBusinessById, updateBusiness } from '@/lib/db/businesses';
+import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
+import type { WebsiteSectionsConfig } from '@/domain/models/website-sections';
+import { WEBSITE_SECTION_TYPES, REQUIRED_SECTION_TYPES, SECTION_CONFIG_VERSION } from '@/domain/constants/website-sections';
+import { WebsiteSectionsConfigSchema } from '@/domain/schemas/website-sections.schema';
+import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
+import { recommendWebsiteSections } from '@/lib/website-sections/recommend';
+import { hasResolvableCta } from '@/lib/website-sections/availability';
+import { INDUSTRIES } from '@/domain/constants/industries';
+import { BRAND_TONES } from '@/domain/constants/brand-tone';
+import { THEME_NAMES } from '@/domain/constants/themes';
+import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
+import { uploadBusinessAssets } from '@/lib/s3/business-assets';
+import type { BusinessFormState } from '../actions';
+
+// ---------------------------------------------------------------------------
+// Business details + photos — inline edit on the business detail page, and
+// the wizard steps ("Add business" → details → photos → sections; see
+// createBusinessAction in `../actions.ts` for step 1). Splitting these into
+// two narrow actions (rather than one big update, or reusing a single
+// monolithic form) means each only ever writes its own slice of fields —
+// saving the Photos card can never accidentally clear Business Details
+// fields and vice versa.
+// ---------------------------------------------------------------------------
+
+const WEBSITE_GENERATION_FIELDS = {
+  servicesOffered: z.string().max(2000).optional(),
+  serviceAreas: z.string().max(2000).optional(),
+  description: z.string().max(2000).optional(),
+  differentiators: z.string().max(2000).optional(),
+  brandTone: z.enum(BRAND_TONES).optional(),
+  notes: z.string().max(2000).optional(),
+  theme: z.enum(THEME_NAMES).optional(),
+};
+
+const UpdateBusinessDetailsSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200),
+  industry: z.enum(INDUSTRIES),
+  legalName: z.string().max(200).optional(),
+  status: z.enum(BUSINESS_STATUSES),
+  source: z.enum(BUSINESS_SOURCES),
+  phone: z.string().optional(),
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  websiteUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
+  googlePlaceId: z.string().optional(),
+  addressLine1: z.string().optional(),
+  addressCity: z.string().optional(),
+  addressState: z.string().optional(),
+  addressPostalCode: z.string().optional(),
+  ...WEBSITE_GENERATION_FIELDS,
+});
+
+function normalizeUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
+}
+
+/**
+ * Updates identity/contact/address/website-generation fields. Never
+ * touches `logoUrl`, `photoUrls`, or the photo-slot overrides — see
+ * `updatePhotosAction` for those.
+ */
+export async function updateBusinessDetailsAction(
+  businessId: string,
+  redirectTo: string,
+  _prevState: BusinessFormState,
+  formData: FormData,
+): Promise<BusinessFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const raw = {
+    name: formData.get('name') as string,
+    industry: formData.get('industry') as string,
+    legalName: coerceOptional(formData.get('legalName') as string | undefined),
+    status: formData.get('status') as string,
+    source: formData.get('source') as string,
+    phone: coerceOptional(formData.get('phone') as string | undefined),
+    email: coerceOptional(formData.get('email') as string | undefined),
+    websiteUrl: normalizeUrl(coerceOptional(formData.get('websiteUrl') as string | undefined)),
+    googlePlaceId: coerceOptional(formData.get('googlePlaceId') as string | undefined),
+    addressLine1: coerceOptional(formData.get('addressLine1') as string | undefined),
+    addressCity: coerceOptional(formData.get('addressCity') as string | undefined),
+    addressState: coerceOptional(formData.get('addressState') as string | undefined),
+    addressPostalCode: coerceOptional(formData.get('addressPostalCode') as string | undefined),
+    servicesOffered: coerceOptional(formData.get('servicesOffered') as string | undefined),
+    serviceAreas: coerceOptional(formData.get('serviceAreas') as string | undefined),
+    description: coerceOptional(formData.get('description') as string | undefined),
+    differentiators: coerceOptional(formData.get('differentiators') as string | undefined),
+    brandTone: (formData.get('brandTone') as string) || undefined,
+    notes: coerceOptional(formData.get('notes') as string | undefined),
+    theme: (formData.get('theme') as string) || undefined,
+  };
+
+  const parsed = UpdateBusinessDetailsSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+  const data = parsed.data;
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const address =
+      data.addressLine1 && data.addressCity && data.addressState && data.addressPostalCode
+        ? {
+            line1: data.addressLine1,
+            city: data.addressCity,
+            state: data.addressState,
+            postalCode: data.addressPostalCode,
+            country: existing.address?.country ?? 'US',
+          }
+        : existing.address;
+
+    await putBusiness({
+      ...existing,
+      name: data.name,
+      industry: data.industry,
+      legalName: data.legalName,
+      status: data.status,
+      source: data.source,
+      phone: data.phone,
+      email: data.email,
+      websiteUrl: data.websiteUrl || undefined,
+      googlePlaceId: data.googlePlaceId,
+      address,
+      servicesOffered: data.servicesOffered,
+      serviceAreas: data.serviceAreas,
+      description: data.description,
+      differentiators: data.differentiators,
+      brandTone: data.brandTone,
+      notes: data.notes,
+      theme: data.theme,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Failed to update business details:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  redirect(redirectTo);
+}
+
+const UpdatePhotosSchema = z.object({
+  heroPhotoUrl: z.string().optional(),
+  aboutPhotoUrl: z.string().optional(),
+  whyChooseUsPhotoUrl: z.string().optional(),
+  servicesPhotoUrl: z.string().optional(),
+});
+
+/** Uploads logo/photos and saves photo-slot assignment overrides. Never touches any other field. */
+export async function updatePhotosAction(
+  businessId: string,
+  redirectTo: string,
+  _prevState: BusinessFormState,
+  formData: FormData,
+): Promise<BusinessFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const raw = {
+    heroPhotoUrl: (formData.get('heroPhotoUrl') as string) || undefined,
+    aboutPhotoUrl: (formData.get('aboutPhotoUrl') as string) || undefined,
+    whyChooseUsPhotoUrl: (formData.get('whyChooseUsPhotoUrl') as string) || undefined,
+    servicesPhotoUrl: (formData.get('servicesPhotoUrl') as string) || undefined,
+  };
+
+  const parsed = UpdatePhotosSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+  const data = parsed.data;
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    // Only replaces logoUrl/photoUrls when a new file was chosen; existing
+    // values are preserved via the `...existing` spread otherwise.
+    const assets = await uploadBusinessAssets(businessId, formData);
+
+    await putBusiness({
+      ...existing,
+      heroPhotoUrl: data.heroPhotoUrl,
+      aboutPhotoUrl: data.aboutPhotoUrl,
+      whyChooseUsPhotoUrl: data.whyChooseUsPhotoUrl,
+      servicesPhotoUrl: data.servicesPhotoUrl,
+      ...assets,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Failed to update business photos:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  redirect(redirectTo);
+}
 
 // ---------------------------------------------------------------------------
 // Industry-specific seed content
@@ -240,7 +441,7 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
  * must be an async Server Action (see cta-defaults.ts for the same
  * constraint) — `page.tsx` duplicates this literal, kept in sync by comment.
  */
-const MAX_AI_GENERATIONS = 3;
+const MAX_AI_GENERATIONS = 10;
 
 export type GenerateWebsiteState = { message?: string } | undefined;
 
@@ -453,4 +654,97 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   await deleteBusinessById(businessId);
 
   redirect('/admin/businesses');
+}
+
+// ---------------------------------------------------------------------------
+// Website section configuration (Stage 11.x)
+// ---------------------------------------------------------------------------
+
+export type SectionsFormState = { message?: string } | undefined;
+
+/**
+ * Save an admin-edited section configuration. Every catalog section is
+ * present in the submitted form (required sections render as a locked
+ * "always on" row — see `SectionConfigForm`), so this reconstructs the full
+ * 15-entry array from form fields rather than merging a partial update.
+ * Required sections are force-enabled server-side regardless of what the
+ * client sent, then the whole config is validated strictly — any violation
+ * (bad order value, duplicate, unsupported variant) rejects the save
+ * outright rather than silently repairing it.
+ */
+export async function saveWebsiteSectionsAction(
+  businessId: string,
+  _prevState: SectionsFormState,
+  formData: FormData,
+): Promise<SectionsFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { message: 'Business not found' };
+
+  const sections = WEBSITE_SECTION_TYPES.map((type) => {
+    const required = (REQUIRED_SECTION_TYPES as readonly string[]).includes(type);
+    const orderRaw = formData.get(`order_${type}`);
+    const order = typeof orderRaw === 'string' && orderRaw.trim() !== '' ? Number(orderRaw) : NaN;
+    return {
+      component: type,
+      enabled: required || formData.get(`enabled_${type}`) === 'on',
+      order: Number.isFinite(order) ? Math.trunc(order) : 0,
+      variant: 'default',
+    };
+  });
+
+  const config: WebsiteSectionsConfig = { sectionConfigVersion: SECTION_CONFIG_VERSION, sections };
+
+  const parsed = WebsiteSectionsConfigSchema.safeParse(config);
+  if (!parsed.success) {
+    return { message: parsed.error.issues.map((i) => i.message).join('; ') };
+  }
+
+  try {
+    await updateBusiness(businessId, { websiteSections: parsed.data });
+  } catch (err) {
+    console.error('Failed to save website sections:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save section configuration. Please try again.' };
+  }
+
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+/**
+ * Deterministic, rule-based recommendation — no AI (see
+ * `lib/website-sections/recommend.ts`). Uses the business's most recent
+ * preview for content-derived signals when one exists.
+ */
+export async function applyRecommendedSectionsAction(businessId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
+
+  const business = await getBusinessById(businessId);
+  if (!business) throw new Error('Business not found');
+
+  const previews = await listPreviewsForBusiness(businessId);
+  const content = previews[0]?.content;
+
+  const config = recommendWebsiteSections({
+    business,
+    content,
+    hasCta: hasResolvableCta(business, content),
+  });
+
+  await updateBusiness(businessId, { websiteSections: config });
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+/** Restores the catalog's default configuration — no business-data rules applied. */
+export async function resetWebsiteSectionsAction(businessId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
+
+  const business = await getBusinessById(businessId);
+  if (!business) throw new Error('Business not found');
+
+  await updateBusiness(businessId, { websiteSections: createDefaultWebsiteSectionsConfig() });
+  redirect(`/admin/businesses/${businessId}`);
 }

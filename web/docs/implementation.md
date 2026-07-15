@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
-**Last updated:** 2026-07-14  
-**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API — see its Status field below and `build_log.md`. Stage 12 onward is next.  
+**Last updated:** 2026-07-15  
+**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 onward is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -948,6 +948,67 @@ All output must:
 - Prompt experimentation dashboard
 - Cost tracking
 - ~~Color contrast/saturation guardrails for the AI-selected theme~~ — resolved by the Brand Theme System (2026-07-14): AI no longer generates colors at all, only a preset name from a curated, pre-validated set. See `architecture.md`, "Brand Theme System".
+
+---
+
+# Stage 11.x — Configurable Website-Section System
+
+## Status
+
+Implemented and manually tested end-to-end (including against the real dev DynamoDB tables) — see `build_log.md`, "Stage 11.x — Configurable Website-Section System" for the full implementation record.
+
+## Objective
+
+Insert a component-configuration foundation between Stage 11 and Stage 12: replace the permanently fixed page layout with a stored, per-business section configuration that the preview renderer honors, so that Stage 12 (and later, rule-based/AI automation) has a validated place to plug section-eligibility signals into — without ever letting stored configuration or AI output directly choose a React component. An administrator can manually enable/disable optional sections and reorder them today; the client dashboard (Cognito-authenticated) is expected to gain the same controls in a future stage.
+
+## Dependencies
+
+Stage 5 (domain model), Stage 7 (admin dashboard), Stage 8 (preview website), Stage 11 (existing template components this reuses).
+
+## Major deliverables
+
+- Fixed component catalog (`domain/constants/website-sections.ts`) — the only source of truth for which section identifiers, required sections, variants, and default order/enabled-state exist.
+- `Business.websiteSections` stored configuration + Zod validation, wired into the existing repository/schema layer — no new persistence mechanism.
+- Default-configuration generator reproducing the pre-existing template's appearance exactly, so no migration was needed for existing businesses/previews.
+- Deterministic, non-AI availability checks and a "Apply Recommended Sections" rule-based recommendation action.
+- A controlled component registry (`section-registry.tsx`) — the single place a stored section identifier becomes a real React component.
+- Preview renderer (`GeneratedWebsite`) refactored to render from resolved configuration through the registry instead of a fixed hardcoded sequence.
+- Admin "Website Sections" management UI (enable/disable, reorder, recommend, reset) on the business detail page.
+- Five new template components for previously-nonexistent sections (Gallery, Reviews, Testimonials, FAQ, Process), each gated by the same availability checks as every other section.
+
+## Implementation requirements
+
+### Core architectural principle
+
+AI must never directly control React components. Any future rule-based or AI-proposed configuration must pass through the same fixed catalog and the same validation this stage establishes — never a dynamic import, never a database-driven `require`, never raw JSX/component names in storage.
+
+### What was explicitly out of scope for this stage
+
+Google Places (Stage 12), Firecrawl, AI section selection, AI-generated testimonials/reviews, AI approval/confidence scoring, Playwright review automation, drag-and-drop page building, arbitrary custom components, customer-facing website editing, multiple design variants per section, a complete CMS.
+
+### Backward compatibility
+
+`Business.websiteSections` is optional; its absence — true for every business/preview created before this stage — resolves at render time to a computed default that exactly reproduces the previously-fixed template's appearance. No destructive or backfill migration was run or is required.
+
+## Acceptance criteria
+
+- A manually entered business can have optional sections enabled or disabled from the admin dashboard.
+- Required sections (Header, Hero, Services, Contact, Footer) cannot be disabled, including via a tampered/bypassed client request (enforced server-side).
+- Settings persist across reloads and across "Generate Website" regenerations.
+- The public preview renders sections from stored configuration, in configured order, through the controlled registry.
+- A disabled section is fully absent — no layout gap, no broken placeholder.
+- An enabled optional section with unavailable content does not render on the public preview and is flagged in the admin UI instead.
+- "Apply Recommended Sections" produces a deterministic, non-AI proposal from currently stored business data; the admin can still override it.
+- Existing businesses/previews with no stored configuration remain fully functional.
+- Server-side validation (Zod) rejects invalid configuration before persistence; client-side feedback surfaces the same errors.
+
+## Deferred work
+
+- Google Places discovery — Stage 12, next.
+- Admin (or client-dashboard) UI to manually enter testimonials/FAQ/process-step content — the fields and availability checks exist; nothing populates them yet.
+- A variant library beyond the single `'default'` variant per section.
+- Drag-and-drop section ordering (plain numeric order inputs only, per this stage's explicit scope).
+- Rule-based/AI-driven automatic section selection without manual admin approval.
 
 ---
 
@@ -2304,11 +2365,12 @@ Outcome:
 
 ## Milestone 4 — AI generation
 
-Stage 11.
+Stage 11, Stage 11.x.
 
 Outcome:
 
 - An administrator can generate, edit, review, and publish structured website content.
+- An administrator can control which optional sections appear on a business's generated preview, independent of content regeneration.
 
 ## Milestone 5 — Sales conversion
 

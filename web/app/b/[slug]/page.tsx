@@ -72,6 +72,7 @@ export default async function PreviewPage({ params }: Props) {
   return (
     <GeneratedWebsite
       preview={preview}
+      business={business}
       businessName={business.name}
       logoUrl={business.logoUrl}
       industry={business.industry}

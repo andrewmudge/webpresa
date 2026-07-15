@@ -2,6 +2,34 @@ import type { Industry } from '@/domain/constants/industries';
 import type { BrandTone } from '@/domain/constants/brand-tone';
 import type { ThemeName } from '@/domain/constants/themes';
 import type { Address, MutableTimestampedRecord } from './common';
+import type { WebsiteSectionsConfig } from './website-sections';
+
+// ---------------------------------------------------------------------------
+// Section-eligibility content sub-types (Stage 11.x)
+//
+// Optional, currently unpopulated by any write path — foundation fields the
+// deterministic recommendation rules and render-time availability checks
+// read from (see `lib/website-sections/`). `googleRating`/`googleReviewCount`
+// are the natural next fields once Stage 12 (Google Places) exists, mirroring
+// how `googlePlaceId`/`googleMapsUrl` were reserved ahead of that stage.
+// `testimonials`/`faqItems`/`processSteps` are manually verified content —
+// no code path may auto-generate entries for these.
+// ---------------------------------------------------------------------------
+
+export interface BusinessTestimonial {
+  author: string;
+  quote: string;
+}
+
+export interface BusinessFaqItem {
+  question: string;
+  answer: string;
+}
+
+export interface BusinessProcessStep {
+  title: string;
+  description: string;
+}
 
 // ---------------------------------------------------------------------------
 // Status & source enums
@@ -131,4 +159,29 @@ export interface Business extends MutableTimestampedRecord {
   // -------------------------------------------------------------------------
 
   theme?: ThemeName;
+
+  // -------------------------------------------------------------------------
+  // Section eligibility signals (Stage 11.x)
+  // See the module-level comment above. Unpopulated today.
+  // -------------------------------------------------------------------------
+
+  /** Average Google rating, 0–5. Reserved for Stage 12 (Google Places). */
+  googleRating?: number;
+  /** Reserved for Stage 12 (Google Places). */
+  googleReviewCount?: number;
+  testimonials?: BusinessTestimonial[];
+  faqItems?: BusinessFaqItem[];
+  processSteps?: BusinessProcessStep[];
+
+  // -------------------------------------------------------------------------
+  // Configurable website sections (Stage 11.x)
+  //
+  // Which optional sections render on this business's generated preview,
+  // and in what order. Absent for businesses created before this system —
+  // the renderer and admin UI both fall back to a computed default that
+  // preserves the pre-existing fixed template's appearance (see
+  // `domain/factories/website-sections.factory.ts`).
+  // -------------------------------------------------------------------------
+
+  websiteSections?: WebsiteSectionsConfig;
 }

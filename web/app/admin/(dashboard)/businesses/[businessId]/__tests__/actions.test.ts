@@ -67,10 +67,15 @@ vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
   deleteBusinessById: mockDeleteBusinessById,
   updateBusiness: mockUpdateBusiness,
+  putBusiness: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
   getSession: mockGetSession,
+}));
+
+vi.mock('@/lib/s3/business-assets', () => ({
+  uploadBusinessAssets: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -217,11 +222,9 @@ describe('generateWebsiteAction — validation', () => {
   });
 
   it('enforces the AI generation cap', async () => {
-    mockListPreviewsForBusiness.mockResolvedValueOnce([
-      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
-      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
-      { ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata },
-    ]);
+    mockListPreviewsForBusiness.mockResolvedValueOnce(
+      Array.from({ length: 10 }, () => ({ ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata })),
+    );
 
     const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
 

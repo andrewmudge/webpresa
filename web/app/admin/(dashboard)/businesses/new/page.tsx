@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BusinessForm } from '../BusinessForm';
+import { BusinessDetailsForm } from '../BusinessDetailsForm';
 import { createBusinessAction } from '../actions';
 
 export default function NewBusinessPage() {
@@ -14,10 +14,14 @@ export default function NewBusinessPage() {
         <span className="text-gray-700">New</span>
       </nav>
 
-      <h1 className="text-xl font-semibold text-gray-900 mb-6">Add business</h1>
+      <div className="mb-6">
+        <p className="text-xs font-semibold text-(--color-brand) uppercase tracking-wide mb-1">Step 1 of 3</p>
+        <h1 className="text-xl font-semibold text-gray-900">Business details</h1>
+        <p className="text-sm text-gray-400 mt-1">Next you&apos;ll upload photos, then choose which website sections to show.</p>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <BusinessForm action={createBusinessAction} submitLabel="Create business" />
+        <BusinessDetailsForm action={createBusinessAction} submitLabel="Continue →" />
       </div>
     </div>
   );

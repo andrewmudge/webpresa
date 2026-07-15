@@ -2049,3 +2049,203 @@ web/
         ├── GeneratedHero.tsx                                     MODIFIED — industry prop, watermark icon via createElement
         └── index.tsx                                             MODIFIED — industry prop wiring
 ```
+
+---
+
+# Stage 11.x — Configurable Website-Section System
+
+**Date:** 2026-07-15
+**Scope:** Foundation stage inserted before Stage 12 (Google Places discovery), per explicit instruction. Replaces the permanently fixed page layout in `template/index.tsx` with a stored, per-business section configuration that a controlled component registry renders from. An admin can now enable/disable optional sections and reorder them; required sections (Header, Hero, Services, Contact, Footer) can never be disabled. A deterministic, non-AI recommendation function proposes a configuration from currently-stored business data. Explicitly **not** implemented here: Google Places (Stage 12), Firecrawl, AI section selection/approval, AI-generated testimonials/reviews, drag-and-drop, or a full CMS — see "Remaining limitations" below.
+
+## Why business-level, not preview-level
+
+`WebsiteSectionConfig`/`sectionConfigVersion` is stored on `Business.websiteSections`, not on `SitePreview`. Section layout is a durable presentation choice (which optional sections a business wants shown, and in what order) — conceptually the same kind of setting as `Business.theme`, which already persists across every preview regeneration rather than living on the versioned `SitePreview` record. Putting it on `Business` means: (1) an admin's section choices survive re-running "Generate Website," (2) the future client dashboard (Cognito-authenticated) edits one business-scoped setting rather than reasoning about preview versions, and (3) it mirrors the exact precedent the Brand Theme System already established for this codebase.
+
+## Fixed component catalog (`domain/constants/website-sections.ts`)
+
+`WEBSITE_SECTION_TYPES` — 15 identifiers exactly matching the objective's recommended enum (`header`, `hero`, `trustStrip`, `services`, `about`, `whyChooseUs`, `reviews`, `testimonials`, `gallery`, `faq`, `serviceAreas`, `process`, `ctaBanner`, `contact`, `footer`). `REQUIRED_SECTION_TYPES` (`header`, `hero`, `services`, `contact`, `footer`) and `SECTION_CONFIG_VERSION = 1` sit alongside. `WEBSITE_SECTION_CATALOG: Record<WebsiteSectionType, …>` is the single source of truth for `required`, `defaultEnabled`, `defaultVariant`, `variants` (every entry is `['default']` today — no section has more than one layout yet, but the schema/registry are variant-ready), and `defaultOrder` (10-point increments: header 10 → footer 100, with room between existing values for future insertions). This lives in `domain/`, not `lib/`, because the Zod schema needs it to validate `variant` per `component` at parse time — unlike the Brand Theme System's palette split (schema only needs theme *names*, not hex values), the section catalog's variant list is itself validation-relevant.
+
+## Data model (`domain/models/website-sections.ts`, `domain/models/business.ts`)
+
+```ts
+interface WebsiteSectionConfig { component: WebsiteSectionType; enabled: boolean; order: number; variant: string; }
+interface WebsiteSectionsConfig { sectionConfigVersion: number; sections: WebsiteSectionConfig[]; }
+```
+
+`Business.websiteSections?: WebsiteSectionsConfig` — optional, absent on every business created before this stage. Also added, optional and currently unpopulated by any write path (see "Remaining limitations"): `Business.googleRating`, `Business.googleReviewCount` (reserved ahead of Stage 12, mirroring how `googlePlaceId`/`googleMapsUrl` were reserved ahead of their own stage), `Business.testimonials: {author, quote}[]`, `Business.faqItems: {question, answer}[]`, `Business.processSteps: {title, description}[]` — manually-verified content fields with no generation path. `domain/schemas/business.schema.ts` validates all of them (length/count caps matching the existing free-text field conventions).
+
+## Validation (`domain/schemas/website-sections.schema.ts`)
+
+Two Zod schemas: `WebsiteSectionConfigSchema` (item-level — `component` restricted to the catalog enum, `enabled` boolean, `order` a bounded non-negative integer, `variant` checked against that specific component's `WEBSITE_SECTION_CATALOG[component].variants`) and `WebsiteSectionsConfigSchema` (whole-config — `sectionConfigVersion` not newer than `SECTION_CONFIG_VERSION`, no duplicate `component` entries, every `REQUIRED_SECTION_TYPES` entry present *and* `enabled: true`). `Business.websiteSections` is wired into `BusinessSchema` via the second schema, so nothing invalid can reach DynamoDB through the normal repository write path (`putBusiness`/`updateBusiness` both call `BusinessSchema.parse()`).
+
+## Defaults and backward compatibility (`domain/factories/website-sections.factory.ts`)
+
+`createDefaultWebsiteSectionsConfig()` builds a full 15-entry config straight from the catalog's `defaultEnabled`/`defaultOrder`/`defaultVariant`. The defaults were chosen to exactly reproduce the pre-existing fixed template's appearance: `header`/`hero`/`trustStrip`/`services`/`whyChooseUs`/`about`/`serviceAreas`/`ctaBanner`/`contact`/`footer` default `enabled: true` (the old `template/index.tsx` always attempted to render all of these, several already gated by their own data-presence checks); `reviews`/`testimonials`/`gallery`/`faq`/`process` default `enabled: false` since the old template never rendered them at all. No migration was needed or run — `Business.websiteSections` being absent is a fully valid, expected state that the render path (below) falls back from on every request, so every existing business/preview keeps rendering exactly as before with zero data changes.
+
+## Section logic (`lib/website-sections/`, not `domain/` — mirrors the `lib/theme/` split)
+
+- `availability.ts` — `computeSectionAvailability({business, content, hasCta})` — deterministic, no AI, content-presence checks per section (`services`/`about`/`whyChooseUs`/`serviceAreas` read the generated preview's `PreviewContent`; `gallery` reads the existing `Business.photoUrls` upload — genuinely functional today, unlike the Stage-12-reserved fields; `reviews`/`testimonials`/`faq`/`process` read the new, currently-always-empty `Business` fields above; `header`/`hero`/`trustStrip`/`contact`/`footer` are always available; `ctaBanner` mirrors the caller-supplied `hasCta`). Also exports `hasResolvableCta(business, content?)`, a conservative phone/email/CTA-value check used when no `SitePreview` exists yet to resolve against (the authoritative renderer path uses `resolvePreviewCtaConfig` instead — see below).
+- `resolve.ts` — `resolveStoredOrDefaultSections(stored)`: the lenient, render-safe pipeline — falls back to the computed default when configuration is absent or its version is newer than this build understands; drops individually malformed or unsupported-variant entries while keeping the rest (defense in depth beyond what `BusinessSchema.parse()` on read already guarantees); deduplicates by `component`, keeping the first occurrence; backfills any missing required section from the catalog and force-enables any stored-disabled required section; sorts by `order`. `resolveRenderableSections(stored, availability)` layers the availability gate on top (required sections always pass; optional sections must also be `enabled` *and* available). `resolveSectionWarnings(sections, availability)` surfaces the inverse — enabled-but-unavailable optional sections — for the admin UI.
+- `recommend.ts` — `recommendWebsiteSections({business, content, hasCta})`: the non-AI, rule-based "Apply Recommended Sections" function. Required sections always recommended `enabled: true`; every optional section's recommendation reuses the exact same `computeSectionAvailability` predicate that gates public rendering — deliberately DRY, since the objective's own rule list ("Reviews: enable when a valid rating or review count is available," etc.) *is* the availability check. Order/variant always come from catalog defaults; this stage doesn't recommend custom ordering.
+
+## Rendering architecture (`app/b/[slug]/template/`)
+
+- `section-registry.tsx` (new) — `SectionRenderContext` (business, content, theme, businessName, logoUrl, industry, isClaimed, phone, email, primary/secondary resolved CTA) and `sectionRegistry: Record<WebsiteSectionType, (ctx) => ReactNode>`, one small adapter per catalog entry mapping the shared context onto each existing component's actual (heterogeneous) prop shape. This is the only place a `WebsiteSectionType` string is ever turned into a real component — no dynamic import, no string-keyed `require`, nothing database-controlled ever reaches `React.createElement` directly.
+- `index.tsx` (`GeneratedWebsite`, rewritten) — computes `content`/`theme`/resolved CTA exactly as before, then: `computeSectionAvailability(...)` → `resolveRenderableSections(business.websiteSections, availability)` → maps the resulting ordered list through `sectionRegistry`. `MobileCallBar` stays outside the loop (not a catalog section — a persistent mobile-only overlay, unchanged). A disabled section is simply absent from the mapped array — no conditional wrapper, no empty `<section>` shell, so there's never a layout gap.
+- Five new, minimal template components join the registry: `GallerySection.tsx` (renders `Business.photoUrls` — real data, works today), `ReviewsSection.tsx`, `TestimonialsSection.tsx`, `FaqSection.tsx` (native `<details>`/`<summary>`, no client JS), `ProcessSection.tsx` — all gated by the same availability check as everything else, so on every business today except `gallery` (once photos exist) they simply don't render until their data source is populated.
+- `app/b/[slug]/page.tsx` — now also passes the full `business` object through to `GeneratedWebsite` (previously only `businessName`/`logoUrl`/`industry` were destructured out).
+
+## Admin workflow (`app/admin/(dashboard)/businesses/[businessId]/`)
+
+New "Website Sections" card on the business detail page, below the existing Preview/CTA cards. `SectionConfigForm.tsx` (client component, `useActionState`, mirrors `CtaConfigForm.tsx`'s pattern) renders one row per resolved section: required sections show a disabled, checked checkbox and a "Required" badge; optional sections show a live checkbox; every row has a numeric `order` input; an enabled-but-unavailable optional section shows an inline amber warning ("Enabled, but hidden on the public preview — no content available yet") computed server-side via `resolveSectionWarnings`. Two plain-bind quick-action buttons sit above the form: **Apply Recommended Sections** (`applyRecommendedSectionsAction`, uses the business's most recent preview content when one exists, `resolveStoredOrDefaultSections`'d as its own action) and **Reset to Defaults** (`resetWebsiteSectionsAction`, pure catalog defaults, no business-data awareness — deliberately distinct from "recommended"). Saving (`saveWebsiteSectionsAction`) reconstructs the full 15-entry array server-side from form fields, **force-enables required sections regardless of what was submitted** (defense against a tampered/bypassed disabled-attribute request — verified manually, see below), validates strictly against `WebsiteSectionsConfigSchema`, and rejects the whole save with the Zod error message on any violation rather than partially persisting.
+
+## Tests
+
+64 new tests (294 total, was 230): `domain/__tests__/website-sections.test.ts` (19 — default-config content/version/schema-validity, item- and config-level schema rejection cases including unsupported component/variant/negative-order/duplicate/missing-required/future-version, `Business.websiteSections` optionality and validation); `lib/website-sections/__tests__/availability.test.ts` (15), `recommend.test.ts` (7), `resolve.test.ts` (15 — malformed-entry dropping, dedup, required backfill/force-enable, sort, availability filtering, warnings); `app/admin/.../[businessId]/__tests__/website-sections-actions.test.ts` (8 — auth, persistence, required force-enable, invalid-order rejection without persisting, business-not-found, recommend/reset flows).
+
+## Manual verification
+
+Full lint/typecheck/test/build pass (see below). Additionally live-tested end-to-end against the real dev DynamoDB (`--profile webpresa`) and a temporary local-only dev server: signed in via a locally-generated throw-away credential set (process env only — `.env.local` untouched, nothing persisted after the session), then drove every admin flow via raw HTTP against Next's server-action no-JS form encoding (no browser available in this environment):
+
+- Every existing business's detail page renders the new card with the expected default checkbox/badge states (required sections locked+checked; trustStrip/whyChooseUs/about/serviceAreas/ctaBanner checked; reviews/testimonials/gallery/faq/process unchecked) — confirmed across all 6 businesses in the dev table, `200 OK`, zero server-log errors or warnings.
+- Disabling Trust Strip and saving: persisted (re-fetched form shows unchecked), and the public preview (`/b/tims-fart-factory`) immediately stopped rendering any Trust Strip content — no layout gap, no error.
+- **Apply Recommended Sections** on a business with real uploaded photos: correctly enabled `gallery` (real `photoUrls` data) while leaving `reviews`/`testimonials`/`faq`/`process` disabled (no data) — the public preview then rendered a working "Our Work" gallery section in its correct catalog position between Services and About.
+- **Reset to Defaults**: reverted `gallery` back to disabled, ignoring the fact that photos exist — confirming it's data-blind by design, distinct from "recommended."
+- Submitting an invalid `order` value (`-5`): rejected with `200` (no redirect) and the exact Zod message ("Number must be greater than or equal to 0") surfaced in the admin alert box; nothing persisted.
+- Submitting a save with every `enabled_*` field omitted (simulating a client that bypassed the `disabled` attribute on required checkboxes): required sections were still force-enabled server-side; public preview kept rendering with no errors.
+- **Apply Recommended Sections** on a business with zero `SitePreview` records at all (`content: undefined`): completed without error, confirming the admin action's optional-content handling.
+
+Not verified in this pass (no browser available in this environment — see the note below): actual visual rendering at desktop/mobile breakpoints, hydration-warning console output, and drag/keyboard interaction with the form. The new section components reuse the same Tailwind responsive patterns (`grid`, `sm:`/`lg:` breakpoints, `<details>`/native form controls) already shipping in every other template component, so this is a reasoned inference rather than a pixel-verified one.
+
+```
+Lint:      0 errors   (npm run lint)
+TypeCheck: 0 errors   (npx tsc --noEmit)
+Tests:     294 passed (npm test) — 64 new
+Build:     clean      (npm run build) — no new routes, all existing routes unchanged
+```
+
+## How Stage 12 (Google Places) will feed these rules
+
+Stage 12 is expected to populate `Business.googleRating`/`Business.googleReviewCount` from the Places Details API. The moment those fields carry real values, `computeSectionAvailability`'s `reviews` check flips to `true` for that business with **zero code changes** — the same is true for `recommendWebsiteSections`, since it reuses the identical predicate. `gallery` already works today off `Business.photoUrls`; Stage 12/13 (Firecrawl) could similarly populate `testimonials`/`faqItems`/`processSteps` once a real, verified source for that content exists (Stage 12 itself doesn't supply testimonials/FAQs/process steps — those would need their own future stage or an admin-entry UI, neither built here). No renderer, registry, or schema change is anticipated to be necessary for Stage 12 to start driving section eligibility — this was the explicit goal of building the availability/recommendation layer against the data model now rather than later.
+
+## Remaining limitations
+
+- No admin UI to manually enter `testimonials`/`faqItems`/`processSteps` content yet — those fields exist and validate, but nothing currently writes to them, so those three sections cannot show real content until a future stage adds either an entry UI or an automated (verified, non-AI-fabricated) source.
+- `googleRating`/`googleReviewCount` are inert until Stage 12 exists.
+- Variant support is structural only — every section has exactly one (`'default'`) variant; no admin UI exists to pick a variant because there's nothing to pick yet.
+- Order editing is a plain number input, not drag-and-drop, per the objective's explicit scope limit.
+- No visual/browser verification was possible in this environment (see "Manual verification" above).
+
+## Files created / modified
+
+```
+web/
+├── domain/
+│   ├── constants/website-sections.ts                           NEW — WEBSITE_SECTION_TYPES, catalog, version
+│   ├── models/website-sections.ts                               NEW — WebsiteSectionConfig, WebsiteSectionsConfig
+│   ├── models/business.ts                                       MODIFIED — websiteSections + googleRating/googleReviewCount/testimonials/faqItems/processSteps
+│   ├── models/index.ts                                          MODIFIED — export website-sections
+│   ├── schemas/website-sections.schema.ts                       NEW — item + config Zod schemas
+│   ├── schemas/business.schema.ts                                MODIFIED — new field validation
+│   ├── schemas/index.ts                                         MODIFIED — export website-sections.schema
+│   ├── factories/website-sections.factory.ts                    NEW — createDefaultWebsiteSectionsConfig
+│   ├── factories/index.ts                                       MODIFIED — export website-sections.factory
+│   └── __tests__/website-sections.test.ts                       NEW — 19 tests
+├── lib/website-sections/
+│   ├── availability.ts                                          NEW — computeSectionAvailability, hasResolvableCta
+│   ├── recommend.ts                                              NEW — recommendWebsiteSections
+│   ├── resolve.ts                                                NEW — resolveStoredOrDefaultSections, resolveRenderableSections, resolveSectionWarnings
+│   └── __tests__/{availability,recommend,resolve}.test.ts        NEW — 37 tests
+├── app/b/[slug]/
+│   ├── page.tsx                                                  MODIFIED — passes business prop
+│   └── template/
+│       ├── section-registry.tsx                                  NEW — SectionRenderContext, sectionRegistry
+│       ├── GallerySection.tsx                                    NEW
+│       ├── ReviewsSection.tsx                                    NEW
+│       ├── TestimonialsSection.tsx                                NEW
+│       ├── FaqSection.tsx                                        NEW
+│       ├── ProcessSection.tsx                                    NEW
+│       └── index.tsx                                             MODIFIED — renders from resolved config via registry
+└── app/admin/(dashboard)/businesses/[businessId]/
+    ├── actions.ts                                                MODIFIED — saveWebsiteSectionsAction, applyRecommendedSectionsAction, resetWebsiteSectionsAction
+    ├── SectionConfigForm.tsx                                     NEW
+    ├── page.tsx                                                  MODIFIED — Website Sections card
+    └── __tests__/website-sections-actions.test.ts                 NEW — 8 tests
+```
+
+---
+
+# Admin Onboarding Flow — 3-Step Wizard + Inline Editing
+
+**Date:** 2026-07-15
+**Scope:** UX fix, prompted by direct user feedback that the "Add business" flow was clunky (enter everything in one form, then bounce between the business detail page and a separate edit page to configure CTA/sections/photos) and that clicking "Edit" navigated away to a whole other page. Two changes:
+
+1. **"Add business" is now a 3-step wizard**: Business Details (text) → Photos → Website Sections, each its own page. Submitting step 1 immediately creates the `Business` record (`status: 'pending'`) and redirects to the photos step — photo uploads need an existing `businessId` to key their S3 path off of, so a single atomic create-with-everything submit was never actually possible once assets were involved. If an admin abandons the wizard partway through, the business already exists and is fully editable from its detail page (see point 2) — there's no special "resume" mode, because that page already shows everything the wizard would have asked for.
+2. **The standalone `/edit` page is gone.** Every field it contained is now inline, editable directly on the business detail page — no navigation required to change anything. The Preview actions card moved to the bottom of the page, after CTA and Website Sections, since it's the last thing an admin should look at once everything above it is configured.
+
+## Why two narrow actions, not one big one
+
+The old edit page saved the entire `Business` record from one monolithic form/schema. Splitting the UI into a "Business Details" card and a "Photos" card meant a naive reuse of that one big action would have been dangerous: submitting the Details card (which no longer has file inputs) through the old action would silently overwrite `logoUrl`/`photoUrls`/photo-slot fields with `undefined`, since the old action always wrote every field from its schema. Instead, `updateBusinessDetailsAction` and `updatePhotosAction` (`[businessId]/actions.ts`) are genuinely separate: each does its own `getBusinessById` → merge its own field subset → `putBusiness()`, so saving one card can never clobber the other's data. Both take a bound `redirectTo` parameter so the exact same action/form pair serves both the wizard step (redirects to the next step) and the detail page's inline card (redirects back to itself).
+
+## New shared form components
+
+`BusinessForm.tsx` (the old monolithic form) is deleted. In its place:
+
+- `FormFields.tsx` — the field-level building blocks (`Field`, `TextareaField`, `SelectField`, `FileField`, `ThemeField`, `PhotoSlotField`, `PhotoThumbnail`, `SubmitButton`), extracted so both new forms and the wizard steps share one implementation instead of copy-pasting markup.
+- `BusinessDetailsForm.tsx` — identity, contact, address, Stage 11 website-generation inputs, and admin source/status (status only shown when editing an existing record — a brand-new business is always `pending`). Used by wizard step 1 (`createBusinessAction`) and the detail page's "Business Details" card (`updateBusinessDetailsAction`).
+- `PhotosForm.tsx` — logo/photo upload plus the existing photo-slot assignment UI. Used by wizard step 2 and the detail page's "Photos" card (both via `updatePhotosAction`).
+- `lib/s3/business-assets.ts` (new) — `uploadBusinessAssets`, extracted from the old `businesses/actions.ts` into a plain (non-`'use server'`) module so both `businesses/actions.ts` and `[businessId]/actions.ts` can import it. A `'use server'` file's every export must itself be a valid Server Action, so a shared upload helper can't live inside one directly.
+
+Also added a `legalName` field to `Business Details` — the `Business` model already had a `legalName` field (shown read-only on the old detail page) with no way to actually set it from any form; closed while already rebuilding this exact form.
+
+## Wizard steps (`[businessId]/onboarding/`)
+
+- `photos/page.tsx` — `PhotosForm` bound to `updatePhotosAction(businessId, '.../onboarding/sections')`. "Skip for now" link goes straight to the sections step.
+- `sections/page.tsx` — `SectionConfigForm` (reused unchanged, given an optional new `submitLabel` prop — "Finish setup →" here vs. "Save Sections" on the detail page). Pre-fills with `recommendWebsiteSections(...)` rather than plain catalog defaults when the business has no stored configuration yet, since step 2 (photos) likely just ran and gallery availability may have changed — reuses the exact same deterministic, non-AI recommendation logic Stage 11.x already built. "Skip — use these →" link goes straight to the business detail page; since an unset `Business.websiteSections` already falls back to computed defaults at render time (Stage 11.x's own backward-compatibility design), skipping is always safe.
+- `saveWebsiteSectionsAction` (unchanged) already redirects to the business detail page, which is exactly "Finish" — no new redirect-parameter plumbing needed for step 3.
+
+## Business detail page (`[businessId]/page.tsx`)
+
+Reordered top to bottom: Business Details (form) → Photos (form) → Timestamps/Scores/Billing (read-only, 3-column row) → Previews/Scans/Postcards history (read-only, 3-column row) → Preview CTA (form, if a preview exists) → Website Sections (form) → **Preview actions (moved to the bottom)** → deferred-actions note. The header's "Edit" button/link is gone — "Delete" is the only header action now. The now-unused `Empty`/`StatusRow` sub-components (only ever used by the read-only Identity/Contact/Address cards this replaces) were removed along with them.
+
+## Tests
+
+`businesses/__tests__/actions.test.ts` trimmed to `createBusinessAction` only (asset-upload and `editBusinessAction` tests removed — that functionality moved to `updatePhotosAction`/`updateBusinessDetailsAction`); new `[businessId]/__tests__/business-details-actions.test.ts` (12 tests) covers both new actions, including the specific regression the split-action design exists to prevent: saving the Details card never touches photo fields and vice versa. Net test count: 298 (was 294; +12 new, -8 removed).
+
+## Bug fix along the way — stale `.next` build cache
+
+While investigating a separately-reported "Edit gives a 404" issue, found that a prior verification session's `npm run build` (a production build) had overwritten the same `.next` directory the user's `npm run dev` was using, leaving it in a state dev mode doesn't understand. `rm -rf .next` + restart resolved it. Documented here because it directly motivated *not* running `npm run build` again against the shared directory for this change's own verification — instead verified via `tsc --noEmit` (clean), `npm run lint` (clean), the full test suite (298 passed), and unauthenticated `curl` checks confirming every touched route still resolves (redirects to sign-in, not a 404) against the user's live dev server. A second, fully authenticated verification pass (throwaway credentials, isolated dev server) was attempted but aborted immediately on realizing two concurrent `next dev` processes would share — and could corrupt — the same `.next` directory the user's real session depends on; the user was asked to click through the new flow directly instead, since they already had an authenticated session open.
+
+## Verification
+
+```
+Lint:      0 errors   (npm run lint)
+TypeCheck: 0 errors   (npx tsc --noEmit)
+Tests:     298 passed (npm test)
+Build:     not re-run against the shared dev directory (see above) — tsc/lint/tests are the verification signal for this change
+```
+
+## Files created / modified / deleted
+
+```
+web/
+├── next.config.ts                                                MODIFIED — comment update (editBusinessAction → updatePhotosAction)
+├── lib/s3/business-assets.ts                                     NEW — uploadBusinessAssets (moved out of businesses/actions.ts)
+└── app/admin/(dashboard)/businesses/
+    ├── BusinessForm.tsx                                          DELETED
+    ├── FormFields.tsx                                            NEW — shared field building blocks
+    ├── BusinessDetailsForm.tsx                                   NEW
+    ├── PhotosForm.tsx                                            NEW
+    ├── actions.ts                                                MODIFIED — createBusinessAction trimmed to text fields + legalName, redirects to onboarding/photos; editBusinessAction removed
+    ├── __tests__/actions.test.ts                                 MODIFIED — trimmed to createBusinessAction
+    ├── new/page.tsx                                              MODIFIED — wizard step 1
+    └── [businessId]/
+        ├── actions.ts                                            MODIFIED — updateBusinessDetailsAction, updatePhotosAction added
+        ├── page.tsx                                              MODIFIED — inline Business Details + Photos cards, Edit button removed, Preview card moved to bottom
+        ├── SectionConfigForm.tsx                                 MODIFIED — optional submitLabel prop
+        ├── edit/page.tsx                                         DELETED
+        ├── __tests__/business-details-actions.test.ts            NEW — 12 tests
+        └── onboarding/
+            ├── photos/page.tsx                                   NEW — wizard step 2
+            └── sections/page.tsx                                 NEW — wizard step 3
+```
