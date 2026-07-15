@@ -50,14 +50,14 @@ export function GeneratedHero({
             illustration column reaches the true browser edge (a full bleed),
             unlike every other section which sits inside max-w-6xl. Only the
             text column gets its own padding, via lg:pl-12 xl:pl-20 below. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 lg:min-h-[640px]">
+        <div className="relative grid grid-cols-1 lg:grid-cols-2 min-h-[520px] lg:min-h-[640px]">
           {/* Text + CTAs — sits at the top of its column (no vertical centering
               against the illustration's height, which previously left a large
-              empty gap above the eyebrow on tall illustrations). Ordered
-              second on mobile (below the illustration banner) but stays
-              first in DOM order, so screen readers/SEO still reach the
-              heading before the decorative image. */}
-          <div className="relative z-10 order-2 lg:order-1 px-4 sm:px-6 lg:pl-12 xl:pl-20 lg:pr-8 py-12 lg:py-20">
+              empty gap above the eyebrow on tall illustrations). On mobile the
+              illustration is now a 30%-opacity background sitting behind this
+              (see below) rather than a separate block, so this stays the only
+              row-occupying content there — no order/reordering needed on mobile. */}
+          <div className="relative z-10 lg:order-1 px-4 sm:px-6 lg:pl-12 xl:pl-20 lg:pr-8 py-12 lg:py-20">
             <div className="max-w-xl">
               {serviceArea && (
                 <div
@@ -108,11 +108,13 @@ export function GeneratedHero({
             </div>
           </div>
 
-          {/* Theme-matched illustration — true full bleed to the browser edge,
-              no rounded corners/card treatment, stretches to the row's full height.
-              Ordered first on mobile (a banner above the text/CTA, not sandwiched
-              awkwardly below them) but second on desktop, back on the right. */}
-          <div className="relative order-1 lg:order-2 aspect-[16/10] lg:aspect-auto min-h-[220px]">
+          {/* Theme-matched illustration. Desktop (lg+): unchanged — a full-bleed
+              right column at full opacity, reaching the true browser edge.
+              Mobile: a 30%-opacity watermark filling the whole section behind
+              the text/CTA (position: absolute takes it out of grid flow, so it
+              no longer reserves its own row — this replaces the earlier
+              "banner above the text" mobile treatment). */}
+          <div className="absolute inset-0 opacity-30 lg:relative lg:inset-auto lg:opacity-100 lg:order-2 lg:min-h-[280px]">
             <Image
               src={getHeroIllustration(themeName)}
               alt=""
