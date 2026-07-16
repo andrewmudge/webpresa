@@ -50,39 +50,46 @@ export function GeneratedHero({
             illustration column reaches the true browser edge (a full bleed),
             unlike every other section which sits inside max-w-6xl. Only the
             text column gets its own padding, via lg:pl-12 xl:pl-20 below. */}
-        <div className="relative grid grid-cols-1 lg:grid-cols-2 min-h-[520px] lg:min-h-[640px]">
+        <div className="relative grid grid-cols-1 lg:grid-cols-2 lg:min-h-[640px]">
           {/* Text + CTAs — sits at the top of its column (no vertical centering
               against the illustration's height, which previously left a large
-              empty gap above the eyebrow on tall illustrations). On mobile the
-              illustration is now a 30%-opacity background sitting behind this
-              (see below) rather than a separate block, so this stays the only
-              row-occupying content there — no order/reordering needed on mobile. */}
+              empty gap above the eyebrow on tall illustrations). The section's
+              mobile height is driven entirely by this block's natural content
+              height (no artificial min-height), which is what lets the
+              illustration below match it exactly instead of overshooting. */}
           <div className="relative z-10 lg:order-1 px-4 sm:px-6 lg:pl-12 xl:pl-20 lg:pr-8 py-12 lg:py-20">
             <div className="max-w-xl">
-              {serviceArea && (
-                <div
-                  className="inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 mb-5"
-                  style={{ backgroundColor: V.surface, borderColor: V.border }}
+              {/* Capped to 75% width on mobile so it never runs under the
+                  illustration, which is anchored to the right ~25%. */}
+              <div className="max-w-[75%] lg:max-w-none">
+                {serviceArea && (
+                  <div
+                    className="inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 mb-5"
+                    style={{ backgroundColor: V.surface, borderColor: V.border }}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20" style={{ color: V.primary }}>
+                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm font-medium text-(--site-text)">Serving {serviceArea}</span>
+                  </div>
+                )}
+
+                <h1
+                  className="font-extrabold text-(--site-text) leading-[1.1] mb-5 tracking-tight"
+                  style={{ fontSize: 'clamp(2.4rem, 5.5vw, 4rem)' }}
                 >
-                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20" style={{ color: V.primary }}>
-                    <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm font-medium text-(--site-text)">Serving {serviceArea}</span>
-                </div>
-              )}
+                  {headline}
+                </h1>
 
-              <h1
-                className="font-extrabold text-(--site-text) leading-[1.1] mb-5 tracking-tight"
-                style={{ fontSize: 'clamp(2.4rem, 5.5vw, 4rem)' }}
-              >
-                {headline}
-              </h1>
+                <p className="text-(--site-muted) mb-8 leading-relaxed" style={{ fontSize: 'clamp(1rem, 1.8vw, 1.2rem)' }}>
+                  {subheadline}
+                </p>
+              </div>
 
-              <p className="text-(--site-muted) mb-8 leading-relaxed" style={{ fontSize: 'clamp(1rem, 1.8vw, 1.2rem)' }}>
-                {subheadline}
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-3">
+              {/* Capped tighter than the text above (60% vs 75%) — the pill
+                  buttons' borders/shadow read worse than text if they touch
+                  the illustration's edge, so they get more clearance. */}
+              <div className="max-w-[60%] lg:max-w-none flex flex-col sm:flex-row gap-3">
                 {primary && (
                   <a
                     href={primary.href}
@@ -110,18 +117,27 @@ export function GeneratedHero({
 
           {/* Theme-matched illustration. Desktop (lg+): unchanged — a full-bleed
               right column at full opacity, reaching the true browser edge.
-              Mobile: a 30%-opacity watermark filling the whole section behind
-              the text/CTA (position: absolute takes it out of grid flow, so it
-              no longer reserves its own row — this replaces the earlier
-              "banner above the text" mobile treatment). */}
-          <div className="absolute inset-0 opacity-30 lg:relative lg:inset-auto lg:opacity-100 lg:order-2 lg:min-h-[280px]">
+              Mobile: full-color, cropped to the right 30% of the screen,
+              bleeding off the right edge, and matching the text column's
+              height exactly (inset-y-0 against the wrapper above, whose
+              height is now driven purely by the text content — no more
+              artificial min-height pushing the image below the CTAs). */}
+          <div className="absolute inset-y-0 right-0 w-[35%] lg:relative lg:inset-auto lg:w-auto lg:order-2 lg:min-h-[280px]">
             <Image
               src={getHeroIllustration(themeName)}
               alt=""
               fill
-              className="object-cover"
+              className="object-cover object-right lg:object-center"
               priority
-              sizes="(min-width: 1024px) 50vw, 100vw"
+              sizes="(min-width: 1024px) 50vw, 35vw"
+            />
+            {/* Mobile-only legibility fade, sharing the exact same box as the
+                image above (not a separately-sized sibling) so the gradient
+                stops land precisely on the image's actual edge instead of
+                fading out before ever reaching it. */}
+            <div
+              className="absolute inset-0 lg:hidden"
+              style={{ background: 'linear-gradient(to right, var(--site-background) 0%, var(--site-background) 10%, transparent 60%)' }}
             />
           </div>
         </div>
