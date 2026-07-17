@@ -1,6 +1,6 @@
 # Webpresa — Deployment
 
-**Last updated:** 2026-07-12
+**Last updated:** 2026-07-17
 
 > **Hosting:** Vercel (migrated from AWS Amplify in Stage 7). CDK/DynamoDB infrastructure remains on AWS.
 
@@ -229,7 +229,78 @@ aws secretsmanager put-secret-value \
   --profile webpresa
 ```
 
+Google Places (Stage 12) follows the same one-key shape as OpenAI, Firecrawl, and Lob:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-google-places \
+  --secret-string '{"apiKey":"AIza..."}' \
+  --profile webpresa
+```
+
 Because CloudFormation only touches a secret's value when the CDK construct's `jsonKeys` change, running `cdk deploy` afterward does not overwrite a value set this way. Never paste real secret values into a commit, a CDK construct prop, or this document.
+
+---
+
+## Stage 12 — Google Places Discovery deployment guidance
+
+**Documentation only — no deployment has been performed for Stage 12.** This section describes what setup Stage 12 will require once implemented; nothing below has been executed against Google Cloud, AWS, or Vercel as part of writing it.
+
+### Google Cloud project and API setup
+
+1. Use (or create) a Google Cloud project dedicated to Webpresa's server-side integrations.
+2. Enable **Places API (New)** — the current generation of the API. Do not enable the deprecated legacy Places API.
+3. Enable billing on the project — Places API (New) requires an active billing account even within the free-tier usage included each month.
+
+### API key restrictions (server-side Vercel integration)
+
+Webpresa's Places API calls run entirely server-side (Next.js Server Actions / Route Handlers on Vercel), never from the browser, so the key must be restricted accordingly:
+
+- **API restrictions:** restrict the key to Places API (New) only — never leave it unrestricted or allow every enabled API.
+- **Application restrictions:** prefer IP address restrictions scoped to known server egress ranges where practical. Vercel serverless functions don't expose a small, stable IP range by default, so if IP restriction isn't practical, leave the key unrestricted on application type but keep the API restriction in place — the primary control is that the key is only ever read from Secrets Manager inside `server-only` code and is never sent to the browser. **Never** use an HTTP-referrer (browser-key) restriction for this key — that restriction type assumes the key is meant to be seen by the browser, which it must never be.
+- Do not reuse this key for any other Google Cloud product or Webpresa integration.
+
+### Quota limits and budget alerts
+
+- Set a daily request quota on the Places API (New) console page sized for manual, admin-driven searches — Stage 12 has no automated batch mode, so the limit should be low.
+- Configure a Google Cloud Billing budget alert (a modest monthly threshold) that notifies before real spend becomes significant. Places API (New) bills per request, and `rating`/`userRatingCount`/`regularOpeningHours` sit in a higher-cost tier than basic identity/location fields — see `implementation.md`, Stage 12, "Economical field-mask requirements."
+- No Google Places Photos API access, quota, or S3 storage permission is required for Stage 12. Stage 12 does not download or store Google Places photos (see `implementation.md` and `architecture.md`) — do not enable that capability or grant any photo-storage IAM permission as part of this stage's setup.
+
+### Secret name, JSON shape, and environment variable
+
+Already provisioned in Stage 10 — no new secret is created for Stage 12:
+
+| | |
+|---|---|
+| Secret name | `webpresa-{env}-google-places` (dev: `webpresa-dev-google-places`) |
+| JSON shape | `{ "apiKey": "..." }` |
+| Environment variable (the secret's *name*, never the key value) | `GOOGLE_PLACES_SECRET_NAME` — already set to `webpresa-dev-google-places` in `.env.local.example` and in the environment-variable table above |
+| IAM | Already granted via the `webpresa-dev-secrets` inline policy on `webpresa-vercel-dev` (see "AWS credentials for Vercel" above) |
+
+Populate the real API key with the same pattern used for every other secret — see "Populating a real secret value" above.
+
+### Local development requirements
+
+- `GOOGLE_PLACES_SECRET_NAME=webpresa-dev-google-places` in `.env.local` (already present in `.env.local.example`).
+- `AWS_PROFILE=webpresa` so the local Secrets Manager client can resolve the secret via SSO credentials, matching every other integration.
+- No other local environment variable is needed — application code reads only the secret's *name* from the environment; the key value itself always comes from Secrets Manager.
+
+### Verifying the key is not exposed
+
+Before considering Stage 12 done, confirm:
+
+- No occurrence of the raw API key value in the built client bundle (inspect the `.next` build output) or in any deployed page's source.
+- No Server Action or Route Handler response body, error message, or redirect URL ever includes the raw key.
+- Browser network requests for the search/import flow go only to Webpresa's own server (a Server Action or Route Handler), never directly to `places.googleapis.com`.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| Secret missing / `GOOGLE_PLACES_SECRET_NAME` unset | Server Action returns a controlled error; no stack trace or secret name leaks to the client |
+| Invalid or revoked API key | Google returns 401/403; surfaced to the admin as a generic "search failed" message, logged safely server-side |
+| Key restricted to the wrong API or application type | Google returns 403 (`PERMISSION_DENIED`); same safe-error handling as an invalid key |
+| Quota exhausted | Google returns 429 / `RESOURCE_EXHAUSTED`; surfaced as a clear "try again later" admin message, never retried silently in a loop |
 
 ---
 

@@ -1,6 +1,6 @@
 # Webpresa Implementation Plan
 
-**Last updated:** 2026-07-15  
+**Last updated:** 2026-07-17  
 **Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 onward is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
@@ -1014,51 +1014,167 @@ Google Places (Stage 12), Firecrawl, AI section selection, AI-generated testimon
 
 # Stage 12 — Google Places Discovery
 
+## Status
+
+Not started. Next implementation stage after Stage 11.x.
+
 ## Objective
 
-Allow an administrator to discover and selectively import local businesses from Google Places.
+Allow an administrator to search Google Places for local businesses by industry and location, review the results, and selectively import chosen businesses into the existing `Business` persistence model.
+
+Stage 12 is strictly **discovery and selective import**. It ends the moment selected Google Places records have been safely imported as `Business` records — it does not run, queue, or schedule any later-pipeline stage. See "Relationship to Stage 13" below for the exact handoff boundary.
 
 ## Dependencies
 
-Stages 7 and 10.
+Stages 7 (admin dashboard, `Business` schema/model, repositories) and 10 (`webpresa-{env}-google-places` secret).
 
 ## Major deliverables
 
-- Google Cloud Places configuration
-- Restricted API key
-- Admin business-search form
-- Server-side Places client
-- Field-mask configuration
-- Search result review table
-- Selective import
-- Duplicate detection
-- Import result summary
+- Google Cloud project with the Places API (New) enabled, and a restricted server-side API key
+- Admin business-search form (industry + location)
+- Server-side Google Places client — never called from the browser
+- Economical field-mask configuration for the search request
+- Search-result review table showing required fields plus duplicate indicators
+- Selective import (only admin-checked results import; nothing imports automatically)
+- Server-side duplicate detection, re-run immediately before persistence
+- Import result summary (imported / duplicate / failed counts)
+- Safe, non-persistent operational logging of search and import activity
 
 ## Implementation requirements
 
-- Begin with manual searches by industry and location.
-- Request only fields needed for the import workflow.
-- Do not import all results automatically.
-- Check duplicates using:
-  - Google Place ID
-  - normalized website domain
-  - normalized name and address
-- Set imported business source to `google_places`.
-- Set initial business status to the canonical discovered/pending state used by the current model.
-- Handle partial batch failures without losing successful selections.
-- Track Google API failures safely.
+### Manual workflow
+
+```text
+Admin enters industry and location
+        ↓
+Server-side Google Places search
+        ↓
+Admin reviews results
+        ↓
+Duplicate detection
+        ↓
+Admin selects businesses
+        ↓
+Selected businesses are imported
+        ↓
+Imported business status remains the canonical discovered/pending state
+```
+
+Stage 12 must **not** automatically:
+
+- run Firecrawl
+- run Playwright
+- generate screenshots
+- score a website
+- generate a preview
+- trigger OpenAI
+- download Google Places photos
+- publish anything
+
+There is no automated batch mode, scheduled search, or "import all" action — every import is an explicit, individually selected admin decision. Keeping the workflow manual lets Stage 12 be tested completely independently before Stage 13 (Firecrawl enrichment), Stage 14 (screenshots), and Stage 15 (scoring) exist.
+
+### Economical field-mask requirements
+
+Request a field mask limited to what discovery, review, duplicate detection, and downstream eligibility actually need — never the full response. At minimum:
+
+- `id` (Google Place ID)
+- `displayName`
+- `formattedAddress` and `addressComponents` (structured components — needed to populate the existing `Address` shape correctly, not a naive split of the formatted string)
+- `location` (latitude/longitude — review context only, see "Fields requested but not persisted" below)
+- `nationalPhoneNumber` / `internationalPhoneNumber`
+- `websiteUri`
+- `googleMapsUri`
+- `primaryType` and `types`
+- `businessStatus`
+- `rating` and `userRatingCount`
+- `regularOpeningHours` (or an equivalent lightweight hours summary if the chosen search endpoint offers one)
+
+`rating`, `userRatingCount`, and `regularOpeningHours` sit in a higher-cost Places API (New) tier than the identity/location fields — request them deliberately, not by default, and see `deployment.md` for budget guidance.
+
+### No Google Places photo downloading
+
+Google Places photo data — photo references or binaries — must not be requested as a separate call, downloaded, or copied into S3. Webpresa deliberately does not use Google Places photos as website assets:
+
+- retrieving them adds Google API usage and cost beyond the search itself
+- Google Places photos carry attribution and usage constraints
+- they are less useful than assets pulled from the business's own website, which Firecrawl (Stage 13) and Playwright (Stage 14) will later inspect
+- admin-uploaded assets (`Business.photoUrls`, the `businesses/{businessId}/assets/photos/` S3 prefix — Stage 9) remain the supported path for businesses without usable website assets
+
+If the chosen field mask happens to include a lightweight photo-reference field with a clear future use, it may be kept only in the transient search-result shape shown during review. It must never be persisted onto `Business`, downloaded, or written to any S3 prefix — including `businesses/{businessId}/assets/`.
+
+### Imported and reviewed fields — mapped to the current `Business` model
+
+| Google Places field | Destination |
+|---|---|
+| `id` | `Business.googlePlaceId` (existing field; also the target of the `google-place-id-index` GSI on `webpresa-dev-businesses`, used for duplicate detection) |
+| `displayName` | `Business.name` |
+| `formattedAddress` / `addressComponents` | `Business.address` (`Address`: `line1`, `line2?`, `city`, `state`, `postalCode`, `country`) |
+| `nationalPhoneNumber` / `internationalPhoneNumber` | `Business.phone` |
+| `websiteUri` | `Business.websiteUrl` |
+| `googleMapsUri` | `Business.googleMapsUrl` (existing field) |
+| `rating` | `Business.googleRating` (existing field, reserved ahead of this stage — see `architecture.md`, "Section eligibility signals") |
+| `userRatingCount` | `Business.googleReviewCount` (existing field, same reservation) |
+| `primaryType` / `types` | Mapped to `Business.industry` (the fixed `INDUSTRIES` enum) via a deterministic best-match table. `industry` is required and Google's type taxonomy does not line up 1:1 with `INDUSTRIES`, so the admin must be able to review and override the mapped value before import. |
+
+Fields requested for review/eligibility context but **not persisted onto `Business`** — kept only in the transient search-result shape shown to the admin, because nothing downstream currently consumes them and adding a field for them now would be premature:
+
+- `location` (latitude/longitude) — no map or territory feature exists yet to use it
+- `businessStatus` (Google's operational status — e.g. temporarily/permanently closed) — used only to warn the admin during review; never conflated with `Business.status`, Webpresa's own lifecycle field, which imported records still receive normally (see "Canonical initial status" below)
+- `types` beyond the one mapped to `primaryType` — shown for review context only
+- `regularOpeningHours` — shown for review context only; no `Business` or `PreviewContent` field currently stores structured hours (`PreviewContent.hours` is a free-text field populated by generation/admin edit, not by Stage 12)
+
+### Domain-model change required for this stage
+
+`Business.source` (`BUSINESS_SOURCES` in `domain/models/business.ts`, and the matching `z.enum` in `BusinessSchema`) currently allows only `'scan'`, `'manual'`, and `'import'` — none of these identify a Google Places import. Add a new `'google_places'` value to `BUSINESS_SOURCES` as part of implementing this stage. This is a deliberate, minimal extension genuinely needed downstream (distinguishing Google-imported records from manually created ones for the data-attribution guardrail below and for future reporting), not a field invented for completeness. No new table or aggregate is introduced — imported Google results become ordinary `Business` records via the existing `putBusiness()` function in `web/lib/db/businesses.ts`.
+
+### Canonical initial status
+
+Set `status` to `'pending'` — the existing `BUSINESS_STATUSES` value (`'active' | 'inactive' | 'pending' | 'archived'`, `domain/models/business.ts`) that `createBusiness()` already assigns by default. This **is** the canonical discovered/pending state. There is no `READY_FOR_SCAN` or `READY_FOR_ENRICHMENT` status anywhere in the model, and Stage 12 must not invent one — "ready for scan" is no longer valid terminology now that Stage 13 is website enrichment, not a generic scanning stage. Moving a business into Stage 13 enrichment is a distinct, explicit admin action on the business detail page (see "Relationship to Stage 13" below), not a status the import step sets or a queue Stage 12 populates.
+
+### Server-side duplicate detection
+
+Check in this priority order, immediately before persistence — re-run at import time even if the same indicators were already shown during review, since the database may have changed while the admin was looking at the list:
+
+1. **Google Place ID** — exact match via the existing `google-place-id-index` GSI. A match is definitive: block import, or require explicit admin confirmation to proceed.
+2. **Normalized website domain** — strip protocol/`www.`/trailing slash, compare host. May block or require confirmation.
+3. **Normalized phone number** — digits-only comparison. May block or require confirmation.
+4. **Normalized business name + full address** — case/whitespace/punctuation-normalized comparison. May block or require confirmation.
+5. **Normalized business name + city** — a lower-confidence signal. Surface as a possible-duplicate warning; do not block import on this alone.
+
+Partial batch failures must not roll back successful imports — if 8 of 10 selected businesses import successfully and 2 fail (validation error, transient DynamoDB error, etc.), the 8 remain persisted and the summary reports the 2 failures separately.
+
+### Google Places source data versus verified business data
+
+Imported Google Places fields are source data the admin has selectively chosen to bring in — they are not automatically treated as verified, customer-provided information. Stage 13 and later AI generation must continue to honor the existing anti-fabrication guardrails (see Stage 11, "Guardrails") and must never use imported data to assert licenses, certifications, guarantees, ownership claims, years in business, 24/7 availability, awards, or statistics.
+
+`googleRating` / `googleReviewCount`, when stored, remain specifically attributed Google data (see Stage 11.x, "Section eligibility signals") — they must never be presented as manually entered reviews or generic testimonials.
+
+Stage 12 never enables, disables, or reorders any website section. `Business.websiteSections` and the deterministic "Apply Recommended Sections" action (Stage 11.x) remain the only path that changes section configuration. Populating `googleRating`/`googleReviewCount` only changes what the Reviews section's existing, deterministic availability check returns — Stage 12 itself never writes `websiteSections` and never lets external data directly choose a React component.
+
+### Operational logging (no search-history table)
+
+No new persistence for search history is introduced in this stage. Non-persistent, structured log entries may capture: search query, location, result count, selected count, imported count, duplicate count, failure count, request duration, and safe provider error metadata. Persistent search-history reporting, per-search cost attribution, territory management, and automated city campaigns remain deferred (see below).
+
+### API quota and budget protection
+
+- The Google Places API key is read server-side only, via `getGooglePlacesSecret()` (`web/lib/secrets/index.ts`), which reads the existing `webpresa-{env}-google-places` secret — never sent to or read from the browser.
+- Restrict the API key in Google Cloud to the Places API (New) only.
+- Configure a Google Cloud budget alert and a daily quota before running any real (non-test) searches.
+- Handle quota-exhausted, invalid-key, and restricted-key responses safely — surface a clear admin-facing error, never a raw provider error or stack trace, and never retry silently in a loop.
 
 ## Acceptance criteria
 
 - An admin can search one industry in one location.
-- Results display with required business fields.
-- Individual businesses can be selected.
-- Selected records import successfully.
-- Duplicate Place IDs are prevented.
-- Obvious domain and address duplicates are surfaced.
-- Imported businesses appear in the admin list.
-- The API key is never exposed to the browser.
-- Quotas and budget alerts are configured.
+- Results display with the required business fields (see the field table above).
+- Individual businesses can be selected; nothing imports until the admin explicitly selects and submits.
+- Server-side duplicate detection re-runs immediately before persistence, even when the same indicators were already shown during review.
+- A partial batch failure does not roll back the businesses that imported successfully.
+- Google Places photos are never downloaded, requested as a separate call, or written to any S3 prefix — including `businesses/{businessId}/assets/`.
+- No Firecrawl call, Playwright call, OpenAI call, website scoring, preview generation, or publication action is triggered by search or import.
+- Imported businesses appear in the existing `/admin/businesses` list.
+- `googleRating` / `googleReviewCount`, when stored, remain identified as Google-sourced data wherever surfaced — never rendered as a manually entered review or generic testimonial.
+- The Google Places API key never reaches the client — verify no key value appears in a client bundle, browser network response, or page source.
+- Quotas and a budget alert are configured in Google Cloud before real (non-test) searches are run.
 
 ## Deferred work
 
@@ -1068,6 +1184,7 @@ Stages 7 and 10.
 - Large-scale import
 - Territory management
 - Lead-source cost attribution
+- Persistent search-history table / reporting
 
 ---
 
@@ -1076,6 +1193,8 @@ Stages 7 and 10.
 ## Objective
 
 Improve an already-generated website by extracting information from a business's existing website and re-running generation with that additional context. Stage 13 is not responsible for creating the first website — that's Stage 11. It enriches businesses that already have an existing website.
+
+An admin explicitly starts enrichment by choosing an imported or manually created business and clicking "Generate From Existing Website." Stage 12 import never automatically queues, schedules, or flags a business for enrichment — there is no `READY_FOR_SCAN` or `READY_FOR_ENRICHMENT` state a business passes through. The admin action described here is what begins Stage 13, every time.
 
 ## Dependencies
 
@@ -1099,7 +1218,7 @@ Stages 7, 9, 10, 11, and 12.
 ### Workflow
 
 ```text
-Existing Website URL
+Admin chooses an imported or manually created business with an existing website
         ↓
 Click "Generate From Existing Website"
         ↓
