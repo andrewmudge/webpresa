@@ -2,10 +2,11 @@ import 'server-only';
 import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import type { Business } from '@/domain/models/business';
-import type { GenerationMetadata, PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
+import type { GenerationMetadata, HeroStyle, PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
 import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
 import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]/cta-defaults';
 import { resolveBusinessTheme } from '@/lib/theme/select-theme';
+import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
 import { getOpenAiClient, getOpenAiModel } from './client';
 
 // ---------------------------------------------------------------------------
@@ -240,12 +241,22 @@ export async function generatePreviewContent(business: Business): Promise<Genera
     cta,
   };
 
+  // Never AI-chosen: a resolved hero photo always wins over the theme-
+  // matched illustration fallback. Whether it renders full-bleed or in the
+  // split layout depends on its actual pixel dimensions — see
+  // lib/image/hero-dimensions.ts, shared with the admin-facing warning in
+  // PhotosForm so the two can never disagree.
+  const heroDimensionCheck = heroImageUrl ? await checkHeroPhotoDimensions(heroImageUrl) : null;
+  const heroStyle: HeroStyle = !heroImageUrl
+    ? 'illustration'
+    : heroDimensionCheck?.isFullBleedEligible
+      ? 'image'
+      : 'imageSplit';
+
   const theme: PreviewTheme = {
     themeName,
     fontFamily: output.fontFamily,
-    // Never AI-chosen: a photo always wins, otherwise the theme-matched
-    // illustration fallback is used — see template/hero-illustrations.ts.
-    ...(heroImageUrl ? { heroImageUrl, heroStyle: 'image' as const } : { heroStyle: 'illustration' as const }),
+    ...(heroImageUrl ? { heroImageUrl, heroStyle } : { heroStyle: 'illustration' as const }),
     ...(aboutImageUrl ? { aboutImageUrl } : {}),
     ...(aboutSectionImageUrl ? { aboutSectionImageUrl } : {}),
     ...(servicesImageUrl ? { servicesImageUrl } : {}),

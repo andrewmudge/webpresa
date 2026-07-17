@@ -1,5 +1,5 @@
 'use client';
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import type { Business } from '@/domain/models/business';
 import { FileField, PhotoSlotField, PhotoThumbnail, SubmitButton } from './FormFields';
 import type { BusinessFormState } from './actions';
@@ -8,6 +8,15 @@ interface PhotosFormProps {
   action: (prevState: BusinessFormState, formData: FormData) => Promise<BusinessFormState>;
   defaults?: Partial<Business>;
   submitLabel?: string;
+  /**
+   * Dimension-warning result for every uploaded photo (see
+   * lib/image/hero-dimensions.ts), keyed by photo URL; `null` means that
+   * photo is full-bleed eligible (no warning). Precomputed server-side for
+   * *all* photos — not just the currently-saved hero pick — so the field
+   * below can show the right warning immediately when the admin changes the
+   * selection, without waiting for a save/reload.
+   */
+  heroPhotoWarnings?: Record<string, string | null>;
 }
 
 /**
@@ -17,10 +26,21 @@ interface PhotosFormProps {
  * so this form is never shown before a business record exists) and its own
  * inline card on the business detail page.
  */
-export function PhotosForm({ action, defaults, submitLabel = 'Save' }: PhotosFormProps) {
+export function PhotosForm({ action, defaults, submitLabel = 'Save', heroPhotoWarnings }: PhotosFormProps) {
   const [state, formAction] = useActionState<BusinessFormState, FormData>(action, undefined);
   const errors = state?.errors ?? {};
   const photoUrls = defaults?.photoUrls ?? [];
+
+  // Tracks the Desktop hero image select's current value client-side (in
+  // addition to the native uncontrolled <select>) purely so the warning
+  // below can update the instant the admin picks a different photo, rather
+  // than only after the form is saved and the page reloads.
+  const [selectedHeroPhotoUrl, setSelectedHeroPhotoUrl] = useState(defaults?.heroPhotoUrl ?? '');
+  const resolvedHeroPhotoUrlForWarning =
+    selectedHeroPhotoUrl === 'none' ? null : selectedHeroPhotoUrl || photoUrls[0];
+  const heroPhotoWarning = resolvedHeroPhotoUrlForWarning
+    ? heroPhotoWarnings?.[resolvedHeroPhotoUrlForWarning] ?? null
+    : null;
 
   return (
     <form action={formAction} className="space-y-6">
@@ -58,13 +78,22 @@ export function PhotosForm({ action, defaults, submitLabel = 'Save' }: PhotosFor
             ))}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <PhotoSlotField
-              label="Hero background"
-              name="heroPhotoUrl"
-              photoUrls={photoUrls}
-              defaultValue={defaults?.heroPhotoUrl}
-              errors={errors.heroPhotoUrl}
-            />
+            <div>
+              <PhotoSlotField
+                label="Desktop hero image"
+                name="heroPhotoUrl"
+                photoUrls={photoUrls}
+                defaultValue={defaults?.heroPhotoUrl}
+                errors={errors.heroPhotoUrl}
+                hint="For a full-width background, use a photo within 100px of 1920×1080 or 1600×900px. Other sizes will display alongside your text instead."
+                onChange={(e) => setSelectedHeroPhotoUrl(e.target.value)}
+              />
+              {heroPhotoWarning && (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {heroPhotoWarning}
+                </p>
+              )}
+            </div>
             <PhotoSlotField
               label="About Us section"
               name="aboutPhotoUrl"

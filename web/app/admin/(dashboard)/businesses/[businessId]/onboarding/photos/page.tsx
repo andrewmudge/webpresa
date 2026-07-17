@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
+import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
 import { PhotosForm } from '../../../PhotosForm';
 import { updatePhotosAction } from '../../actions';
 
@@ -15,7 +16,19 @@ export default async function OnboardingPhotosPage({ params }: Props) {
   const business = await getBusinessById(businessId);
   if (!business) notFound();
 
-  const boundAction = updatePhotosAction.bind(null, businessId, `/admin/businesses/${businessId}/onboarding/sections`);
+  const photosPageUrl = `/admin/businesses/${businessId}/onboarding/photos`;
+  const sectionsPageUrl = `/admin/businesses/${businessId}/onboarding/sections`;
+
+  // Once photos exist, the Photo Assignment section below becomes visible
+  // (see PhotosForm) — only then does the submit button advance to step 3.
+  // Before that, submitting redirects back to this same page so the newly
+  // uploaded photos and the assignment UI actually show up before moving on.
+  const hasPhotos = (business.photoUrls?.length ?? 0) > 0;
+  const redirectTarget = hasPhotos ? sectionsPageUrl : photosPageUrl;
+  const boundAction = updatePhotosAction.bind(null, businessId, redirectTarget);
+  const submitLabel = hasPhotos ? 'Continue →' : 'Upload Photos';
+
+  const heroPhotoWarnings = await describeHeroDimensionWarningsForPhotos(business.photoUrls ?? []);
 
   return (
     <div className="p-8 max-w-3xl">
@@ -34,7 +47,7 @@ export default async function OnboardingPhotosPage({ params }: Props) {
           <p className="text-sm text-gray-400 mt-1">Optional — a logo and a few photos make for a stronger generated website.</p>
         </div>
         <Link
-          href={`/admin/businesses/${businessId}/onboarding/sections`}
+          href={sectionsPageUrl}
           className="text-sm text-gray-400 hover:text-(--color-brand) transition-colors shrink-0 mt-1"
         >
           Skip for now →
@@ -42,7 +55,12 @@ export default async function OnboardingPhotosPage({ params }: Props) {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <PhotosForm action={boundAction} defaults={business} submitLabel="Continue →" />
+        <PhotosForm
+          action={boundAction}
+          defaults={business}
+          submitLabel={submitLabel}
+          heroPhotoWarnings={heroPhotoWarnings}
+        />
       </div>
     </div>
   );

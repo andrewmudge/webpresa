@@ -2249,3 +2249,221 @@ web/
             ├── photos/page.tsx                                   NEW — wizard step 2
             └── sections/page.tsx                                 NEW — wizard step 3
 ```
+
+---
+
+# Website Sections Reorder UI — Up/Down Controls + Catalog Renumbering
+
+**Date:** 2026-07-16
+**Scope:** UX fix, prompted by direct user feedback on the Website Sections admin card ("this is not user friendly, i have no idea how to update the order of components"). The raw `<input type="number">` per row required knowing the neighboring rows' exact order values to move anything — replaced with up/down arrow buttons, per the original Stage 11.x spec's own allowance ("simple numeric order inputs **or** move-up and move-down controls" — no heavy drag-and-drop dependency). Bundled in the same change: the user's explicit ask that Gallery default to sitting after Service Areas instead of between Services and Why Choose Us.
+
+## Catalog renumbering (`domain/constants/website-sections.ts`)
+
+`WEBSITE_SECTION_CATALOG`'s `defaultOrder` values and the `WEBSITE_SECTION_TYPES` array declaration order were both renumbered to the same ascending sequence (previously the two didn't match, and `recommendWebsiteSections`'s `Object.entries()` output relied on that coincidental alignment without ever sorting — a fragile, undocumented invariant): header(10), hero(20), trustStrip(30), services(40), whyChooseUs(50), about(60), reviews(70), testimonials(80), serviceAreas(90), **gallery(100)**, process(110), faq(120), ctaBanner(130), contact(140), footer(150). Gallery moved from its old position (45, between services and whyChooseUs) to right after serviceAreas, per the request. Confirmed via research before changing: no test in the repo hardcodes any specific section's numeric order or position relative to another by number — every order-assertion is either derived dynamically from the catalog or uses an arbitrary out-of-band value to test schema rules (negative/non-integer/duplicate rejection) — so this was safe to renumber freely.
+
+## Reorder UI (`[businessId]/SectionConfigForm.tsx`, new `[businessId]/section-order.ts`)
+
+- **Header and Footer are pinned** — always first/last, still shown (still locked-on, "Required" badge, disabled checkbox) but with no up/down arrows at all, removing the ability to create a nonsensical "Footer above Header" state.
+- **The other 13 sections get ▲/▼ icon buttons** (hand-rolled inline SVG chevrons, matching the existing admin/template convention — `lucide-react` stays public-marketing-site-only, not introduced into `web/app/admin/`). Clicking a button swaps the row with its neighbor and the row visually moves immediately via client-side `useState`; order is never shown as a number to the admin — it's computed automatically from final row position on save (`(index + 1) * 10`), submitted as a hidden `order_<type>` input. **No server-side change was needed** — `saveWebsiteSectionsAction` already read `order_<type>` as a generic FormData field regardless of whether it came from a visible `<input type="number">` or a hidden one.
+- New pure helper `section-order.ts` — `moveSection<T>(list, index, direction)`, a generic array-swap function extracted specifically so the reorder logic has real unit coverage: this repo's vitest config runs in a plain `node` environment (no jsdom/RTL anywhere), so `SectionConfigForm.tsx`'s own JSX/event-handler code can't be tested directly. New `__tests__/section-order.test.ts` (10 tests): swap up/down, no-op at both list boundaries, no-op on out-of-range index, doesn't mutate the input array, single-element list is always a no-op.
+- Arrow buttons disable at the top/bottom of the reorderable list and while a save is in flight (`useActionState`'s third tuple element, `isPending` — supported since React 19, confirmed on the installed 19.2.4 — used directly in the parent component rather than requiring a child `useFormStatus` wrapper just for this).
+- Required sections are still force-enabled server-side regardless of submitted form data (unchanged, pre-existing behavior, re-verified).
+
+## Tests / verification
+
+308 → 309 total (net +1: +10 new `section-order.test.ts`, existing suites unaffected — confirmed no test hardcoded a catalog order number). Lint and `tsc --noEmit` clean.
+
+```
+Lint:      0 errors
+TypeCheck: 0 errors
+Tests:     309 passed (10 new)
+```
+
+## Files changed
+
+```
+web/
+├── domain/constants/website-sections.ts                          MODIFIED — renumbered defaultOrder, reordered declarations
+└── app/admin/(dashboard)/businesses/[businessId]/
+    ├── SectionConfigForm.tsx                                     MODIFIED — pinned header/footer rows, up/down buttons replace number input
+    ├── section-order.ts                                          NEW — moveSection pure helper
+    └── __tests__/section-order.test.ts                           NEW — 10 tests
+```
+
+---
+
+# Admin Polish — AI Generation Cap Raised, Legacy Preview Buttons Retired
+
+**Date:** 2026-07-16
+**Scope:** Two small, user-requested tweaks to the business detail page's Preview card now that "Generate Website" (the real AI pipeline) is the primary/proven path.
+
+- `MAX_AI_GENERATIONS` (`[businessId]/actions.ts`) raised from 3 to 10. The literal is duplicated once, in a comment-documented spot in `page.tsx` (`capReached={previews.filter(...).length >= 10}`) — the action file can't export the constant directly since every export of a `'use server'` module must itself be an async Server Action, per the existing comment explaining this same constraint.
+- **"Create test preview" and "View preview" (the free, non-AI seed-preview action and its published-preview shortcut link) are commented out**, not deleted — left as inline JSX/import comments in `page.tsx` so re-enabling is a one-line uncomment if ever needed, rather than a re-implementation. `createSeedPreviewAction`'s import was correspondingly commented out to avoid an unused-import lint warning.
+
+## Tests / verification
+
+One existing test (`enforces the AI generation cap`) hardcoded exactly 3 prior generations to trigger the old cap — updated to seed 10. Full suite re-run clean afterward.
+
+```
+Lint:      0 errors
+TypeCheck: 0 errors
+Tests:     309 passed
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/
+├── actions.ts                                                    MODIFIED — MAX_AI_GENERATIONS 3 → 10
+├── page.tsx                                                      MODIFIED — cap literal synced, seed-preview/view-preview UI commented out
+└── __tests__/actions.test.ts                                     MODIFIED — cap test seeds 10 prior generations
+```
+
+---
+
+# Theme-Matched Illustration Hero Fallback
+
+**Date:** 2026-07-16
+**Scope:** Replaces the hero section's no-photo fallback. Previously: the OpenAI generation call itself picked one of three CSS-only backgrounds (`gradient`/`pattern`/`solid`, built from `color-mix()` over the theme's CSS variables) with a large low-opacity `lucide-react` industry icon watermarked on top (`industry-icons.tsx`). Now: a hand-designed, theme-matched illustration — one static image per Brand Theme preset, colored to that preset's own palette — renders deterministically in code, the same way `heroStyle: 'image'` was already hardcoded (never AI-chosen) whenever a hero photo exists. The color list needed to design the 10 images (primary/accent/surface per theme) was read directly from `lib/themes.ts` and handed to the user; they produced and delivered all 10 PNGs mid-session.
+
+## Data model (`domain/models/site-preview.ts`)
+
+`HERO_STYLES` gains `'illustration'`: `['image', 'illustration', 'gradient', 'pattern', 'solid']`. The Zod schema (`z.enum(HERO_STYLES)` in `site-preview.schema.ts`) picks it up automatically — no separate schema edit. `gradient`/`pattern`/`solid` remain valid values purely for backward compatibility — **no new generation produces them**; only previews saved before this change still carry them, and render exactly as before (`industry-icons.tsx`/lucide-react stay in the codebase, still actively serving those three legacy styles, just never reached by the new branch).
+
+## Generation (`lib/ai/generate-preview.ts`)
+
+`heroStyle: z.enum(['gradient', 'pattern', 'solid'])` removed from the OpenAI structured-output schema entirely — hero presentation is no longer something the model decides at all. Where `theme` is assembled, the no-photo branch changed from `{ heroStyle: output.heroStyle }` to a hardcoded `{ heroStyle: 'illustration' as const }`, mirroring the existing photo branch's already-deterministic `{ heroImageUrl, heroStyle: 'image' as const }`. `__tests__/generate-preview.test.ts` updated to match: removed the AI-selection assertions, added a test confirming a no-photo generation always produces `illustration`, deterministically.
+
+## Assets
+
+10 PNGs delivered by the user at `public/hero_illustrations/{themeName}.png` (note: underscore — the user's own naming, not the hyphenated path floated earlier in planning). Windows `:Zone.Identifier` download-metadata sidecar files that came along with the upload were cleaned up. Files run ~1.2–1.6MB each — heavy for a background image given `next.config.ts` has `images.unoptimized: true` (no server-side compression); flagged as a possible follow-up, not addressed here. New `app/b/[slug]/template/hero-illustrations.ts` — a static `Record<ThemeName, string>` lookup (`getHeroIllustration(themeName)`), mirroring the existing `getHeroIcon`/`INDUSTRY_HERO_ICONS` pattern in `industry-icons.tsx`; falls back to `DEFAULT_THEME_NAME`'s illustration for legacy previews with no stored `themeName`, the same graceful-fallback pattern `resolveThemePalette` already uses for legacy color-only previews.
+
+## Rendering (`app/b/[slug]/template/GeneratedHero.tsx`, `section-registry.tsx`)
+
+New `themeName?: ThemeName` prop, wired through `section-registry.tsx`'s `hero` entry (`themeName={ctx.theme.themeName}`). Style inference changed from `heroStyle ?? (heroImageUrl ? 'image' : 'solid')` to `heroStyle ?? (heroImageUrl ? 'image' : 'illustration')` — legacy previews saved before `heroStyle` existed at all now upgrade to the nicer illustration fallback instead of a flat color, a pure visual improvement with no compatibility risk.
+
+`resolvedStyle === 'illustration'` is a genuinely distinct early-return branch, not squeezed into the single-background-layer chain that serves the legacy styles:
+
+- **Desktop (`lg:`)**: a true full-bleed two-column split. No `max-w-6xl` wrapper on the outer grid (every other section sits inside one) — the illustration column reaches the actual browser edge. Light background, no dark readability scrim (today's overlay exists only because text sits *on top of* a busy image; here text sits on a plain panel). Text column top-aligned (not vertically centered against the illustration's height — centering was tried first and left a large empty gap above the eyebrow whenever the illustration was tall) with its own `lg:pl-12 xl:pl-20` padding; image column full-bleed via `next/image` `fill`/`object-cover`.
+- **Mobile**: went through several iterations based on live feedback against the user's own reference screenshots before landing on the final design — (1) image as its own banner block above the text: rejected, looked "sandwiched"; (2) image as a uniform 30%-opacity watermark behind the whole text block: rejected outright. **Final**: full-color image, `position: absolute`, cropped to the right ~35% of the screen (user-tuned in the editor after trying 25/40/60%), bleeding off the right edge; height matches the text column's own natural content height exactly via `inset-y-0` against a `relative` wrapper whose height is driven purely by the text (the earlier watermark attempt's artificial `min-h-[520px]` floor was removed — that's what had let the image overshoot below the CTAs). A gradient-fade div, sharing the *exact same box* as the image (not a separately-sized sibling — an earlier version mismatched the two boxes' widths, which silently faded the gradient out to nothing before it ever reached the image's actual edge, producing a hard seam instead of a blend), blends the image's left portion into `var(--site-background)` so text stays legible regardless of which theme's specific illustration is behind it. Headline/subheadline capped to `max-w-[75%]`, the CTA button row to a tighter `max-w-[60%]` (button borders read worse touching the image edge than plain text does) — both mobile-only, reset at `lg:`. One regression caught and fixed along the way: widening the image to 60% without narrowing the CTA cap let the secondary button's opaque `border-2` extend into the image and draw a visible line through it — confirmed by inspecting the actual source PNG (no seam baked into the art) before concluding it was a CSS overlap, not an asset defect.
+
+## Tests / verification
+
+309 tests throughout (no test logic touched by the mobile CSS iterations — pure JSX/Tailwind). `generate-preview.test.ts` changes covered above. Confirmed via the running dev server (not a rebuild): all 10 `/hero_illustrations/*.png` paths return 200; a business with an existing uploaded photo renders completely unaffected (the `image` branch, untouched). Visual correctness of the mobile crop/gradient/sizing was verified interactively against the user's own screenshots across ~6 rounds of adjustment — not something `vitest`/`tsc` can check, since this repo has no jsdom/RTL component-rendering test infrastructure.
+
+```
+Lint:      0 errors
+TypeCheck: 0 errors
+Tests:     309 passed
+Build:     not run (see below)
+```
+
+Consistent with the rest of this session: no `npm run build` and no second `next dev` process was run against the shared `web/` directory at any point during this change — both had caused real, user-visible problems earlier in the session (a stale-`.next` 404 bug, and a near-miss where two concurrent dev servers would have shared/corrupted the same build cache). Every iteration here was verified via lint/typecheck/tests plus the user's own live dev server and screenshots.
+
+## Files changed
+
+```
+web/
+├── domain/models/site-preview.ts                                 MODIFIED — HERO_STYLES gains 'illustration'
+├── lib/ai/
+│   ├── generate-preview.ts                                       MODIFIED — heroStyle removed from AI schema, deterministic in code
+│   └── __tests__/generate-preview.test.ts                        MODIFIED — assertions updated for deterministic illustration
+├── public/hero_illustrations/{ten theme}.png                     NEW — user-supplied assets
+└── app/b/[slug]/template/
+    ├── hero-illustrations.ts                                     NEW — getHeroIllustration lookup
+    ├── section-registry.tsx                                      MODIFIED — themeName wired to the hero entry
+    └── GeneratedHero.tsx                                         MODIFIED — new 'illustration' branch (desktop full-bleed split + mobile cropped/gradient treatment)
+```
+
+---
+
+# Wizard Photo Assignment Timing + Desktop Hero Image Classification
+
+**Date:** 2026-07-16
+**Scope:** Two related fixes, requested directly by the user. (1) The "Add business" wizard's step 2 (photo upload) always redirected straight to step 3, so the Photo Assignment section inside `PhotosForm` — which only renders once `photoUrls` exist — never actually appeared during the wizard even though photos were just uploaded; admins only ever saw it later, on the business detail page. (2) No classification of hero photo dimensions existed — any uploaded hero photo always rendered as a full-width background, regardless of its actual size or crop-worthiness.
+
+## 1. Wizard step 2 — show Photo Assignment before advancing
+
+`onboarding/photos/page.tsx` now computes its own redirect target from the freshly-fetched `business` record on each render, mirroring the self-redirect pattern the business detail page's "Photos" card already used: `redirectTarget` is the photos page itself (stay put) when `business.photoUrls` is still empty, or the sections step once photos exist. The submit button label follows the same signal ("Upload Photos" → "Continue →"). No change to `updatePhotosAction`, `PhotosForm`'s existing conditional rendering of the assignment section, or `SubmitButton` — this was purely a caller-side redirect-target/label computation. The "Skip for now" link is unaffected (always jumps straight to the sections step).
+
+## 2. Desktop hero image dimension classification
+
+New `HeroStyle` value `'imageSplit'`, added alongside `'image'`/`'illustration'`/legacy `'gradient'`/`'pattern'`/`'solid'` in `HERO_STYLES`. A resolved hero photo (auto-picked `photoUrls[0]`, or the `heroPhotoUrl` override — same resolution semantics `resolvePhotoSlot` already used) now only renders full-bleed (`'image'`) when it's exactly 1920×1080 or 1600×900px; any other size still gets used as the hero photo, but in a new two-column split layout (`'imageSplit'` — text left, photo right) reusing the shell already built for the no-photo `'illustration'` fallback.
+
+New `lib/image/hero-dimensions.ts` — `checkHeroPhotoDimensions(photoUrl)` mirrors `lib/theme/logo-color.ts`'s established S3-proxy-URL → `getAsset()` → pixel-read pattern, but uses `sharp(buffer).metadata()` (a header-only read, not `detectLogoThemeFamily`'s full pixel decode) so it's cheap enough to call on every relevant page render, not just at generation time. `describeHeroDimensionWarning(check)` turns the result into a short admin-facing message. `lib/ai/generate-preview.ts` calls the same helper at generation time to decide `heroStyle` fresh on every run — never cached — so the admin-facing warning (below) and the actual rendered result can never disagree.
+
+**Admin-facing warning:** computed at page-render time in both `onboarding/photos/page.tsx` and `[businessId]/page.tsx` (not inside `updatePhotosAction` — that action always ends in `redirect()`, which discards the function's return value before `useActionState` ever sees it, making a warning returned alongside a redirect unreachable dead code) and passed into `PhotosForm` as `heroPhotoWarning`. Warns on the *resolved* hero photo regardless of whether it was auto-picked or explicitly overridden, since most admins never touch the override. Rendered as an amber info box (this codebase's existing FYI/pending convention) below the Hero field, which is relabeled "Desktop hero image" (UI copy only — `Business.heroPhotoUrl` is not renamed, per this codebase's established never-rename-a-stored-field convention) and gained a static hint about the two accepted sizes (`FormFields.tsx`'s `PhotoSlotField` gained a `hint` prop for this).
+
+**No mobile hero image field this session** — confirmed with the user: mobile hero photo selection is fully out of scope, deferred to a future session. Per the user's explicit instruction, mobile now always renders the no-photo illustration treatment regardless of which desktop hero style is chosen, including for `'image'` (previously `'image'` showed the real photo at every viewport size).
+
+**`GeneratedHero.tsx` restructuring:** extracted `HeroCornerImage({ desktopSrc, mobileSrc })` (renders one `<Image>` when the two sources are equal — the `'illustration'` case, byte-identical to before — or two breakpoint-gated `<Image>`s when they differ) and `SplitHeroSection({ ...text/CTA props, desktopImageSrc, mobileImageSrc })` (the full two-column shell, composing `HeroCornerImage`) out of the former single `'illustration'`-only branch. `'illustration'` now calls `SplitHeroSection` with both sources equal to the theme illustration (provably unchanged output). New `'imageSplit'` branch calls it with the real photo on desktop and the theme illustration on mobile. The legacy single-`<section>` chain (`'gradient'`/`'pattern'`/`'solid'`, and `'image'`'s own desktop rendering) is untouched, computed once into a local `legacySection`; the `'image'` branch now renders `legacySection` at `lg:`+ only and `SplitHeroSection` (both sources = theme illustration) at mobile only, via `hidden`/`lg:hidden` wrapper divs.
+
+## Verification
+
+```
+Lint:      0 errors   (npm run lint)
+TypeCheck: 0 errors   (npx tsc --noEmit)
+Tests:     320 passed (npm test) — 11 new (9 hero-dimensions, 1 generate-preview imageSplit case, 1 domain schema-acceptance)
+Build:     not run — a `next dev` process was already live against this shared `web/` directory (same reasoning as the two prior entries above); verified instead via lint/typecheck/tests plus unauthenticated curl checks confirming touched routes still resolve (200 on `/`, 307 admin redirect-to-sign-in on `/admin/businesses/new`). Full manual click-through (photo upload → assignment → hero dimension warning → generated preview at both breakpoints) requires the user's authenticated session — see the plan file's verification section for the exact steps.
+```
+
+## Files changed / created
+
+```
+web/
+├── domain/models/site-preview.ts                                                MODIFIED — HERO_STYLES gains 'imageSplit', heroStyle JSDoc updated
+├── domain/__tests__/domain.test.ts                                              MODIFIED — schema-acceptance test for 'imageSplit'
+├── lib/image/
+│   ├── hero-dimensions.ts                                                       NEW — checkHeroPhotoDimensions, describeHeroDimensionWarning
+│   └── __tests__/hero-dimensions.test.ts                                        NEW — 9 tests
+├── lib/ai/
+│   ├── generate-preview.ts                                                      MODIFIED — heroStyle decision uses checkHeroPhotoDimensions
+│   └── __tests__/generate-preview.test.ts                                       MODIFIED — mocked helper, new imageSplit case
+├── app/b/[slug]/template/GeneratedHero.tsx                                       MODIFIED — HeroCornerImage + SplitHeroSection extraction, imageSplit branch, image mobile-split
+└── app/admin/(dashboard)/businesses/
+    ├── FormFields.tsx                                                           MODIFIED — PhotoSlotField gains hint prop
+    ├── PhotosForm.tsx                                                           MODIFIED — relabel, hint, heroPhotoWarning box
+    └── [businessId]/
+        ├── page.tsx                                                             MODIFIED — heroPhotoWarning computed, passed to PhotosForm
+        └── onboarding/photos/page.tsx                                           MODIFIED — conditional redirect target/submitLabel, heroPhotoWarning
+```
+
+---
+
+# Bug Fix — Hero Dimension Warning Only Ever Checked the Saved Photo, No Tolerance
+
+**Date:** 2026-07-16
+**Scope:** Direct user report on the desktop hero classification work above: "the hero size checker is only checking the first photo that was uploaded... if i select a different photo the photo pixels don't change." Root cause confirmed by re-reading the prior implementation: the admin-facing warning was computed purely server-side from the *saved* `Business.heroPhotoUrl` on page render — changing the "Desktop hero image" `<select>` in the browser is a plain uncontrolled form field with no submit yet, so nothing recomputed until the form was saved and the page reloaded. Effectively, only whichever photo was already persisted as the resolved hero pick was ever dimension-checked at all; every other uploaded photo looked "unchecked" until explicitly selected and saved. Also requested: a ±100px tolerance instead of requiring an exact pixel match.
+
+## Fix 1 — Tolerance
+
+`lib/image/hero-dimensions.ts` gains `HERO_DIMENSION_TOLERANCE_PX = 100`. `checkHeroPhotoDimensions()`'s eligibility check changed from an exact `d.width === width && d.height === height` match to `Math.abs(d.width - width) <= 100 && Math.abs(d.height - height) <= 100` against each of the two target sizes. `describeHeroDimensionWarning()`'s copy and the static hint in `PhotosForm.tsx` updated to say "within 100px" instead of "exactly".
+
+## Fix 2 — Check every uploaded photo up front, make the warning live
+
+New `describeHeroDimensionWarningsForPhotos(photoUrls)` (`lib/image/hero-dimensions.ts`) runs `checkHeroPhotoDimensions` + `describeHeroDimensionWarning` over *every* uploaded photo (bounded — `photoUrls` is capped at 6), returning `Record<photoUrl, warning | null>`. Both `onboarding/photos/page.tsx` and `[businessId]/page.tsx` now compute this map once per render (replacing the old single-photo `heroPhotoWarning` computation) and pass it to `PhotosForm` as `heroPhotoWarnings`.
+
+`PhotosForm.tsx` (already a client component) tracks the Desktop hero image select's value in local `useState`, initialized from `defaults?.heroPhotoUrl`, and looks up the live warning from `heroPhotoWarnings` using the same Auto/`'none'`/explicit-URL resolution semantics `resolvePhotoSlot` already uses elsewhere — so the warning now updates the instant the admin picks a different photo, no save/reload required. `FormFields.tsx`'s `PhotoSlotField` gained a passthrough `onChange` prop (the field itself stays uncontrolled via `defaultValue` for form submission; `onChange` is purely for this side-channel live lookup) to wire the select's native change event to that state update.
+
+## Verification
+
+```
+Lint:      0 errors   (npm run lint)
+TypeCheck: 0 errors   (npx tsc --noEmit)
+Tests:     325 passed (npm test) — 5 new (3 tolerance boundary cases, 2 for describeHeroDimensionWarningsForPhotos)
+```
+
+## Files changed
+
+```
+web/
+├── lib/image/
+│   ├── hero-dimensions.ts                                                       MODIFIED — HERO_DIMENSION_TOLERANCE_PX, tolerance-based eligibility, describeHeroDimensionWarningsForPhotos
+│   └── __tests__/hero-dimensions.test.ts                                        MODIFIED — 5 new tests
+└── app/admin/(dashboard)/businesses/
+    ├── FormFields.tsx                                                           MODIFIED — PhotoSlotField gains onChange passthrough
+    ├── PhotosForm.tsx                                                           MODIFIED — heroPhotoWarnings map + client-side live lookup on selection change
+    └── [businessId]/
+        ├── page.tsx                                                             MODIFIED — computes heroPhotoWarnings map instead of single warning
+        └── onboarding/photos/page.tsx                                           MODIFIED — computes heroPhotoWarnings map instead of single warning
+```

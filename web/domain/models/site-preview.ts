@@ -105,7 +105,7 @@ export interface PreviewContent {
   cta?: PreviewCtaConfig;
 }
 
-export const HERO_STYLES = ['image', 'illustration', 'gradient', 'pattern', 'solid'] as const;
+export const HERO_STYLES = ['image', 'imageSplit', 'illustration', 'gradient', 'pattern', 'solid'] as const;
 export type HeroStyle = (typeof HERO_STYLES)[number];
 
 /**
@@ -147,15 +147,24 @@ export interface PreviewTheme {
   /** URL of the featured-service-card background image. Falls back to a DEV_FIXTURE placeholder when absent. */
   servicesImageUrl?: string;
   /**
-   * Hero presentation style. Never AI-chosen — `'image'` is hardcoded in
-   * code whenever a hero photo resolves, `'illustration'` (a theme-matched
-   * static graphic, see `template/hero-illustrations.ts`) whenever it
-   * doesn't. `gradient`/`pattern`/`solid` are legacy values only — no new
-   * preview generates them, but previews saved before `'illustration'`
-   * existed keep rendering with them unchanged. Optional for backward
-   * compatibility — previews saved before `heroStyle` existed at all are
-   * inferred as `'image'` when `heroImageUrl` is set, else `'illustration'`
-   * (see `GeneratedHero.tsx`).
+   * Hero presentation style. Never AI-chosen — code decides between
+   * `'image'` and `'imageSplit'` whenever a hero photo resolves, based on
+   * its actual pixel dimensions (`lib/image/hero-dimensions.ts`):
+   * `'image'` (full-bleed background, desktop only — see below) only when
+   * the photo is exactly 1920×1080 or 1600×900px; `'imageSplit'` (a
+   * two-column split, real photo on the right, desktop only) for any other
+   * size. `'illustration'` (a theme-matched static graphic, see
+   * `template/hero-illustrations.ts`) is used whenever no hero photo
+   * resolves at all. On mobile, `'image'` and `'imageSplit'` both currently
+   * render the same no-photo illustration treatment as `'illustration'` —
+   * a real uploaded photo is not yet shown on mobile at any size (deferred
+   * to a future session). `gradient`/`pattern`/`solid` are legacy values
+   * only — no new preview generates them, but previews saved before
+   * `'illustration'` existed keep rendering with them unchanged (at every
+   * viewport size, exactly as before this hero-dimension-classification
+   * work). Optional for backward compatibility — previews saved before
+   * `heroStyle` existed at all are inferred as `'image'` when
+   * `heroImageUrl` is set, else `'illustration'` (see `GeneratedHero.tsx`).
    */
   heroStyle?: HeroStyle;
 }

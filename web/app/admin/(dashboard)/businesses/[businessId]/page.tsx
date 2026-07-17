@@ -23,6 +23,7 @@ import { PhotosForm } from '../PhotosForm';
 import type { SitePreview } from '@/domain/models/site-preview';
 import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
 import { computeSectionAvailability, hasResolvableCta } from '@/lib/website-sections/availability';
+import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,8 @@ export default async function BusinessDetailPage({ params }: Props) {
     hasCta: hasResolvableCta(business, latestContent),
   });
   const resolvedSections = resolveStoredOrDefaultSections(business.websiteSections);
+
+  const heroPhotoWarnings = await describeHeroDimensionWarningsForPhotos(business.photoUrls ?? []);
 
   return (
     <div className="p-8 max-w-5xl">
@@ -164,6 +167,7 @@ export default async function BusinessDetailPage({ params }: Props) {
           action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
           submitLabel="Save Photos"
+          heroPhotoWarnings={heroPhotoWarnings}
         />
       </div>
 

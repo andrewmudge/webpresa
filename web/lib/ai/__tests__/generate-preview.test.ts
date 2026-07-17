@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockParse = vi.hoisted(() => vi.fn());
 const mockGetOpenAiClient = vi.hoisted(() => vi.fn());
 const mockResolveBusinessTheme = vi.hoisted(() => vi.fn());
+const mockCheckHeroPhotoDimensions = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/ai/client', () => ({
   getOpenAiClient: mockGetOpenAiClient,
@@ -15,6 +16,10 @@ vi.mock('@/lib/ai/client', () => ({
 
 vi.mock('@/lib/theme/select-theme', () => ({
   resolveBusinessTheme: mockResolveBusinessTheme,
+}));
+
+vi.mock('@/lib/image/hero-dimensions', () => ({
+  checkHeroPhotoDimensions: mockCheckHeroPhotoDimensions,
 }));
 
 vi.mock('server-only', () => ({}));
@@ -61,6 +66,7 @@ beforeEach(() => {
     chat: { completions: { parse: mockParse } },
   });
   mockResolveBusinessTheme.mockResolvedValue('classicBlue');
+  mockCheckHeroPhotoDimensions.mockResolvedValue({ isFullBleedEligible: true, width: 1920, height: 1080 });
 });
 
 describe('generatePreviewContent — precondition', () => {
@@ -98,6 +104,17 @@ describe('generatePreviewContent — success', () => {
     const result = await generatePreviewContent(business);
 
     expect(result.theme.heroStyle).toBe('image');
+    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+  });
+
+  it('sets heroStyle to imageSplit when the hero photo is not hero-dimensioned', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    mockCheckHeroPhotoDimensions.mockResolvedValueOnce({ isFullBleedEligible: false, width: 1200, height: 800 });
+    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.heroStyle).toBe('imageSplit');
     expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
   });
 
