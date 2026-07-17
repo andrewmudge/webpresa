@@ -21,7 +21,7 @@ export default function NewBusinessPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <BusinessDetailsForm action={createBusinessAction} submitLabel="Continue →" />
+        <BusinessDetailsForm action={createBusinessAction} submitLabel="Continue →" showAutofillButton />
       </div>
     </div>
   );

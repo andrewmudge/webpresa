@@ -2,12 +2,13 @@
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import type { Business } from '@/domain/models/business';
-import type { PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewTheme } from '@/domain/models/site-preview';
+import type { HeroStyle, PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewTheme } from '@/domain/models/site-preview';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
-import { PreviewContentSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
+import { PreviewContentSchema, PreviewThemeSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 import { generatePreviewContent } from '@/lib/ai/generate-preview';
 import { resolveBusinessThemeForSeed } from '@/lib/theme/select-theme';
+import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
 import { buildDefaultCta } from './cta-defaults';
 import {
   listPreviewsForBusiness,
@@ -29,8 +30,11 @@ import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
-import { uploadBusinessAssets } from '@/lib/s3/business-assets';
+import { uploadBusinessAssets, uploadBusinessAsset, fileExtension } from '@/lib/s3/business-assets';
 import type { BusinessFormState } from '../actions';
+import type { WebsiteSectionType } from '@/domain/constants/website-sections';
+import type { GalleryImage, PreviewService } from '@/domain/models/site-preview';
+import { parseIndexedList } from './form-list';
 
 // ---------------------------------------------------------------------------
 // Business details + photos — inline edit on the business detail page, and
@@ -49,15 +53,12 @@ const WEBSITE_GENERATION_FIELDS = {
   differentiators: z.string().max(2000).optional(),
   brandTone: z.enum(BRAND_TONES).optional(),
   notes: z.string().max(2000).optional(),
-  theme: z.enum(THEME_NAMES).optional(),
 };
 
 const UpdateBusinessDetailsSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   industry: z.enum(INDUSTRIES),
   legalName: z.string().max(200).optional(),
-  status: z.enum(BUSINESS_STATUSES),
-  source: z.enum(BUSINESS_SOURCES),
   phone: z.string().optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   websiteUrl: z.string().url('Invalid URL').optional().or(z.literal('')),
@@ -81,8 +82,8 @@ function normalizeUrl(raw: string | undefined): string | undefined {
 
 /**
  * Updates identity/contact/address/website-generation fields. Never
- * touches `logoUrl`, `photoUrls`, or the photo-slot overrides — see
- * `updatePhotosAction` for those.
+ * touches `logoUrl`/`photoUrls`/photo-slot overrides (`updatePhotosAction`),
+ * `theme` (`updateThemeAction`), or `source`/`status` (`updateAdminFieldsAction`).
  */
 export async function updateBusinessDetailsAction(
   businessId: string,
@@ -97,8 +98,6 @@ export async function updateBusinessDetailsAction(
     name: formData.get('name') as string,
     industry: formData.get('industry') as string,
     legalName: coerceOptional(formData.get('legalName') as string | undefined),
-    status: formData.get('status') as string,
-    source: formData.get('source') as string,
     phone: coerceOptional(formData.get('phone') as string | undefined),
     email: coerceOptional(formData.get('email') as string | undefined),
     websiteUrl: normalizeUrl(coerceOptional(formData.get('websiteUrl') as string | undefined)),
@@ -113,7 +112,6 @@ export async function updateBusinessDetailsAction(
     differentiators: coerceOptional(formData.get('differentiators') as string | undefined),
     brandTone: (formData.get('brandTone') as string) || undefined,
     notes: coerceOptional(formData.get('notes') as string | undefined),
-    theme: (formData.get('theme') as string) || undefined,
   };
 
   const parsed = UpdateBusinessDetailsSchema.safeParse(raw);
@@ -142,8 +140,6 @@ export async function updateBusinessDetailsAction(
       name: data.name,
       industry: data.industry,
       legalName: data.legalName,
-      status: data.status,
-      source: data.source,
       phone: data.phone,
       email: data.email,
       websiteUrl: data.websiteUrl || undefined,
@@ -155,11 +151,98 @@ export async function updateBusinessDetailsAction(
       differentiators: data.differentiators,
       brandTone: data.brandTone,
       notes: data.notes,
-      theme: data.theme,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Failed to update business details:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  redirect(redirectTo);
+}
+
+const UpdateThemeSchema = z.object({
+  theme: z.enum(THEME_NAMES).optional(),
+});
+
+/** Updates only `Business.theme`. Never touches any other field. */
+export async function updateThemeAction(
+  businessId: string,
+  redirectTo: string,
+  _prevState: BusinessFormState,
+  formData: FormData,
+): Promise<BusinessFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = UpdateThemeSchema.safeParse({ theme: (formData.get('theme') as string) || undefined });
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    await putBusiness({ ...existing, theme: parsed.data.theme, updatedAt: new Date().toISOString() });
+
+    // Dual-write: a specific theme pick applies to the live preview
+    // immediately, not just the next regeneration — same reasoning as the
+    // photo-slot dual-write in updatePhotosAction. Leaving it on "Auto"
+    // (undefined) makes no live change; there's no specific new theme to
+    // apply, and the current preview keeps whatever it already had.
+    if (parsed.data.theme) {
+      const previews = await listPreviewsForBusiness(businessId);
+      const latest = previews[0];
+      if (latest && latest.theme.themeName !== parsed.data.theme) {
+        const theme: PreviewTheme = { ...latest.theme, themeName: parsed.data.theme };
+        PreviewThemeSchema.parse(theme);
+        await putSitePreview({ ...latest, theme, updatedAt: new Date().toISOString() });
+      }
+    }
+  } catch (err) {
+    console.error('Failed to update theme:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  redirect(redirectTo);
+}
+
+const UpdateAdminFieldsSchema = z.object({
+  source: z.enum(BUSINESS_SOURCES),
+  status: z.enum(BUSINESS_STATUSES),
+});
+
+/** Updates only `Business.source`/`status`. Never touches any other field. */
+export async function updateAdminFieldsAction(
+  businessId: string,
+  redirectTo: string,
+  _prevState: BusinessFormState,
+  formData: FormData,
+): Promise<BusinessFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = UpdateAdminFieldsSchema.safeParse({
+    source: formData.get('source') as string,
+    status: formData.get('status') as string,
+  });
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors };
+  }
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    await putBusiness({
+      ...existing,
+      source: parsed.data.source,
+      status: parsed.data.status,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Failed to update admin fields:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }
 
@@ -173,7 +256,43 @@ const UpdatePhotosSchema = z.object({
   servicesPhotoUrl: z.string().optional(),
 });
 
-/** Uploads logo/photos and saves photo-slot assignment overrides. Never touches any other field. */
+/**
+ * Resolves a photo-slot form value into a theme-field patch: `undefined`
+ * means "left on Auto" (no change to the live preview — there's no specific
+ * new photo to apply), `'none'` clears the slot's photo, anything else is a
+ * URL to apply.
+ */
+function resolveThemePhotoPatch(value: string | undefined): { apply: boolean; url: string | undefined } {
+  if (!value) return { apply: false, url: undefined };
+  if (value === 'none') return { apply: true, url: undefined };
+  return { apply: true, url: value };
+}
+
+/** Mirrors business.schema.ts's `photoUrls` bound — checked before appending a direct slot upload. */
+const MAX_BUSINESS_PHOTOS = 6;
+
+/**
+ * Per-slot direct-upload field names (see `PhotoPickerField`'s
+ * `uploadFieldName` prop) — lets an admin upload a brand-new photo straight
+ * into a section slot without first going back to the main Photos card. A
+ * file present here always wins over whatever that slot's picker selected.
+ */
+const SLOT_UPLOAD_FIELDS = {
+  heroPhotoUrl: 'heroPhotoFile',
+  aboutPhotoUrl: 'aboutPhotoFile',
+  whyChooseUsPhotoUrl: 'whyChooseUsPhotoFile',
+  servicesPhotoUrl: 'servicesPhotoFile',
+} as const;
+
+/**
+ * Uploads logo/photos and saves photo-slot assignment overrides on the
+ * `Business` record (persists for future regenerations), and — when a slot
+ * was explicitly set to a specific photo or "no photo" — also patches the
+ * matching field on the business's most recent `SitePreview.theme` in
+ * place, so the change is visible on the live preview immediately rather
+ * than only on the next "Generate Website" run. Never touches any other
+ * field on either record.
+ */
 export async function updatePhotosAction(
   businessId: string,
   redirectTo: string,
@@ -200,19 +319,82 @@ export async function updatePhotosAction(
     const existing = await getBusinessById(businessId);
     if (!existing) return { message: 'Business not found' };
 
-    // Only replaces logoUrl/photoUrls when a new file was chosen; existing
-    // values are preserved via the `...existing` spread otherwise.
+    // Only replaces photoUrls wholesale when the main multi-photo field was
+    // used (matches FileField's existing "choosing new files replaces all
+    // of them" behavior); otherwise starts from what's already there so
+    // per-slot direct uploads below can append to it.
     const assets = await uploadBusinessAssets(businessId, formData);
+    let photoUrls = assets.photoUrls ?? existing.photoUrls ?? [];
+
+    const slotOverrides: Partial<Record<keyof typeof SLOT_UPLOAD_FIELDS, string>> = {};
+    for (const [slotKey, fieldName] of Object.entries(SLOT_UPLOAD_FIELDS) as [
+      keyof typeof SLOT_UPLOAD_FIELDS,
+      string,
+    ][]) {
+      const file = formData.get(fieldName);
+      if (file instanceof File && file.size > 0) {
+        if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
+          return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in the Photos card first.` };
+        }
+        const url = await uploadBusinessAsset(businessId, file, `photos/${photoUrls.length}.${fileExtension(file)}`);
+        photoUrls = [...photoUrls, url];
+        slotOverrides[slotKey] = url;
+      }
+    }
+
+    const heroPhotoUrl = slotOverrides.heroPhotoUrl ?? data.heroPhotoUrl;
+    const aboutPhotoUrl = slotOverrides.aboutPhotoUrl ?? data.aboutPhotoUrl;
+    const whyChooseUsPhotoUrl = slotOverrides.whyChooseUsPhotoUrl ?? data.whyChooseUsPhotoUrl;
+    const servicesPhotoUrl = slotOverrides.servicesPhotoUrl ?? data.servicesPhotoUrl;
 
     await putBusiness({
       ...existing,
-      heroPhotoUrl: data.heroPhotoUrl,
-      aboutPhotoUrl: data.aboutPhotoUrl,
-      whyChooseUsPhotoUrl: data.whyChooseUsPhotoUrl,
-      servicesPhotoUrl: data.servicesPhotoUrl,
-      ...assets,
+      heroPhotoUrl,
+      aboutPhotoUrl,
+      whyChooseUsPhotoUrl,
+      servicesPhotoUrl,
+      logoUrl: assets.logoUrl ?? existing.logoUrl,
+      photoUrls,
       updatedAt: new Date().toISOString(),
     });
+
+    // Dual-write: apply explicitly-set slots to the live preview too.
+    const hero = resolveThemePhotoPatch(heroPhotoUrl);
+    const about = resolveThemePhotoPatch(aboutPhotoUrl);
+    const whyChooseUs = resolveThemePhotoPatch(whyChooseUsPhotoUrl);
+    const services = resolveThemePhotoPatch(servicesPhotoUrl);
+
+    if (hero.apply || about.apply || whyChooseUs.apply || services.apply) {
+      const previews = await listPreviewsForBusiness(businessId);
+      const latest = previews[0];
+      if (latest) {
+        // heroStyle must be recomputed whenever the hero photo itself
+        // changes — it's not just "which URL to show", it decides which
+        // rendering branch GeneratedHero takes at all (a stored
+        // heroStyle: 'illustration' from the original generation ignores
+        // heroImageUrl completely, so patching the URL alone silently did
+        // nothing when the preview had no photo at generation time).
+        let heroStyle: HeroStyle | undefined;
+        if (hero.apply) {
+          if (!hero.url) {
+            heroStyle = 'illustration';
+          } else {
+            const dimensionCheck = await checkHeroPhotoDimensions(hero.url);
+            heroStyle = dimensionCheck?.isFullBleedEligible ? 'image' : 'imageSplit';
+          }
+        }
+
+        const theme: PreviewTheme = {
+          ...latest.theme,
+          ...(hero.apply ? { heroImageUrl: hero.url, heroStyle } : {}),
+          ...(about.apply ? { aboutSectionImageUrl: about.url } : {}),
+          ...(whyChooseUs.apply ? { aboutImageUrl: whyChooseUs.url } : {}),
+          ...(services.apply ? { servicesImageUrl: services.url } : {}),
+        };
+        PreviewThemeSchema.parse(theme);
+        await putSitePreview({ ...latest, theme, updatedAt: new Date().toISOString() });
+      }
+    }
   } catch (err) {
     console.error('Failed to update business photos:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
@@ -225,8 +407,8 @@ export async function updatePhotosAction(
 // Industry-specific seed content
 //
 // DEV_FIXTURE: All content here is clearly fictional development data.
-// Images use picsum.photos placeholder URLs — replace with real S3 URLs
-// when Stage 9 (image pipeline) is implemented.
+// No placeholder photos are used — a seeded business with no uploaded
+// photos renders the same themed no-photo fallback as any other business.
 //
 // Do NOT represent these as real businesses, real reviews, real credentials,
 // real ratings, or real statistics. Content must pass PreviewContentSchema.
@@ -235,8 +417,6 @@ export async function updatePhotosAction(
 type SeedOverrides = {
   services: { name: string; description: string }[];
   differentiators: { title: string; description: string }[];
-  heroImageUrl: string;
-  aboutImageUrl: string;
 };
 
 const INDUSTRY_SEEDS: Partial<Record<string, SeedOverrides>> = {
@@ -255,9 +435,6 @@ const INDUSTRY_SEEDS: Partial<Record<string, SeedOverrides>> = {
       { title: 'Clean Work Guarantee', description: 'We leave your home cleaner than we found it. Every single visit.' },
       { title: 'Rapid Response', description: 'Most calls are answered within minutes and service is dispatched the same day.' },
     ],
-    // DEV_FIXTURE: picsum.photos placeholder images
-    heroImageUrl: 'https://picsum.photos/id/162/1600/900',
-    aboutImageUrl: 'https://picsum.photos/id/1011/800/600',
   },
   hvac: {
     services: [
@@ -273,8 +450,6 @@ const INDUSTRY_SEEDS: Partial<Record<string, SeedOverrides>> = {
       { title: 'Certified Technicians', description: 'Our team is trained and experienced on all major HVAC brands and systems.' },
       { title: 'Energy-Efficiency Focus', description: 'We recommend solutions that reduce your utility costs over time.' },
     ],
-    heroImageUrl: 'https://picsum.photos/id/1080/1600/900',
-    aboutImageUrl: 'https://picsum.photos/id/1031/800/600',
   },
   roofing: {
     services: [
@@ -290,8 +465,6 @@ const INDUSTRY_SEEDS: Partial<Record<string, SeedOverrides>> = {
       { title: 'Clean Job Sites', description: 'We protect your property and clean up completely when the job is done.' },
       { title: 'Fair, Written Quotes', description: 'Every project starts with a detailed, written proposal — no verbal estimates.' },
     ],
-    heroImageUrl: 'https://picsum.photos/id/164/1600/900',
-    aboutImageUrl: 'https://picsum.photos/id/1074/800/600',
   },
   landscaping: {
     services: [
@@ -307,8 +480,6 @@ const INDUSTRY_SEEDS: Partial<Record<string, SeedOverrides>> = {
       { title: 'Responsive Communication', description: 'You can always reach someone — before, during, and after the job.' },
       { title: 'Satisfaction Promise', description: 'If something doesn\'t look right, we come back and make it right.' },
     ],
-    heroImageUrl: 'https://picsum.photos/id/145/1600/900',
-    aboutImageUrl: 'https://picsum.photos/id/1084/800/600',
   },
 };
 
@@ -325,8 +496,6 @@ const DEFAULT_SEED: SeedOverrides = {
     { title: 'Clean Work Areas', description: 'We protect your property and leave every job site clean and tidy.' },
     { title: 'Quality You Can Count On', description: 'We take pride in every job and stand behind the work we deliver.' },
   ],
-  heroImageUrl: 'https://picsum.photos/id/119/1600/900',
-  aboutImageUrl: 'https://picsum.photos/id/1025/800/600',
 };
 
 function buildSeedContent(business: Business): PreviewContent {
@@ -382,14 +551,12 @@ function buildSeedContent(business: Business): PreviewContent {
 }
 
 async function buildSeedTheme(business: Business): Promise<PreviewTheme> {
-  const seed = INDUSTRY_SEEDS[business.industry] ?? DEFAULT_SEED;
   const themeName = await resolveBusinessThemeForSeed(business);
   return {
     themeName,
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    // DEV_FIXTURE: picsum.photos placeholder — replace with S3 URLs in Stage 9
-    heroImageUrl: seed.heroImageUrl,
-    aboutImageUrl: seed.aboutImageUrl,
+    // No placeholder photo — a seeded business with no uploaded photos
+    // renders the same themed no-photo illustration as any other business.
   };
 }
 
@@ -427,6 +594,10 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
   if (!business.theme && theme.themeName) {
     await updateBusiness(business.businessId, { theme: theme.themeName });
   }
+  // Same durability rule for CTA — see the `Business.cta` doc comment.
+  if (!business.cta) {
+    await updateBusiness(business.businessId, { cta: content.cta });
+  }
 
   redirect(`/admin/businesses/${business.businessId}`);
 }
@@ -445,17 +616,15 @@ const MAX_AI_GENERATIONS = 10;
 
 export type GenerateWebsiteState = { message?: string } | undefined;
 
-export async function generateWebsiteAction(
-  businessId: string,
-  // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _prevState: GenerateWebsiteState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _formData: FormData,
-): Promise<GenerateWebsiteState> {
-  const session = await getSession();
-  if (!session) return { message: 'Unauthorized' };
-
+/**
+ * The actual OpenAI generation call, shared by `generateWebsiteAction` (the
+ * business detail page's "Generate Website" button) and
+ * `finishOnboardingAction` (the wizard's final step, which saves section
+ * config and generates the first draft in one click) — extracted so neither
+ * caller duplicates the cap check, theme/CTA seeding, or error handling.
+ * Never redirects; callers decide what happens after.
+ */
+async function runWebsiteGeneration(businessId: string): Promise<GenerateWebsiteState> {
   const business = await getBusinessById(businessId);
   if (!business) return { message: 'Business not found' };
 
@@ -492,10 +661,31 @@ export async function generateWebsiteAction(
     if (!business.theme && theme.themeName) {
       await updateBusiness(business.businessId, { theme: theme.themeName });
     }
+    // Same durability rule for CTA — see the `Business.cta` doc comment.
+    if (!business.cta) {
+      await updateBusiness(business.businessId, { cta: content.cta });
+    }
   } catch (err) {
     console.error('Failed to generate website:', err instanceof Error ? err.message : err);
     return { message: 'Failed to generate website. Please try again.' };
   }
+
+  return undefined;
+}
+
+export async function generateWebsiteAction(
+  businessId: string,
+  // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _prevState: GenerateWebsiteState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _formData: FormData,
+): Promise<GenerateWebsiteState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const result = await runWebsiteGeneration(businessId);
+  if (result) return result;
 
   redirect(`/admin/businesses/${businessId}`);
 }
@@ -607,6 +797,11 @@ export async function updatePreviewCtaAction(
 
     PreviewContentSchema.parse(content);
     await putSitePreview({ ...preview, content, updatedAt: new Date().toISOString() });
+
+    // An explicit CTA edit is a durable business decision (see the
+    // `Business.cta` doc comment) — always persist it, unlike theme/photos
+    // which only seed once and otherwise require an explicit override too.
+    await updateBusiness(businessId, { cta });
   } catch (err) {
     console.error('Failed to update preview CTA:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save CTA changes. Please try again.' };
@@ -617,6 +812,201 @@ export async function updatePreviewCtaAction(
 
 function coerceOptional(value: string | null | undefined): string | undefined {
   return value?.trim() || undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Section content editing — inline admin editors on the business detail page
+//
+// Two categories, mirroring the split between durable business facts and
+// per-version generated content:
+//   - Preview-content sections write to the business's most recent
+//     SitePreview.content in place (no new version) — same pattern as
+//     updatePreviewCtaAction above.
+//   - Business-level list sections (testimonials/faq/process) write to
+//     Business fields that persist across regenerations, like theme/photos.
+// ---------------------------------------------------------------------------
+
+export type SectionContentFormState = { message?: string } | undefined;
+
+const SECTION_HEADING_MAX = { headline: 120, subheadline: 300 };
+
+function optionalHeading(headline: string, subheadline: string): { headline?: string; subheadline?: string } | undefined {
+  const h = headline.trim();
+  const s = subheadline.trim();
+  if (!h && !s) return undefined;
+  return { ...(h ? { headline: h } : {}), ...(s ? { subheadline: s } : {}) };
+}
+
+/**
+ * Edits one section's content on the business's most recent preview, in
+ * place — same shallow-spread-and-revalidate pattern as
+ * `updatePreviewCtaAction`. Dispatches on `section` to parse the right form
+ * fields; each branch only ever touches its own slice of `content`.
+ */
+export async function updateSectionContentAction(
+  businessId: string,
+  previewId: string,
+  section: WebsiteSectionType,
+  _prevState: SectionContentFormState,
+  formData: FormData,
+): Promise<SectionContentFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  try {
+    const preview = await getSitePreviewById(previewId);
+    if (!preview) return { message: 'Preview not found' };
+    if (preview.businessId !== businessId) return { message: 'Preview does not belong to this business' };
+
+    const content: PreviewContent = { ...preview.content };
+
+    switch (section) {
+      case 'hero': {
+        const headline = ((formData.get('headline') as string | null) ?? '').trim();
+        const subheadline = ((formData.get('subheadline') as string | null) ?? '').trim();
+        if (!headline || !subheadline) return { message: 'Headline and sub-headline are required.' };
+        content.hero = {
+          ...content.hero,
+          headline: headline.slice(0, SECTION_HEADING_MAX.headline),
+          subheadline: subheadline.slice(0, SECTION_HEADING_MAX.subheadline),
+        };
+        break;
+      }
+      case 'services': {
+        const rows = parseIndexedList(formData, 'services', ['name', 'description']).filter((r) => r.name || r.description);
+        if (rows.length === 0) return { message: 'At least one service is required.' };
+        const services: PreviewService[] = rows.map((r) => ({
+          name: r.name.slice(0, 100),
+          description: r.description.slice(0, 500),
+        }));
+        content.services = services;
+        content.servicesSection = optionalHeading(
+          (formData.get('sectionHeadline') as string | null) ?? '',
+          (formData.get('sectionSubheadline') as string | null) ?? '',
+        );
+        break;
+      }
+      case 'whyChooseUs': {
+        const rows = parseIndexedList(formData, 'differentiators', ['title', 'description']).filter(
+          (r) => r.title || r.description,
+        );
+        content.differentiators = rows.length
+          ? rows.map((r) => ({ title: r.title.slice(0, 80), description: r.description.slice(0, 300) }))
+          : undefined;
+        content.whyChooseUsSection = optionalHeading((formData.get('sectionHeadline') as string | null) ?? '', '');
+        break;
+      }
+      case 'about': {
+        const tagline = ((formData.get('tagline') as string | null) ?? '').trim();
+        const aboutText = ((formData.get('aboutText') as string | null) ?? '').trim();
+        if (!tagline || !aboutText) return { message: 'Headline and description are required.' };
+        const quote = ((formData.get('quote') as string | null) ?? '').trim();
+        content.tagline = tagline.slice(0, 200);
+        content.aboutText = aboutText.slice(0, 2000);
+        content.aboutSection = quote ? { quote: quote.slice(0, 300) } : undefined;
+        break;
+      }
+      case 'serviceAreas': {
+        const rows = parseIndexedList(formData, 'serviceAreas', ['value']).map((r) => r.value).filter(Boolean);
+        content.serviceAreas = rows.length ? rows.slice(0, 10).map((v) => v.slice(0, 80)) : undefined;
+        content.serviceAreasSection = optionalHeading(
+          (formData.get('sectionHeadline') as string | null) ?? '',
+          (formData.get('sectionSubheadline') as string | null) ?? '',
+        );
+        break;
+      }
+      case 'gallery': {
+        const rows = parseIndexedList(formData, 'galleryImages', ['url', 'caption']).filter((r) => r.url);
+        const images: GalleryImage[] = rows
+          .slice(0, 6)
+          .map((r) => ({ url: r.url, ...(r.caption ? { caption: r.caption.slice(0, 200) } : {}) }));
+        content.gallerySection = {
+          ...optionalHeading(
+            (formData.get('sectionHeadline') as string | null) ?? '',
+            (formData.get('sectionSubheadline') as string | null) ?? '',
+          ),
+          images,
+        };
+        break;
+      }
+      case 'ctaBanner': {
+        content.ctaBannerSection = optionalHeading(
+          (formData.get('sectionHeadline') as string | null) ?? '',
+          (formData.get('sectionSubheadline') as string | null) ?? '',
+        );
+        break;
+      }
+      case 'contact': {
+        const phone = coerceOptional(formData.get('phone') as string | null);
+        const email = coerceOptional(formData.get('email') as string | null);
+        const address = coerceOptional(formData.get('address') as string | null);
+        const hours = coerceOptional(formData.get('hours') as string | null);
+        content.contact = { ...(phone ? { phone } : {}), ...(email ? { email } : {}), ...(address ? { address } : {}) };
+        content.hours = hours;
+        break;
+      }
+      default:
+        return { message: `Section "${section}" has no content editor.` };
+    }
+
+    PreviewContentSchema.parse(content);
+    await putSitePreview({ ...preview, content, updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error(`Failed to update ${section} content:`, err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  // Carries the edited section back through the redirect via a query param
+  // so the page can re-open it expanded — a Server Action redirect causes a
+  // fresh render of the page, which would otherwise silently collapse the
+  // section the admin was just editing.
+  redirect(`/admin/businesses/${businessId}?expandedSection=${section}`);
+}
+
+const BUSINESS_LIST_FIELDS = ['testimonials', 'faqItems', 'processSteps'] as const;
+export type BusinessListField = (typeof BUSINESS_LIST_FIELDS)[number];
+
+const BUSINESS_LIST_FIELD_TO_SECTION: Record<BusinessListField, WebsiteSectionType> = {
+  testimonials: 'testimonials',
+  faqItems: 'faq',
+  processSteps: 'process',
+};
+
+/**
+ * Edits one of the durable, manually-curated Business list fields
+ * (testimonials/FAQ/process steps) — persists across regenerations, like
+ * `theme`/photo-slot overrides. Never touches any preview record.
+ */
+export async function updateBusinessListFieldAction(
+  businessId: string,
+  field: BusinessListField,
+  _prevState: SectionContentFormState,
+  formData: FormData,
+): Promise<SectionContentFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+  if (!(BUSINESS_LIST_FIELDS as readonly string[]).includes(field)) return { message: 'Unknown field' };
+
+  try {
+    let update: Partial<Business>;
+    if (field === 'testimonials') {
+      const rows = parseIndexedList(formData, 'testimonials', ['author', 'quote']).filter((r) => r.author && r.quote);
+      update = { testimonials: rows.map((r) => ({ author: r.author.slice(0, 100), quote: r.quote.slice(0, 500) })) };
+    } else if (field === 'faqItems') {
+      const rows = parseIndexedList(formData, 'faq', ['question', 'answer']).filter((r) => r.question && r.answer);
+      update = { faqItems: rows.map((r) => ({ question: r.question.slice(0, 200), answer: r.answer.slice(0, 1000) })) };
+    } else {
+      const rows = parseIndexedList(formData, 'process', ['title', 'description']).filter((r) => r.title && r.description);
+      update = { processSteps: rows.map((r) => ({ title: r.title.slice(0, 80), description: r.description.slice(0, 300) })) };
+    }
+
+    await updateBusiness(businessId, update);
+  } catch (err) {
+    console.error(`Failed to update ${field}:`, err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+
+  redirect(`/admin/businesses/${businessId}?expandedSection=${BUSINESS_LIST_FIELD_TO_SECTION[field]}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -672,14 +1062,17 @@ export type SectionsFormState = { message?: string } | undefined;
  * (bad order value, duplicate, unsupported variant) rejects the save
  * outright rather than silently repairing it.
  */
-export async function saveWebsiteSectionsAction(
+/**
+ * Shared by `saveWebsiteSectionsAction` (redirects — the wizard's "Finish
+ * setup" step) and `autoSaveWebsiteSectionsAction` (no redirect — every
+ * checkbox/reorder interaction on the business detail page persists
+ * immediately). Reconstructs and validates the full config from form
+ * fields; never partially saves.
+ */
+async function persistWebsiteSections(
   businessId: string,
-  _prevState: SectionsFormState,
   formData: FormData,
-): Promise<SectionsFormState> {
-  const session = await getSession();
-  if (!session) return { message: 'Unauthorized' };
-
+): Promise<{ message: string } | undefined> {
   const business = await getBusinessById(businessId);
   if (!business) return { message: 'Business not found' };
 
@@ -708,6 +1101,67 @@ export async function saveWebsiteSectionsAction(
     console.error('Failed to save website sections:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save section configuration. Please try again.' };
   }
+
+  return undefined;
+}
+
+export async function saveWebsiteSectionsAction(
+  businessId: string,
+  _prevState: SectionsFormState,
+  formData: FormData,
+): Promise<SectionsFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const result = await persistWebsiteSections(businessId, formData);
+  if (result) return result;
+
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+/**
+ * Auto-save variant used by the business detail page: every checkbox toggle
+ * or reorder click calls this immediately (no manual "Save Sections" step),
+ * and — unlike `saveWebsiteSectionsAction` — it never redirects, since the
+ * client's own optimistic state already reflects the change; a redirect
+ * would force a full page reload on every single click. This is also what
+ * fixes enabling a section (e.g. FAQ) and filling in its content in one
+ * sitting: previously, checking the box only updated local client state
+ * until a separate "Save Sections" click, so saving a section's content
+ * (a different action, which does redirect) reloaded the page with the
+ * checkbox still reflecting whatever was last actually persisted — unchecked.
+ */
+export async function autoSaveWebsiteSectionsAction(
+  businessId: string,
+  _prevState: SectionsFormState,
+  formData: FormData,
+): Promise<SectionsFormState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  return persistWebsiteSections(businessId, formData);
+}
+
+/**
+ * The onboarding wizard's final step: saves the chosen section configuration
+ * and immediately generates the first AI draft in one click — matching the
+ * intended workflow (add business → wizard → generate website), rather than
+ * saving sections and leaving the admin to separately find and click
+ * "Generate Website" on the detail page afterward.
+ */
+export async function finishOnboardingAction(
+  businessId: string,
+  _prevState: GenerateWebsiteState,
+  formData: FormData,
+): Promise<GenerateWebsiteState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const sectionsResult = await persistWebsiteSections(businessId, formData);
+  if (sectionsResult) return sectionsResult;
+
+  const generationResult = await runWebsiteGeneration(businessId);
+  if (generationResult) return generationResult;
 
   redirect(`/admin/businesses/${businessId}`);
 }

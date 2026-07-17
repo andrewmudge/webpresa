@@ -63,9 +63,20 @@ const PreviewCtaSchema = z
     path: ['value'],
   });
 
-const PreviewCtaConfigSchema = z.object({
+export const PreviewCtaConfigSchema = z.object({
   primary: PreviewCtaSchema,
   secondary: PreviewCtaSchema.optional(),
+});
+
+/** Admin-editable heading override for a section with previously-hardcoded copy. */
+const SectionHeadingSchema = z.object({
+  headline: z.string().min(1).max(120).optional(),
+  subheadline: z.string().min(1).max(300).optional(),
+});
+
+const GalleryImageSchema = z.object({
+  url: UrlOrPathSchema,
+  caption: z.string().max(200).optional(),
 });
 
 /**
@@ -100,6 +111,12 @@ export const PreviewContentSchema = z.object({
     })
     .optional(),
   cta: PreviewCtaConfigSchema.optional(),
+  servicesSection: SectionHeadingSchema.optional(),
+  whyChooseUsSection: SectionHeadingSchema.optional(),
+  aboutSection: z.object({ quote: z.string().max(300).optional() }).optional(),
+  serviceAreasSection: SectionHeadingSchema.optional(),
+  gallerySection: SectionHeadingSchema.extend({ images: z.array(GalleryImageSchema).max(6).optional() }).optional(),
+  ctaBannerSection: SectionHeadingSchema.optional(),
 });
 
 /**
@@ -109,7 +126,7 @@ export const PreviewContentSchema = z.object({
  * backward compatibility with previews saved before the preset system
  * existed; the refine below requires one or the other to be present.
  */
-const PreviewThemeSchema = z
+export const PreviewThemeSchema = z
   .object({
     themeName: z.enum(THEME_NAMES).optional(),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),

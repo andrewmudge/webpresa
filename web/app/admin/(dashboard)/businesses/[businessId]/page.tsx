@@ -8,8 +8,11 @@ import {
   // createSeedPreviewAction, — unused now that "Create test preview" is disabled (see Preview actions card below)
   updatePreviewCtaAction,
   updateBusinessDetailsAction,
+  updateThemeAction,
+  updateAdminFieldsAction,
   updatePhotosAction,
   saveWebsiteSectionsAction,
+  autoSaveWebsiteSectionsAction,
   applyRecommendedSectionsAction,
   resetWebsiteSectionsAction,
 } from './actions';
@@ -19,20 +22,29 @@ import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
 import { SectionConfigForm } from './SectionConfigForm';
 import { BusinessDetailsForm } from '../BusinessDetailsForm';
+import { ThemeForm } from '../ThemeForm';
+import { AdminFieldsForm } from '../AdminFieldsForm';
 import { PhotosForm } from '../PhotosForm';
+import { CollapsibleCard } from '../CollapsibleCard';
 import type { SitePreview } from '@/domain/models/site-preview';
 import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
 import { computeSectionAvailability, hasResolvableCta } from '@/lib/website-sections/availability';
 import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
+import { WEBSITE_SECTION_TYPES, type WebsiteSectionType } from '@/domain/constants/website-sections';
 
 export const dynamic = 'force-dynamic';
 
 interface Props {
   params: Promise<{ businessId: string }>;
+  searchParams: Promise<{ expandedSection?: string }>;
 }
 
-export default async function BusinessDetailPage({ params }: Props) {
+export default async function BusinessDetailPage({ params, searchParams }: Props) {
   const { businessId } = await params;
+  const { expandedSection: expandedSectionRaw } = await searchParams;
+  const initialExpandedSection = (WEBSITE_SECTION_TYPES as readonly string[]).includes(expandedSectionRaw ?? '')
+    ? (expandedSectionRaw as WebsiteSectionType)
+    : undefined;
 
   const [business, previews, scans, postcards] = await Promise.all([
     getBusinessById(businessId),
@@ -78,13 +90,16 @@ export default async function BusinessDetailPage({ params }: Props) {
             {business.industry.replace('_', ' ')} · {business.slug}
           </p>
         </div>
-        <DeleteBusinessButton
-          businessId={businessId}
-          businessName={business.name}
-          previewCount={previews.length}
-          scanCount={scans.length}
-          postcardCount={postcards.length}
-        />
+        <div className="flex items-center gap-3">
+          <PreviewLink previews={previews} />
+          <DeleteBusinessButton
+            businessId={businessId}
+            businessName={business.name}
+            previewCount={previews.length}
+            scanCount={scans.length}
+            postcardCount={postcards.length}
+          />
+        </div>
       </div>
 
       {/* Meta info */}
@@ -151,39 +166,54 @@ export default async function BusinessDetailPage({ params }: Props) {
       </div>
 
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Business Details</h3>
+      <CollapsibleCard title="Business Details">
         <BusinessDetailsForm
           action={updateBusinessDetailsAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
           submitLabel="Save Details"
         />
+      </CollapsibleCard>
+
+      {/* Theme */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Theme</h3>
+        <ThemeForm
+          action={updateThemeAction.bind(null, businessId, detailPageUrl)}
+          defaults={business}
+          submitLabel="Save Theme"
+        />
+      </div>
+
+      {/* Admin */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Admin</h3>
+        <AdminFieldsForm
+          action={updateAdminFieldsAction.bind(null, businessId, detailPageUrl)}
+          defaults={business}
+          submitLabel="Save"
+        />
       </div>
 
       {/* Photos */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Photos</h3>
+      <CollapsibleCard title="Photos">
         <PhotosForm
           action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
           submitLabel="Save Photos"
           heroPhotoWarnings={heroPhotoWarnings}
         />
-      </div>
+      </CollapsibleCard>
 
       {/* Actions */}
       <div className="space-y-4">
         {/* CTA config — edits the most recent preview in place */}
         {previews.length > 0 && (
-          <div className="rounded-xl border border-gray-200 bg-white p-5">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              Preview CTA — v{previews[0].version}
-            </h3>
+          <CollapsibleCard title="Call to Action Buttons">
             <CtaConfigForm
               action={updatePreviewCtaAction.bind(null, previews[0].previewId)}
               defaults={previews[0].content.cta ?? buildDefaultCta(previews[0].content.contact)}
             />
-          </div>
+          </CollapsibleCard>
         )}
 
         {/* Website section configuration */}
@@ -214,60 +244,48 @@ export default async function BusinessDetailPage({ params }: Props) {
           </p>
           <SectionConfigForm
             action={saveWebsiteSectionsAction.bind(null, businessId)}
+            autoSaveAction={autoSaveWebsiteSectionsAction.bind(null, businessId)}
             sections={resolvedSections}
             availability={sectionAvailability}
+            business={business}
+            latestPreview={previews[0]}
+            redirectTo={detailPageUrl}
+            initialExpandedSection={initialExpandedSection}
           />
         </div>
 
         {/* Preview actions — kept last: the thing you look at once everything above is set up */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview</h3>
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Create seed preview — disabled now that Generate Website is live.
-            <form action={createSeedPreviewAction.bind(null, businessId)}>
-              <button
-                type="submit"
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Create test preview
-              </button>
-            </form>
-            */}
-            {/* Generate a real AI website (Stage 11) — must match MAX_AI_GENERATIONS in actions.ts */}
-            <GenerateWebsiteButton
-              businessId={businessId}
-              capReached={previews.filter((p: SitePreview) => p.generationMetadata).length >= 10}
-            />
-            {/* Links to existing published previews — disabled now that Generate Website is live.
-            {previews.filter((p: SitePreview) => p.status === 'published').slice(0, 1).map((p: SitePreview) => (
-              <a
-                key={p.previewId}
-                href={`/b/${p.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                View preview ↗
-              </a>
-            ))}
-            */}
-            {/* Review the latest AI-generated draft before publishing */}
-            {previews[0]?.status === 'draft' && (
-              <a
-                href={`/b/${previews[0].slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 hover:bg-amber-100 transition-colors"
-              >
-                Review draft (v{previews[0].version}) ↗
-              </a>
+        <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-5">
+          <div>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Preview</h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Shows exactly what&apos;s saved right now — business details, component order, and every inline
+              edit apply immediately, with no need to regenerate.
+            </p>
+            <PreviewLink previews={previews} />
+            {previews.filter((p: SitePreview) => p.status === 'published').length > 0 && (
+              <p className="mt-2 text-xs text-gray-400">
+                Live URL: <span className="font-mono">/b/{business.slug}</span>
+              </p>
             )}
           </div>
-          {previews.filter((p: SitePreview) => p.status === 'published').length > 0 && (
-            <p className="mt-2 text-xs text-gray-400">
-              URL: <span className="font-mono">/b/{business.slug}</span>
+
+          <div className="pt-4 border-t border-gray-100">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              Generate Website (AI)
+            </h3>
+            <p className="text-xs text-gray-400 mb-3">
+              {previews.length === 0
+                ? 'Creates the first AI-written draft from the business details above.'
+                : 'Creates a brand-new AI-written draft. Text edits and component reordering made since the last generation are NOT carried over — theme, CTA, and photo assignments are preserved.'}
             </p>
-          )}
+            <GenerateWebsiteButton
+              businessId={businessId}
+              nextVersion={(previews[0]?.version ?? 0) + 1}
+              hasExistingPreview={previews.length > 0}
+              capReached={previews.filter((p: SitePreview) => p.generationMetadata).length >= 10}
+            />
+          </div>
         </div>
 
         {/* Deferred actions */}
@@ -283,6 +301,50 @@ export default async function BusinessDetailPage({ params }: Props) {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+/**
+ * Links to the current preview (`/b/{slug}`) — only shown when the most
+ * recent preview is a draft awaiting review. Shared between the page
+ * header (so it's visible immediately after opening the page) and the
+ * "Preview" action card at the bottom, so both spots always agree.
+ */
+/**
+ * Links to the current preview (`/b/{slug}`) — the live view of whatever is
+ * actually saved right now, including every inline edit and reorder made so
+ * far (those write in place, no regeneration needed to see them). Shown
+ * whenever any viewable preview exists — archived previews 404 for everyone,
+ * including admins, so those are excluded. Shared between the page header
+ * (visible immediately on opening the page) and the "Preview" action card,
+ * so both spots always agree.
+ */
+function PreviewLink({ previews }: { previews: SitePreview[] }) {
+  const latest = previews[0];
+  if (!latest || latest.status === 'archived') return null;
+
+  const label =
+    latest.status === 'draft'
+      ? `Review draft (v${latest.version})`
+      : latest.status === 'published'
+        ? `View live site (v${latest.version})`
+        : `Preview (v${latest.version})`;
+
+  const isDraft = latest.status === 'draft';
+
+  return (
+    <a
+      href={`/b/${latest.slug}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={
+        isDraft
+          ? 'rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 hover:bg-amber-100 transition-colors'
+          : 'rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors'
+      }
+    >
+      {label} ↗
+    </a>
+  );
+}
 
 function DetailCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (

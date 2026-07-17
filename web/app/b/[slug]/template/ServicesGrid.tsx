@@ -6,14 +6,12 @@ interface Props {
   services: PreviewService[];
   /** An uploaded business photo always wins over the placeholder below. */
   featuredImageUrl?: string;
+  /** Admin-editable heading override (`content.servicesSection`). Falls back to the built-in copy below when absent. */
+  sectionHeadline?: string;
+  sectionSubheadline?: string;
 }
 
-// DEV_FIXTURE: picsum.photos placeholder, used only when the business has no
-// uploaded photo available for this slot — replace with a Firecrawl-sourced
-// service photo once website scanning supplies real images (Stage 13).
-const FEATURED_SERVICE_IMAGE_URL = 'https://picsum.photos/id/1040/800/1000';
-
-export function ServicesGrid({ services, featuredImageUrl }: Props) {
+export function ServicesGrid({ services, featuredImageUrl, sectionHeadline, sectionSubheadline }: Props) {
   const [featured, ...rest] = services;
 
   return (
@@ -25,10 +23,11 @@ export function ServicesGrid({ services, featuredImageUrl }: Props) {
             Our Services
           </p>
           <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) max-w-xl leading-tight">
-            Professional work, done right
+            {sectionHeadline || 'Professional work, done right'}
           </h2>
           <p className="mt-3 text-(--site-muted) max-w-lg">
-            From routine maintenance to complex projects — we handle it all with expertise and care.
+            {sectionSubheadline ||
+              'From routine maintenance to complex projects — we handle it all with expertise and care.'}
           </p>
         </div>
 
@@ -80,17 +79,23 @@ function ServiceCard({
   featured?: boolean;
   imageUrl?: string;
 }) {
+  // Only apply the picture-background treatment when a real photo is
+  // available — with no photo, the featured card matches the plain default
+  // card look every other service card already uses, rather than falling
+  // back to any placeholder image.
+  const showPicture = featured && !!imageUrl;
+
   return (
     <div
       className={`relative overflow-hidden rounded-2xl p-6 h-full flex flex-col transition-shadow hover:shadow-md bg-(--site-surface) border border-(--site-border) ${
-        featured ? 'min-h-[200px] lg:border-0' : ''
+        showPicture ? 'min-h-[200px] lg:border-0' : ''
       }`}
     >
       {/* Picture background on large displays only — matches the other cards below lg */}
-      {featured && (
+      {showPicture && (
         <>
           <Image
-            src={imageUrl || FEATURED_SERVICE_IMAGE_URL}
+            src={imageUrl!}
             alt=""
             fill
             className="hidden lg:block object-cover object-center"
@@ -110,10 +115,10 @@ function ServiceCard({
             d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
         </svg>
       </div>
-      <h3 className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${featured ? 'lg:text-white' : ''}`}>
+      <h3 className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${showPicture ? 'lg:text-white' : ''}`}>
         {service.name}
       </h3>
-      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-(--site-muted) ${featured ? 'lg:text-white/80' : ''}`}>
+      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-(--site-muted) ${showPicture ? 'lg:text-white/80' : ''}`}>
         {service.description}
       </p>
     </div>

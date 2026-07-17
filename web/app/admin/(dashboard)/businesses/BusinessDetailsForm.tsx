@@ -2,33 +2,95 @@
 import { useActionState } from 'react';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
-import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import type { Business } from '@/domain/models/business';
-import { Field, TextareaField, SelectField, ThemeField, SubmitButton } from './FormFields';
+import { Field, TextareaField, SelectField, SubmitButton } from './FormFields';
 import type { BusinessFormState } from './actions';
 
 interface BusinessDetailsFormProps {
   action: (prevState: BusinessFormState, formData: FormData) => Promise<BusinessFormState>;
   defaults?: Partial<Business>;
   submitLabel?: string;
+  /** Shows a dev-only "Autofill test data" button — only passed from the "New business" wizard step. */
+  showAutofillButton?: boolean;
+}
+
+function randomFrom<T>(options: readonly T[]): T {
+  return options[Math.floor(Math.random() * options.length)];
+}
+
+/** Fills every field with plausible test data, purely to speed up repeated manual testing of this form. */
+function buildAutofillData() {
+  const n = Math.floor(1000 + Math.random() * 9000);
+  return {
+    name: `Test Plumbing Co ${n}`,
+    industry: randomFrom(INDUSTRIES),
+    legalName: `Test Plumbing Co ${n} LLC`,
+    phone: '512-555-0100',
+    email: `test${n}@example.com`,
+    websiteUrl: 'https://example.com',
+    googlePlaceId: '',
+    addressLine1: '123 Main St',
+    addressCity: 'Austin',
+    addressState: 'TX',
+    addressPostalCode: '78701',
+    servicesOffered: 'Drain cleaning\nWater heater repair\nLeak detection and repair',
+    serviceAreas: 'Austin\nRound Rock\nCedar Park',
+    description:
+      'A locally owned company serving the Austin metro area for over a decade with honest pricing and reliable, professional service.',
+    differentiators: 'Same-day service\nUpfront flat-rate pricing\nLicensed and insured technicians',
+    brandTone: randomFrom(BRAND_TONES),
+    notes: 'Autofilled test data — for development testing only.',
+  };
+}
+
+function setFormValue(form: HTMLFormElement, name: string, value: string) {
+  const el = form.elements.namedItem(name);
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+    el.value = value;
+  }
+}
+
+function AutofillButton() {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        const form = e.currentTarget.form;
+        if (!form) return;
+        const data = buildAutofillData();
+        for (const [key, value] of Object.entries(data)) {
+          setFormValue(form, key, value);
+        }
+      }}
+      className="rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+    >
+      Autofill test data
+    </button>
+  );
 }
 
 /**
  * All the free-text business fields — identity, contact, address, and the
- * Stage 11 website-generation inputs. Deliberately excludes logo/photo
- * uploads and photo-slot assignment (see `PhotosForm`) so it can post as a
- * plain, file-free request: used both as wizard step 1 (creating a new
- * business — `status` hidden, since a new business is always `pending`)
- * and as the business detail page's inline "Business Details" card
- * (`status` shown, since `defaults.status` is set on an existing record).
+ * Stage 11 website-generation inputs, stopping at "Additional notes". Theme
+ * and admin metadata (source/status) are their own narrow cards/forms — see
+ * `ThemeForm` and `AdminFieldsForm` — so saving this card can never clobber
+ * those fields. Deliberately excludes logo/photo uploads and photo-slot
+ * assignment (see `PhotosForm`) so it can post as a plain, file-free
+ * request: used both as wizard step 1 (creating a new business) and as the
+ * business detail page's inline "Business Details" card.
  */
-export function BusinessDetailsForm({ action, defaults, submitLabel = 'Save' }: BusinessDetailsFormProps) {
+export function BusinessDetailsForm({ action, defaults, submitLabel = 'Save', showAutofillButton }: BusinessDetailsFormProps) {
   const [state, formAction] = useActionState<BusinessFormState, FormData>(action, undefined);
   const errors = state?.errors ?? {};
-  const isExisting = !!defaults?.status;
 
   return (
     <form action={formAction} className="space-y-6">
+      {showAutofillButton && (
+        <div className="flex justify-end">
+          <AutofillButton />
+        </div>
+      )}
+
       {state?.message && (
         <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {state.message}
@@ -148,30 +210,6 @@ export function BusinessDetailsForm({ action, defaults, submitLabel = 'Save' }: 
           <div className="md:col-span-2">
             <TextareaField label="Additional notes" name="notes" defaultValue={defaults?.notes} errors={errors.notes} />
           </div>
-          <ThemeField label="Theme" name="theme" defaultValue={defaults?.theme} errors={errors.theme} />
-        </div>
-      </section>
-
-      {/* Admin metadata */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Admin</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SelectField
-            label="Source"
-            name="source"
-            options={BUSINESS_SOURCES}
-            defaultValue={defaults?.source ?? 'manual'}
-            errors={errors.source}
-          />
-          {isExisting && (
-            <SelectField
-              label="Status"
-              name="status"
-              options={BUSINESS_STATUSES}
-              defaultValue={defaults?.status}
-              errors={errors.status}
-            />
-          )}
         </div>
       </section>
 

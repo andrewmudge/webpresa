@@ -97,6 +97,17 @@ describe('generatePreviewContent — success', () => {
     expect(result.content.hero.ctaText).toBe('Call Now');
   });
 
+  it('reuses a persisted Business.cta override verbatim, ignoring the model-supplied labels', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const storedCta = { primary: { type: 'external_url' as const, label: 'Book Online', value: 'https://booking.example.com' } };
+    const business = makeBusiness({ cta: storedCta });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.content.cta).toEqual(storedCta);
+    expect(result.content.hero.ctaText).toBe('Book Online');
+  });
+
   it('uses the first uploaded photo as the hero image, setting heroStyle to image', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });

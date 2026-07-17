@@ -2467,3 +2467,348 @@ web/
         ├── page.tsx                                                             MODIFIED — computes heroPhotoWarnings map instead of single warning
         └── onboarding/photos/page.tsx                                           MODIFIED — computes heroPhotoWarnings map instead of single warning
 ```
+
+---
+
+# Business Detail Page Redesign — Mobile Nav, Card Reorg, Inline Section Content Editing
+
+**Date:** 2026-07-17
+**Scope:** Direct user request to turn the admin business detail page into a preview of the future client dashboard — every rendered section editable inline, defaulting to collapsed, plus a mobile-responsive admin sidebar and a few small card/layout changes. Full design (including three explicit scope decisions confirmed with the user beforehand — dual-write photo edits, Testimonials/FAQ/Process editors in scope but Reviews out, Trust Strip staying fully static) is recorded in the approved plan.
+
+## Mobile-responsive admin sidebar
+
+`layout.tsx`'s `<aside>` was a fixed `w-56` sidebar with no responsive behavior — on mobile it consumed roughly half the screen. Extracted into a new client component, `AdminSidebar.tsx`, mirroring the existing hamburger pattern already used by the public site's `Navbar.tsx` (`useState` open/close, `lucide-react`'s `Menu`/`X`, `framer-motion` slide-in drawer — both already project dependencies, no new ones added). Renders the unchanged fixed sidebar at `md:`+ (`hidden md:flex`) and a slim top bar + backdrop + slide-in drawer at mobile widths (`md:hidden`), closing on link click or backdrop click. `layout.tsx` itself stays a server component — it still does the session fetch/redirect, just delegates the nav markup to `<AdminSidebar signedInAs={session.sub} />`.
+
+## Duplicated preview link + card reorganization
+
+- The "Review draft (vN) ↗" link (previously only in the bottom "Preview" card, and only when the latest preview is a draft) is now factored into a shared `PreviewLink` component and rendered a second time in the page header, to the left of the Delete button — so it's visible immediately on opening the page, without scrolling. The bottom card's copy is unchanged (this is a duplicate, not a move).
+- New shared `CollapsibleCard.tsx` (chevron toggle, `defaultOpen` prop) wraps Business Details, Photos, and Preview CTA — all now start collapsed.
+- `BusinessDetailsForm.tsx` trimmed to stop after "Additional notes" — the `ThemeField` and the entire "Admin" section (source/status) were removed from it and given their own narrow cards: new `ThemeForm.tsx` / `updateThemeAction` (touches only `Business.theme`) and `AdminFieldsForm.tsx` / `updateAdminFieldsAction` (touches only `source`/`status`), following the same "one action, one slice of fields" convention `updateBusinessDetailsAction`/`updatePhotosAction` already established. `updateBusinessDetailsAction`'s schema/handler narrowed to match (no longer reads/writes `theme`/`source`/`status`).
+
+## Inline section content editing — the main feature
+
+**Core idea:** the existing "Website Sections" card (`SectionConfigForm.tsx`) already lists every catalog section in order with enable/reorder controls — the natural place to add a per-row expand toggle revealing that section's actual content, rather than building a second, separate editing surface.
+
+**`SectionConfigForm.tsx` refactor:** the outer native `<form action={formAction}>` was replaced with a plain `<div>` — a per-row expand chevron needed to reveal a section's own content-editing `<form>` directly beneath the row, and HTML forms cannot nest. `enabledByType` (checkboxes) and `orderedTypes` (existing reorder state) are now the only source of truth; a "Save Sections" button builds a `FormData` object from that state directly and calls `formAction(fd)` — valid and typed in React 19's `useActionState` (the returned dispatch function's signature is `(payload) => void`, callable directly, not only via a `<form>`'s `action` prop). A chevron expand toggle was added to every row except `header`/`footer` (page chrome, already had no reorder controls either) and `trustStrip`/`reviews` (no content editor exists for either — Trust Strip stays fully static by design, per the confirmed scope decision; Reviews has no admin entry path, reserved for a future Google Places integration).
+
+**New domain fields (additive only — `web/domain/models/site-preview.ts` / `site-preview.schema.ts`):** `PreviewContent` gained optional per-section heading overrides for the sections whose copy was previously a hardcoded literal in its template component — `servicesSection`, `whyChooseUsSection`, `aboutSection` (just `{ quote }`; `tagline`/`aboutText` already served as the section's editable headline/description), `serviceAreasSection`, `gallerySection` (heading plus the new curated `images: GalleryImage[]` list), `ctaBannerSection`. All optional and normalized at render time — absence renders the exact same hardcoded copy as before, so no migration was needed for any existing preview. `PreviewThemeSchema` was also exported (previously module-private) so the new photo dual-write action (below) can reuse it.
+
+**Template components updated to consume the new fields, falling back to their existing hardcoded copy when absent:** `ServicesGrid`, `WhyChooseUs`, `AboutSection`, `ServiceAreaSection`, `GallerySection` (also switched from rendering raw `business.photoUrls` strings to the curated `GalleryImage[]` shape, with a per-photo caption overlay; `section-registry.tsx` normalizes an absent `gallerySection.images` to `business.photoUrls.map(url => ({ url }))` so behavior is unchanged until an admin curates it), `FinalCTA`. `lib/website-sections/availability.ts`'s `gallery` check now prefers `content.gallerySection.images.length` when a curated list is stored, falling back to `business.photoUrls.length` otherwise, so removing every curated photo correctly hides the section instead of leaving a stale "available" signal.
+
+**New server actions (`[businessId]/actions.ts`):**
+- `updateSectionContentAction(businessId, previewId, section, ...)` — one dispatch action (mirrors `section-registry.tsx`'s per-type mapping philosophy) covering the 8 sections backed by `SitePreview.content` (hero, services, whyChooseUs, about, serviceAreas, gallery, ctaBanner, contact). Follows `updatePreviewCtaAction`'s exact established pattern: fetch the preview, shallow-spread `preview.content`, patch only the touched keys, re-validate the whole `PreviewContentSchema`, `putSitePreview` in place (same `previewId`/version, no new snapshot).
+- `updateBusinessListFieldAction(businessId, field, ...)` — one dispatch action covering the 3 durable Business list fields (`testimonials`/`faqItems`/`processSteps`) that had zero admin write path before this stage (the model/schema fields were already reserved). These stay on `Business`, not `SitePreview`, so they persist across regenerations exactly like `theme` and the photo-slot overrides already do.
+- `updatePhotosAction` extended for the confirmed dual-write behavior: after writing the `Business`-level slot override (unchanged, persists for future regenerations), it now also fetches the business's most recent `SitePreview` and patches the matching `theme.*ImageUrl` field in place (re-validated via `PreviewThemeSchema`), so a photo change is visible on the *current* live preview immediately, not only after the next "Generate Website" run. Only applies when a slot was explicitly set to a specific photo or "No photo" — leaving a slot on "Auto" makes no change to an already-generated preview, since there's no specific new photo to apply.
+- `parseIndexedList(formData, prefix, keys)` (new `form-list.ts`) — the shared parser for every repeatable-list field (services, differentiators, service areas, gallery captions, testimonials, FAQ, process steps): reconstructs an ordered array of objects from `FormData` fields named `${prefix}.${index}.${key}`, the exact shape `RepeatableListEditor.tsx` (new, generic add/remove/reorder list editor, reused across 6 of the list-shaped sections) submits.
+
+**New `SectionContentEditor.tsx`** — the per-row dispatch component, analogous to `section-registry.tsx` on the public-render side: switches on `WebsiteSectionType` to render the right small form. Hero/Services/WhyChooseUs/About each render two independent sibling `<form>`s (never nested) — the text-content form bound to `updateSectionContentAction`, and a `SectionPhotoEditor` mini-form bound to the (now dual-writing) `updatePhotosAction`, carrying the other three photo slots' current values as hidden inputs so saving one slot can never clobber the other three. Gallery gets a dedicated `GalleryImageEditor` (thumbnail + caption + remove/reorder per curated photo, plus a dropdown to add any already-uploaded business photo not yet in the curated list — uploading a *new* photo file still happens via the Photos card, not duplicated here). Testimonials/FAQ/Process route through `BusinessListEditor`, sharing `RepeatableListEditor`. A section with no generated preview yet (only possible for the 8 preview-backed sections) shows "Generate a website first..." instead of a broken form.
+
+## Scope decisions (confirmed with the user before implementation)
+
+1. Photo edits: dual-write (immediate + persisted `Business` override) — see `updatePhotosAction` above.
+2. Testimonials/FAQ/Process got full editors; Reviews did not (reserved for real Google Places data — an admin hand-typing a star rating would risk looking like a real Google rating).
+3. Trust Strip stays fully static — enable/disable only, no content editor, preserving the existing anti-fabrication guardrail.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     326 passed  (npm test) — 1 new test added (theme/source/status isolation on updateBusinessDetailsAction);
+                          2 pre-existing tests updated to match the intentional narrowing of updateBusinessDetailsAction
+                          and the new listPreviewsForBusiness dependency in updatePhotosAction's dual-write path.
+Build:     next build succeeds — all admin/business-detail routes still compile and prerender correctly.
+Manual:    Dev server started against the real dev DynamoDB tables (AWS SSO session already active); signed in
+           programmatically (session JWT minted locally with the app's own SESSION_SECRET — same signing code as
+           lib/auth/session.ts — since the plaintext admin password wasn't available in this session; no token or
+           secret value was ever printed). Confirmed via curl against real business records: business detail pages
+           render 200 with the new Business Details / Theme / Admin / Photos / Preview CTA cards present, chevron
+           expand controls present on exactly the 11 sections expected to have a content editor (15 catalog sections
+           minus header/footer/trustStrip/reviews) and absent from the other 4, and section content editors are not
+           present in the initial server-rendered HTML while collapsed (confirms lazy client-mounting, not just
+           CSS-hidden). Did not verify interactive behavior (clicking a chevron, editing and saving a section, the
+           mobile drawer opening) in a real browser — no headless browser was available in this environment and the
+           user asked not to install Playwright now ("that's a later stage"). Recommend a follow-up manual click-through
+           once browser tooling is available, per the plan's verification section.
+```
+
+## Files changed / created
+
+```
+web/
+├── domain/models/site-preview.ts                                                MODIFIED — SectionHeading, GalleryImage types; per-section heading/gallery fields on PreviewContent
+├── domain/schemas/site-preview.schema.ts                                        MODIFIED — matching Zod schemas; PreviewThemeSchema exported
+├── lib/website-sections/availability.ts                                         MODIFIED — gallery availability prefers curated gallerySection.images length
+├── app/b/[slug]/template/
+│   ├── section-registry.tsx                                                    MODIFIED — wires new heading/gallery props through to each component
+│   ├── ServicesGrid.tsx                                                         MODIFIED — sectionHeadline/sectionSubheadline props, fallback to existing copy
+│   ├── WhyChooseUs.tsx                                                         MODIFIED — sectionHeadline prop
+│   ├── AboutSection.tsx                                                        MODIFIED — quote prop
+│   ├── ServiceAreaSection.tsx                                                  MODIFIED — sectionHeadline/sectionSubheadline props
+│   ├── GallerySection.tsx                                                      MODIFIED — GalleryImage[] shape + captions, heading props
+│   └── FinalCTA.tsx                                                            MODIFIED — sectionHeadline/sectionSubheadline props
+└── app/admin/(dashboard)/
+    ├── layout.tsx                                                               MODIFIED — delegates nav markup to AdminSidebar
+    ├── AdminSidebar.tsx                                                         NEW — responsive sidebar + mobile hamburger drawer
+    └── businesses/
+        ├── CollapsibleCard.tsx                                                 NEW — shared chevron-collapse card wrapper
+        ├── ThemeForm.tsx                                                       NEW — bound to updateThemeAction
+        ├── AdminFieldsForm.tsx                                                 NEW — bound to updateAdminFieldsAction
+        ├── BusinessDetailsForm.tsx                                             MODIFIED — trimmed to stop after Notes (theme/admin fields removed)
+        └── [businessId]/
+            ├── actions.ts                                                       MODIFIED — updateThemeAction, updateAdminFieldsAction, updateSectionContentAction,
+            │                                                                        updateBusinessListFieldAction, dual-write updatePhotosAction; narrowed
+            │                                                                        updateBusinessDetailsAction
+            ├── form-list.ts                                                     NEW — parseIndexedList shared FormData-array parser
+            ├── RepeatableListEditor.tsx                                         NEW — generic add/remove/reorder list editor
+            ├── SectionContentEditor.tsx                                         NEW — per-section dispatch editor UI
+            ├── SectionConfigForm.tsx                                           MODIFIED — controlled (non-form) state, per-row expand/collapse dispatch
+            ├── page.tsx                                                         MODIFIED — header PreviewLink, collapsible/split cards, SectionConfigForm props
+            ├── onboarding/sections/page.tsx                                     MODIFIED — passes new SectionConfigForm props
+            └── __tests__/business-details-actions.test.ts                      MODIFIED — updated for the narrowed action + dual-write mock wiring
+```
+
+---
+
+# Bug Fixes — Direct User Testing of the Inline Content Editor
+
+**Date:** 2026-07-17
+**Scope:** Direct user report after clicking through the redesign above in a real dev session against real data: chevron contrast, a save that silently discarded reordering and crashed with a hooks-count error, the content editor collapsing itself after every save, an unreadable "Photo 1/Photo 2" photo picker, CTA config resetting on every regeneration, and — the core issue — no clear separation between "generate a fresh AI draft" and "preview what I've already saved," so clicking Generate after making manual edits appeared to silently discard them.
+
+## Root cause — `formAction()` called outside a transition
+
+The user's console showed React's own diagnostic verbatim: *"An async function with useActionState was called outside of a transition."* `SectionConfigForm.tsx`'s "Save Sections" button was calling the `useActionState` dispatch function (`formAction(formData)`) directly from a plain `onClick` handler — valid to call imperatively, but only inside `startTransition()`; called bare, React can't track pending state or hand the action off to Next.js's redirect-interception machinery correctly. This one bug explained three of the reported symptoms: reordering sections and clicking Save appeared to do nothing (the save didn't take effect, so the page reverted to the last real save on reload); a follow-up interaction then threw "Rendered more hooks than during the previous render" in the browser console; and it likely contributed to unpredictable behavior generally. Fix: wrap the call in `startTransition(() => formAction(formData))` — the exact remedy React's own warning names.
+
+## Content editor collapsing itself after every save
+
+Saving a section's content (or its photo) redirects back to the same page — and a Server Action's `redirect()` always produces a fresh render of the destination page, which discarded the client-only `expandedTypes` state that tracked which row was open. Fixed by carrying the edited section through the redirect as a URL query param (`?expandedSection=hero`) instead of relying on client memory: `updateSectionContentAction` and `updateBusinessListFieldAction` now append it to their redirect target (mapping the business-list `field` back to its section type where needed), `page.tsx` reads it from `searchParams` and passes it to `SectionConfigForm` as `initialExpandedSection`, which seeds `expandedTypes` with it on mount. The inline photo mini-form (`SectionPhotoEditor`, bound to `updatePhotosAction`) gets the same treatment via a `photoRedirectTo` computed in `SectionContentEditor.tsx`. The section reopens already-expanded on the very first paint (server-rendered, not a post-hydration client toggle) — verified via a direct request to `?expandedSection=hero` returning the Hero editor's fields already present in the HTML.
+
+## Photo picker overhaul
+
+`PhotoSlotField` (a `<select>` listing "Photo 1", "Photo 2", ...) forced an admin to scroll back up to the Photos card to know what they were about to pick. Replaced with `PhotoPickerField` (`FormFields.tsx`) — an actual thumbnail grid (plus "Auto"/"No photo" buttons), backed by a hidden input for the selected value so it still posts through existing form-based actions unchanged. Used everywhere `PhotoSlotField` was (`PhotosForm.tsx`, `SectionContentEditor.tsx`'s `SectionPhotoEditor`); `PhotoSlotField` itself was deleted, not left dead. The Gallery section's "add a photo" control (a similar text dropdown) got the same treatment — one click on a thumbnail adds it, no separate Add button needed.
+
+## Chevron contrast
+
+Both expand chevrons (`CollapsibleCard.tsx`'s card-level toggle, `SectionConfigForm.tsx`'s per-row toggle) were `text-gray-400` — too light against a white card per direct feedback. Changed to `text-gray-800`/`hover:text-black`.
+
+## CTA reset on every regeneration
+
+`generatePreviewContent()` always built a brand-new `cta` from the model's freshly generated labels, discarding whatever the admin had configured on the Preview CTA card the moment "Generate Website" ran again — the admin had no way to make a CTA choice durable, unlike `theme` (which already persists to `Business.theme` and is reused on every regeneration). Fixed by adding `Business.cta?: PreviewCtaConfig` (`domain/models/business.ts` / `business.schema.ts`, reusing the newly-exported `PreviewCtaConfigSchema`) as the same kind of durable, business-level override:
+- `generatePreviewContent()` now uses `business.cta` verbatim when set, only falling back to `buildDefaultCta()` + the model's labels when the business has none yet.
+- `generateWebsiteAction`/`createSeedPreviewAction` seed `Business.cta` from the freshly generated content the first time (mirroring the existing `if (!business.theme ...)` pattern), so even a business that never manually edited its CTA gets a durable one after its first generation.
+- `updatePreviewCtaAction` now always persists the edited CTA to `Business.cta` (not just seeds it once) — an explicit edit is a deliberate decision, not a value to preserve only-if-absent.
+
+## Generate vs. Preview — separating "fresh AI draft" from "what's currently saved"
+
+The core complaint: after saving inline edits and reordering sections, clicking "Generate Website" produced a version that didn't include any of it — which is actually correct (each generation is a fresh AI draft built from `Business` fields, not a re-save of the previous version's edited `PreviewContent`), but nothing in the UI made that distinction clear, so it read as data loss. Rather than merging AI regeneration with manual edits (a much larger, unrequested change to what "regenerate" means), the fix is UI clarity plus a safety net:
+- The `PreviewLink` (header + "Preview" card) is no longer gated to `status === 'draft'` — it now shows for any viewable preview (draft/ready/published; archived previews 404 for everyone including admins, so those are excluded), labeled contextually ("Review draft", "View live site", or "Preview"), so there's always an obvious, low-friction way to see exactly what's currently saved — including every inline edit and reorder, which already apply immediately with no regeneration involved.
+- The "Preview" action card was split into two clearly-labeled halves: "Preview" (with copy explaining it reflects saved changes immediately) and "Generate Website (AI)" (with copy warning that text edits and reordering since the last generation are not carried over, but theme/CTA/photo assignments are preserved).
+- `GenerateWebsiteButton.tsx` now requires a confirmation dialog before regenerating whenever a preview already exists (mirroring `DeleteBusinessButton`'s modal pattern) — first-time generation (nothing to lose) skips it. The dialog names the next version number and spells out exactly what does and doesn't carry over.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     328 passed  (npm test) — 3 new (CTA persisted on first generation, CTA not overwritten once stored,
+                          Business.cta reused verbatim in generatePreviewContent, explicit CTA edit persists to
+                          Business.cta); 1 pre-existing test corrected (the old "theme already stored → updateBusiness
+                          never called" assertion needed the fixture to also have a stored CTA, now that CTA-seeding
+                          is a second independent reason updateBusiness might legitimately be called).
+Build:     next build succeeds.
+Manual:    Verified server-side against the same live business record from the user's own bug report
+           (biz_953451ea...), via the same session-minting + curl approach as the prior round (no secrets printed).
+           Confirmed: PhotoSlotField is fully gone from every rendered page; the new chevron color class is present;
+           the Generate button correctly reads "Generate New Draft (v6)" against a business already at v5; the
+           Preview link duplicates correctly; and — critically — requesting the page with
+           `?expandedSection=hero` returns the Hero content editor already expanded in the server-rendered HTML
+           (Sub-Headline field, Save Content, Save Photo all present), confirming the redirect-preserves-expanded-
+           section fix actually works end-to-end, not just in isolated logic. A dev server appeared to already be
+           connected to a real browser (hydration warning attributable to a browser extension, unrelated to this
+           change) during this session, so no further interactive/mutating checks were performed to avoid
+           disrupting that session — the startTransition fix, the reorder-persists-on-save behavior, and the
+           Generate confirmation dialog's appearance still warrant a real click-through.
+```
+
+## Files changed
+
+```
+web/
+├── domain/models/business.ts                                                    MODIFIED — Business.cta field
+├── domain/schemas/business.schema.ts                                             MODIFIED — cta schema field
+├── domain/schemas/site-preview.schema.ts                                         MODIFIED — PreviewCtaConfigSchema exported
+├── lib/ai/generate-preview.ts                                                    MODIFIED — reuses business.cta when set
+├── lib/ai/__tests__/generate-preview.test.ts                                     MODIFIED — 1 new test
+└── app/admin/(dashboard)/businesses/
+    ├── CollapsibleCard.tsx                                                       MODIFIED — darker chevron color
+    ├── FormFields.tsx                                                            MODIFIED — PhotoSlotField replaced with PhotoPickerField (thumbnail grid)
+    ├── PhotosForm.tsx                                                            MODIFIED — uses PhotoPickerField
+    └── [businessId]/
+        ├── actions.ts                                                            MODIFIED — CTA persistence (generate/seed/update actions), expandedSection
+        │                                                                             query param on redirect
+        ├── SectionConfigForm.tsx                                                 MODIFIED — startTransition fix, initialExpandedSection prop
+        ├── SectionContentEditor.tsx                                              MODIFIED — PhotoPickerField, gallery add-photo thumbnails, photoRedirectTo
+        ├── GenerateWebsiteButton.tsx                                             MODIFIED — confirmation dialog, dynamic label
+        ├── page.tsx                                                              MODIFIED — searchParams → initialExpandedSection, always-visible PreviewLink,
+        │                                                                             split Preview/Generate card copy
+        └── __tests__/actions.test.ts                                             MODIFIED — 2 new tests, 1 corrected
+```
+
+---
+
+# Bug Fixes + Features — Second Round of Direct User Testing
+
+**Date:** 2026-07-17
+**Scope:** Further direct user testing surfaced: theme changes requiring a full AI regeneration to take visible effect; a hero photo swap via the inline editor silently not appearing on the live preview; an enabled section's checkbox reverting after saving its content; a photo picker request for per-section direct upload; a request for theme color swatches; and two content bugs (CTA card title, swapped CTA button copy).
+
+## Theme dual-write
+
+Same gap the photo-slot dual-write closed last round: `updateThemeAction` only ever wrote `Business.theme`, which is read at the *next* "Generate Website" run — the currently live preview's `theme.themeName` never changed, so picking a new theme appeared to do nothing without a fresh AI regeneration (which the user should not need for a color choice). Fixed by patching the business's most recent `SitePreview.theme.themeName` in place too, the same dual-write shape `updatePhotosAction` already uses. Picking "Auto" makes no live change, same reasoning as the photo slots — there's no specific new theme to apply retroactively.
+
+## Hero photo swap not appearing — stale `heroStyle`
+
+Root cause, not just a caching issue: `GeneratedHero.tsx` branches entirely differently depending on `theme.heroStyle` (`'illustration'` ignores `heroImageUrl` completely — it's a structurally different layout, not a fallback path that also checks the URL). The photo dual-write from last round patched `heroImageUrl` but never touched `heroStyle`, so a preview generated with no hero photo (`heroStyle: 'illustration'`) kept rendering the illustration forever after — the new photo was saved correctly, it was simply never rendered. Fixed: `updatePhotosAction`'s dual-write now recomputes `heroStyle` from the new photo's actual dimensions (`checkHeroPhotoDimensions`, the same helper `generatePreviewContent` already used) whenever the hero slot changes, including resetting to `'illustration'` when the slot is cleared to "No photo".
+
+## Section checkbox reverting after saving content — auto-save
+
+The reported repro (check FAQ's box, expand it, fill in a question, click "Save Content") exposed a real design gap: enabling a section and saving its content are two *separate* actions (`autoSaveWebsiteSectionsAction`/`saveWebsiteSectionsAction` vs. `updateBusinessListFieldAction`/`updateSectionContentAction`), and checking the box alone only updated transient client state until a separate, explicit "Save Sections" click — which the user's workflow never reached before reloading via the content save's own redirect. Rather than teach the user a two-step save order, removed the step entirely: `SectionConfigForm.tsx` now persists every checkbox toggle and every reorder click immediately (wrapped in the same `startTransition` as the manual path), via a new `autoSaveWebsiteSectionsAction` that shares `saveWebsiteSectionsAction`'s validation/persist logic (extracted into `persistWebsiteSections()`) but never redirects — a redirect on every single click would reload the whole page, which defeats the point of "immediate." The manual "Save Sections" button and its redirect are unchanged for the onboarding wizard's "Finish setup" step (`autoSaveAction` prop is only passed from the business detail page).
+
+## Photo picker: theme swatches + per-section direct upload
+
+- `ThemeField` (`FormFields.tsx`) converted from a `<select>` (browsers can't render swatches inside `<option>`) to a custom radio-style list — one row per preset, three small `rounded-sm` color squares (primary/accent/surface — the three fields that actually vary meaningfully per preset; background/text/border are near-identical across all ten) sized to sit inline with the theme name text, backed by a hidden input so it still posts through the existing form action unchanged.
+- `PhotoPickerField` gained an optional `uploadFieldName` prop — a compact file input that uploads a brand-new photo straight into that specific section slot, so a forgotten hero image (or any other slot) can be added without leaving the section editor or going back to the main Photos card. `updatePhotosAction` now handles the four new fields (`heroPhotoFile`/`aboutPhotoFile`/`whyChooseUsPhotoFile`/`servicesPhotoFile`): uploads via a newly-exported `uploadBusinessAsset()`/`fileExtension()` (`lib/s3/business-assets.ts`, previously private), appends the result to `Business.photoUrls` (capped at the schema's existing 6-photo limit), and — a direct upload always wins over whatever that slot's picker buttons had selected. Wired into both the wizard's `PhotosForm.tsx` (its "Photo Assignment" section no longer requires photos to already exist before it's useful) and the inline `SectionContentEditor.tsx`'s `SectionPhotoEditor`.
+
+## Content fixes
+
+- Renamed the "Preview CTA — vN" card to "Call to Action Buttons" (`page.tsx`) — the version number wasn't meaningful to what the card does.
+- Fixed CTA button copy landing on the wrong channel (a phone-icon button reading "Get a Free Estimate", an email-icon button reading "Call Now"): the model was never told which label slot (`primaryCtaLabel`/`secondaryCtaLabel`) would actually be attached to which contact channel — that mapping is decided entirely in code (`buildDefaultCta`, phone always wins primary when present) *after* the model responds, so its creative label choice had a coin-flip chance of matching the channel it landed on. `generate-preview.ts`'s prompt now states explicitly which channel each label slot serves (e.g. "primaryCtaLabel is the button text for a phone call action") whenever that's knowable from the business's verified contact fields.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     328 passed  (npm test) — 3 test files needed a new `@/lib/image/hero-dimensions` mock (a real new
+                          dependency of actions.ts, previously only reachable through the already-mocked
+                          generate-preview.ts) and an extended `@/lib/s3/business-assets` mock for the two newly
+                          exported helpers; no test assertions changed.
+Build:     next build succeeds.
+Manual:    A dev server had been running for ~40 minutes under the user's own session when this round started;
+           left it alone rather than restart it (Turbopack picks up file changes via its own watcher). Verified
+           read-only against it: "Call to Action Buttons" title present, "Changes save automatically." auto-save
+           indicator present, and the theme picker rendering 10 distinct sets of real hex colors (confirming the
+           swatch feature, not just the text). No mutating requests were made against the shared dev database this
+           round, to avoid touching whatever state the user's own session was mid-edit on.
+```
+
+## Files changed
+
+```
+web/
+├── lib/ai/generate-preview.ts                                                    MODIFIED — prompt states which
+│                                                                                       channel each CTA label serves
+└── app/admin/(dashboard)/businesses/
+    ├── FormFields.tsx                                                             MODIFIED — ThemeField swatches,
+    │                                                                                   PhotoPickerField uploadFieldName
+    ├── PhotosForm.tsx                                                             MODIFIED — per-slot upload inputs,
+    │                                                                                   assignment section always shown
+    └── [businessId]/
+        ├── actions.ts                                                             MODIFIED — theme dual-write,
+        │                                                                              heroStyle recomputation,
+        │                                                                              autoSaveWebsiteSectionsAction,
+        │                                                                              per-slot upload handling in
+        │                                                                              updatePhotosAction
+        ├── SectionConfigForm.tsx                                                  MODIFIED — auto-save on
+        │                                                                              toggle/reorder
+        ├── SectionContentEditor.tsx                                               MODIFIED — per-slot upload wiring
+        ├── page.tsx                                                               MODIFIED — CTA card title,
+        │                                                                              autoSaveAction wiring
+        └── __tests__/*.test.ts                                                    MODIFIED — new mocks for
+                                                                                         hero-dimensions/business-assets
+```
+
+---
+
+# Autofill Test Data + Removed picsum.photos Fallbacks
+
+**Date:** 2026-07-17
+**Scope:** Direct user request: a dev-only "autofill" button on the new-business wizard to speed up repeated manual testing, and removal of every remaining `picsum.photos` placeholder-image fallback — "that was a relic of initial site setup."
+
+## Autofill test data button
+
+`BusinessDetailsForm.tsx` gained an optional `showAutofillButton` prop (only passed from `businesses/new/page.tsx` — never the business detail page's reuse of this same form, since that's editing a real business, not entering test data). The button is a plain `type="button"` inside the form; on click it walks the form's own `HTMLFormElement.elements` and sets `.value` directly on each named field (`Field`/`TextareaField`/`SelectField` are all uncontrolled `defaultValue`-based inputs, so this is a normal, safe way to bulk-fill them without restructuring the form to be controlled). Fills every field the wizard's step 1 has, with a randomized name/email suffix each click so repeated test runs don't collide, and a random industry/brand tone pick.
+
+## Removed picsum.photos fallbacks
+
+Three remaining places still fell back to `picsum.photos` placeholder images — all relics of the very first seed/dev-fixture work, predating the theme-matched illustration system that's since become the real "no photo" treatment everywhere else:
+
+- **`ServicesGrid.tsx`** (the one still live in production rendering) — the featured service card's picture background fell back to a hardcoded `picsum.photos` URL when no real photo existed for that slot. Now: with no photo, the featured card renders identically to every other (non-featured) service card — no picture background, no white-text override — matching the same "default no photo" look used elsewhere, instead of any placeholder image at all.
+- **`createSeedPreviewAction`'s `INDUSTRY_SEEDS`/`DEFAULT_SEED`** (`actions.ts`) — the disabled/legacy "Create test preview" dev-fixture path set `heroImageUrl`/`aboutImageUrl` to per-industry `picsum.photos` URLs. Removed entirely; a seeded preview with no uploaded photos now falls through to the same themed illustration/decorative fallback a real AI-generated preview with no photos already uses — no special-cased placeholder path.
+- **`next.config.ts`** — the `images.remotePatterns` entry allowlisting `picsum.photos` is now unused by any code path, so it was removed.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     328 passed  (npm test) — no test changes needed (no test referenced picsum.photos).
+Build:     next build succeeds.
+Manual:    Confirmed read-only against the user's own already-running dev server that the "Autofill test data"
+           button renders on /admin/businesses/new. Did not run a real "Generate Website" call or click through
+           the featured-service-card no-photo rendering interactively, to avoid touching the user's live session.
+```
+
+## Files changed
+
+```
+web/
+├── next.config.ts                                                                MODIFIED — removed unused picsum.photos remote pattern
+├── app/b/[slug]/template/ServicesGrid.tsx                                         MODIFIED — featured card falls back to the plain default look, not a placeholder image
+└── app/admin/(dashboard)/businesses/
+    ├── BusinessDetailsForm.tsx                                                    MODIFIED — showAutofillButton + autofill logic
+    ├── new/page.tsx                                                               MODIFIED — passes showAutofillButton
+    └── [businessId]/actions.ts                                                    MODIFIED — removed picsum URLs from seed-preview fixture data
+```
+
+---
+
+# Wizard Fixes — Photo Assignment Gating Regression + Generate-on-Finish
+
+**Date:** 2026-07-17
+**Scope:** Two direct user reports on the onboarding wizard: the Photo Assignment section (step 2) was showing before any photo had been uploaded — a regression from the same day's earlier per-section-upload feature — and step 3's "Finish setup" button only saved section config, leaving the admin to separately find and click "Generate Website" on the detail page afterward.
+
+## Photo Assignment gating regression
+
+Earlier the same day, `PhotosForm.tsx`'s "Photo Assignment" section was changed from conditional (`photoUrls.length > 0`) to always-rendered, specifically so the new per-slot direct-upload inputs would be reachable even before any photo existed. That inadvertently broke the wizard's step 2, which relies on that exact conditional to stay hidden until the first "Upload Photos" submission actually populates `photoUrls` (see the `hasPhotos` gate already in `onboarding/photos/page.tsx`, unchanged) — instead it now appeared on the very first page load, before anything had been uploaded. Reverted to the original `photoUrls.length > 0` gate; the per-slot upload inputs (`uploadFieldName`) stay in place for once the section *does* become visible, so "forgot to upload a hero image" is still solved as soon as at least one photo exists in the pool.
+
+## Wizard step 3 now generates the first draft on finish
+
+New `finishOnboardingAction` (`actions.ts`) replaces `saveWebsiteSectionsAction` as the wizard's step-3 form action: it persists the section configuration (same `persistWebsiteSections` helper the auto-save path already uses) and then immediately calls a newly extracted `runWebsiteGeneration(businessId)` — the actual OpenAI generation logic, factored out of `generateWebsiteAction` so both callers share the same cap check, theme/CTA seeding, and error handling without duplication. This matches the intended workflow (add business → wizard → generate website) in one click, rather than leaving generation as a separate, easy-to-miss step on the detail page afterward. The button was relabeled "Generate Website →" (from "Finish setup →"), with "Generating…" shown while pending (`SectionConfigForm` gained a `pendingLabel` prop so this doesn't say the generic "Saving…" during a real, multi-second AI call) and explanatory copy added above the section list. `generateWebsiteAction` itself (the detail page's own "Generate Website" button) is behaviorally unchanged — it now just calls the shared `runWebsiteGeneration` helper internally.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     328 passed  (npm test) — no test changes needed (both fixes sit above/around already-tested action logic;
+                          runWebsiteGeneration extraction is behavior-preserving, confirmed by the existing
+                          generateWebsiteAction test suite passing unchanged).
+Build:     next build succeeds.
+Manual:    Confirmed read-only, against the user's own already-running dev server, that an existing business's
+           onboarding/sections page renders the new "Generate Website →" label and explanatory copy. Did not
+           actually submit the wizard's finish step (would trigger a real, billed OpenAI call and count against
+           the business's generation cap) or create a throwaway business to test the step-2 gating fix end-to-end,
+           to avoid side effects on shared dev data; the gating revert restores the exact prior, already-proven
+           conditional, so this is low-risk.
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/
+├── PhotosForm.tsx                                                                MODIFIED — restored photoUrls.length > 0 gate on Photo Assignment
+└── [businessId]/
+    ├── actions.ts                                                                MODIFIED — runWebsiteGeneration extracted, finishOnboardingAction added
+    ├── SectionConfigForm.tsx                                                     MODIFIED — pendingLabel prop
+    └── onboarding/sections/page.tsx                                              MODIFIED — finishOnboardingAction, relabeled button, explanatory copy
+```

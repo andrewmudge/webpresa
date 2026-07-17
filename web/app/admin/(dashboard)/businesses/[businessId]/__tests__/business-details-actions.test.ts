@@ -6,11 +6,20 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGetBusinessById, mockPutBusiness, mockGetSession, mockUploadBusinessAssets } = vi.hoisted(() => ({
+const {
+  mockGetBusinessById,
+  mockPutBusiness,
+  mockGetSession,
+  mockUploadBusinessAssets,
+  mockListPreviewsForBusiness,
+  mockPutSitePreview,
+} = vi.hoisted(() => ({
   mockGetBusinessById: vi.fn(),
   mockPutBusiness: vi.fn(),
   mockGetSession: vi.fn(),
   mockUploadBusinessAssets: vi.fn(),
+  mockListPreviewsForBusiness: vi.fn(),
+  mockPutSitePreview: vi.fn(),
 }));
 
 vi.mock('@/lib/db/businesses', () => ({
@@ -20,9 +29,9 @@ vi.mock('@/lib/db/businesses', () => ({
 }));
 
 vi.mock('@/lib/db/site-previews', () => ({
-  listPreviewsForBusiness: vi.fn(),
+  listPreviewsForBusiness: mockListPreviewsForBusiness,
   getSitePreviewById: vi.fn(),
-  putSitePreview: vi.fn(),
+  putSitePreview: mockPutSitePreview,
 }));
 
 vi.mock('@/lib/db/scan-events', () => ({
@@ -49,6 +58,12 @@ vi.mock('@/lib/theme/select-theme', () => ({
 
 vi.mock('@/lib/s3/business-assets', () => ({
   uploadBusinessAssets: mockUploadBusinessAssets,
+  uploadBusinessAsset: vi.fn(),
+  fileExtension: vi.fn(),
+}));
+
+vi.mock('@/lib/image/hero-dimensions', () => ({
+  checkHeroPhotoDimensions: vi.fn().mockResolvedValue({ isFullBleedEligible: true, width: 1920, height: 1080 }),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -91,6 +106,8 @@ beforeEach(() => {
   mockGetBusinessById.mockResolvedValue(EXISTING_BUSINESS);
   mockPutBusiness.mockResolvedValue(undefined);
   mockUploadBusinessAssets.mockResolvedValue({});
+  mockListPreviewsForBusiness.mockResolvedValue([]);
+  mockPutSitePreview.mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -101,8 +118,6 @@ describe('updateBusinessDetailsAction', () => {
   const DETAILS_FIELDS = {
     name: 'Acme HVAC',
     industry: 'hvac',
-    status: 'active',
-    source: 'manual',
   };
 
   it('requires an authenticated session', async () => {
@@ -136,8 +151,21 @@ describe('updateBusinessDetailsAction', () => {
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.name).toBe('Acme HVAC');
     expect(saved.industry).toBe('hvac');
-    expect(saved.status).toBe('active');
+    expect(saved.status).toBe(EXISTING_BUSINESS.status);
     expect(saved.businessId).toBe(EXISTING_BUSINESS.businessId);
+  });
+
+  it('never touches theme/source/status fields', async () => {
+    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, theme: 'classicBlue', source: 'import', status: 'active' });
+
+    await expect(
+      updateBusinessDetailsAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, makeFormData(DETAILS_FIELDS)),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.theme).toBe('classicBlue');
+    expect(saved.source).toBe('import');
+    expect(saved.status).toBe('active');
   });
 
   it('never touches photo fields (logoUrl, photoUrls, photo-slot overrides)', async () => {

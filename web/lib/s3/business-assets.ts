@@ -10,13 +10,20 @@ import { putAsset } from './assets';
  * being a private function duplicated in each `actions.ts` that needs it.
  */
 
-function fileExtension(file: File): string {
+export function fileExtension(file: File): string {
   const fromName = file.name.split('.').pop();
   if (fromName && fromName.length <= 5) return fromName.toLowerCase();
   return file.type.split('/').pop() || 'bin';
 }
 
-async function uploadBusinessAsset(businessId: string, file: File, filename: string): Promise<string> {
+/**
+ * Uploads one file under a business's asset prefix and returns its public
+ * proxy URL. Exported (not just used internally by `uploadBusinessAssets`)
+ * so callers that need to upload a single photo directly into a specific
+ * section slot — rather than the generic multi-photo `photos` field — can
+ * reuse the same key structure and upload path.
+ */
+export async function uploadBusinessAsset(businessId: string, file: File, filename: string): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   const key = `businesses/${businessId}/assets/${filename}`;
   await putAsset(key, buffer, file.type || 'application/octet-stream');

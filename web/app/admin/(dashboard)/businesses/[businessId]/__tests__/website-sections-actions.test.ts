@@ -20,6 +20,12 @@ vi.mock('@/lib/db/businesses', () => ({
 
 vi.mock('@/lib/s3/business-assets', () => ({
   uploadBusinessAssets: vi.fn(),
+  uploadBusinessAsset: vi.fn(),
+  fileExtension: vi.fn(),
+}));
+
+vi.mock('@/lib/image/hero-dimensions', () => ({
+  checkHeroPhotoDimensions: vi.fn(),
 }));
 
 vi.mock('@/lib/db/site-previews', () => ({

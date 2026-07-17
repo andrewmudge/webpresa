@@ -4,9 +4,12 @@ import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
 interface Props {
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
+  /** Admin-editable heading override (`content.ctaBannerSection`). Falls back to the built-in copy below when absent. */
+  sectionHeadline?: string;
+  sectionSubheadline?: string;
 }
 
-export function FinalCTA({ primary, secondary }: Props) {
+export function FinalCTA({ primary, secondary, sectionHeadline, sectionSubheadline }: Props) {
   return (
     <section
       className="py-20 relative overflow-hidden"
@@ -18,10 +21,10 @@ export function FinalCTA({ primary, secondary }: Props) {
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 text-center">
         <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-4 leading-tight">
-          Ready for a fix? Let&apos;s talk.
+          {sectionHeadline || "Ready for a fix? Let's talk."}
         </h2>
         <p className="text-white/75 mb-10 max-w-md mx-auto">
-          Schedule service today — fast response, professional results.
+          {sectionSubheadline || 'Schedule service today — fast response, professional results.'}
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           {primary && (

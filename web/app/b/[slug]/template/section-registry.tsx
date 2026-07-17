@@ -73,14 +73,29 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
     />
   ),
   trustStrip: () => <TrustStrip />,
-  services: (ctx) => <ServicesGrid services={ctx.content.services} featuredImageUrl={ctx.theme.servicesImageUrl} />,
-  gallery: (ctx) => <GallerySection businessName={ctx.businessName} images={ctx.business.photoUrls ?? []} />,
+  services: (ctx) => (
+    <ServicesGrid
+      services={ctx.content.services}
+      featuredImageUrl={ctx.theme.servicesImageUrl}
+      sectionHeadline={ctx.content.servicesSection?.headline}
+      sectionSubheadline={ctx.content.servicesSection?.subheadline}
+    />
+  ),
+  gallery: (ctx) => (
+    <GallerySection
+      businessName={ctx.businessName}
+      images={ctx.content.gallerySection?.images ?? (ctx.business.photoUrls ?? []).map((url) => ({ url }))}
+      sectionHeadline={ctx.content.gallerySection?.headline}
+      sectionSubheadline={ctx.content.gallerySection?.subheadline}
+    />
+  ),
   whyChooseUs: (ctx) => (
     <WhyChooseUs
       differentiators={ctx.content.differentiators ?? []}
       aboutImageUrl={ctx.theme.aboutImageUrl}
       businessName={ctx.businessName}
       primary={ctx.primary}
+      sectionHeadline={ctx.content.whyChooseUsSection?.headline}
     />
   ),
   about: (ctx) => (
@@ -90,16 +105,31 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
       aboutText={ctx.content.aboutText}
       imageUrl={ctx.theme.aboutSectionImageUrl}
       primary={ctx.primary}
+      quote={ctx.content.aboutSection?.quote}
     />
   ),
   reviews: (ctx) => (
     <ReviewsSection businessName={ctx.businessName} rating={ctx.business.googleRating} reviewCount={ctx.business.googleReviewCount} />
   ),
   testimonials: (ctx) => <TestimonialsSection testimonials={ctx.business.testimonials ?? []} />,
-  serviceAreas: (ctx) => <ServiceAreaSection serviceAreas={ctx.content.serviceAreas ?? []} primary={ctx.primary} />,
+  serviceAreas: (ctx) => (
+    <ServiceAreaSection
+      serviceAreas={ctx.content.serviceAreas ?? []}
+      primary={ctx.primary}
+      sectionHeadline={ctx.content.serviceAreasSection?.headline}
+      sectionSubheadline={ctx.content.serviceAreasSection?.subheadline}
+    />
+  ),
   process: (ctx) => <ProcessSection steps={ctx.business.processSteps ?? []} />,
   faq: (ctx) => <FaqSection faqItems={ctx.business.faqItems ?? []} />,
-  ctaBanner: (ctx) => <FinalCTA primary={ctx.primary} secondary={ctx.secondary} />,
+  ctaBanner: (ctx) => (
+    <FinalCTA
+      primary={ctx.primary}
+      secondary={ctx.secondary}
+      sectionHeadline={ctx.content.ctaBannerSection?.headline}
+      sectionSubheadline={ctx.content.ctaBannerSection?.subheadline}
+    />
+  ),
   contact: (ctx) => (
     <ContactSection phone={ctx.phone} email={ctx.email} address={ctx.content.contact.address} hours={ctx.content.hours} />
   ),

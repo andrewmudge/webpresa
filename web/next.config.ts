@@ -16,9 +16,6 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
     remotePatterns: [
-      // DEV_FIXTURE: picsum.photos placeholder images used in seed preview data.
-      // Replace with the actual S3 bucket pattern in Stage 9.
-      { protocol: 'https', hostname: 'picsum.photos' },
       { protocol: 'https', hostname: 'images.unsplash.com' },
     ],
   },

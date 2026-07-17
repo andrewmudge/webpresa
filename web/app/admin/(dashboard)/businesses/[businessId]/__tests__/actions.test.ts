@@ -76,6 +76,12 @@ vi.mock('@/lib/auth/session', () => ({
 
 vi.mock('@/lib/s3/business-assets', () => ({
   uploadBusinessAssets: vi.fn(),
+  uploadBusinessAsset: vi.fn(),
+  fileExtension: vi.fn(),
+}));
+
+vi.mock('@/lib/image/hero-dimensions', () => ({
+  checkHeroPhotoDimensions: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -185,8 +191,20 @@ describe('generateWebsiteAction — success flow', () => {
     expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, { theme: 'classicBlue' });
   });
 
-  it('does not overwrite a business theme that is already stored', async () => {
-    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, theme: 'green' });
+  it('persists the generated CTA onto the business when it has none stored yet', async () => {
+    await expect(
+      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, { cta: GENERATED.content.cta });
+  });
+
+  it('does not overwrite a business theme or CTA that are already stored', async () => {
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      theme: 'green',
+      cta: { primary: { type: 'phone' as const, label: 'Existing CTA' } },
+    });
 
     await expect(
       generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
@@ -345,6 +363,12 @@ describe('updatePreviewCtaAction — success flow', () => {
     expect(saved.content.cta).toEqual({ primary: { type: 'phone', label: 'Call Now' } });
     // Legacy hero.ctaText is kept in sync with the new primary label.
     expect(saved.content.hero.ctaText).toBe('Call Now');
+    // An explicit CTA edit always persists onto Business.cta too, so it
+    // survives every future "Generate Website" regeneration — see the
+    // Business.cta doc comment.
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_PREVIEW.businessId, {
+      cta: { primary: { type: 'phone', label: 'Call Now' } },
+    });
   });
 
   it('saves a primary + secondary CTA config with an override value', async () => {

@@ -37,7 +37,9 @@ export function computeSectionAvailability({
     hero: true,
     trustStrip: true,
     services: (content?.services.length ?? 0) > 0,
-    gallery: (business.photoUrls?.length ?? 0) >= 1,
+    gallery: content?.gallerySection?.images
+      ? content.gallerySection.images.length >= 1
+      : (business.photoUrls?.length ?? 0) >= 1,
     whyChooseUs: (content?.differentiators?.length ?? 0) >= 1,
     about: (content?.aboutText.trim().length ?? 0) > 0,
     reviews: (business.googleReviewCount ?? 0) >= 1,

@@ -12,10 +12,12 @@ interface Props {
   aboutImageUrl?: string;
   businessName: string;
   primary: ResolvedCta | null;
+  /** Admin-editable heading override (`content.whyChooseUsSection`). Falls back to the built-in copy below when absent. */
+  sectionHeadline?: string;
 }
 
 // Only rendered when differentiators data is present
-export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, primary }: Props) {
+export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, primary, sectionHeadline }: Props) {
   if (!differentiators || differentiators.length === 0) return null;
 
   return (
@@ -62,7 +64,7 @@ export function WhyChooseUs({ differentiators, aboutImageUrl, businessName, prim
               Why Choose Us
             </p>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) leading-tight mb-8">
-              The experience your property deserves
+              {sectionHeadline || 'The experience your property deserves'}
             </h2>
             <ul className="space-y-5">
               {differentiators.map((d, i) => (

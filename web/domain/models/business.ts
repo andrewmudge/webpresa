@@ -3,6 +3,7 @@ import type { BrandTone } from '@/domain/constants/brand-tone';
 import type { ThemeName } from '@/domain/constants/themes';
 import type { Address, MutableTimestampedRecord } from './common';
 import type { WebsiteSectionsConfig } from './website-sections';
+import type { PreviewCtaConfig } from './site-preview';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -159,6 +160,20 @@ export interface Business extends MutableTimestampedRecord {
   // -------------------------------------------------------------------------
 
   theme?: ThemeName;
+
+  // -------------------------------------------------------------------------
+  // Configurable CTA
+  //
+  // The resolved primary/secondary call-to-action, persisted here so it
+  // survives every "Generate Website" regeneration exactly like `theme`
+  // already does — an admin's CTA edit (or the first generation's own
+  // AI-labeled-but-code-derived pick) is a durable business decision, not
+  // AI-generated prose that's expected to reset on regeneration. Set once by
+  // the first successful generation if unset, and always overwritten
+  // whenever an admin explicitly edits the Preview CTA card.
+  // -------------------------------------------------------------------------
+
+  cta?: PreviewCtaConfig;
 
   // -------------------------------------------------------------------------
   // Section eligibility signals (Stage 11.x)

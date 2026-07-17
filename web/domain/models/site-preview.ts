@@ -40,6 +40,25 @@ export interface PreviewContact {
 // Call-to-action configuration
 // ---------------------------------------------------------------------------
 
+/**
+ * Admin-editable headline/subheadline override for a section whose heading
+ * copy was previously a hardcoded literal in its template component (e.g.
+ * `ServicesGrid`'s "Our Services" / "Professional work, done right"). Both
+ * fields are optional — absence means "keep the component's built-in
+ * default copy", so no backfill is required for previews saved before these
+ * fields existed.
+ */
+export interface SectionHeading {
+  headline?: string;
+  subheadline?: string;
+}
+
+/** A single curated gallery photo. `url` must be one of the business's uploaded `photoUrls`. */
+export interface GalleryImage {
+  url: string;
+  caption?: string;
+}
+
 export const CTA_ACTION_TYPES = ['phone', 'email', 'sms', 'external_url', 'none'] as const;
 export type CtaActionType = (typeof CTA_ACTION_TYPES)[number];
 
@@ -103,6 +122,36 @@ export interface PreviewContent {
    * should always populate this.
    */
   cta?: PreviewCtaConfig;
+
+  // -------------------------------------------------------------------------
+  // Per-section heading overrides (inline admin content editing)
+  //
+  // Every field below is optional and additive — a section with no override
+  // stored renders its existing hardcoded default copy exactly as before.
+  // These let an admin hand-edit the heading/body copy of a section whose
+  // text was previously not sourced from any field at all.
+  // -------------------------------------------------------------------------
+
+  /** Services section heading override (default: "Our Services" / "Professional work, done right"). */
+  servicesSection?: SectionHeading;
+  /** Why Choose Us section heading override (default: "Why Choose Us" / "The experience your property deserves"). */
+  whyChooseUsSection?: SectionHeading;
+  /**
+   * The decorative photo-panel quote shown in the About section. `tagline`
+   * already serves as this section's editable headline, so only the quote
+   * needs a new field here.
+   */
+  aboutSection?: { quote?: string };
+  /** Service Areas section heading override (default: "Coverage" / "Areas We Serve"). */
+  serviceAreasSection?: SectionHeading;
+  /**
+   * Gallery section heading override plus the curated photo list. Absent
+   * `images` normalizes at render time to every uploaded `Business.photoUrls`
+   * entry with no caption — identical to today's behavior.
+   */
+  gallerySection?: SectionHeading & { images?: GalleryImage[] };
+  /** CTA Banner section heading override (default: "Ready for a fix? Let's talk." / "Schedule service today..."). */
+  ctaBannerSection?: SectionHeading;
 }
 
 export const HERO_STYLES = ['image', 'imageSplit', 'illustration', 'gradient', 'pattern', 'solid'] as const;

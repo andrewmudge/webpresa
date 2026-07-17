@@ -4,10 +4,13 @@ import { externalLinkAttrs, type ResolvedCta } from './cta';
 interface Props {
   serviceAreas: string[];
   primary: ResolvedCta | null;
+  /** Admin-editable heading override (`content.serviceAreasSection`). Falls back to the built-in copy below when absent. */
+  sectionHeadline?: string;
+  sectionSubheadline?: string;
 }
 
 // Only rendered when serviceAreas has entries
-export function ServiceAreaSection({ serviceAreas, primary }: Props) {
+export function ServiceAreaSection({ serviceAreas, primary, sectionHeadline, sectionSubheadline }: Props) {
   if (!serviceAreas || serviceAreas.length === 0) return null;
 
   return (
@@ -17,10 +20,10 @@ export function ServiceAreaSection({ serviceAreas, primary }: Props) {
           Coverage
         </p>
         <h2 className="text-3xl sm:text-4xl font-extrabold text-(--site-text) mb-3">
-          Areas We Serve
+          {sectionHeadline || 'Areas We Serve'}
         </h2>
         <p className="text-(--site-muted) mb-10 max-w-md mx-auto">
-          Providing fast, reliable service across the region.
+          {sectionSubheadline || 'Providing fast, reliable service across the region.'}
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           {serviceAreas.map((area) => (

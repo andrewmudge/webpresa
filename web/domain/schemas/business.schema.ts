@@ -5,6 +5,7 @@ import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_STATUSES, BUSINESS_SOURCES } from '@/domain/models/business';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
+import { PreviewCtaConfigSchema } from './site-preview.schema';
 
 export const BusinessScoresSchema = z.object({
   overall: ScoreSchema.optional(),
@@ -65,6 +66,7 @@ export const BusinessSchema = z.object({
   whyChooseUsPhotoUrl: PhotoSlotOverrideSchema,
   servicesPhotoUrl: PhotoSlotOverrideSchema,
   theme: z.enum(THEME_NAMES).optional(),
+  cta: PreviewCtaConfigSchema.optional(),
   googleRating: z.number().min(0).max(5).optional(),
   googleReviewCount: z.number().int().min(0).optional(),
   testimonials: z

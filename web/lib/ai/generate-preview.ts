@@ -102,14 +102,32 @@ function buildPrompt(business: Business): { system: string; user: string } {
     ? [business.address.city, business.address.state].filter(Boolean).join(', ')
     : undefined;
 
+  // The primary/secondary CTA *type and destination* are always decided in
+  // code from verified contact fields (buildDefaultCta, called after this
+  // prompt runs) — phone wins the primary slot whenever one is on file,
+  // email only ever lands in secondary (or primary if there's no phone).
+  // The model only supplies the button copy, so it must be told which
+  // channel each label slot will actually be attached to — otherwise it has
+  // no way to know "Call Now" belongs on the phone button, not the email
+  // one, and the two can end up swapped on the rendered page.
+  const primaryChannel = business.phone ? 'phone call' : business.email ? 'email' : null;
+  const secondaryChannel = business.phone && business.email ? 'email' : null;
+
   const system = [
     'You write structured content for a local-service-business website generator.',
     'You must not invent the following — only use what is explicitly provided below:',
     ...GUARDRAILS.map((g) => `- ${g}`),
     'Write one service entry for each service the business owner listed — do not add extra services.',
     'Write one differentiator entry for each differentiator listed — do not add extra ones. If none were listed, return an empty array.',
-    'CTA labels should be short (2-4 words) action phrases appropriate to the brand tone, e.g. "Call Now", "Get a Free Estimate", "Book Online" — never invent unrelated claims in them.',
-  ].join('\n');
+    'CTA labels should be short (2-4 words) action phrases appropriate to the brand tone — never invent unrelated claims in them.',
+    primaryChannel &&
+      `primaryCtaLabel is the button text for a ${primaryChannel} action — write copy appropriate to that specific channel (e.g. "Call Now" for a phone call, "Email Us" or "Get a Free Estimate" for email).`,
+    secondaryChannel
+      ? `secondaryCtaLabel is the button text for a separate ${secondaryChannel} action — write copy appropriate to that specific channel, distinct from primaryCtaLabel.`
+      : 'secondaryCtaLabel is unused in this case (only one contact channel is on file) — still return a short generic phrase, but it will not be rendered.',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const user = [
     `Business name: ${business.name}`,
@@ -198,8 +216,12 @@ export async function generatePreviewContent(business: Business): Promise<Genera
   };
   const serviceAreas = linesFrom(business.serviceAreas);
 
-  // --- CTA: code decides type/destination via buildDefaultCta; model only supplied the labels. ---
-  const cta = buildDefaultCta(contact, {
+  // --- CTA: a durable business-level decision, like theme — once an admin
+  // has an edited (or a first-generation-seeded) CTA on file, every
+  // subsequent regeneration reuses it verbatim instead of re-deriving one
+  // from the model's fresh labels. Only derives a brand-new CTA (via
+  // buildDefaultCta + the model's labels) when the business has none yet. ---
+  const cta = business.cta ?? buildDefaultCta(contact, {
     primary: output.primaryCtaLabel,
     secondary: output.secondaryCtaLabel,
   });

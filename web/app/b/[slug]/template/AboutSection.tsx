@@ -8,9 +8,11 @@ interface Props {
   aboutText: string;
   primary: ResolvedCta | null;
   imageUrl?: string;
+  /** Admin-editable override for the decorative photo-panel quote (`content.aboutSection.quote`). */
+  quote?: string;
 }
 
-export function AboutSection({ businessName, tagline, aboutText, primary, imageUrl }: Props) {
+export function AboutSection({ businessName, tagline, aboutText, primary, imageUrl, quote }: Props) {
   return (
     <section id="about" className="py-20 bg-(--site-background)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -69,7 +71,7 @@ export function AboutSection({ businessName, tagline, aboutText, primary, imageU
             )}
             <div className="relative z-10 p-10 flex flex-col justify-end h-full">
               <blockquote className="text-white/90 text-lg font-medium italic leading-relaxed">
-                &ldquo;Our goal is simple: deliver quality work on time, every time.&rdquo;
+                &ldquo;{quote || 'Our goal is simple: deliver quality work on time, every time.'}&rdquo;
               </blockquote>
               <p className="text-white/60 text-sm mt-3">— {businessName}</p>
             </div>

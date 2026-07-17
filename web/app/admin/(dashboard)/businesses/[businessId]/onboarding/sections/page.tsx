@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { SectionConfigForm } from '../../SectionConfigForm';
-import { saveWebsiteSectionsAction } from '../../actions';
+import { finishOnboardingAction } from '../../actions';
 import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
 import { computeSectionAvailability, hasResolvableCta } from '@/lib/website-sections/availability';
 import { recommendWebsiteSections } from '@/lib/website-sections/recommend';
@@ -57,6 +57,7 @@ export default async function OnboardingSectionsPage({ params }: Props) {
           <h1 className="text-xl font-semibold text-gray-900">Choose website sections</h1>
           <p className="text-sm text-gray-400 mt-1">
             Pre-selected based on what you&apos;ve entered so far. Required sections always render.
+            Finishing saves this configuration and generates the first AI-written draft.
           </p>
         </div>
         <Link
@@ -69,10 +70,14 @@ export default async function OnboardingSectionsPage({ params }: Props) {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <SectionConfigForm
-          action={saveWebsiteSectionsAction.bind(null, businessId)}
+          action={finishOnboardingAction.bind(null, businessId)}
           sections={sections}
           availability={availability}
-          submitLabel="Finish setup →"
+          submitLabel="Generate Website →"
+          pendingLabel="Generating…"
+          business={business}
+          latestPreview={previews[0]}
+          redirectTo={`/admin/businesses/${businessId}`}
         />
       </div>
     </div>
