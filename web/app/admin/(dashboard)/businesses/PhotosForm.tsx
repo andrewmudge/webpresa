@@ -82,6 +82,14 @@ export function PhotosForm({ action, defaults, submitLabel = 'Save', heroPhotoWa
             ))}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <PhotoPickerField
+              label="Business logo"
+              name="logoPhotoUrl"
+              photoUrls={photoUrls}
+              defaultValue=""
+              errors={errors.logoPhotoUrl}
+              hint={'Auto keeps the current logo (above) unchanged. Pick a photo — e.g. one imported from the business’s website — to use it as the logo instead, or "No photo" to remove the logo entirely.'}
+            />
             <div>
               <PhotoPickerField
                 label="Desktop hero image"

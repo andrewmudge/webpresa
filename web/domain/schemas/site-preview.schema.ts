@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES, HERO_STYLES } from '@/domain/models/site-preview';
+import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES, HERO_STYLES, GENERATION_SOURCES } from '@/domain/models/site-preview';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { IsoTimestampSchema, UrlOrPathSchema } from './common.schema';
 
@@ -148,6 +148,8 @@ const GenerationMetadataSchema = z.object({
   promptVersion: z.string().min(1),
   generatedAt: IsoTimestampSchema,
   durationMs: z.number().int().min(0),
+  source: z.enum(GENERATION_SOURCES).optional(),
+  scanId: z.string().regex(/^scan_/).optional(),
 });
 
 // ---------------------------------------------------------------------------

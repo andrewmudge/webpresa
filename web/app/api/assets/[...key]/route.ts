@@ -2,14 +2,24 @@ import { NextResponse } from 'next/server';
 import { getAsset } from '@/lib/s3/assets';
 
 /**
- * Public read proxy for admin-uploaded business assets (logo/photos).
+ * Public read proxy for admin-uploaded business assets (logo/photos) and,
+ * as of Stage 13, accepted Firecrawl scan-derived images.
  *
  * The assets bucket is fully private — this route is the only public-facing
- * path to any object in it, and it intentionally only serves the
- * `businesses/` prefix. Scan, preview, and postcard artifacts stay private;
- * do not widen this beyond `businesses/` without reconsidering what's inside
- * those other prefixes.
+ * path to any object in it. It serves exactly two prefixes:
+ *   - `businesses/{businessId}/assets/...` — admin-uploaded logo/photos.
+ *   - `scans/{businessId}/{scanId}/images/...` — accepted/review-required
+ *     scan-derived images only (see `lib/firecrawl/images.ts`). The sibling
+ *     `crawl.json`/`extracted.json` artifacts in the same scan folder are
+ *     deliberately NOT matched by `SCAN_IMAGE_KEY_PATTERN` — they stay
+ *     private, admin-viewable only via a short-lived signed URL
+ *     (`getSignedAssetUrl`).
+ * Preview and postcard artifacts stay fully private; do not widen this
+ * beyond the two patterns below without reconsidering what's inside those
+ * other prefixes.
  */
+
+const SCAN_IMAGE_KEY_PATTERN = /^scans\/[^/]+\/[^/]+\/images\//;
 
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
@@ -33,7 +43,7 @@ export async function GET(_request: Request, { params }: Props) {
   const { key: segments } = await params;
   const key = segments.join('/');
 
-  if (!key.startsWith('businesses/')) {
+  if (!key.startsWith('businesses/') && !SCAN_IMAGE_KEY_PATTERN.test(key)) {
     return new NextResponse('Not found', { status: 404 });
   }
 

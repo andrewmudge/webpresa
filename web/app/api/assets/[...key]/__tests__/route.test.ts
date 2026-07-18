@@ -56,6 +56,34 @@ describe('GET /api/assets/[...key]', () => {
     expect(mockGetAsset).not.toHaveBeenCalled();
   });
 
+  it('serves an accepted Stage 13 scan image under scans/.../images/', async () => {
+    mockGetAsset.mockResolvedValueOnce(Buffer.from('fake-jpeg-bytes'));
+
+    const res = await GET(
+      new Request('http://localhost/api/assets/scans/biz_1/scan_1/images/img1.jpg'),
+      makeParams(['scans', 'biz_1', 'scan_1', 'images', 'img1.jpg']),
+    );
+
+    expect(mockGetAsset).toHaveBeenCalledWith('scans/biz_1/scan_1/images/img1.jpg');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg');
+  });
+
+  it('still rejects the private crawl.json/extracted.json artifacts in the same scan folder as the served images', async () => {
+    const crawlRes = await GET(
+      new Request('http://localhost/api/assets/scans/biz_1/scan_1/crawl.json'),
+      makeParams(['scans', 'biz_1', 'scan_1', 'crawl.json']),
+    );
+    const extractedRes = await GET(
+      new Request('http://localhost/api/assets/scans/biz_1/scan_1/extracted.json'),
+      makeParams(['scans', 'biz_1', 'scan_1', 'extracted.json']),
+    );
+
+    expect(crawlRes.status).toBe(404);
+    expect(extractedRes.status).toBe(404);
+    expect(mockGetAsset).not.toHaveBeenCalled();
+  });
+
   it('infers content type for jpeg photos', async () => {
     mockGetAsset.mockResolvedValueOnce(Buffer.from('x'));
     const res = await GET(

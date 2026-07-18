@@ -57,8 +57,8 @@ describe('unique IDs', () => {
 
   it('two ScanEvent records get different scanIds', () => {
     const biz = createBusiness({ name: 'Acme Plumbing', industry: 'plumbing' });
-    const s1 = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://example.com' });
-    const s2 = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://example.com' });
+    const s1 = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://example.com' });
+    const s2 = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://example.com' });
     expect(s1.scanId).not.toBe(s2.scanId);
   });
 
@@ -90,7 +90,7 @@ describe('createdAt is always set', () => {
 
   it('ScanEvent has createdAt', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'hvac' });
-    const s = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://example.com' });
+    const s = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://example.com' });
     expect(s.createdAt).toBeTruthy();
   });
 
@@ -121,7 +121,7 @@ describe('updatedAt is always set', () => {
 
   it('ScanEvent has updatedAt', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'electrical' });
-    const s = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://acme.com' });
+    const s = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://acme.com' });
     expect(s.updatedAt).toBeTruthy();
   });
 });
@@ -146,7 +146,7 @@ describe('status validation', () => {
 
   it('ScanEventSchema rejects an invalid status string', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'plumbing' });
-    const s = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://acme.com' });
+    const s = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://acme.com' });
     const result = ScanEventSchema.safeParse({ ...s, status: 'done' });
     expect(result.success).toBe(false);
   });
@@ -429,7 +429,7 @@ describe('ID prefix format', () => {
 
   it('ScanEvent ID starts with scan_', () => {
     const biz = createBusiness({ name: 'Prefix Test', industry: 'accounting' });
-    const s = createScanEvent({ businessId: biz.businessId, sourceUrl: 'https://prefix-test.com' });
+    const s = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape', sourceUrl: 'https://prefix-test.com' });
     expect(s.scanId).toMatch(/^scan_/);
   });
 

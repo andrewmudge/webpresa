@@ -1,11 +1,54 @@
 import type { MutableTimestampedRecord } from './common';
+import type { ScanImageAsset } from './scan-image';
 
 // ---------------------------------------------------------------------------
-// Status enum
+// Status, provider, operation, and failure-category enums
+//
+// ScanEvent had no real caller before Stage 13 (Firecrawl Website
+// Enrichment) — Stage 12 (Google Places) explicitly creates no ScanEvent
+// records, see architecture.md, "Google Places Discovery Boundary". This is
+// the first stage to actually write one, so the shape below is designed
+// directly for Stage 13's execution model rather than defensively extending
+// an in-use shape.
 // ---------------------------------------------------------------------------
 
-export const SCAN_STATUSES = ['pending', 'running', 'completed', 'failed'] as const;
+export const SCAN_STATUSES = [
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'manual_approval_required',
+] as const;
 export type ScanStatus = (typeof SCAN_STATUSES)[number];
+
+export const SCAN_PROVIDERS = ['firecrawl'] as const;
+export type ScanProvider = (typeof SCAN_PROVIDERS)[number];
+
+export const SCAN_OPERATIONS = ['scrape'] as const;
+export type ScanOperation = (typeof SCAN_OPERATIONS)[number];
+
+/**
+ * Why a scan attempt did not complete successfully. Drives both admin-facing
+ * copy and automatic-retry eligibility — see
+ * `lib/firecrawl/retry.ts`'s `isRetryableFailureCategory`.
+ */
+export const SCAN_FAILURE_CATEGORIES = [
+  'missing_website',
+  'invalid_url',
+  'blocked_url',
+  'firecrawl_auth',
+  'firecrawl_rate_limit',
+  'firecrawl_timeout',
+  'firecrawl_provider_error',
+  'website_unreachable',
+  'empty_content',
+  'normalization_failed',
+  'artifact_storage_failed',
+  'generation_failed',
+  'preview_persistence_failed',
+  'unknown',
+] as const;
+export type ScanFailureCategory = (typeof SCAN_FAILURE_CATEGORIES)[number];
 
 // ---------------------------------------------------------------------------
 // Sub-types
@@ -13,7 +56,7 @@ export type ScanStatus = (typeof SCAN_STATUSES)[number];
 
 /**
  * Quality scores produced by a scan run, each on a 0–100 scale.
- * A scan may produce any subset of these — all fields are optional.
+ * Reserved for Stage 15 (AI Website Scoring) — Stage 13 never writes these.
  */
 export interface ScanScores {
   overall?: number;
@@ -25,9 +68,8 @@ export interface ScanScores {
 }
 
 /**
- * Object-storage keys for artifacts captured during the scan.
- * Keys are opaque S3-compatible paths — the specific bucket is resolved
- * by the storage layer, not stored here.
+ * Object-storage keys for Stage 14 (Playwright screenshot) artifacts.
+ * Untouched by Stage 13 — kept for forward compatibility.
  */
 export interface ScanStorageKeys {
   screenshotKey?: string;
@@ -40,25 +82,46 @@ export interface ScanStorageKeys {
 // ---------------------------------------------------------------------------
 
 /**
- * A single website scan run triggered for a business.
+ * A single provider attempt (currently: one Firecrawl scrape) run against a
+ * business's website.
  *
- * `startedAt` is set when the job begins processing.
- * `completedAt` is set (and `status` updated) when the run concludes,
- * whether successfully or with a failure.
+ * Lifecycle: `queued` → `running` → `completed` | `failed` |
+ * `manual_approval_required` (the last only for the no-website path, which
+ * never calls the provider at all). A `failed` ScanEvent is an immutable
+ * historical record — it is never transitioned back to `running`; a retry
+ * always creates a brand-new ScanEvent linked via `retryOfScanId`.
  */
 export interface ScanEvent extends MutableTimestampedRecord {
   /** Globally unique identifier.  Format: `scan_<uuid>` */
   scanId: string;
   businessId: string;
+  provider: ScanProvider;
+  operation: ScanOperation;
   status: ScanStatus;
-  /** The URL that was scanned. */
-  sourceUrl: string;
+  /** The URL that was (or would have been) scanned. Absent for the no-website path. */
+  sourceUrl?: string;
+  /** The provider's final URL after redirects, once known. */
+  finalUrl?: string;
+  httpStatus?: number;
+  failureCategory?: ScanFailureCategory;
+  /** Safe, admin-facing failure summary — never a raw provider error or stack trace. */
+  failureMessage?: string;
+  /** 1 for a first attempt; incremented on each retry. */
+  attempt: number;
+  /** Set only on a retry — points at the ScanEvent this attempt retries. */
+  retryOfScanId?: string;
+  /** S3 key for the sanitized raw Firecrawl response — `scans/{businessId}/{scanId}/crawl.json`. */
+  rawArtifactKey?: string;
+  /** S3 key for the validated WebsiteEnrichmentSnapshot — `scans/{businessId}/{scanId}/extracted.json`. */
+  extractedArtifactKey?: string;
+  /** Images discovered and (if accepted/review_required) rehosted during this scan. */
+  images?: ScanImageAsset[];
+  /** Set once generation succeeds and a new SitePreview is persisted. */
+  generatedPreviewId?: string;
   storageKeys?: ScanStorageKeys;
   scores?: ScanScores;
-  /** Human-readable reason populated only when status is `'failed'`. */
-  failureReason?: string;
-  /** ISO 8601 timestamp — set when the scan job starts executing. */
-  startedAt: string;
-  /** ISO 8601 timestamp — set when the scan job finishes (success or failure). */
+  /** ISO 8601 timestamp — set when the scan transitions to `running`. */
+  startedAt?: string;
+  /** ISO 8601 timestamp — set when the scan reaches a terminal status. */
   completedAt?: string;
 }

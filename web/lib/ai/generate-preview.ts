@@ -3,11 +3,29 @@ import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import type { Business } from '@/domain/models/business';
 import type { GenerationMetadata, HeroStyle, PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
+import type { WebsiteEnrichmentSnapshot } from '@/domain/models/website-enrichment';
+import type { ScanImageAsset } from '@/domain/models/scan-image';
 import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
 import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]/cta-defaults';
 import { resolveBusinessTheme } from '@/lib/theme/select-theme';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
+import { buildGenerationContext, type GenerationContext } from '@/lib/firecrawl/generation-context';
 import { getOpenAiClient, getOpenAiModel } from './client';
+
+/**
+ * Optional Firecrawl enrichment input (Stage 13). When present,
+ * `buildGenerationContext` fills gaps in the prompt input for fields the
+ * business left blank, and scan-accepted images become a lower-priority
+ * photo-slot fallback tier after `business.photoUrls`. Business fields
+ * always win over the snapshot — see `lib/firecrawl/generation-context.ts`.
+ */
+export interface GeneratePreviewOptions {
+  enrichment?: {
+    snapshot: WebsiteEnrichmentSnapshot;
+    scanImages: ScanImageAsset[];
+    scanId: string;
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Structured output schema
@@ -72,13 +90,6 @@ const GUARDRAILS = [
   'statistics',
 ] as const;
 
-function linesFrom(text: string | undefined): string[] {
-  return (text ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
 /**
  * Resolves one photo-slot assignment: an explicit admin `override` wins
  * outright (the reserved value `'none'` forces "no photo for this slot",
@@ -94,10 +105,10 @@ function resolvePhotoSlot(
   return autoFallbacks.find((url): url is string => !!url);
 }
 
-function buildPrompt(business: Business): { system: string; user: string } {
-  const services = linesFrom(business.servicesOffered);
-  const serviceAreas = linesFrom(business.serviceAreas);
-  const differentiators = linesFrom(business.differentiators);
+function buildPrompt(business: Business, generationContext: GenerationContext): { system: string; user: string } {
+  const services = generationContext.servicesLines;
+  const serviceAreas = generationContext.serviceAreaLines;
+  const differentiators = generationContext.differentiatorLines;
   const locationLabel = business.address
     ? [business.address.city, business.address.state].filter(Boolean).join(', ')
     : undefined;
@@ -110,14 +121,15 @@ function buildPrompt(business: Business): { system: string; user: string } {
   // channel each label slot will actually be attached to — otherwise it has
   // no way to know "Call Now" belongs on the phone button, not the email
   // one, and the two can end up swapped on the rendered page.
-  const primaryChannel = business.phone ? 'phone call' : business.email ? 'email' : null;
-  const secondaryChannel = business.phone && business.email ? 'email' : null;
+  const primaryChannel = generationContext.contact.phone ? 'phone call' : generationContext.contact.email ? 'email' : null;
+  const secondaryChannel = generationContext.contact.phone && generationContext.contact.email ? 'email' : null;
 
   const system = [
     'You write structured content for a local-service-business website generator.',
     'You must not invent the following — only use what is explicitly provided below:',
     ...GUARDRAILS.map((g) => `- ${g}`),
-    'Write one service entry for each service the business owner listed — do not add extra services.',
+    'Some fields below may have been filled in from information found on the business\'s own existing website (noted as such) rather than typed directly by the owner — treat it as supporting context with the same "do not invent beyond what is provided" rule, never as license to add anything beyond what is listed.',
+    'Write one service entry for each service listed — do not add extra services.',
     'Write one differentiator entry for each differentiator listed — do not add extra ones. If none were listed, return an empty array.',
     'CTA labels should be short (2-4 words) action phrases appropriate to the brand tone — never invent unrelated claims in them.',
     primaryChannel &&
@@ -133,15 +145,17 @@ function buildPrompt(business: Business): { system: string; user: string } {
     `Business name: ${business.name}`,
     `Industry: ${business.industry.replace(/_/g, ' ')}`,
     locationLabel && `Location: ${locationLabel}`,
-    `Has phone on file: ${!!business.phone}`,
-    `Has email on file: ${!!business.email}`,
+    `Has phone on file: ${!!generationContext.contact.phone}`,
+    `Has email on file: ${!!generationContext.contact.email}`,
     `Has an uploaded photo: ${!!business.photoUrls?.length}`,
     business.brandTone && `Brand tone: ${business.brandTone}`,
-    services.length > 0 && `Services offered (one per line, verbatim from the owner):\n${services.join('\n')}`,
+    services.length > 0 && `Services offered (one per line):\n${services.join('\n')}`,
     serviceAreas.length > 0 && `Service areas (context only — do not restate as a separate field): ${serviceAreas.join(', ')}`,
-    business.description && `Business description: ${business.description}`,
+    generationContext.description && `Business description: ${generationContext.description}`,
     differentiators.length > 0 && `Differentiators (one per line, verbatim from the owner):\n${differentiators.join('\n')}`,
     business.notes && `Additional notes from the owner: ${business.notes}`,
+    generationContext.usedEnrichmentFallback &&
+      'Note: some of the fields above (services, service areas, and/or description) were filled in from the business\'s own existing website because the owner left them blank — not typed directly by the owner.',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -161,19 +175,35 @@ export interface GeneratedPreview {
 
 /**
  * Generate a complete SitePreview (content + theme) for a business from its
- * verified, admin-entered fields. Never crawls a website — that's Stage 13.
+ * verified, admin-entered fields, optionally enriched with Firecrawl-scraped
+ * website content (Stage 13 — see `options.enrichment`). Never crawls a
+ * website itself — that's `lib/firecrawl/enrich-business.ts`'s job; this
+ * function only ever receives an already-normalized snapshot.
  *
- * Throws when required inputs are missing (no services listed) or when the
+ * Without `options.enrichment`, behavior is identical to the original
+ * Stage 11 manual-generation path. With it, `buildGenerationContext` fills
+ * gaps in services/service areas/description that the business left blank
+ * — this is what lets a Stage 12–imported business (typically no
+ * `servicesOffered` text yet) get its first preview without completing
+ * Stage 11 manually first. Business-entered fields still always win.
+ *
+ * Throws when required inputs are missing (no services available from
+ * either the business record or the enrichment snapshot) or when the
  * model's output fails validation — callers must not persist a caught error.
  */
-export async function generatePreviewContent(business: Business): Promise<GeneratedPreview> {
-  if (linesFrom(business.servicesOffered).length === 0) {
+export async function generatePreviewContent(
+  business: Business,
+  options: GeneratePreviewOptions = {},
+): Promise<GeneratedPreview> {
+  const generationContext = buildGenerationContext({ business, snapshot: options.enrichment?.snapshot });
+
+  if (generationContext.servicesLines.length === 0) {
     throw new Error('Add at least one service under "Services offered" before generating a website.');
   }
 
   const model = getOpenAiModel();
   const client = await getOpenAiClient();
-  const { system, user } = buildPrompt(business);
+  const { system, user } = buildPrompt(business, generationContext);
   const startedAt = Date.now();
 
   // Content copy and theme-preset selection are independent OpenAI concerns
@@ -197,24 +227,12 @@ export async function generatePreviewContent(business: Business): Promise<Genera
 
   const durationMs = Date.now() - startedAt;
 
-  // --- Contact + service areas: always code-derived from verified fields, never the model. ---
-  const contact = {
-    ...(business.phone ? { phone: business.phone } : {}),
-    ...(business.email ? { email: business.email } : {}),
-    ...(business.address
-      ? {
-          address: [
-            business.address.line1,
-            business.address.city,
-            business.address.state,
-            business.address.postalCode,
-          ]
-            .filter(Boolean)
-            .join(', '),
-        }
-      : {}),
-  };
-  const serviceAreas = linesFrom(business.serviceAreas);
+  // --- Contact + service areas: always code-derived, never the model.
+  // `generationContext.contact` already resolved business-wins-else-snapshot
+  // for each of phone/email/address (see buildGenerationContext) — this is
+  // generation-input only, never a write-back to Business. ---
+  const contact = generationContext.contact;
+  const serviceAreas = generationContext.serviceAreaLines;
 
   // --- CTA: a durable business-level decision, like theme — once an admin
   // has an edited (or a first-generation-seeded) CTA on file, every
@@ -231,24 +249,36 @@ export async function generatePreviewContent(business: Business): Promise<Genera
   // gets used, falling back to reusing an earlier one when fewer exist.
   // An admin override (see Business model) takes priority over the
   // automatic pick; overriding to 'none' forces that slot's non-photo
-  // fallback even when photos exist. ---
-  const heroImageUrl = resolvePhotoSlot(business.heroPhotoUrl, business.photoUrls?.[0]);
+  // fallback even when photos exist. Scan-accepted images (Stage 13) are a
+  // final, lowest-priority fallback tier — admin-uploaded photos always win
+  // over anything discovered on the business's own website. Never sourced
+  // from Google Places (Stage 12 never downloads photos at all). ---
+  const acceptedScanImages = (options.enrichment?.scanImages ?? []).filter(
+    (img): img is typeof img & { url: string } => img.status === 'accepted' && !!img.url,
+  );
+  const scanHeroImageUrl = acceptedScanImages.find((img) => img.role === 'hero')?.url ?? acceptedScanImages[0]?.url;
+  const otherScanImageUrls = acceptedScanImages.filter((img) => img.url !== scanHeroImageUrl).map((img) => img.url);
+
+  const heroImageUrl = resolvePhotoSlot(business.heroPhotoUrl, business.photoUrls?.[0], scanHeroImageUrl);
   const aboutImageUrl = resolvePhotoSlot(
     business.whyChooseUsPhotoUrl,
     business.photoUrls?.[1],
     business.photoUrls?.[0],
+    otherScanImageUrls[0],
   );
   const servicesImageUrl = resolvePhotoSlot(
     business.servicesPhotoUrl,
     business.photoUrls?.[2],
     business.photoUrls?.[1],
     business.photoUrls?.[0],
+    otherScanImageUrls[1] ?? otherScanImageUrls[0],
   );
   const aboutSectionImageUrl = resolvePhotoSlot(
     business.aboutPhotoUrl,
     business.photoUrls?.[3],
     business.photoUrls?.[1],
     business.photoUrls?.[0],
+    otherScanImageUrls[2] ?? otherScanImageUrls[0],
   );
 
   const content: PreviewContent = {
@@ -297,6 +327,8 @@ export async function generatePreviewContent(business: Business): Promise<Genera
       promptVersion: '2026-07-13',
       generatedAt: new Date().toISOString(),
       durationMs,
+      source: options.enrichment ? 'firecrawl_enriched' : 'manual_ai',
+      ...(options.enrichment ? { scanId: options.enrichment.scanId } : {}),
     },
   };
 }

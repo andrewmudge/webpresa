@@ -288,4 +288,50 @@ describe('updatePhotosAction', () => {
     expect(saved.status).toBe(EXISTING_BUSINESS.status);
     expect(saved.servicesOffered).toBe(EXISTING_BUSINESS.servicesOffered);
   });
+
+  it('leaving the logo picker on "Auto" (unset) keeps the existing logoUrl unchanged', async () => {
+    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, logoUrl: '/api/assets/businesses/biz_1/assets/logo.png' });
+
+    await expect(
+      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, new FormData()),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
+  });
+
+  it('picking a photo in the logo picker sets Business.logoUrl to it — e.g. a promoted scan image', async () => {
+    const fd = makeFormData({ logoPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/2.jpg' });
+
+    await expect(
+      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, fd),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/photos/2.jpg');
+  });
+
+  it('picking "No photo" in the logo picker clears logoUrl', async () => {
+    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, logoUrl: '/api/assets/businesses/biz_1/assets/logo.png' });
+    const fd = makeFormData({ logoPhotoUrl: 'none' });
+
+    await expect(
+      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, fd),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBeUndefined();
+  });
+
+  it('a fresh logo file upload wins over the logo picker selection', async () => {
+    mockUploadBusinessAssets.mockResolvedValue({ logoUrl: '/api/assets/businesses/biz_1/assets/logo.png' });
+    const fd = makeFormData({ logoPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/2.jpg' });
+
+    await expect(
+      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, fd),
+    ).rejects.toThrow('REDIRECT:');
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
+  });
 });

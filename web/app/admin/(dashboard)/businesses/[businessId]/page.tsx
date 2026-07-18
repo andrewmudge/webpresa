@@ -20,6 +20,10 @@ import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
+import { EnrichmentSection } from './EnrichmentSection';
+import { ScanImageReview } from './ScanImageReview';
+import { FoundContactInfo } from './FoundContactInfo';
+import { getLatestSnapshotForBusiness } from '@/lib/firecrawl/snapshot';
 import { SectionConfigForm } from './SectionConfigForm';
 import { BusinessDetailsForm } from '../BusinessDetailsForm';
 import { ThemeForm } from '../ThemeForm';
@@ -36,12 +40,17 @@ export const dynamic = 'force-dynamic';
 
 interface Props {
   params: Promise<{ businessId: string }>;
-  searchParams: Promise<{ expandedSection?: string }>;
+  searchParams: Promise<{
+    expandedSection?: string;
+    enrichmentResult?: string;
+    photoApproval?: string;
+    contactApproval?: string;
+  }>;
 }
 
 export default async function BusinessDetailPage({ params, searchParams }: Props) {
   const { businessId } = await params;
-  const { expandedSection: expandedSectionRaw } = await searchParams;
+  const { expandedSection: expandedSectionRaw, enrichmentResult, photoApproval, contactApproval } = await searchParams;
   const initialExpandedSection = (WEBSITE_SECTION_TYPES as readonly string[]).includes(expandedSectionRaw ?? '')
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
@@ -70,6 +79,13 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
   const resolvedSections = resolveStoredOrDefaultSections(business.websiteSections);
 
   const heroPhotoWarnings = await describeHeroDimensionWarningsForPhotos(business.photoUrls ?? []);
+  const hasPendingScanImageReview = scans.some((s) => s.images?.some((i) => i.url && !i.promotedPhotoUrl));
+  const latestSnapshot = await getLatestSnapshotForBusiness(scans);
+  const hasPendingContactReview = !!(
+    latestSnapshot &&
+    ((latestSnapshot.contact.phones[0] && latestSnapshot.contact.phones[0] !== business.phone) ||
+      (latestSnapshot.contact.emails[0] && latestSnapshot.contact.emails[0] !== business.email))
+  );
 
   return (
     <div className="p-8 max-w-5xl">
@@ -166,11 +182,18 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       </div>
 
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}
-      <CollapsibleCard title="Business Details">
+      <CollapsibleCard title="Business Details" defaultOpen={!!contactApproval || hasPendingContactReview}>
         <BusinessDetailsForm
           action={updateBusinessDetailsAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
           submitLabel="Save Details"
+        />
+        <FoundContactInfo
+          businessId={businessId}
+          business={business}
+          snapshot={latestSnapshot}
+          redirectTo={detailPageUrl}
+          contactApproval={contactApproval}
         />
       </CollapsibleCard>
 
@@ -195,13 +218,15 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       </div>
 
       {/* Photos */}
-      <CollapsibleCard title="Photos">
+      <CollapsibleCard title="Photos" defaultOpen={hasPendingScanImageReview}>
         <PhotosForm
           action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
           submitLabel="Save Photos"
           heroPhotoWarnings={heroPhotoWarnings}
         />
+        {photoApproval && <PhotoApprovalBanner result={photoApproval} />}
+        <ScanImageReview businessId={businessId} scans={scans} redirectTo={detailPageUrl} />
       </CollapsibleCard>
 
       {/* Actions */}
@@ -288,6 +313,9 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           </div>
         </div>
 
+        {/* Firecrawl website enrichment (Stage 13) */}
+        <EnrichmentSection business={business} scans={scans} previews={previews} resultQuery={enrichmentResult} />
+
         {/* Deferred actions */}
         <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">
           Actions — <em>Run scan, Generate postcard, Publish preview (AI)</em> — will be
@@ -344,6 +372,25 @@ function PreviewLink({ previews }: { previews: SitePreview[] }) {
       {label} ↗
     </a>
   );
+}
+
+const PHOTO_APPROVAL_MESSAGES: Record<string, { tone: 'success' | 'warning' | 'error'; text: string }> = {
+  added: { tone: 'success', text: 'Image added to Photos.' },
+  already_added: { tone: 'warning', text: 'That image was already added to Photos.' },
+  limit_reached: { tone: 'warning', text: 'Photo limit reached (6) — remove a photo below first.' },
+  not_found: { tone: 'error', text: 'Could not find that image.' },
+};
+
+function PhotoApprovalBanner({ result }: { result: string }) {
+  const copy = PHOTO_APPROVAL_MESSAGES[result];
+  if (!copy) return null;
+  const toneClass =
+    copy.tone === 'success'
+      ? 'border-green-200 bg-green-50 text-green-800'
+      : copy.tone === 'warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
+        : 'border-red-200 bg-red-50 text-red-800';
+  return <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${toneClass}`}>{copy.text}</div>;
 }
 
 function DetailCard({ title, children }: { title: string; children: React.ReactNode }) {

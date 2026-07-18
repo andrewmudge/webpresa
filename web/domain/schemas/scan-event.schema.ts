@@ -1,6 +1,12 @@
 import { z } from 'zod';
-import { SCAN_STATUSES } from '@/domain/models/scan-event';
+import {
+  SCAN_STATUSES,
+  SCAN_PROVIDERS,
+  SCAN_OPERATIONS,
+  SCAN_FAILURE_CATEGORIES,
+} from '@/domain/models/scan-event';
 import { IsoTimestampSchema, ScoreSchema } from './common.schema';
+import { ScanImageAssetSchema } from './scan-image.schema';
 
 const ScanScoresSchema = z.object({
   overall: ScoreSchema.optional(),
@@ -22,12 +28,26 @@ export const ScanEventSchema = z.object({
     .string()
     .regex(/^scan_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
   businessId: z.string().regex(/^biz_/),
+  provider: z.enum(SCAN_PROVIDERS),
+  operation: z.enum(SCAN_OPERATIONS),
   status: z.enum(SCAN_STATUSES),
-  sourceUrl: z.string().url(),
+  sourceUrl: z.string().url().optional(),
+  finalUrl: z.string().url().optional(),
+  httpStatus: z.number().int().min(100).max(599).optional(),
+  failureCategory: z.enum(SCAN_FAILURE_CATEGORIES).optional(),
+  failureMessage: z.string().max(500).optional(),
+  attempt: z.number().int().min(1),
+  retryOfScanId: z
+    .string()
+    .regex(/^scan_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    .optional(),
+  rawArtifactKey: z.string().max(500).optional(),
+  extractedArtifactKey: z.string().max(500).optional(),
+  images: z.array(ScanImageAssetSchema).max(20).optional(),
+  generatedPreviewId: z.string().optional(),
   storageKeys: ScanStorageKeysSchema.optional(),
   scores: ScanScoresSchema.optional(),
-  failureReason: z.string().optional(),
-  startedAt: IsoTimestampSchema,
+  startedAt: IsoTimestampSchema.optional(),
   completedAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,

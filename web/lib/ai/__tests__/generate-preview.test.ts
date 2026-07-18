@@ -220,6 +220,130 @@ describe('generatePreviewContent — success', () => {
   });
 });
 
+describe('generatePreviewContent — Stage 13 enrichment (optional third argument)', () => {
+  const snapshot = {
+    schemaVersion: '1' as const,
+    sourceUrl: 'https://acme.com/',
+    services: [{ name: 'Sewer Line Repair' }],
+    serviceAreas: ['Austin'],
+    faq: [],
+    navigationLabels: [],
+    callsToAction: [],
+    contact: { phones: [], emails: [], addresses: [] },
+    socialLinks: [],
+    links: [],
+    imageReferences: [],
+    extractedAt: new Date().toISOString(),
+  };
+
+  it('is unaffected when called with no enrichment — sets source to manual_ai', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const result = await generatePreviewContent(makeBusiness());
+    expect(result.metadata.source).toBe('manual_ai');
+    expect(result.metadata.scanId).toBeUndefined();
+  });
+
+  it('creates a preview using enrichment-sourced services when the business has none of its own (Stage 12 import case)', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ servicesOffered: undefined, source: 'google_places' });
+
+    const result = await generatePreviewContent(business, {
+      enrichment: { snapshot, scanImages: [], scanId: 'scan_1' },
+    });
+
+    expect(result.metadata.source).toBe('firecrawl_enriched');
+    expect(result.metadata.scanId).toBe('scan_1');
+    expect(mockGetOpenAiClient).toHaveBeenCalled();
+  });
+
+  it('fills in the generated preview\'s contact email from the snapshot when the business has none on file', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ email: undefined });
+    const snapshotWithEmail = { ...snapshot, contact: { phones: [], emails: ['aaa1paulsplumbing@yahoo.com'], addresses: [] } };
+
+    const result = await generatePreviewContent(business, {
+      enrichment: { snapshot: snapshotWithEmail, scanImages: [], scanId: 'scan_1' },
+    });
+
+    expect(result.content.contact.email).toBe('aaa1paulsplumbing@yahoo.com');
+    // The business's own phone still wins outright.
+    expect(result.content.contact.phone).toBe('512-555-0100');
+  });
+
+  it('does not let a found email override the business\'s own email', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ email: 'owner@acme.com' });
+    const snapshotWithEmail = { ...snapshot, contact: { phones: [], emails: ['found@somewhere.com'], addresses: [] } };
+
+    const result = await generatePreviewContent(business, {
+      enrichment: { snapshot: snapshotWithEmail, scanImages: [], scanId: 'scan_1' },
+    });
+
+    expect(result.content.contact.email).toBe('owner@acme.com');
+  });
+
+  it('still throws when neither the business nor the enrichment snapshot has any services', async () => {
+    const business = makeBusiness({ servicesOffered: undefined });
+    const emptySnapshot = { ...snapshot, services: [] };
+    await expect(
+      generatePreviewContent(business, { enrichment: { snapshot: emptySnapshot, scanImages: [], scanId: 'scan_1' } }),
+    ).rejects.toThrow(/at least one service/i);
+  });
+
+  it('uses an accepted scan image as the hero fallback only when no business photo exists', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: undefined });
+    const scanImages = [
+      {
+        imageId: 'img1',
+        role: 'hero' as const,
+        status: 'accepted' as const,
+        url: '/api/assets/scans/biz_1/scan_1/images/img1.jpg',
+        originalUrl: 'https://acme.com/hero.jpg',
+      },
+    ];
+
+    const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
+
+    expect(result.theme.heroImageUrl).toBe('/api/assets/scans/biz_1/scan_1/images/img1.jpg');
+  });
+
+  it('prefers an uploaded business photo over a scan-derived image for the hero slot', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+    const scanImages = [
+      {
+        imageId: 'img1',
+        role: 'hero' as const,
+        status: 'accepted' as const,
+        url: '/api/assets/scans/biz_1/scan_1/images/img1.jpg',
+        originalUrl: 'https://acme.com/hero.jpg',
+      },
+    ];
+
+    const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
+
+    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+  });
+
+  it('ignores a review_required (not accepted) scan image as a photo-slot fallback', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: undefined });
+    const scanImages = [
+      {
+        imageId: 'img1',
+        role: 'hero' as const,
+        status: 'review_required' as const,
+        originalUrl: 'https://acme.com/hero.jpg',
+      },
+    ];
+
+    const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
+
+    expect(result.theme.heroImageUrl).toBeUndefined();
+  });
+});
+
 describe('generatePreviewContent — model failure handling', () => {
   it('throws a clear error when the model returns no parsable output', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: null } }] });

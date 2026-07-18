@@ -43,6 +43,34 @@ export const BUSINESS_SOURCES = ['scan', 'manual', 'import', 'google_places'] as
 export type BusinessSource = (typeof BUSINESS_SOURCES)[number];
 
 // ---------------------------------------------------------------------------
+// Firecrawl enrichment disposition (Stage 13)
+//
+// A business-level, human-facing summary of where this business stands in
+// the Firecrawl enrichment pipeline — distinct from the per-attempt
+// `ScanEvent.status`. Never overloaded onto `Business.status` (the general
+// lifecycle field) or `ScanEvent.status` (a single attempt's execution
+// state) — see architecture.md, "Firecrawl Website Enrichment".
+// ---------------------------------------------------------------------------
+
+export const ENRICHMENT_STATUSES = [
+  'not_started',
+  'ready_for_enrichment',
+  'enrichment_in_progress',
+  'enrichment_completed',
+  'enrichment_failed',
+  'manual_approval_required',
+] as const;
+export type EnrichmentStatus = (typeof ENRICHMENT_STATUSES)[number];
+
+export const MANUAL_APPROVAL_REASONS = [
+  'missing_website',
+  'no_usable_images',
+  'insufficient_content',
+  'other',
+] as const;
+export type ManualApprovalReason = (typeof MANUAL_APPROVAL_REASONS)[number];
+
+// ---------------------------------------------------------------------------
 // Sub-types
 // ---------------------------------------------------------------------------
 
@@ -199,4 +227,23 @@ export interface Business extends MutableTimestampedRecord {
   // -------------------------------------------------------------------------
 
   websiteSections?: WebsiteSectionsConfig;
+
+  // -------------------------------------------------------------------------
+  // Firecrawl enrichment disposition (Stage 13)
+  //
+  // Set by `lib/firecrawl/enrich-business.ts` after each enrichment attempt.
+  // `manualApprovalReason`/`manualApprovalNote` most commonly accompany
+  // `enrichmentStatus: 'manual_approval_required'` (the no-website hard
+  // stop), but can also be set alongside `'enrichment_completed'` — a
+  // successful text-only scrape with no usable images still flags
+  // `'no_usable_images'` as a softer, non-blocking note. Never set from
+  // Firecrawl-discovered content — these describe the *pipeline's* state,
+  // not business facts, so they don't conflict with the "Business is
+  // canonical" rule.
+  // -------------------------------------------------------------------------
+
+  enrichmentStatus?: EnrichmentStatus;
+  manualApprovalReason?: ManualApprovalReason;
+  /** Admin-visible explanation — see `lib/firecrawl/enrich-business.ts` for the exact required copy. */
+  manualApprovalNote?: string;
 }

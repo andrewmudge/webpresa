@@ -254,7 +254,21 @@ const UpdatePhotosSchema = z.object({
   aboutPhotoUrl: z.string().optional(),
   whyChooseUsPhotoUrl: z.string().optional(),
   servicesPhotoUrl: z.string().optional(),
+  logoPhotoUrl: z.string().optional(),
 });
+
+/**
+ * Resolves the logo picker's value against the existing `logoUrl`: `undefined`
+ * (left on "Auto") keeps it unchanged, `'none'` clears it, anything else
+ * (a URL from `photoUrls`, e.g. a promoted scan image) becomes the new logo.
+ * Unlike the four section slots, there's no automatic upload-order fallback
+ * for the logo — "Auto" here means "don't touch it," not "pick one for me."
+ */
+function resolveLogoUrl(picked: string | undefined, existingLogoUrl: string | undefined): string | undefined {
+  if (!picked) return existingLogoUrl;
+  if (picked === 'none') return undefined;
+  return picked;
+}
 
 /**
  * Resolves a photo-slot form value into a theme-field patch: `undefined`
@@ -307,6 +321,7 @@ export async function updatePhotosAction(
     aboutPhotoUrl: (formData.get('aboutPhotoUrl') as string) || undefined,
     whyChooseUsPhotoUrl: (formData.get('whyChooseUsPhotoUrl') as string) || undefined,
     servicesPhotoUrl: (formData.get('servicesPhotoUrl') as string) || undefined,
+    logoPhotoUrl: (formData.get('logoPhotoUrl') as string) || undefined,
   };
 
   const parsed = UpdatePhotosSchema.safeParse(raw);
@@ -353,7 +368,7 @@ export async function updatePhotosAction(
       aboutPhotoUrl,
       whyChooseUsPhotoUrl,
       servicesPhotoUrl,
-      logoUrl: assets.logoUrl ?? existing.logoUrl,
+      logoUrl: assets.logoUrl ?? resolveLogoUrl(data.logoPhotoUrl, existing.logoUrl),
       photoUrls,
       updatedAt: new Date().toISOString(),
     });

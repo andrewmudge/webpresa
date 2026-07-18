@@ -2,7 +2,12 @@ import { z } from 'zod';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
-import { BUSINESS_STATUSES, BUSINESS_SOURCES } from '@/domain/models/business';
+import {
+  BUSINESS_STATUSES,
+  BUSINESS_SOURCES,
+  ENRICHMENT_STATUSES,
+  MANUAL_APPROVAL_REASONS,
+} from '@/domain/models/business';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 import { PreviewCtaConfigSchema } from './site-preview.schema';
@@ -82,6 +87,9 @@ export const BusinessSchema = z.object({
     .max(10)
     .optional(),
   websiteSections: WebsiteSectionsConfigSchema.optional(),
+  enrichmentStatus: z.enum(ENRICHMENT_STATUSES).optional(),
+  manualApprovalReason: z.enum(MANUAL_APPROVAL_REASONS).optional(),
+  manualApprovalNote: z.string().max(500).optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

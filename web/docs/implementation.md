@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
-**Last updated:** 2026-07-17  
-**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 (Google Places Discovery) implemented, automatically tested, and manually verified end-to-end against the real Google Places API and dev DynamoDB. Stage 13 onward is next.  
+**Last updated:** 2026-07-18  
+**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 (Google Places Discovery) implemented, automatically tested, and manually verified end-to-end against the real Google Places API and dev DynamoDB. Stage 13 (Firecrawl Website Enrichment) implemented, automatically tested (472 tests), and manually verified end-to-end against the real Firecrawl v2 API, real OpenAI API, and real dev S3/DynamoDB. Stage 14 onward is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -1190,11 +1190,15 @@ No new persistence for search history is introduced in this stage. Non-persisten
 
 # Stage 13 — Firecrawl Website Enrichment
 
+## Status
+
+Implemented and manually verified end-to-end against the real Firecrawl v2 API, the real OpenAI API, the real dev S3 bucket, and the real dev DynamoDB tables (see `build_log.md`, "Stage 13 — Firecrawl Website Enrichment"). **Revises the original objective below**: Stage 13 can now create a business's **first** preview, not only enrich an already-generated one — a Google Places–imported business typically has no Stage 11 inputs at all, and requiring a manual Stage 11 pass first would defeat the point of automated discovery. Stage 11 remains fully independent and unaffected; Stage 13 reuses its generation pipeline (`lib/ai/generate-preview.ts`) rather than duplicating it.
+
 ## Objective
 
-Improve an already-generated website by extracting information from a business's existing website and re-running generation with that additional context. Stage 13 is not responsible for creating the first website — that's Stage 11. It enriches businesses that already have an existing website.
+Allow an administrator to enrich a `Business` record by scraping its known website with Firecrawl, normalizing the result into a validated evidence snapshot, merging it in memory with the canonical `Business` record (Business always wins on conflict), and generating a new versioned `SitePreview` via the existing Stage 11 pipeline — whether or not a preview already exists for that business.
 
-An admin explicitly starts enrichment by choosing an imported or manually created business and clicking "Generate From Existing Website." Stage 12 import never automatically queues, schedules, or flags a business for enrichment — there is no `READY_FOR_SCAN` or `READY_FOR_ENRICHMENT` state a business passes through. The admin action described here is what begins Stage 13, every time.
+An admin explicitly starts enrichment by clicking "Enrich Website" on the business detail page. Stage 12 import never automatically queues, schedules, or flags a business for enrichment — there is no `READY_FOR_SCAN` or `READY_FOR_ENRICHMENT` `Business.status` value. The admin action is what begins Stage 13, every time; `Business.enrichmentStatus` (a separate field from `Business.status` — see "Domain model" below) tracks Stage 13's own disposition without overloading the general lifecycle status.
 
 ## Dependencies
 
@@ -1202,105 +1206,109 @@ Stages 7, 9, 10, 11, and 12.
 
 ## Major deliverables
 
-- Server-side Firecrawl client
-- Manual "Generate From Existing Website" admin action
-- `ScanEvent` lifecycle updates
-- Raw crawl output in S3
-- Extracted structured business information
-- OpenAI merge step (`Business` record + Firecrawl content → improved `PreviewContent`)
-- Conflict-resolution rule (admin-entered data always wins)
-- New `SitePreview` version creation, comparable side-by-side with the Stage 11 version
-- Retry support
-- Safe failure recording
+- Server-side Firecrawl v2 client (`lib/firecrawl/client.ts`) — plain `fetch` against the REST API, matching the Stage 12 Google Places client's pattern rather than the `firecrawl` npm SDK (see `architecture.md` for the rationale)
+- SSRF-safe URL validation (`lib/firecrawl/url-validation.ts`), applied to the business's website URL, Firecrawl's reported final URL, and every candidate image URL
+- Redesigned `ScanEvent` (`queued`/`running`/`completed`/`failed`/`manual_approval_required`, provider/operation/attempt/retry/failure-category fields) — Stage 13 is `ScanEvent`'s first real caller (Stage 12 creates none)
+- `WebsiteEnrichmentSnapshot` — a normalized, bounded, Zod-validated evidence shape (`domain/models/website-enrichment.ts`) built from Firecrawl's response, including a `{ type: 'json', schema, prompt }` structured-extraction format requested as part of the single Scrape call (Firecrawl's own extraction LLM — no second app-side LLM call)
+- Website image discovery/ingestion pipeline (`lib/firecrawl/images.ts`) — validates, fetches, dimension-checks, classifies, and rehosts accepted images under `scans/{businessId}/{scanId}/images/`; never downloads Google Places photos, never hotlinks the original URL, never writes to `Business.photoUrls`
+- `buildGenerationContext()` (`lib/firecrawl/generation-context.ts`) — the one explicit merge function; Business's own fields win outright, the snapshot fills only what's blank
+- `enrichBusinessWebsite()` / `retryEnrichmentScan()` orchestration (`lib/firecrawl/enrich-business.ts`), split into small checkpoint functions per the 20-step flow below
+- `Business.enrichmentStatus` / `manualApprovalReason` / `manualApprovalNote` — the business-level disposition, distinct from per-attempt `ScanEvent.status`
+- Bounded inline retry (exponential backoff + jitter, honors `Retry-After`) for transient Firecrawl failures, plus a separate admin-triggered cross-attempt retry that always creates a new `ScanEvent`
+- Admin UI: "Website Enrichment" card (`EnrichmentSection.tsx`) on the business detail page
 
 ## Implementation requirements
 
-### Workflow
+### Workflow (20 checkpoints, split across small functions — never one monolithic action)
 
 ```text
-Admin chooses an imported or manually created business with an existing website
+Authenticate admin → load Business → verify it exists
         ↓
-Click "Generate From Existing Website"
+No website on file? → manual_approval_required ScanEvent, Business.enrichmentStatus
+        set, Firecrawl never called, no images downloaded — DONE
+        ↓ (website present)
+Validate + normalize the website URL (SSRF guard)
         ↓
-Firecrawl crawls website
+Reject if another scan is already queued/running for this Business (conflict)
         ↓
-Raw crawl stored in S3
+Create a queued ScanEvent → transition to running
         ↓
-Structured business information extracted
+Call Firecrawl Scrape (bounded inline retry on rate-limit/timeout/5xx)
         ↓
-OpenAI combines:
-    • Business record
-    • Firecrawl content
+Classify provider/HTTP failure if any → failed ScanEvent, stop
         ↓
-Generate improved PreviewContent
+Sanitize + store the raw response → scans/{businessId}/{scanId}/crawl.json
         ↓
-Create new SitePreview version
+Normalize + validate → WebsiteEnrichmentSnapshot → extracted.json
         ↓
-Preview
+Ingest candidate images (failure here is never fatal to the scan)
+        ↓
+buildGenerationContext(Business, snapshot) → generatePreviewContent(Business, { enrichment })
+        ↓
+Persist a new immutable SitePreview version (1 if none existed, else latest + 1)
+        ↓
+Mark ScanEvent completed + generatedPreviewId; set Business.enrichmentStatus
+        ↓
+Return a structured result to the admin UI
 ```
 
-Initial scope is one homepage per scan.
+Initial scope is one homepage per scan (single-page Firecrawl **Scrape** — never crawl, search, or extract).
 
 ### Firecrawl extracts
 
-Examples:
+Via one Scrape call requesting `formats: ['markdown', 'links', 'images', { type: 'json', schema, prompt }]`:
 
-- business description
-- services
+- business name, summary, about text
+- services (name + description)
 - service areas
-- about page
-- contact information
-- FAQ
-- mission statement
-- existing CTAs
-- navigation
-- branding language
+- FAQ question/answer pairs
+- navigation labels, calls-to-action
+- contact phones/emails/addresses
+- social profile links
+- discovered page links and image URLs
 
-Also store or derive, as before: title, meta description, markdown or primary text, links, image references, status code, final URL, crawl timestamp, and the raw provider output key. Raw crawl artifacts are stored in S3.
+Also captured: title, meta description, HTTP status, final URL (itself re-validated by the SSRF guard before being trusted), and the raw provider output key. Raw crawl artifacts are stored in S3, never in DynamoDB.
 
 ### OpenAI receives
 
-- the `Business` record
-- Firecrawl-extracted content
+- the `Business` record (unchanged from Stage 11)
+- gap-filled prompt input from `buildGenerationContext()` — the normalized snapshot only ever supplies what the admin-entered fields leave blank
 
-OpenAI should not read the website directly — Firecrawl remains responsible for retrieval.
+OpenAI never reads the website directly — Firecrawl remains responsible for retrieval, and its own structured-extraction LLM (not a second OpenAI call) does the raw-page → structured-fields work.
 
 ### Conflict resolution
 
-Admin-entered information always takes priority. For example, if the admin entered phone `850-555-1234` and Firecrawl finds `850-555-1111` on the site, do not overwrite the admin value. Instead: keep the verified admin value, surface the conflict for review, and use Firecrawl primarily to fill information the admin left blank.
+Administrator-approved Business data always wins. `buildGenerationContext()` uses the business's own `servicesOffered`/`serviceAreas`/`differentiators`/`description` outright whenever non-empty; the Firecrawl snapshot is consulted only for fields the business left blank. `Business` is never mutated by this process — no field is ever overwritten, so there is no field-level "conflict" to surface for review; a blank field silently gets a Firecrawl-sourced value in the generation *input* only.
 
 ### Output
 
-Create a new `SitePreview` version. Do not overwrite the Stage 11 (or prior Stage 13) version — this lets the admin compare the Manual AI Generation and the Firecrawl-Enriched Generation before publishing.
+Creates a new immutable `SitePreview` version via the existing Stage 11 factory/persistence path (`createSitePreview`/`putSitePreview`) — version 1 when none exists yet, otherwise latest + 1. Prior versions (Stage 11–generated or earlier Stage 13 runs) are never overwritten, so they remain viewable for comparison. `SitePreview.generationMetadata.source` is `'firecrawl_enriched'` (vs. Stage 11's `'manual_ai'`) and `generationMetadata.scanId` links back to the producing `ScanEvent`.
 
 ### Failure handling
 
-Handle:
+`ScanFailureCategory` (`domain/models/scan-event.ts`): `missing_website`, `invalid_url`, `blocked_url`, `firecrawl_auth`, `firecrawl_rate_limit`, `firecrawl_timeout`, `firecrawl_provider_error`, `website_unreachable`, `empty_content`, `normalization_failed`, `artifact_storage_failed`, `generation_failed`, `preview_persistence_failed`, `unknown`. Only `firecrawl_rate_limit`/`firecrawl_timeout`/`firecrawl_provider_error` are retry-eligible (`lib/firecrawl/retry.ts`'s `isRetryableFailureCategory`) — invalid/blocked URLs and auth/config errors are never retried, since they'd fail identically every time.
 
-- invalid URLs
-- inactive domains
-- SSL failure
-- timeout
-- robots restrictions
-- rate limits
-- provider 5xx errors
-- empty responses
-- redirects and loops
+Businesses without a website follow the dedicated no-website path (`manual_approval_required`, `missing_website` category) — never treated as a generic technical failure, and Firecrawl is never called for them.
 
-Businesses without a website must follow a separate `no website` path and must not be treated as permanent scan failures — Stage 13 simply isn't available for them; Stage 11 remains their generation path.
+### Website images
+
+See `architecture.md`, "Firecrawl Website Enrichment" for the full image-ingestion pipeline (validation, size/dimension/format limits, deterministic role classification, S3 storage, and the public-proxy exposure boundary). A successful text scrape with zero accepted images still completes normally — `Business.manualApprovalReason` is set to `'no_usable_images'` as a non-blocking note, and generation proceeds with the existing image-free fallback (theme-matched illustration hero).
 
 ## Acceptance criteria
 
-- An admin can start a crawl of an existing website.
-- A `ScanEvent` is created and its status transitions are recorded.
-- Raw output is saved privately in S3; the `ScanEvent` stores the S3 key.
-- Failed scans store a safe failure reason and can be retried.
-- One failed scan does not permanently invalidate the business.
-- OpenAI combines the `Business` record and Firecrawl content into a new `SitePreview` version.
-- Admin-entered fields are never overwritten by Firecrawl-discovered values.
-- The new version does not overwrite the Stage 11–generated version — both remain viewable for comparison.
-- Publishing still requires an explicit admin action.
-- API credentials remain server-side.
+- An admin can start a Firecrawl scrape of a business's website from the business detail page.
+- A `ScanEvent` is created and its status transitions (`queued` → `running` → terminal) are recorded.
+- Raw and normalized artifacts are saved privately in S3; the `ScanEvent` stores both keys.
+- Failed scans store a safe failure category/message and can be retried when eligible; one failed scan never permanently invalidates the business.
+- A business with no prior preview gets version 1 from Stage 13; a business with existing previews gets the next version.
+- Business-entered fields are never overwritten by Firecrawl-discovered values, and Firecrawl never mutates `Business` beyond its own `enrichmentStatus`/`manualApprovalReason`/`manualApprovalNote` disposition fields.
+- The new version does not overwrite any prior version — all remain viewable for comparison.
+- A business with no website gets `manual_approval_required` with the exact required admin note, and Firecrawl is never called.
+- Google Places photos are never downloaded; Firecrawl-discovered images are only ever used after being fetched, validated, and rehosted under `scans/`, never hotlinked.
+- A retry always creates a new `ScanEvent` (`retryOfScanId` + incremented `attempt`) — a failed `ScanEvent` is never transitioned back to `running`.
+- Concurrent active scans for the same business are prevented.
+- Publishing still requires an explicit admin action (new previews save as `draft`).
+- API credentials remain server-side; no raw page content or API key is ever returned to the browser.
 
 ## Deferred work
 
@@ -1309,7 +1317,11 @@ Businesses without a website must follow a separate `no website` path and must n
 - Content-diff detection
 - Robots-policy reporting
 - Crawl-cost tracking
-- Dedicated side-by-side conflict-diff UI (v1 relies on comparing two full `SitePreview` versions, not a field-level diff)
+- Dedicated side-by-side conflict-diff UI (relies on comparing two full `SitePreview` versions, not a field-level diff)
+- `insufficient_content`/`other` `ManualApprovalReason` values (modeled in the schema; no write path sets them yet — only `missing_website` and `no_usable_images` are produced today)
+- A "dismiss"/"not interested" action for a scan-discovered image an admin doesn't want promoted — today the only choice is promote-or-ignore; ignored images stay listed under "Images found during website enrichment" indefinitely (see "Scan-image promotion" in `architecture.md`)
+
+Implemented after the initial build, in response to real usage — see `architecture.md`, "Scan-image promotion" and "`/admin/scans`", and `build_log.md`: admin promotion of scan-derived images (`accepted` or `review_required`) into the canonical `Business.photoUrls`, and a real `/admin/scans` list/detail UI replacing the Stage-9 placeholder.
 
 ---
 

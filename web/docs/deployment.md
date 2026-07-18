@@ -1,6 +1,6 @@
 # Webpresa — Deployment
 
-**Last updated:** 2026-07-17
+**Last updated:** 2026-07-18
 
 > **Hosting:** Vercel (migrated from AWS Amplify in Stage 7). CDK/DynamoDB infrastructure remains on AWS.
 
@@ -301,6 +301,56 @@ Before considering Stage 12 done, confirm:
 | Invalid or revoked API key | Google returns 401/403; surfaced to the admin as a generic "search failed" message, logged safely server-side |
 | Key restricted to the wrong API or application type | Google returns 403 (`PERMISSION_DENIED`); same safe-error handling as an invalid key |
 | Quota exhausted | Google returns 429 / `RESOURCE_EXHAUSTED`; surfaced as a clear "try again later" admin message, never retried silently in a loop |
+
+---
+
+## Stage 13 — Firecrawl Website Enrichment deployment guidance
+
+**Application code is implemented, automatically tested (472 tests), and manually verified** against the real Firecrawl v2 API, the real OpenAI API, and the real dev S3/DynamoDB (see `build_log.md`, "Stage 13 — Firecrawl Website Enrichment"). The `webpresa-dev-firecrawl` secret now holds a real API key. No infrastructure change was needed — the secret, its IAM grant, and `FIRECRAWL_SECRET_NAME` were already provisioned in Stage 10 and already present in `.env.local`/`.env.local.example`/the environment-variable table above.
+
+### `FIRECRAWL_API_KEY` — how it's actually delivered
+
+There is no `FIRECRAWL_API_KEY` environment variable anywhere in this app, by design — matching every other third-party credential in this codebase. The application reads only the secret's *name* from `FIRECRAWL_SECRET_NAME` (already `webpresa-dev-firecrawl`); the real key value is fetched from Secrets Manager at runtime via `getFirecrawlSecret()` (`web/lib/secrets/index.ts`) and cached per process. The real key was populated using the same command already documented above for every other secret:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-firecrawl \
+  --secret-string '{"apiKey":"fc-..."}' \
+  --profile webpresa
+```
+
+Never paste the real key into a commit, a CDK construct prop, this document, or any other file in the repo.
+
+### Server-runtime requirements
+
+Stage 13 runs entirely inside existing Next.js Server Actions (`enrichWebsiteAction`/`retryEnrichmentAction`) and library code called from them — no new Route Handler, no new Lambda, no new Vercel configuration. It uses:
+- `fetch` (built into the Node.js runtime Vercel already uses for this app — no `runtime: 'edge'` opt-in, and none is used elsewhere in this codebase) for the Firecrawl REST call and for fetching discovered website images.
+- `sharp` (already a dependency, already used by `lib/theme/logo-color.ts`/`lib/image/hero-dimensions.ts`) for image dimension checks — no new native dependency.
+- `node:dns`/`node:net` (Node built-ins) for the SSRF guard — requires the Node.js runtime, not Edge; this app has never opted into Edge runtime for any route, so no change was needed.
+
+No new environment variable, no new IAM policy, no new S3 prefix registration beyond what "Adding a new S3 prefix" below already covers (the `scans/` prefix was already allowed in `web/lib/s3/assets.ts`'s `ALLOWED_PREFIXES` since Stage 9).
+
+### Smoke-test procedure (without exposing secrets)
+
+The real end-to-end smoke test was run as a local script (not committed) that: loads `.env.local`, creates a throwaway dev `Business` with `websiteUrl: 'https://www.firecrawl.dev'` (Firecrawl's own marketing site — stable, scrape-friendly, and unambiguously permitted to be scraped by their own API) and a minimal `servicesOffered` value, calls `enrichBusinessWebsite()` directly, and logs only non-sensitive fields (status, scanId, previewId, S3 key names, image counts) — never the API key, never raw page content. Result: `status: 'completed'`, real HTTP 200 from Firecrawl, both `crawl.json`/`extracted.json` artifacts written to the correct S3 keys, 9 candidate images discovered with 3 accepted and uploaded, a real OpenAI-generated `SitePreview` v1 with `generationMetadata.source: 'firecrawl_enriched'`, and `Business.enrichmentStatus: 'enrichment_completed'`.
+
+To repeat this smoke test:
+1. Ensure `.env.local` has `FIRECRAWL_SECRET_NAME`, `AWS_PROFILE=webpresa` (or Vercel's AWS keys), and the other standard variables set (see the environment-variable table above).
+2. Create a throwaway `Business` via the admin UI (`/admin/businesses/new`) with a real, safe public `websiteUrl` and at least a minimal value in "Services offered" (or accept that Stage 13 can supply services itself when the business has none — see `implementation.md`, Stage 13).
+3. Click "Enrich Website" on that business's detail page.
+4. Confirm a new `SitePreview` draft appears, the "Website Enrichment" card shows `Enrichment completed`, and (optionally) inspect the S3 console under `scans/{businessId}/` for the artifacts — `crawl.json`/`extracted.json` are private (no console "make public" action needed or wanted); accepted images are viewable directly via their `/api/assets/scans/...` proxy URL.
+5. Delete the throwaway business afterward if it shouldn't remain in the dev table (cascade-deletes its previews/scans via the existing "Delete business" action).
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| Secret missing / `FIRECRAWL_SECRET_NAME` unset | Server Action returns a controlled error; no stack trace or secret name leaks to the client |
+| Invalid or revoked API key | Firecrawl returns 401/403; classified `firecrawl_auth`; surfaced as a safe generic message, not retried |
+| Rate limit (429) | Classified `firecrawl_rate_limit`; bounded inline retry honoring `Retry-After` before the `ScanEvent` is marked `failed`; admin can retry again afterward |
+| Firecrawl 5xx | Classified `firecrawl_provider_error`; same bounded inline retry, then `failed` if still unsuccessful |
+| Business has no website | Never calls Firecrawl at all — `manual_approval_required`, `missing_website` |
+| Private/internal/malformed website URL | Rejected before any Firecrawl call — `blocked_url`/`invalid_url` |
 
 ---
 

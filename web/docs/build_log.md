@@ -2990,3 +2990,367 @@ web/lib/db/
 ├── businesses.ts                                                                 MODIFIED — listBusinesses filtering, matchesBusinessFilters
 └── __tests__/businesses.test.ts                                                  MODIFIED — filter tests
 ```
+
+---
+
+# Stage 13 — Firecrawl Website Enrichment
+
+**Date:** 2026-07-18
+**Scope:** Firecrawl single-page website enrichment for an existing or newly-imported `Business` — server-side Firecrawl v2 Scrape client, SSRF-safe URL validation, a normalized/validated enrichment snapshot, deterministic website-image discovery and rehosting, an explicit Business-wins merge function feeding the existing Stage 11 OpenAI generation pipeline, a redesigned `ScanEvent` (its first real caller), bounded/retryable failure handling, and an admin "Enrich Website" action. Per the finalized task spec (superseding the original Stage 13 stub in `implementation.md`), this stage can create a business's **first** preview, not only enrich an existing one.
+
+## Overview
+
+Implemented the full enrichment pipeline end to end: an admin clicks "Enrich Website" on the business detail page → the business's website URL is SSRF-validated → a `queued` `ScanEvent` is created and transitioned to `running` → Firecrawl's `/v2/scrape` is called once (single page, `formats: ['markdown','links','images',{type:'json',schema,prompt}]` — Firecrawl's own extraction LLM runs inside this one Scrape call, so no second app-side LLM call does extraction) → the sanitized raw response is stored as `crawl.json`, normalized into a validated `WebsiteEnrichmentSnapshot` and stored as `extracted.json` → candidate images are validated/fetched/dimension-checked/classified and accepted ones rehosted under `scans/{businessId}/{scanId}/images/` → `buildGenerationContext()` merges the snapshot with the canonical `Business` record (Business wins on every field) → the existing `lib/ai/generate-preview.ts` pipeline (extended with an optional third parameter, fully backward-compatible) produces a new immutable `SitePreview` version → the `ScanEvent` is marked `completed` and `Business.enrichmentStatus` updated. Every failure path is classified into one of 14 `ScanFailureCategory` values and recorded on an immutable `ScanEvent`; retries always create a brand-new `ScanEvent`, never mutate a `failed` one back to `running`.
+
+## Key architectural decisions (see `architecture.md`, "Firecrawl Website Enrichment" for full detail)
+
+1. **Plain `fetch` REST client, not the `firecrawl` npm SDK.** Mirrors `lib/google-places/client.ts`'s established pattern. Confirmed the real `/v2/scrape` wire contract (base URL, auth header, request/response shape) by pulling and reading the actual `firecrawl@4.30.1` SDK source, not just documentation. Chosen over the SDK specifically because the SDK discards the raw HTTP response (needed for reading `Retry-After`) and would have added an unused `axios` dependency.
+2. **Structured extraction inside the one Scrape call** via a `{ type: 'json', schema, prompt }` format entry — still the single-page Scrape operation, never Search/Extract/Crawl, and keeps this app's own OpenAI usage limited to the existing Stage 11 generation call.
+3. **Scan-derived images get a stable public URL via the existing `/api/assets/[...key]` proxy**, extended to also serve `scans/{businessId}/{scanId}/images/` (images only — `crawl.json`/`extracted.json` stay private, admin-viewable only via `getSignedAssetUrl`). Reuses the established asset-delivery mechanism rather than a new one, at the same trust level as today's admin-uploaded business photos.
+4. **`ScanEvent` was redesigned, not defensively extended** — Stage 12 never created a real `ScanEvent` record, so this is genuinely the first real caller, with zero migration risk.
+5. **`generatePreviewContent()` gained one optional third argument** (`options.enrichment?`) rather than a second parallel generator function — when absent, behavior is byte-for-byte identical to the original Stage 11 path; all existing Stage 11 tests and call sites pass unchanged.
+
+## Domain-model changes
+
+- `domain/models/scan-event.ts` — **rewritten**: `SCAN_STATUSES` → `queued`/`running`/`completed`/`failed`/`manual_approval_required` (was `pending`/`running`/`completed`/`failed`); added `SCAN_PROVIDERS` (`'firecrawl'`), `SCAN_OPERATIONS` (`'scrape'`), `SCAN_FAILURE_CATEGORIES` (14 values); new fields `provider`, `operation`, `finalUrl?`, `httpStatus?`, `failureCategory?`, `attempt`, `retryOfScanId?`, `rawArtifactKey?`, `extractedArtifactKey?`, `images?`, `generatedPreviewId?`; `sourceUrl`/`startedAt` now optional (`failureReason` renamed `failureMessage`).
+- `domain/models/scan-image.ts` — **new**: `WebsiteImageRole` (7 values), `WebsiteImageStatus` (`accepted`/`review_required`/`rejected`), `ScanImageAsset`.
+- `domain/models/website-enrichment.ts` — **new**: `WebsiteEnrichmentSnapshot` and its sub-shapes, `WEBSITE_ENRICHMENT_SCHEMA_VERSION`.
+- `domain/models/business.ts` — added `EnrichmentStatus` (6 values), `ManualApprovalReason` (4 values), and `Business.enrichmentStatus?`/`manualApprovalReason?`/`manualApprovalNote?`. No "latest scan" pointer field — the admin UI derives that from `listScansForBusiness()` (already sorted newest-first) instead of a second, potentially-stale pointer.
+- `domain/models/site-preview.ts` — `GenerationMetadata` gained `source?: 'seed'|'manual_ai'|'firecrawl_enriched'` and `scanId?`, both optional for backward compatibility with previews saved before this field existed.
+- Matching Zod schema updates: `scan-event.schema.ts` rewritten; new `scan-image.schema.ts`/`website-enrichment.schema.ts` (the latter is the enforcement point keeping an unbounded raw Firecrawl response from ever reaching storage or the OpenAI prompt — every array/string is capped, malformed URLs rejected, HTML/control characters stripped); `business.schema.ts`/`site-preview.schema.ts` extended.
+- `domain/factories/scan-event.factory.ts` — `createScanEvent()` now takes `{businessId, provider, operation, sourceUrl?, attempt?, retryOfScanId?}` and always starts `queued` (was `{businessId, sourceUrl}` → `pending`). All 6 existing call sites in `domain/__tests__/domain.test.ts` updated to pass `provider`/`operation`.
+
+## `web/lib/firecrawl/` (new)
+
+- `client.ts` — `scrapeWebsite()`, `FirecrawlApiError` (6-category enum), reads `Retry-After` off 429s.
+- `url-validation.ts` — `validateOutboundUrl()`: protocol allowlist, no embedded credentials, `dns.promises.lookup` + IPv4/IPv6 private/reserved-range rejection (RFC1918, loopback, link-local incl. the `169.254.169.254` AWS metadata endpoint, CGNAT, benchmarking/test-net ranges, multicast, IPv4-mapped IPv6). Applied to the business website URL, Firecrawl's reported final URL, and every candidate image URL.
+- `normalize.ts` — `normalizeFirecrawlResponse()`: deterministic, no AI call; caps/sanitizes/dedupes/validates into `WebsiteEnrichmentSnapshot`.
+- `images.ts` — `ingestScanImages()`: candidate cap 15, accepted cap 8, 8MB size cap (`Content-Length` + actual-bytes check), 8s fetch timeout, manually-followed redirects (max 3 hops, each re-validated through the SSRF guard — deliberately not `fetch`'s automatic follow, which would bypass re-validation on a malicious redirect), `image/jpeg`/`png`/`webp` only, real pixel dimensions via `sharp`, sub-80px rejected as icon/tracking-pixel, ≥400×300px (or role `logo`) accepted, smaller real photos `review_required` (stored in metadata, never auto-used), URL-keyword role classification (deterministic, not AI).
+- `generation-context.ts` — `buildGenerationContext()`: the one explicit merge function: Business's own `servicesOffered`/`serviceAreas`/`differentiators`/`description` win outright when non-empty, snapshot fills only genuinely blank fields; never mutates `Business`.
+- `retry.ts` — `isRetryableFailureCategory()`, `computeAutomaticRetryDelayMs()` (bounded exponential backoff + jitter, honors `Retry-After`, `MAX_AUTOMATIC_RETRIES = 2`) — used only for `firecrawl_rate_limit`/`firecrawl_timeout`/`firecrawl_provider_error`.
+- `enrich-business.ts` — `enrichBusinessWebsite()`/`retryEnrichmentScan()`: the 20-checkpoint orchestration, split into small named functions (`handleMissingWebsite`, `runAttempt`, `markFailed`, `finishFailed`, `scrapeWithBoundedRetry`, `hasActiveScan`, `mapFirecrawlErrorCategory`) rather than one monolithic action. Concurrency-guarded (rejects a new attempt while one is `queued`/`running`); every failure path writes an immutable `failed` `ScanEvent` with a safe category/message and updates only `Business.enrichmentStatus`/`manualApprovalReason`/`manualApprovalNote` — never any content field.
+
+## `lib/ai/generate-preview.ts` (extended, backward-compatible)
+
+Added optional `options: GeneratePreviewOptions = {}` second parameter (`{ enrichment?: { snapshot, scanImages, scanId } }`). When absent, output is identical to the pre-Stage-13 function — verified by leaving all 22 pre-existing tests in `lib/ai/__tests__/generate-preview.test.ts` unchanged and passing. When present: `buildGenerationContext()` resolves prompt inputs before `buildPrompt()` runs; the "no services" guard now checks the merged context (not `business.servicesOffered` alone) — this is what lets a Stage 12–imported business with no Stage 11 inputs get a first preview directly; `resolvePhotoSlot()` chains gained a third, lowest-priority fallback tier of scan-accepted images after `business.photoUrls`; `generationMetadata.source` is now always explicitly set (`'manual_ai'` by default, `'firecrawl_enriched'` + `scanId` when enrichment is present) — previously always implicitly absent. Removed the now-dead local `linesFrom()` helper (superseded by `generation-context.ts`'s own).
+
+## S3 and public-asset-proxy changes
+
+New keys under the already-provisioned `scans/` prefix (no infra change): `scans/{businessId}/{scanId}/crawl.json`, `extracted.json`, `images/{imageId}.{ext}`. `app/api/assets/[...key]/route.ts` extended with a `SCAN_IMAGE_KEY_PATTERN` regex so it also serves the `images/` sub-path publicly (unconditionally, like `businesses/`) while leaving `crawl.json`/`extracted.json` in the very same folder private — deliberately not a blanket `scans/` allow.
+
+## Admin UI
+
+- `app/admin/(dashboard)/businesses/[businessId]/enrichment-actions.ts` (new) — `enrichWebsiteAction`/`retryEnrichmentAction`, kept separate from the already 1200+ line `actions.ts`; both redirect back to the detail page with `?enrichmentResult=` rather than returning `useActionState` feedback.
+- `app/admin/(dashboard)/businesses/[businessId]/EnrichmentSection.tsx` (new) — plain server component (no client JS needed); shows website URL, human-labeled enrichment status, latest scan status/time, latest successful enrichment time, the manual-approval/no-usable-images banner with the exact required copy, a link to the generated preview, and "Enrich Website"/"Retry" actions (disabled while a scan is active).
+- `page.tsx` — wired `EnrichmentSection` in near "Generate Website (AI)"; `searchParams` now also reads `enrichmentResult`.
+
+## Environment / secrets
+
+No new environment variable — `FIRECRAWL_SECRET_NAME` was already set in `.env.local`/`.env.local.example` and the `webpresa-dev-firecrawl` secret already existed (Stage 10). Populated the real API key the user supplied via the standard `aws secretsmanager put-secret-value --secret-id webpresa-dev-firecrawl --profile webpresa` pattern already used for every other secret — value never written to any file, never logged, not present in this document.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     472 passed  (npm test) — 63 new tests: lib/firecrawl/__tests__/ (client 6, url-validation
+                          10, normalize 9, images 9, generation-context 7, enrich-business 21),
+                          domain/__tests__/stage13.test.ts (13), plus 6 new cases in the existing
+                          lib/ai/__tests__/generate-preview.test.ts and 2 new cases in
+                          app/api/assets/[...key]/__tests__/route.test.ts. Every external dependency
+                          (DynamoDB, S3, Firecrawl, OpenAI, DNS, sharp) mocked — no real network/AWS
+                          calls in the automated suite.
+Build:     next build succeeds — no new routes (Stage 13 is Server Actions on the existing business
+           detail page, not a new route).
+Secret leak check: grepped the full `.next` build output for the literal API key (zero matches) and
+           grepped `.next/static` (the client bundle) for FIRECRAWL_SECRET_NAME/getFirecrawlSecret/
+           scrapeWebsite (zero matches) — confirms the key and every Firecrawl-calling identifier
+           stay entirely server-side.
+Manual smoke test: ran the real production code path (enrichBusinessWebsite) via a local script
+           (not committed — lived only in the session scratchpad) against a throwaway dev Business
+           pointed at https://www.firecrawl.dev (Firecrawl's own site — stable, scrape-friendly,
+           unambiguously permitted). Real Firecrawl API returned HTTP 200; crawl.json/extracted.json
+           written to the correct S3 keys; 9 candidate images discovered, 3 accepted and uploaded
+           under scans/.../images/; real OpenAI call succeeded (durationMs 3719) producing a v1
+           SitePreview with generationMetadata.source: 'firecrawl_enriched' and the correct scanId;
+           ScanEvent completed with generatedPreviewId set; Business.enrichmentStatus:
+           'enrichment_completed'. The throwaway business/preview/scan were left in the dev table
+           for interactive admin-UI review (not deleted, unlike the Stage 12 smoke-test record).
+```
+
+## Deviations from the original task spec
+
+- **S3 image path** — the spec suggested `businesses/{businessId}/scans/{scanId}/images/{imageId}.{ext}`; used `scans/{businessId}/{scanId}/images/{imageId}.{ext}` instead, staying under the `scans/` prefix already reserved for scan artifacts in `architecture.md` since Stage 9, rather than nesting under the `businesses/` prefix (which is otherwise reserved for admin-approved canonical assets).
+- **"No usable images" note wording** — the spec used two slightly different strings for this note in two different sections ("No usable website images were found or downloaded..." vs. "No usable images were found on the business website..."). Picked the first (matching the dedicated section header) as canonical; used consistently in code and the admin UI.
+- **`generatePreviewContent`'s optional-enrichment design and the two-tier retry model** (inline bounded retry within one `ScanEvent` attempt, separate from the admin-triggered cross-`ScanEvent` retry) were judgment calls not fully spelled out in the spec — documented with rationale in `architecture.md`.
+- Firecrawl SDK vs. REST API — the spec allowed either; chose REST for parity with the existing `lib/google-places/client.ts` pattern (see "Key architectural decisions" above).
+
+## Unresolved issues / follow-ups
+
+- No admin workflow yet to promote a scan-derived image (`accepted` or `review_required`) into the canonical `Business` photo library — noted as deferred in `implementation.md`.
+- `enrichWebsiteAction`/`retryEnrichmentAction` are not subject to any generation cap (unlike `generateWebsiteAction`'s `MAX_AI_GENERATIONS = 10`) — worth revisiting if real usage warrants bounding Stage 13 OpenAI spend per business.
+- IAM for the `webpresa-vercel-dev` user was not narrowed to a Firecrawl-specific least-privilege policy — Stage 13 runs in existing Next.js Server Actions (no new Lambda role), so it reuses the existing broad S3/Secrets grants; flagged in `architecture.md` as a pre-production consideration, same as Stage 12 left it.
+
+## Files changed
+
+```
+web/domain/
+├── models/
+│   ├── scan-event.ts                                                             REWRITTEN — new statuses/provider/operation/failure-category/attempt/retry fields
+│   ├── scan-image.ts                                                             NEW — WebsiteImageRole, WebsiteImageStatus, ScanImageAsset
+│   ├── website-enrichment.ts                                                     NEW — WebsiteEnrichmentSnapshot and sub-shapes
+│   ├── business.ts                                                               MODIFIED — EnrichmentStatus, ManualApprovalReason, enrichmentStatus?/manualApprovalReason?/manualApprovalNote?
+│   ├── site-preview.ts                                                           MODIFIED — GenerationMetadata.source?/scanId?
+│   └── index.ts                                                                  MODIFIED — export scan-image, website-enrichment
+├── schemas/
+│   ├── scan-event.schema.ts                                                      REWRITTEN
+│   ├── scan-image.schema.ts                                                      NEW
+│   ├── website-enrichment.schema.ts                                              NEW
+│   ├── business.schema.ts                                                        MODIFIED
+│   ├── site-preview.schema.ts                                                    MODIFIED
+│   └── index.ts                                                                  MODIFIED — export scan-image.schema, website-enrichment.schema
+├── factories/
+│   └── scan-event.factory.ts                                                     REWRITTEN — provider/operation/attempt/retryOfScanId, starts 'queued'
+└── __tests__/
+    ├── domain.test.ts                                                            MODIFIED — 6 createScanEvent call sites updated
+    └── stage13.test.ts                                                           NEW — 13 tests
+
+web/lib/firecrawl/                                                                NEW package
+├── client.ts
+├── url-validation.ts
+├── normalize.ts
+├── images.ts
+├── generation-context.ts
+├── retry.ts
+├── enrich-business.ts
+└── __tests__/
+    ├── client.test.ts
+    ├── url-validation.test.ts
+    ├── normalize.test.ts
+    ├── images.test.ts
+    ├── generation-context.test.ts
+    └── enrich-business.test.ts
+
+web/lib/ai/
+├── generate-preview.ts                                                           MODIFIED — optional enrichment parameter, provenance metadata
+└── __tests__/generate-preview.test.ts                                            MODIFIED — 6 new Stage 13 cases, all prior cases unchanged
+
+web/app/admin/(dashboard)/businesses/[businessId]/
+├── EnrichmentSection.tsx                                                         NEW
+├── enrichment-actions.ts                                                         NEW
+└── page.tsx                                                                      MODIFIED — wired EnrichmentSection, enrichmentResult search param
+
+web/app/api/assets/[...key]/
+├── route.ts                                                                      MODIFIED — SCAN_IMAGE_KEY_PATTERN, serves scans/.../images/
+└── __tests__/route.test.ts                                                       MODIFIED — 2 new cases
+
+web/docs/
+├── implementation.md                                                             MODIFIED — Stage 13 section rewritten to match actual behavior
+├── architecture.md                                                               MODIFIED — new "Firecrawl Website Enrichment" section + related updates
+├── deployment.md                                                                 MODIFIED — new Stage 13 deployment-guidance section
+└── build_log.md                                                                  MODIFIED — this entry
+```
+
+---
+
+## Bug fix — `image/jpg` content type silently dropped real website images, plus new `/admin/scans` UI
+
+**Date:** 2026-07-18 (same day, follow-up)
+**Trigger:** User ran a real enrichment against a live business website and reported that services transferred correctly but the hero image and two other homepage images did not, and that `/admin/scans` was still the Stage-9-era placeholder with no way to inspect what a scan actually found/saved.
+
+### Root cause
+
+`lib/firecrawl/images.ts`'s `ALLOWED_CONTENT_TYPES` allowlist only recognized `image/jpeg` — but the business's real CDN (`lirp.cdn-website.com`) serves its JPEGs with the non-standard (technically incorrect per the MIME spec, but common in the wild) `Content-Type: image/jpg` header. Every real photo on that response — including the actual 1920×1440 hero image — was silently rejected by `fetchImageBytes()`'s content-type check and simply never appeared in `ScanEvent.images` at all; only a single small `image/png` payment-method icon (167×158, correctly flagged `review_required`) made it through. Confirmed by downloading the real `crawl.json` artifact for `biz_39c2b268-36e8-48cf-9481-673921e12880` from S3 and `curl -I`-ing each discovered image URL directly — every `.jpg` on that CDN returned `content-type: image/jpg`.
+
+### Fix
+
+Added `'image/jpg'` as a second key in `ALLOWED_CONTENT_TYPES` (mapping to the same `jpg` extension), and normalized it to the standard `image/jpeg` before it's used as the S3 object's stored `Content-Type` or the extension-mapping lookup — so the stored asset and the file extension both stay standards-correct regardless of what the origin server sent. Added a regression test asserting `image/jpg` is accepted and normalized. Re-ran the exact same enrichment against the same real business afterward: the hero image (`432bbcb-1920w.jpg`, 1920×1440) was correctly `accepted` and uploaded to S3 this time, alongside four more real photos now correctly recorded as `review_required` (small real photos, not auto-used but visible for manual review) instead of being silently dropped.
+
+### New `/admin/scans` list + detail UI
+
+The placeholder `/admin/scans` page (a static "coming in a future stage" message left over from Stage 9) is now a real read-only view:
+
+- `lib/db/scan-events.ts` — added `listAllScans()`: pages through the whole table (same dev-scale `ScanCommand` + safety-cap pattern as `listAllBusinesses()` — no GSI supports a global "every scan, newest first" query), sorted by `createdAt` descending in application code.
+- `app/admin/(dashboard)/scans/page.tsx` (rewritten) — a table of every scan across every business: business name (linked), status badge, source URL, images (accepted/found counts), attempt number (flagging retries), created/completed timestamps, and a link to the detail page.
+- `app/admin/(dashboard)/scans/[scanId]/page.tsx` (new) — per-scan detail: business/generated-preview links, scan metadata (URLs, HTTP status, timestamps), failure category/message when applicable, an image grid (accepted images render their actual thumbnail via the public scan-image proxy URL; `review_required`/`rejected` images show role/dimensions/note instead, matching the "never auto-use anything but accepted" rule), and the full extracted `WebsiteEnrichmentSnapshot` rendered field-by-field (services, service areas, FAQ, navigation labels, CTAs, contact, social links) with an explicit note that this is evidence, not canonical Business data.
+- `app/admin/(dashboard)/scans/[scanId]/actions.ts` (new) — `viewRawArtifactAction(key)`: session-checked, key-prefix-checked, redirects to a short-lived `getSignedAssetUrl()` link for the private `crawl.json`/`extracted.json` artifacts (these are deliberately not part of the public image proxy — see `architecture.md`).
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     473 passed  (npm test) — 1 new regression test for the image/jpg fix
+Build:     next build succeeds — /admin/scans/[scanId] registered as a new dynamic (ƒ) route
+Manual:    Re-ran enrichBusinessWebsite against the real business (biz_39c2b268-36e8-48cf-9481-
+           673921e12880) that surfaced the bug. Before the fix: 1 image recorded, 0 accepted.
+           After the fix: 5 images recorded, 1 accepted (the real 1920×1440 hero image, uploaded
+           to S3 and immediately usable by generation), 4 review_required. Confirmed via a direct
+           DynamoDB query against webpresa-dev-scan-events (business-id-index) before and after,
+           and by curl -I against each real candidate image URL to confirm the image/jpg content
+           type was the actual root cause, not a fluke.
+```
+
+## Files changed
+
+```
+web/lib/firecrawl/
+├── images.ts                                                                     MODIFIED — accept + normalize image/jpg
+└── __tests__/images.test.ts                                                      MODIFIED — 1 new regression test
+
+web/lib/db/
+└── scan-events.ts                                                                MODIFIED — added listAllScans()
+
+web/app/admin/(dashboard)/scans/
+├── page.tsx                                                                      REWRITTEN — real list, was a static placeholder
+└── [scanId]/
+    ├── page.tsx                                                                  NEW — scan detail: metadata, images, extracted snapshot
+    └── actions.ts                                                                NEW — viewRawArtifactAction (signed URL redirect)
+
+web/docs/build_log.md                                                            MODIFIED — this entry
+```
+
+---
+
+## Scan-image promotion workflow — review and add discovered images to Business Photos
+
+**Date:** 2026-07-18 (same day, second follow-up)
+**Trigger:** After the `/admin/scans` UI shipped, the user pointed out two remaining gaps: `review_required` images had no way to actually be reviewed (no thumbnail — just a "Needs review" placeholder box, since their bytes were never stored), and there was no way to move any scan-discovered image — including the one truly `accepted` hero photo — into the business's canonical Photos. They asked for review capability on both the scan detail page and the business's Photos section, with approved images landing in Photos.
+
+### Change 1 — store `review_required` images too, not just `accepted`
+
+`lib/firecrawl/images.ts`'s `ingestScanImages()` previously only called `putAsset()` for `status === 'accepted'` images; `review_required` images were fetched (to read dimensions) and then discarded — no S3 object, no `url`/`s3Key`, so the admin UI had nothing to show or promote. Fixed: both statuses now upload to `scans/{businessId}/{scanId}/images/{imageId}.{ext}` and get a real `url`. Only `rejected` candidates (which never reach the upload step at all) have no stored bytes. `MAX_ACCEPTED = 8` still only bounds auto-usable `accepted` images; `review_required` storage is bounded only by the existing 15-candidate ceiling.
+
+### Change 2 — `approveScanImageAction`: promote a scan image into `Business.photoUrls`
+
+New action in `enrichment-actions.ts` (see `architecture.md`, "Scan-image promotion" for the full step-by-step). Key decision: **copies** the object bytes into `businesses/{businessId}/assets/photos/{n}.{ext}` rather than pointing `Business.photoUrls` at the `scans/` prefix directly — keeps every `photoUrls` entry's provenance/lifecycle identical regardless of origin (admin upload vs. promoted scan image), matching the numbering convention (`photos/${photoUrls.length}.${ext}`) `updatePhotosAction`'s per-slot uploads already use. Idempotent (`ScanImageAsset.promotedPhotoUrl`, a new optional field, prevents double-promotion) and respects the existing 6-photo cap.
+
+### Change 3 — review UI in both places the user asked for
+
+- Scan detail page (`/admin/scans/[scanId]`): every stored image (`accepted` or `review_required`) now renders its real thumbnail (previously only `accepted` did) and gets an "Add to Photos" button; already-promoted images show a disabled "✓ Added to Photos" state. A `photoApproval` query-param result banner reports success/limit-reached/already-added/not-found.
+- Business detail page: new `ScanImageReview.tsx`, rendered inside the existing Photos `CollapsibleCard`, lists every not-yet-promoted image across *all* of that business's scans (not just the most recent) with the same "Add to Photos" action. The Photos card now auto-opens (`defaultOpen`) whenever there's something to review, so a just-completed enrichment doesn't hide new images behind a collapsed card.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     478 passed  (npm test) — 5 new tests for approveScanImageAction (promotes, idempotent,
+                          limit-reached, refuses a rejected/never-stored image, requires a session),
+                          1 existing images.ts test updated for the new storage behavior
+Build:     next build succeeds — no new routes (reuses /admin/scans/[scanId] and the business
+           detail page)
+Manual:    Re-ran enrichBusinessWebsite against the same real business used for the earlier bug fix
+           (biz_39c2b268-36e8-48cf-9481-673921e12880). All 5 discovered images now have real S3
+           objects and URLs (previously only 1 of 5 did). Verified the promotion logic itself
+           against real AWS (bypassing only the getSession() cookie check, which requires a real
+           browser request context a standalone script doesn't have — the action's session guard
+           itself is covered by an automated test instead): promoted the real 1920×1440 hero image
+           into businesses/{id}/assets/photos/0.jpg (confirmed via `aws s3api head-object`:
+           image/jpeg, 201360 bytes) and onto Business.photoUrls. The remaining 4 review_required
+           images were left unpromoted so the user can exercise the "Add to Photos" button
+           themselves in the live admin UI.
+```
+
+## Files changed
+
+```
+web/domain/
+├── models/scan-image.ts                                                          MODIFIED — added promotedPhotoUrl?
+└── schemas/scan-image.schema.ts                                                  MODIFIED — added promotedPhotoUrl?
+
+web/lib/firecrawl/
+├── images.ts                                                                     MODIFIED — store review_required images too
+└── __tests__/images.test.ts                                                      MODIFIED — updated the review_required test
+
+web/lib/db/scan-events.ts                                                         MODIFIED — putScanEvent already existed; no change here (used by the new action)
+
+web/app/admin/(dashboard)/businesses/[businessId]/
+├── enrichment-actions.ts                                                         MODIFIED — added approveScanImageAction
+├── ScanImageReview.tsx                                                           NEW — Photos-card review list
+├── page.tsx                                                                      MODIFIED — wired ScanImageReview, photoApproval param, auto-open Photos
+└── __tests__/enrichment-actions.test.ts                                          NEW — 5 tests
+
+web/app/admin/(dashboard)/scans/[scanId]/page.tsx                                 MODIFIED — real thumbnails for review_required, Add to Photos button
+
+web/docs/
+├── architecture.md                                                               MODIFIED — "Scan-image promotion" and "/admin/scans" sections
+├── implementation.md                                                             MODIFIED — Stage 13 deferred-work list updated
+└── build_log.md                                                                  MODIFIED — this entry
+```
+
+---
+
+## Batch photo approval, logo assignment from Photo Assignment, and found-contact-info promotion
+
+**Date:** 2026-07-18 (same day, third follow-up)
+**Trigger:** Three separate asks after trying the scan-image review workflow live: (1) clicking "Add to Photos" one image at a time was tedious — wanted checkboxes with select-all/none for batch approval; (2) no way to attach a Firecrawl-imported logo image to `Business.logoUrl`, only to `photoUrls`; (3) for AAA-1 Paul's Plumbing (`biz_39c2b268-36e8-48cf-9481-673921e12880`), Firecrawl found `aaa1paulsplumbing@yahoo.com` in "Contact found on page," but `Business.email` stayed blank — asked why.
+
+### 1. Batch photo approval
+
+Refactored `approveScanImageAction`'s body into `promoteScanImage(businessId, scanId, imageId)` — a pure helper returning `'added'|'already_added'|'limit_reached'|'not_found'`, no redirect — shared by the existing single-image action and a new `approveScanImagesAction(businessId, redirectTo, formData)`. The batch action reads every checked `"{scanId}::{imageId}"` value from the submitted form and promotes each **sequentially** (never `Promise.all` — each call re-fetches `Business` fresh and appends to `photoUrls` by current length, so parallel calls would race and silently drop entries), stopping additions at the 6-photo cap but still counting the rest as `skipped` in the result banner rather than failing the batch.
+
+New shared client component `ScanImageApprovalGrid.tsx`: a "Select all"/"Select none" button pair that toggles checkbox `.checked` directly via a form ref (plain uncontrolled checkboxes, no lifted React state) plus one submit button. Both `/admin/scans/[scanId]` and the business detail page's Photos card (`ScanImageReview.tsx`) now render this same grid bound to the same `approveScanImagesAction`, replacing their previous one-form-per-image approach.
+
+### 2. Business logo in Photo Assignment
+
+Added a fifth `PhotoPickerField` to `PhotosForm.tsx`'s "Photo Assignment" section: "Business logo" (`logoPhotoUrl`). Unlike the four section slots (hero/about/whyChooseUs/services), a logo has no automatic upload-order fallback — "Auto" here means "leave the current logo untouched," not "pick one automatically." `resolveLogoUrl()` in `[businessId]/actions.ts` implements that distinction. A fresh logo *file* upload (the existing top-of-card "Logo" field) still wins over the picker, matching the same precedence the section slots already use for their own direct-upload fields. This closes the loop on scan-image promotion: promote a Firecrawl-found logo image into Photos, then use this picker to point `Business.logoUrl` at it.
+
+### 3. Why the found email wasn't in `Business.email` — and the real gap it exposed
+
+Two distinct issues, both fixed:
+
+- **The generated preview itself never used it either.** `lib/ai/generate-preview.ts`'s `contact` object was built directly from `business.phone`/`email`/`address` with **no fallback to the Firecrawl snapshot at all** — unlike services/service areas/description, which already had this fallback from the original Stage 13 build. This was an inconsistency with the documented merge-precedence rule ("Firecrawl may contribute information absent from the canonical generation context") that got missed for contact fields specifically, reasoning from Stage 11's "contact info is always code-derived, never trusted from the model" invariant — which is about not trusting the *model's* guesses, not about excluding Firecrawl's actually-scraped data as a gap-filler. Fixed: `buildGenerationContext()` now also resolves `contact: { phone?, email?, address? }`, each field independently business-wins-else-first-snapshot-value; `generate-preview.ts` now just uses `generationContext.contact`. `buildPrompt()`'s CTA-channel detection (`primaryChannel`/`secondaryChannel`) was updated to match, so the model's CTA labels stay correctly wired to whichever channel(s) actually end up on the page.
+- **Nothing ever wrote it onto `Business` itself**, by design — Stage 13's explicit rule is that Firecrawl evidence never auto-mutates `Business`. What was missing was the same kind of deliberate admin-promotion action scan images already got. Added `applyFoundContactFieldAction(businessId, field, value, redirectTo)` and `FoundContactInfo.tsx` (rendered inside the Business Details card): shows the latest completed scan's first found phone/email/address next to the matching `Business` field whenever they differ, with an "Apply"/"Overwrite" button. New shared helper `lib/firecrawl/snapshot.ts`'s `getLatestSnapshotForBusiness()` backs this (and could back future evidence surfaces).
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     497 passed  (npm test) — 19 new: 5 contact-fallback cases in generation-context.test.ts,
+                          2 contact-fallback cases in generate-preview.test.ts, 8 new
+                          enrichment-actions.test.ts cases (batch approve ×4, applyFoundContactFieldAction
+                          ×4), 4 logo-picker cases in business-details-actions.test.ts
+Build:     next build succeeds — no new routes
+Manual:    Verified against the real business that raised this (biz_39c2b268-36e8-48cf-9481-
+           673921e12880, "AAA-1 Paul's Plumbing Inc"): confirmed Business.email is genuinely blank,
+           the latest scan's real snapshot contains aaa1paulsplumbing@yahoo.com, and
+           getLatestSnapshotForBusiness() + the FoundContactInfo comparison correctly determine an
+           "Apply" button should show for it — confirmed via a script calling the real production
+           code path against real DynamoDB, without applying the value (left for the user to click
+           through in the live UI themselves, since changing a business's canonical email is more
+           consequential than the earlier photo-promotion demo).
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/
+├── enrichment-actions.ts                                                         MODIFIED — promoteScanImage extracted, approveScanImagesAction, applyFoundContactFieldAction
+├── ScanImageApprovalGrid.tsx                                                     NEW — shared checkbox grid + select all/none
+├── ScanImageReview.tsx                                                           MODIFIED — uses ScanImageApprovalGrid
+├── FoundContactInfo.tsx                                                         NEW — found phone/email/address review + apply
+├── page.tsx                                                                      MODIFIED — wired FoundContactInfo, contactApproval param, auto-open logic
+├── actions.ts                                                                    MODIFIED — logoPhotoUrl handling, resolveLogoUrl
+└── __tests__/
+    ├── enrichment-actions.test.ts                                                MODIFIED — 8 new tests
+    └── business-details-actions.test.ts                                         MODIFIED — 4 new logo-picker tests
+
+web/app/admin/(dashboard)/businesses/PhotosForm.tsx                              MODIFIED — Business logo picker
+
+web/app/admin/(dashboard)/scans/[scanId]/page.tsx                                MODIFIED — uses ScanImageApprovalGrid, batch result banner
+
+web/lib/firecrawl/
+├── generation-context.ts                                                        MODIFIED — contact fallback
+├── snapshot.ts                                                                   NEW — getLatestSnapshotForBusiness
+└── __tests__/generation-context.test.ts                                         MODIFIED — 5 new contact-fallback tests
+
+web/lib/ai/
+├── generate-preview.ts                                                          MODIFIED — uses generationContext.contact
+└── __tests__/generate-preview.test.ts                                           MODIFIED — 2 new tests
+
+web/docs/
+├── architecture.md                                                               MODIFIED — "Scan-image promotion" batch update, new logo/contact sections
+└── build_log.md                                                                  MODIFIED — this entry
+```

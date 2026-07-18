@@ -218,6 +218,16 @@ export interface PreviewTheme {
   heroStyle?: HeroStyle;
 }
 
+/**
+ * What produced this preview's content. `'seed'` (the free, non-AI seed
+ * generator) never actually attaches `GenerationMetadata` today — it's
+ * listed here for completeness since it's a legitimate future source, not
+ * because any current write path sets it. Optional for backward
+ * compatibility with previews saved before Stage 13 introduced this field.
+ */
+export const GENERATION_SOURCES = ['seed', 'manual_ai', 'firecrawl_enriched'] as const;
+export type GenerationSource = (typeof GENERATION_SOURCES)[number];
+
 /** Metadata about the generation run that produced this preview. */
 export interface GenerationMetadata {
   /** Model identifier, e.g. `gpt-4o`. */
@@ -228,6 +238,10 @@ export interface GenerationMetadata {
   generatedAt: string;
   /** Wall-clock milliseconds the generation took. */
   durationMs: number;
+  /** Optional for backward compatibility — new saves always set it. */
+  source?: GenerationSource;
+  /** The ScanEvent that supplied enrichment context, when `source` is `'firecrawl_enriched'`. */
+  scanId?: string;
 }
 
 // ---------------------------------------------------------------------------
