@@ -267,20 +267,24 @@ export function SectionConfigForm({
     persist(orderedTypes, enabledByType);
   }
 
+  // `persist` (and therefore `formAction`/`startTransition`) must never be
+  // called from inside a `setState` updater function — updaters run during
+  // React's render/commit work and must stay pure, and dispatching another
+  // action from within one throws "Cannot update action state while
+  // rendering." The buttons that trigger these handlers are already
+  // disabled while `isPending`, so there's no concurrent-call risk in
+  // reading `orderedTypes`/`enabledByType` directly here instead of via the
+  // functional-updater form.
   function handleToggleEnabled(type: WebsiteSectionType, checked: boolean) {
-    setEnabledByType((current) => {
-      const next = { ...current, [type]: checked };
-      if (autoSaveAction) persist(orderedTypes, next);
-      return next;
-    });
+    const next = { ...enabledByType, [type]: checked };
+    setEnabledByType(next);
+    if (autoSaveAction) persist(orderedTypes, next);
   }
 
   function handleMove(index: number, direction: 'up' | 'down') {
-    setOrderedTypes((current) => {
-      const next = moveSection(current, index, direction);
-      if (autoSaveAction) persist(next, enabledByType);
-      return next;
-    });
+    const next = moveSection(orderedTypes, index, direction);
+    setOrderedTypes(next);
+    if (autoSaveAction) persist(next, enabledByType);
   }
 
   return (

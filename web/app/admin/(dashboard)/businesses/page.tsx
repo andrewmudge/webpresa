@@ -1,9 +1,17 @@
 import Link from 'next/link';
 import { listBusinesses } from '@/lib/db/businesses';
-import type { Business } from '@/domain/models/business';
+import { FilterBar } from './FilterBar';
+import { BusinessTable } from './BusinessTable';
 
 interface SearchParams {
   cursor?: string;
+  status?: string;
+  industry?: string;
+  source?: string;
+  city?: string;
+  state?: string;
+  createdFrom?: string;
+  createdTo?: string;
 }
 
 interface Props {
@@ -12,14 +20,27 @@ interface Props {
 
 export const dynamic = 'force-dynamic';
 
+/** Builds a query string carrying forward every active filter, optionally overriding `cursor`. */
+function buildQueryString(filters: SearchParams, cursor?: string): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === 'cursor') continue;
+    if (value) params.set(key, value);
+  }
+  if (cursor) params.set('cursor', cursor);
+  return params.toString();
+}
+
 export default async function BusinessListPage({ searchParams }: Props) {
-  const { cursor } = await searchParams;
+  const { cursor, status, industry, source, city, state, createdFrom, createdTo } = await searchParams;
+  const filters: SearchParams = { status, industry, source, city, state, createdFrom, createdTo };
+  const hasActiveFilters = Object.values(filters).some(Boolean);
 
   let result: Awaited<ReturnType<typeof listBusinesses>>;
   let loadError: string | undefined;
 
   try {
-    result = await listBusinesses({ limit: 50, cursor });
+    result = await listBusinesses({ limit: 50, cursor, status, industry, source, city, state, createdFrom, createdTo });
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load businesses';
     result = { items: [], nextCursor: undefined };
@@ -43,6 +64,8 @@ export default async function BusinessListPage({ searchParams }: Props) {
         </Link>
       </div>
 
+      <FilterBar values={filters} hasActiveFilters={hasActiveFilters} />
+
       {/* Error state */}
       {loadError && (
         <div
@@ -56,40 +79,32 @@ export default async function BusinessListPage({ searchParams }: Props) {
       {/* Empty state */}
       {!loadError && items.length === 0 && (
         <div className="text-center py-20 text-gray-400">
-          <p className="text-lg mb-2">No businesses yet</p>
-          <Link href="/admin/businesses/new" className="text-sm text-(--color-brand) hover:underline">
-            Add the first business →
-          </Link>
+          {hasActiveFilters ? (
+            <>
+              <p className="text-lg mb-2">No businesses match these filters</p>
+              <Link href="/admin/businesses" className="text-sm text-(--color-brand) hover:underline">
+                Clear filters
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="text-lg mb-2">No businesses yet</p>
+              <Link href="/admin/businesses/new" className="text-sm text-(--color-brand) hover:underline">
+                Add the first business →
+              </Link>
+            </>
+          )}
         </div>
       )}
 
       {/* Table */}
-      {items.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                <th className="px-4 py-3 font-medium text-gray-600">Name</th>
-                <th className="px-4 py-3 font-medium text-gray-600">Industry</th>
-                <th className="px-4 py-3 font-medium text-gray-600">Status</th>
-                <th className="px-4 py-3 font-medium text-gray-600">Source</th>
-                <th className="px-4 py-3 font-medium text-gray-600">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {items.map((b) => (
-                <BusinessRow key={b.businessId} business={b} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {items.length > 0 && <BusinessTable items={items} />}
 
       {/* Pagination */}
       {nextCursor && (
         <div className="mt-6 text-center">
           <Link
-            href={`/admin/businesses?cursor=${encodeURIComponent(nextCursor)}`}
+            href={`/admin/businesses?${buildQueryString(filters, nextCursor)}`}
             className="text-sm text-(--color-brand) hover:underline"
           >
             Load more →
@@ -97,47 +112,5 @@ export default async function BusinessListPage({ searchParams }: Props) {
         </div>
       )}
     </div>
-  );
-}
-
-function BusinessRow({ business: b }: { business: Business }) {
-  return (
-    <tr className="hover:bg-gray-50 transition-colors">
-      <td className="px-4 py-3">
-        <Link
-          href={`/admin/businesses/${b.businessId}`}
-          className="font-medium text-gray-900 hover:text-(--color-brand) hover:underline"
-        >
-          {b.name}
-        </Link>
-        {b.address?.city && (
-          <span className="ml-2 text-xs text-gray-400">
-            {b.address.city}, {b.address.state}
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-gray-600">{b.industry.replace('_', ' ')}</td>
-      <td className="px-4 py-3">
-        <StatusBadge status={b.status} />
-      </td>
-      <td className="px-4 py-3 text-gray-600">{b.source}</td>
-      <td className="px-4 py-3 text-gray-400 text-xs">
-        {new Date(b.createdAt).toLocaleDateString()}
-      </td>
-    </tr>
-  );
-}
-
-function StatusBadge({ status }: { status: Business['status'] }) {
-  const styles: Record<Business['status'], string> = {
-    active: 'bg-green-50 text-green-700',
-    pending: 'bg-yellow-50 text-yellow-700',
-    inactive: 'bg-gray-50 text-gray-600',
-    archived: 'bg-red-50 text-red-600',
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}>
-      {status}
-    </span>
   );
 }

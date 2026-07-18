@@ -25,9 +25,12 @@ vi.mock('server-only', () => ({}));
 import {
   getBusinessById,
   getBusinessBySlug,
+  getBusinessByGooglePlaceId,
   putBusiness,
   resolveUniqueSlug,
   listBusinesses,
+  listAllBusinesses,
+  matchesBusinessFilters,
   updateBusiness,
 } from '@/lib/db/businesses';
 import { createBusiness } from '@/domain/factories/business.factory';
@@ -95,6 +98,59 @@ describe('getBusinessBySlug', () => {
     mockSend.mockResolvedValueOnce({ Items: [] });
     const result = await getBusinessBySlug('no-match');
     expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getBusinessByGooglePlaceId
+// ---------------------------------------------------------------------------
+
+describe('getBusinessByGooglePlaceId', () => {
+  it('queries the google-place-id-index GSI and returns the matching business', async () => {
+    // googlePlaceId isn't part of CreateBusinessInput (the factory only
+    // accepts a fixed set of creation fields) — set it directly on the
+    // resulting record, the same way an import action would.
+    const b = { ...makeBusiness(), googlePlaceId: 'place_abc' };
+    mockSend.mockResolvedValueOnce({ Items: [b] });
+
+    const result = await getBusinessByGooglePlaceId('place_abc');
+
+    expect(result?.googlePlaceId).toBe('place_abc');
+    const arg = mockSend.mock.calls[0][0].input;
+    expect(arg.IndexName).toBe('google-place-id-index');
+  });
+
+  it('returns null when no business has that Place ID', async () => {
+    mockSend.mockResolvedValueOnce({ Items: [] });
+    const result = await getBusinessByGooglePlaceId('place_missing');
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listAllBusinesses
+// ---------------------------------------------------------------------------
+
+describe('listAllBusinesses', () => {
+  it('returns all items from a single scan page', async () => {
+    const items = [makeBusiness(), makeBusiness()];
+    mockSend.mockResolvedValueOnce({ Items: items, LastEvaluatedKey: undefined });
+
+    const result = await listAllBusinesses();
+
+    expect(result).toHaveLength(2);
+    expect(mockSend).toHaveBeenCalledOnce();
+  });
+
+  it('pages through multiple scans until LastEvaluatedKey is exhausted', async () => {
+    mockSend
+      .mockResolvedValueOnce({ Items: [makeBusiness()], LastEvaluatedKey: { businessId: 'biz_a' } })
+      .mockResolvedValueOnce({ Items: [makeBusiness()], LastEvaluatedKey: undefined });
+
+    const result = await listAllBusinesses();
+
+    expect(result).toHaveLength(2);
+    expect(mockSend).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -184,6 +240,104 @@ describe('listBusinesses', () => {
     expect(result.items).toHaveLength(1);
     expect(result.nextCursor).toBeDefined();
     expect(typeof result.nextCursor).toBe('string');
+  });
+
+  describe('with filters', () => {
+    it('filters a single scan page in application code and does not use the unfiltered fast path', async () => {
+      const match = makeBusiness({ name: 'Acme Plumbing', industry: 'plumbing' });
+      const nonMatch = makeBusiness({ name: 'Other HVAC', industry: 'hvac' });
+      mockSend.mockResolvedValueOnce({ Items: [match, nonMatch], LastEvaluatedKey: undefined });
+
+      const result = await listBusinesses({ limit: 50, industry: 'plumbing' });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].businessId).toBe(match.businessId);
+      expect(result.nextCursor).toBeUndefined();
+    });
+
+    it('pages through multiple scans to accumulate enough matches', async () => {
+      // `status` isn't part of CreateBusinessInput (the factory always
+      // defaults to 'pending') — set it directly on the built record.
+      const matchA = { ...makeBusiness({ name: 'A' }), status: 'active' as const };
+      const nonMatch = { ...makeBusiness({ name: 'B' }), status: 'pending' as const };
+      const matchC = { ...makeBusiness({ name: 'C' }), status: 'active' as const };
+
+      mockSend
+        .mockResolvedValueOnce({ Items: [matchA, nonMatch], LastEvaluatedKey: { businessId: 'cursor1' } })
+        .mockResolvedValueOnce({ Items: [matchC], LastEvaluatedKey: undefined });
+
+      const result = await listBusinesses({ limit: 50, status: 'active' });
+
+      expect(result.items.map((b) => b.businessId)).toEqual([matchA.businessId, matchC.businessId]);
+      expect(result.nextCursor).toBeUndefined();
+      expect(mockSend).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns a cursor to resume from when the table is not yet exhausted', async () => {
+      const match = { ...makeBusiness(), status: 'active' as const };
+      mockSend.mockResolvedValueOnce({ Items: [match], LastEvaluatedKey: { businessId: 'cursor1' } });
+
+      const result = await listBusinesses({ limit: 1, status: 'active' });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.nextCursor).toBeDefined();
+    });
+
+    it('stops at the safety cap without throwing when a filter matches nothing', async () => {
+      mockSend.mockResolvedValue({ Items: [makeBusiness()], LastEvaluatedKey: { businessId: 'keeps-going' } });
+
+      const result = await listBusinesses({ limit: 50, status: 'active' });
+
+      expect(result.items).toHaveLength(0);
+      // Safety cap (40 pages) reached rather than looping forever.
+      expect(mockSend).toHaveBeenCalledTimes(40);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchesBusinessFilters
+// ---------------------------------------------------------------------------
+
+describe('matchesBusinessFilters', () => {
+  // `status`/`address` aren't part of CreateBusinessInput — set directly on
+  // the built record rather than passed through the factory (which would
+  // silently ignore them).
+  const business = {
+    ...makeBusiness({ name: 'Acme Plumbing', industry: 'plumbing', source: 'manual' }),
+    status: 'active' as const,
+    address: { line1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701', country: 'US' },
+  };
+
+  it('matches with no filters', () => {
+    expect(matchesBusinessFilters(business, {})).toBe(true);
+  });
+
+  it('matches exact status/industry/source', () => {
+    expect(matchesBusinessFilters(business, { status: 'active', industry: 'plumbing', source: 'manual' })).toBe(true);
+  });
+
+  it('rejects a non-matching status', () => {
+    expect(matchesBusinessFilters(business, { status: 'archived' })).toBe(false);
+  });
+
+  it('matches city/state case-insensitively as a substring', () => {
+    expect(matchesBusinessFilters(business, { city: 'aus' })).toBe(true);
+    expect(matchesBusinessFilters(business, { state: 'tx' })).toBe(true);
+    expect(matchesBusinessFilters(business, { city: 'dallas' })).toBe(false);
+  });
+
+  it('rejects a city/state filter when the business has no address', () => {
+    const noAddress = makeBusiness(); // address is unset by default — no factory field for it
+    expect(matchesBusinessFilters(noAddress, { city: 'austin' })).toBe(false);
+  });
+
+  it('includes the whole "createdTo" day, not just midnight', () => {
+    const createdToday = { ...business, createdAt: '2026-07-17T23:59:00.000Z' };
+    expect(matchesBusinessFilters(createdToday, { createdTo: '2026-07-17' })).toBe(true);
+    expect(matchesBusinessFilters(createdToday, { createdFrom: '2026-07-17' })).toBe(true);
+    expect(matchesBusinessFilters(createdToday, { createdTo: '2026-07-16' })).toBe(false);
+    expect(matchesBusinessFilters(createdToday, { createdFrom: '2026-07-18' })).toBe(false);
   });
 });
 

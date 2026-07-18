@@ -2812,3 +2812,181 @@ web/app/admin/(dashboard)/businesses/
     ├── SectionConfigForm.tsx                                                     MODIFIED — pendingLabel prop
     └── onboarding/sections/page.tsx                                              MODIFIED — finishOnboardingAction, relabeled button, explanatory copy
 ```
+
+---
+
+# Stage 12 — Google Places Discovery
+
+**Date:** 2026-07-17
+**Scope:** Manual Google Places search, review, and selective import into the existing `Business` model, per the finalized architecture documented earlier the same day in `implementation.md`/`architecture.md`/`deployment.md`. No Firecrawl, Playwright, OpenAI, scoring, preview generation, or Google photo retrieval — Stage 12 ends at import.
+
+## Overview
+
+Implemented the full manual discovery-to-import workflow: admin enters an industry (from the existing `INDUSTRIES` enum) and a free-text location, the server calls Google Places API (New) Text Search with an economical field mask, results are shown for review with duplicate indicators, and only explicitly checked results are imported as ordinary `Business` records via the existing repository. Duplicate detection re-runs server-side immediately before persistence regardless of what was shown during review, and partial batch failures never roll back already-successful imports in the same submission.
+
+## Domain-model change
+
+`BUSINESS_SOURCES` (`domain/models/business.ts`) gained a fourth value, `'google_places'` — the contradiction flagged in the same-day documentation task (the old Stage 12 draft referenced this value before it existed). `BusinessSchema`'s `source` field derives its `z.enum` from the same array, so no separate schema edit was needed.
+
+## New domain layer
+
+- `domain/models/google-places.ts` — `GooglePlaceSearchResult` (the transient review-shape — never persisted as-is) and `DuplicateSignal`/`DUPLICATE_SIGNAL_TYPES`/`DUPLICATE_SIGNAL_CONFIDENCE`.
+- `domain/schemas/google-places.schema.ts` — `GooglePlaceApiResultSchema`/`GooglePlacesTextSearchResponseSchema` (validates the raw Google API response) and `GooglePlaceSearchResultSchema` (validates the result after it round-trips through the import form's hidden fields — client-controlled input, so it's treated like any other external input, not trusted search output).
+
+## `web/lib/google-places/`
+
+- `client.ts` — `server-only` `searchPlacesText()`: POSTs to Places API (New) `places:searchText` with `X-Goog-Api-Key` (from `getGooglePlacesSecret()`) and an `X-Goog-FieldMask` limited to identity/contact/review fields — no photo field is ever requested. Non-2xx responses are categorized into a small `GooglePlacesErrorCategory` enum (`invalid_key`/`permission_denied`/`quota_exceeded`/`invalid_request`/`unknown`) via `GooglePlacesApiError`, so the calling action can show a safe, generic admin-facing message without leaking the raw provider error.
+- `normalize.ts` — pure helpers: `normalizePhone` (digits-only, strips a leading US/Canada country-code `1` so `+1 512-555-0100` and `(512) 555-0100` compare equal), `normalizeDomain`, `normalizeName`, `buildAddressFromComponents` (Google `addressComponents` → the existing `Address` shape, returning `undefined` rather than a partially-guessed address when a required component is missing), `summarizeOpeningHours` (review-context-only string, never persisted).
+- `industry-map.ts` — `GOOGLE_TYPE_TO_INDUSTRY` deterministic best-match table (Google `primaryType`/`types` → the fixed `INDUSTRIES` enum), `GOOGLE_SEARCH_QUERY_LABELS` (per-industry search phrasing, e.g. `plumbing` → "plumbers", used to build the Text Search query), and `isIndustry()`.
+- `map-result.ts` — `mapApiResultToSearchResult()`: raw API result → `GooglePlaceSearchResult` (minus `duplicateSignals`, added separately since that requires a repository call). Never reads or maps any photo field.
+- `duplicates.ts` — `checkDuplicatesAgainstList()` (pure, priority-ordered domain/phone/name+address/name+city comparison against an already-loaded business list) plus `findDuplicateSignals()`/`findDuplicateSignalsForBatch()` (the I/O wrappers — Place ID via the existing `google-place-id-index` GSI, short-circuiting since a Place ID match is definitive; the batch variant loads the full business list once per search/import rather than once per result).
+- `search.ts` — `searchGooglePlaces({ industry, location })`: builds the text query, calls the client, maps every result, and annotates each with review-time duplicate signals via the batch path.
+
+## Repository additions (`web/lib/db/businesses.ts`)
+
+- `getBusinessByGooglePlaceId()` — queries the existing `google-place-id-index` GSI (no infrastructure change; this index has existed since Stage 6).
+- `listAllBusinesses()` — pages through `ScanCommand` until exhausted or a 40-page safety cap, for the domain/phone/name+address/name+city checks that have no dedicated GSI. Documented in the code as a dev-scale-only approach — a production-scale table would need a proper index before this could run safely.
+
+## Admin UI (`app/admin/(dashboard)/discover/`)
+
+- `page.tsx` / `DiscoverPanel.tsx` (client component) — two independent `useActionState` forms, matching the existing one-action-one-concern convention (`updateBusinessDetailsAction`/`updatePhotosAction`) rather than one combined action: a search form (industry select + location text input) and, once results exist, an import form (one row per result with a checkbox, an industry `<select>` defaulting to the mapped guess — required when nothing mapped confidently — and, when a blocking duplicate signal exists, an explicit "Import anyway" checkbox).
+- Each result row's full data round-trips to the import action as a hidden `JSON.stringify()`'d field (`resultData.{i}`) rather than being re-fetched from Google or held in server memory between requests — this Next.js app has no session-scoped server cache, and re-validating the round-tripped JSON via `GooglePlaceSearchResultSchema` before use keeps this no less safe than any other admin-editable form field.
+- Added to `AdminSidebar.tsx`'s `NAV_ITEMS` as "Discover", between "Businesses" and "Previews". `/admin/discover` is covered by the existing `/admin/*` wildcard in `proxy.ts` — no route-protection change needed — and `searchPlacesAction`/`importSelectedPlacesAction` each independently call `getSession()` before doing anything, matching every other admin Server Action.
+
+## `app/admin/(dashboard)/discover/actions.ts`
+
+- `searchPlacesAction` — validates `industry`/`location`, calls `searchGooglePlaces()`, logs a single non-persistent structured line (query, location, result count, duration — no search-history table, per the finalized scope) on success or failure, and maps any `GooglePlacesApiError` category to one of five safe, generic admin-facing messages (`SAFE_ERROR_MESSAGES`) — the raw provider error is only ever logged server-side, never returned to the client.
+- `importSelectedPlacesAction` — parses every `selected.{i}` row, JSON-parses and re-validates its `resultData.{i}` field, re-runs duplicate detection server-side as one batch immediately before persistence, and then processes each surviving candidate in its own `try`/`catch`: a blocking signal without `confirmDuplicate.{i}` is skipped and counted as a duplicate (never a hard error); a missing industry (no confident mapping and no admin override) is counted as a failure with an explicit reason; a `putBusiness()` throw is caught per-row so it can never roll back a sibling row that already succeeded. `source` is always `'google_places'`; `status` is always the factory's default `'pending'` — there is no `READY_FOR_SCAN`/`READY_FOR_ENRICHMENT` status anywhere in this path. `googlePlaceId`, `googleMapsUrl`, `googleRating`, `googleReviewCount`, and `address` are copied onto the new `Business` record only when present; nothing photo-related is ever copied.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     379 passed  (npm test) — 51 new tests across lib/google-places/__tests__/
+                          (normalize, industry-map, duplicates, map-result, client) and
+                          app/admin/(dashboard)/discover/__tests__/actions.test.ts, plus 4 new
+                          repository tests for getBusinessByGooglePlaceId/listAllBusinesses in
+                          the existing lib/db/__tests__/businesses.test.ts. All AWS/network calls
+                          mocked — no real Google Places or DynamoDB calls in the test suite.
+Build:     next build succeeds — /admin/discover registered as a dynamic (ƒ) route.
+Infra:     infra/npm test still passes (54 tests, unchanged) — no infrastructure changes; this
+           stage reuses the existing webpresa-dev-google-places secret (Stage 10) and the existing
+           google-place-id-index GSI (Stage 6).
+Manual:    Verified end-to-end against the real Google Places API and the real dev DynamoDB table.
+           User provided a real API key, populated into webpresa-dev-google-places via
+           `aws secretsmanager put-secret-value --profile webpresa` (value never written to any
+           file). A throwaway test harness (deleted immediately after the run — see below) called
+           the real production code paths directly: searchGooglePlaces({ industry: 'plumbing',
+           location: 'Austin, TX' }) returned 20 real results with no photo-related field on any
+           of them; the first result ("Radiant Plumbing, Air Conditioning, & Electrical") was
+           imported via the same construction importSelectedPlacesAction uses and read back from
+           DynamoDB with source: 'google_places', status: 'pending', the correct googlePlaceId,
+           and googleRating/googleReviewCount (4.8 / 17,358) attached; re-running duplicate
+           detection against the same candidate immediately after import correctly returned a
+           single blocking place_id signal matching the just-created record. The imported test
+           record was then deleted to leave no residue in the shared dev table. This also
+           surfaced a real (expected, not a bug) industry-mapping miss: this particular business's
+           Google primaryType mapped to 'electrical' rather than 'plumbing' since it's a
+           multi-trade company — exactly the case the admin-editable industry `<select>` exists to
+           catch before import. No interactive browser/UI click-through was performed (no browser
+           automation tool available in this environment) — the admin page (`/admin/discover`)
+           itself was not exercised through a live sign-in, but it calls the exact same
+           `searchPlacesAction`/`importSelectedPlacesAction` functions this harness drove directly.
+```
+
+## Files changed
+
+```
+web/
+├── domain/
+│   ├── models/
+│   │   ├── business.ts                                                           MODIFIED — added 'google_places' to BUSINESS_SOURCES
+│   │   ├── google-places.ts                                                      NEW — transient search-result + duplicate-signal types
+│   │   └── index.ts                                                              MODIFIED — export google-places
+│   └── schemas/
+│       ├── google-places.schema.ts                                               NEW — raw API response + round-trip validation
+│       └── index.ts                                                              MODIFIED — export google-places.schema
+├── lib/
+│   ├── db/
+│   │   ├── businesses.ts                                                         MODIFIED — getBusinessByGooglePlaceId, listAllBusinesses
+│   │   └── __tests__/businesses.test.ts                                          MODIFIED — tests for the two additions
+│   └── google-places/                                                            NEW DIRECTORY
+│       ├── client.ts                                                             NEW — server-only Places API (New) Text Search client
+│       ├── normalize.ts                                                          NEW — phone/domain/name/address normalization
+│       ├── industry-map.ts                                                       NEW — Google type → Industry mapping + search-query labels
+│       ├── map-result.ts                                                         NEW — raw API result → review shape
+│       ├── duplicates.ts                                                         NEW — priority-ordered duplicate detection
+│       ├── search.ts                                                             NEW — search orchestration
+│       └── __tests__/                                                           NEW — normalize, industry-map, duplicates, map-result, client
+└── app/admin/(dashboard)/
+    ├── AdminSidebar.tsx                                                          MODIFIED — added "Discover" nav item
+    └── discover/                                                                 NEW DIRECTORY
+        ├── page.tsx                                                              NEW
+        ├── DiscoverPanel.tsx                                                     NEW — client component, search + import forms
+        ├── actions.ts                                                            NEW — searchPlacesAction, importSelectedPlacesAction
+        └── __tests__/actions.test.ts                                             NEW
+```
+
+---
+
+# admin/businesses: filters, search, location column, delete button — plus a real SectionConfigForm crash fix
+
+**Date:** 2026-07-17
+**Scope:** Four direct user requests on the business list page, plus a user-reported runtime crash on the Website Sections reorder controls.
+
+## admin/businesses list page
+
+- **Location column:** city/state, previously squeezed as small gray text next to the business name, now render in their own "Location" column.
+- **Delete button per row:** `DeleteBusinessRowButton.tsx` — a lighter sibling of the detail page's `DeleteBusinessButton`. It calls the same `deleteBusinessAction` cascade delete, but skips the exact preview/scan/postcard counts in its confirmation dialog (generic warning copy instead) — fetching those counts for all 50 rows on every list-page load would mean 150 extra queries per page view just to populate a dialog most admins will never open.
+- **Filters — every column, per direct user request:** status, industry, source, city, state, and a created-date range (from/to), all combinable. `FilterBar.tsx` is a plain GET `<form>` — filters live entirely in the URL (`searchParams`), so applying them needs no client JS at all; the server component re-queries with the new filters and pagination naturally resets since the form has no `cursor` field.
+- **Search — name only, current page, per direct user request:** `BusinessTable.tsx` is a client component that filters the already-loaded (and already server-filtered) page of businesses by name locally. Deliberately doesn't reach beyond the loaded page — narrowing with the filter bar first is how an admin finds something further back in a large table.
+
+### Repository: `listBusinesses` filtering (`lib/db/businesses.ts`)
+
+No GSI supports status+industry+source+city+state+date together, so filtering happens in application code: `listBusinesses` scans in pages (`FILTERED_SCAN_PAGE_SIZE = 50`) and filters each page in JS (`matchesBusinessFilters`, exported and unit-tested standalone), accumulating matches until `limit` is reached or a `FILTERED_SCAN_SAFETY_CAP_PAGES = 40` cap stops it — the same dev-scale tradeoff already documented for Stage 12's duplicate detection (`listAllBusinesses`). The unfiltered fast path (single `Scan` + `Limit`, used when the page loads with no filters active) is unchanged, so the common case isn't slowed down.
+
+One correctness detail worth calling out: DynamoDB applies `Limit` *before* a `FilterExpression` (irrelevant here since filtering is in JS, but the same hazard applies to a JS filter over a `Limit`-bounded page) — stopping mid-page as soon as enough matches are found would silently skip matching items later in that same already-fetched page on the next "Load more" click, since `LastEvaluatedKey` always refers to the position after the *whole* requested page, not wherever a JS loop happened to stop. `listBusinesses` always finishes filtering a full fetched page before checking whether `limit` is satisfied — the returned page can therefore occasionally hold more than `limit` items, but never silently drops one.
+
+City/state matching is a case-insensitive substring match (free-text inputs); status/industry/source are exact matches (dropdowns); the date range compares against the `YYYY-MM-DD` prefix of `createdAt` rather than the full ISO timestamp — comparing the full timestamp against a bare date string for the "to" bound would incorrectly exclude same-day records (`"2026-07-17T23:59:00.000Z" > "2026-07-17"` is true as a plain string comparison).
+
+## SectionConfigForm reorder crash — real bug, not a race condition
+
+A user reported that reordering website sections (e.g. moving the CTA banner above Gallery) and then opening the draft preview never showed the new order. Investigation of the save/render pipeline (order math, `persistWebsiteSections`, `resolveStoredOrDefaultSections`, the registry-driven renderer) found nothing wrong — all of it was already correct. The user then hit the actual bug directly: a **Next.js runtime error, "Cannot update action state while rendering,"** thrown from `SectionConfigForm.tsx`'s `persist()` at the `formAction(formData)` call.
+
+Root cause: `handleMove` and `handleToggleEnabled` both called `persist()` — which calls `startTransition(() => formAction(formData))` — **from inside** a `setState` updater function (`setOrderedTypes((current) => { ...; persist(...); return next; })`). React updater functions run during render/commit work and must stay pure; dispatching another action from inside one is exactly what this error flags. This explains the original report precisely: React threw synchronously before the action ever reached the server, so the reorder was silently never persisted, while the client's own `orderedTypes` state still visually reflected the (never-saved) move.
+
+Both handlers had the identical anti-pattern, so checkbox toggling almost certainly had the same latent bug — just not yet hit/reported. Fixed by computing the next value first, calling `setOrderedTypes`/`setEnabledByType` with a plain value, and calling `persist()` as a separate top-level statement in the event handler — never nested inside the other state's updater. Safe to read `orderedTypes`/`enabledByType` directly (rather than via the functional-updater form) since the up/down and checkbox controls are already disabled while `isPending`, so there's no concurrent-call risk.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     389 passed  (npm test) — 10 new tests for listBusinesses filtering + matchesBusinessFilters
+                          in the existing lib/db/__tests__/businesses.test.ts. The SectionConfigForm fix
+                          has no new test — this repo's vitest config runs in a plain node environment
+                          (no jsdom/RTL), so this specific React updater-purity crash can't be exercised
+                          by a unit test; verified by full lint/typecheck/build passing and by matching
+                          the user's exact reported stack trace to the fixed code path.
+Build:     next build succeeds.
+Manual:    Not yet re-verified in a live browser session by the user after the fix — this is a client-
+           rendering bug (React throwing before the action ever reaches the server), not a data issue,
+           so no dev-database inspection was needed to confirm the fix. AWS SSO session expired mid-
+           session before a live-record check could be attempted; not required for this fix.
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/
+├── page.tsx                                                                      MODIFIED — filters wired into listBusinesses, BusinessTable, FilterBar
+├── FilterBar.tsx                                                                 NEW — GET-form filter bar (status/industry/source/city/state/date range)
+├── BusinessTable.tsx                                                             NEW — client component: name search + table + Location column + delete
+├── DeleteBusinessRowButton.tsx                                                   NEW — lighter list-page delete confirmation
+└── [businessId]/SectionConfigForm.tsx                                            MODIFIED — fixed "Cannot update action state while rendering" crash
+
+web/lib/db/
+├── businesses.ts                                                                 MODIFIED — listBusinesses filtering, matchesBusinessFilters
+└── __tests__/businesses.test.ts                                                  MODIFIED — filter tests
+```

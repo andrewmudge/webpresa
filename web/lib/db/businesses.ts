@@ -22,6 +22,18 @@ export interface ListBusinessesOptions {
   cursor?: string;
   /** Filter by status.  If omitted, all statuses are returned. */
   status?: string;
+  /** Filter by industry. If omitted, all industries are returned. */
+  industry?: string;
+  /** Filter by source. If omitted, all sources are returned. */
+  source?: string;
+  /** Case-insensitive substring match against address.city. */
+  city?: string;
+  /** Case-insensitive substring match against address.state. */
+  state?: string;
+  /** Inclusive lower bound on createdAt, as a YYYY-MM-DD date string. */
+  createdFrom?: string;
+  /** Inclusive upper bound on createdAt, as a YYYY-MM-DD date string. */
+  createdTo?: string;
 }
 
 export interface ListBusinessesResult {
@@ -50,34 +62,112 @@ function decodeCursor(cursor: string): Record<string, unknown> | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Filtering (in-application — no GSI supports these combined dimensions)
+// ---------------------------------------------------------------------------
+
+type BusinessFilters = Pick<
+  ListBusinessesOptions,
+  'status' | 'industry' | 'source' | 'city' | 'state' | 'createdFrom' | 'createdTo'
+>;
+
+function hasAnyFilter(filters: BusinessFilters): boolean {
+  return Object.values(filters).some((v) => v !== undefined && v !== '');
+}
+
+/**
+ * Pure predicate — exported for unit testing independent of DynamoDB.
+ * City/state are case-insensitive substring matches (free-text filter
+ * inputs); status/industry/source are exact matches (dropdown filters);
+ * createdFrom/createdTo compare against the date-only (YYYY-MM-DD) prefix
+ * of `createdAt` so the "to" boundary includes the whole day, not just
+ * midnight.
+ */
+export function matchesBusinessFilters(business: Business, filters: BusinessFilters): boolean {
+  if (filters.status && business.status !== filters.status) return false;
+  if (filters.industry && business.industry !== filters.industry) return false;
+  if (filters.source && business.source !== filters.source) return false;
+  if (filters.city && !(business.address?.city ?? '').toLowerCase().includes(filters.city.toLowerCase())) {
+    return false;
+  }
+  if (filters.state && !(business.address?.state ?? '').toLowerCase().includes(filters.state.toLowerCase())) {
+    return false;
+  }
+  const createdDate = business.createdAt.slice(0, 10);
+  if (filters.createdFrom && createdDate < filters.createdFrom) return false;
+  if (filters.createdTo && createdDate > filters.createdTo) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
 
+/** Raw scan page size for the filtered path — see `listBusinesses` below. */
+const FILTERED_SCAN_PAGE_SIZE = 50;
+/** Safety cap matching `listAllBusinesses` — bounds worst-case scan cost for a selective filter. */
+const FILTERED_SCAN_SAFETY_CAP_PAGES = 40;
+
 /**
- * Retrieve all businesses, newest-first (scan order), with cursor pagination.
+ * Retrieve businesses, newest-first (scan order), with cursor pagination.
  * For production scale this should query via a GSI with a high-cardinality key.
+ *
+ * When any filter is supplied, DynamoDB is scanned in pages and filtered in
+ * application code (no GSI supports status+industry+source+city+state+date
+ * together) — acceptable at today's dev scale, matching the same tradeoff
+ * `listAllBusinesses` already documents. A full page is always filtered
+ * before checking whether `limit` is satisfied, so `nextCursor` never skips
+ * a matching item that happened to sit after the limit was reached
+ * mid-page — the returned page may therefore occasionally contain more
+ * than `limit` items rather than lose one.
  */
 export async function listBusinesses(
   opts: ListBusinessesOptions = {},
 ): Promise<ListBusinessesResult> {
-  const { limit = 50, cursor } = opts;
+  const { limit = 50, cursor, ...filters } = opts;
   const client = getDynamoDBClient();
 
-  const params: ScanCommandInput = {
-    TableName: TABLE_BUSINESSES(),
-    Limit: limit,
-    ...(cursor ? { ExclusiveStartKey: decodeCursor(cursor) } : {}),
-  };
+  if (!hasAnyFilter(filters)) {
+    const params: ScanCommandInput = {
+      TableName: TABLE_BUSINESSES(),
+      Limit: limit,
+      ...(cursor ? { ExclusiveStartKey: decodeCursor(cursor) } : {}),
+    };
+    const result = await client.send(new ScanCommand(params));
+    const items = (result.Items ?? []).map((item) => BusinessSchema.parse(item));
+    return {
+      items,
+      nextCursor: result.LastEvaluatedKey ? encodeCursor(result.LastEvaluatedKey) : undefined,
+    };
+  }
 
-  const result = await client.send(new ScanCommand(params));
+  const items: Business[] = [];
+  let exclusiveStartKey = cursor ? decodeCursor(cursor) : undefined;
+  let pages = 0;
+  let exhausted = false;
 
-  const items = (result.Items ?? []).map((item) => BusinessSchema.parse(item));
+  while (items.length < limit && pages < FILTERED_SCAN_SAFETY_CAP_PAGES) {
+    const result = await client.send(
+      new ScanCommand({
+        TableName: TABLE_BUSINESSES(),
+        Limit: FILTERED_SCAN_PAGE_SIZE,
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+      }),
+    );
+    for (const raw of result.Items ?? []) {
+      const business = BusinessSchema.parse(raw);
+      if (matchesBusinessFilters(business, filters)) items.push(business);
+    }
+    exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    pages += 1;
+    if (!exclusiveStartKey) {
+      exhausted = true;
+      break;
+    }
+  }
 
   return {
     items,
-    nextCursor: result.LastEvaluatedKey
-      ? encodeCursor(result.LastEvaluatedKey)
-      : undefined,
+    nextCursor: exhausted ? undefined : exclusiveStartKey ? encodeCursor(exclusiveStartKey) : undefined,
   };
 }
 
@@ -113,6 +203,60 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   const items = result.Items ?? [];
   if (items.length === 0) return null;
   return BusinessSchema.parse(items[0]);
+}
+
+/**
+ * Retrieve a single business by Google Place ID using the
+ * google-place-id-index GSI. The fast-path duplicate check for Stage 12
+ * (Google Places Discovery) — a Place ID match is definitive.
+ */
+export async function getBusinessByGooglePlaceId(googlePlaceId: string): Promise<Business | null> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_BUSINESSES(),
+      IndexName: 'google-place-id-index',
+      KeyConditionExpression: 'googlePlaceId = :googlePlaceId',
+      ExpressionAttributeValues: { ':googlePlaceId': googlePlaceId },
+      Limit: 1,
+    }),
+  );
+  const items = result.Items ?? [];
+  if (items.length === 0) return null;
+  return BusinessSchema.parse(items[0]);
+}
+
+/**
+ * Retrieve every business in the table, paging through Scan until
+ * exhausted (or a safety cap is hit). Used for the domain/phone/name+address
+ * duplicate-detection signals (Stage 12) that have no dedicated GSI —
+ * acceptable at today's dev scale; a high-cardinality index would be needed
+ * before this could run against a large production table.
+ */
+const LIST_ALL_SAFETY_CAP_PAGES = 40;
+
+export async function listAllBusinesses(): Promise<Business[]> {
+  const client = getDynamoDBClient();
+  const items: Business[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  let pages = 0;
+
+  do {
+    const result = await client.send(
+      new ScanCommand({
+        TableName: TABLE_BUSINESSES(),
+        Limit: 200,
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+      }),
+    );
+    for (const item of result.Items ?? []) {
+      items.push(BusinessSchema.parse(item));
+    }
+    exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    pages += 1;
+  } while (exclusiveStartKey && pages < LIST_ALL_SAFETY_CAP_PAGES);
+
+  return items;
 }
 
 /**

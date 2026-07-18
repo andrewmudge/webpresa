@@ -244,7 +244,7 @@ Because CloudFormation only touches a secret's value when the CDK construct's `j
 
 ## Stage 12 — Google Places Discovery deployment guidance
 
-**Documentation only — no deployment has been performed for Stage 12.** This section describes what setup Stage 12 will require once implemented; nothing below has been executed against Google Cloud, AWS, or Vercel as part of writing it.
+**Application code is implemented and manually verified** (see `build_log.md`, "Stage 12 — Google Places Discovery"). The `webpresa-dev-google-places` secret now holds a real API key (populated via the standard `aws secretsmanager put-secret-value --profile webpresa` command below — no other AWS resource was created or modified). **No Google Cloud project configuration, IAM key-restriction setup, quota, or budget alert has been performed** — the guidance below (API key restrictions, quota limits, budget alerts) still describes required setup, not completed setup. No Vercel change or deployment was performed.
 
 ### Google Cloud project and API setup
 

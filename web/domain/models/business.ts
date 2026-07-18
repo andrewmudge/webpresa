@@ -39,7 +39,7 @@ export interface BusinessProcessStep {
 export const BUSINESS_STATUSES = ['active', 'inactive', 'pending', 'archived'] as const;
 export type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
-export const BUSINESS_SOURCES = ['scan', 'manual', 'import'] as const;
+export const BUSINESS_SOURCES = ['scan', 'manual', 'import', 'google_places'] as const;
 export type BusinessSource = (typeof BUSINESS_SOURCES)[number];
 
 // ---------------------------------------------------------------------------

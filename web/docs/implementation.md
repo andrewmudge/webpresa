@@ -1,7 +1,7 @@
 # Webpresa Implementation Plan
 
 **Last updated:** 2026-07-17  
-**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 onward is next.  
+**Status:** Stages 1–10 complete in development. Stage 11 (Manual AI Website Generation) foundation implemented and manually tested end-to-end against the real OpenAI API. Stage 11.x (Configurable Website-Section System) implemented and manually tested end-to-end as a foundation stage inserted before Stage 12 — see each stage's Status field below and `build_log.md`. Stage 12 (Google Places Discovery) implemented, automatically tested, and manually verified end-to-end against the real Google Places API and dev DynamoDB. Stage 13 onward is next.  
 **Primary development AWS profile:** `webpresa`  
 **Primary AWS region:** `us-east-1`
 
@@ -1016,7 +1016,7 @@ Google Places (Stage 12), Firecrawl, AI section selection, AI-generated testimon
 
 ## Status
 
-Not started. Next implementation stage after Stage 11.x.
+Implemented, automatically tested, and manually verified end-to-end against the real Google Places API and the real dev DynamoDB table (see `build_log.md`, "Stage 12 — Google Places Discovery", "Manual" verification line). Not yet exercised through the admin UI in a live browser session — the manual verification called the same Server Action functions directly.
 
 ## Objective
 
