@@ -58,22 +58,43 @@ export default async function ScansPage({ searchParams }: Props) {
     uniqueBusinessIds.map((id, i) => [id, businesses[i]?.name ?? null] as const),
   );
 
+  // Unfiltered view: one row per business (its latest scan), since `scans`
+  // is already sorted newest-first — the first occurrence per businessId is
+  // that business's latest attempt. The filtered (?businessId=) view already
+  // shows the full un-grouped history for one company, so it's left as-is.
+  const scanCountByBusiness = new Map<string, number>();
+  for (const scan of scans) {
+    scanCountByBusiness.set(scan.businessId, (scanCountByBusiness.get(scan.businessId) ?? 0) + 1);
+  }
+  const latestScanByBusiness: ScanEvent[] = [];
+  if (!filterBusinessId) {
+    const seen = new Set<string>();
+    for (const scan of scans) {
+      if (seen.has(scan.businessId)) continue;
+      seen.add(scan.businessId);
+      latestScanByBusiness.push(scan);
+    }
+  }
+  const rows = filterBusinessId ? scans : latestScanByBusiness;
+
   return (
     <div className="p-8">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">Scans</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          {scans.length} scan{scans.length === 1 ? '' : 's'}
           {filterBusinessId ? (
             <>
-              {' '}
-              for <span className="font-medium text-gray-700">{filterBusiness?.name ?? filterBusinessId}</span> —{' '}
+              {scans.length} scan{scans.length === 1 ? '' : 's'} for{' '}
+              <span className="font-medium text-gray-700">{filterBusiness?.name ?? filterBusinessId}</span> —{' '}
               <Link href="/admin/scans" className="text-(--color-brand) hover:underline">
                 clear filter
               </Link>
             </>
           ) : (
-            ' — every Firecrawl website-enrichment attempt across all businesses.'
+            <>
+              {rows.length} business{rows.length === 1 ? '' : 'es'} with a Firecrawl website-enrichment attempt.
+              Click a business to see its full scan history.
+            </>
           )}
         </p>
       </div>
@@ -84,13 +105,13 @@ export default async function ScansPage({ searchParams }: Props) {
         </div>
       )}
 
-      {!loadError && scans.length === 0 && (
+      {!loadError && rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-gray-200 p-10 text-center text-sm text-gray-400">
           No scans yet. Run &quot;Enrich Website&quot; on a business with a website to create one.
         </div>
       )}
 
-      {scans.length > 0 && (
+      {rows.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -106,19 +127,27 @@ export default async function ScansPage({ searchParams }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {scans.map((scan) => {
+              {rows.map((scan) => {
                 const accepted = scan.images?.filter((i) => i.status === 'accepted').length ?? 0;
                 const total = scan.images?.length ?? 0;
                 const businessName = businessNameById.get(scan.businessId);
+                const scanCount = scanCountByBusiness.get(scan.businessId) ?? 1;
                 return (
                   <tr key={scan.scanId} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
                       <Link
-                        href={`/admin/businesses/${scan.businessId}`}
+                        href={
+                          filterBusinessId
+                            ? `/admin/businesses/${scan.businessId}`
+                            : `/admin/scans?businessId=${scan.businessId}`
+                        }
                         className="font-medium text-gray-900 hover:text-(--color-brand) hover:underline"
                       >
                         {businessName ?? scan.businessId}
                       </Link>
+                      {!filterBusinessId && scanCount > 1 && (
+                        <span className="ml-1.5 text-xs text-gray-400">· {scanCount} scans</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={scan.status} />

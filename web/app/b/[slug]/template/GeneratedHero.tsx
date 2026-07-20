@@ -13,6 +13,12 @@ interface Props {
   subheadline: string;
   serviceArea?: string;
   heroImageUrl?: string;
+  /**
+   * Optional mobile-only hero photo, independent of `heroImageUrl`/`heroStyle`
+   * (both desktop-oriented). Unset falls back to the theme illustration on
+   * mobile, exactly as before this prop existed.
+   */
+  heroImageUrlMobile?: string;
   /** Falls back to `heroImageUrl ? 'image' : 'illustration'` when absent (legacy previews). */
   heroStyle?: HeroStyle;
   /** Drives the industry watermark icon shown for the legacy gradient/pattern/solid fallbacks. */
@@ -30,14 +36,21 @@ interface Props {
  * graphic at every viewport), renders a single `<Image>` whose crop shifts
  * by breakpoint via CSS, exactly as before this component was extracted.
  *
- * When they differ (the `'imageSplit'` style, and the mobile-only piece of
- * `'image'` — see below), renders two `<Image>`s, each CSS-hidden at the
- * other breakpoint: mobile always shows the theme illustration (no real
- * photo on mobile yet — deferred to a future session), desktop shows the
- * real photo.
+ * When they differ (the `'imageSplit'` style, the mobile-only piece of
+ * `'image'`, or `'illustration'` with a `heroImageUrlMobile` set — see
+ * below), renders two `<Image>`s, each CSS-hidden at the other breakpoint:
+ * mobile shows whichever `mobileSrc` its caller resolved (the theme
+ * illustration by default, or a real photo when `heroImageUrlMobile` is
+ * set), desktop shows `desktopSrc`.
  */
 function HeroCornerImage({ desktopSrc, mobileSrc }: { desktopSrc: string; mobileSrc: string }) {
-  const wrapperClassName = 'absolute inset-y-0 right-0 w-[35%] lg:relative lg:inset-auto lg:w-auto lg:order-2 lg:min-h-[280px]';
+  // A floating rounded card, inset from the section's top/right/bottom edges
+  // (`inset-y-4 right-4` mobile, `lg:my-8 lg:mr-8 xl:mr-12` desktop) with a
+  // shadow — all 4 corners rounded. The left edge is the one exception, left
+  // flush against the text column and blended via the gradient overlay
+  // below rather than gapped, so it still reads as one continuous section.
+  const wrapperClassName =
+    'absolute inset-y-4 right-4 w-[35%] rounded-2xl overflow-hidden shadow-xl lg:relative lg:inset-auto lg:w-auto lg:order-2 lg:min-h-[280px] lg:my-8 lg:mr-8 xl:mr-12';
   const gradientOverlay = (
     <div
       className="absolute inset-0 lg:hidden"
@@ -88,12 +101,16 @@ interface SplitHeroSectionProps {
  * desktop rendering stays the separate full-bleed legacy section below —
  * see the `'image'` branch in `GeneratedHero`).
  *
- * Desktop (`lg:`+): a true full-bleed two-column split — no `max-w-6xl`
- * wrapper, unlike every other section — light background, no dark
- * readability scrim (text sits on a plain panel, not on top of the image).
+ * Desktop (`lg:`+): the section itself has no `max-w-6xl` wrapper, unlike
+ * every other section, so the text column can run the full width of its
+ * half — light background, no dark readability scrim (text sits on a plain
+ * panel, not on top of the image). The image itself is not full-bleed
+ * though — see `HeroCornerImage` — it floats as a rounded, shadowed card
+ * inset from the section's top/right/bottom edges.
  * Mobile: the image is `position: absolute`, cropped to the right ~35% of
- * the screen, height-matched to the text column's own natural content
- * height, with a gradient blending its left portion into
+ * the screen (also inset top/right/bottom into a rounded card — see
+ * `HeroCornerImage`), height-matched to the text column's own natural
+ * content height, with a gradient blending its left portion into
  * `var(--site-background)` so text stays legible.
  */
 function SplitHeroSection({
@@ -183,6 +200,7 @@ export function GeneratedHero({
   subheadline,
   serviceArea,
   heroImageUrl,
+  heroImageUrlMobile,
   heroStyle,
   industry,
   themeName,
@@ -209,16 +227,16 @@ export function GeneratedHero({
         primary={primary}
         secondary={secondary}
         desktopImageSrc={illustrationSrc}
-        mobileImageSrc={illustrationSrc}
+        mobileImageSrc={heroImageUrlMobile ?? illustrationSrc}
       />
     );
   }
 
   // 'imageSplit' — a real hero photo that isn't exactly 1920x1080 or
   // 1600x900 (see lib/image/hero-dimensions.ts). Reuses the same split
-  // layout as 'illustration', with the real photo on the desktop side; on
-  // mobile it still shows the theme illustration, not the real photo — see
-  // the module-level Props comment and the 'image' branch below for why.
+  // layout as 'illustration', with the real photo on the desktop side.
+  // Mobile is independent of the desktop photo — it shows
+  // `heroImageUrlMobile` when set, else the theme illustration.
   if (resolvedStyle === 'imageSplit' && heroImageUrl) {
     return (
       <SplitHeroSection
@@ -228,7 +246,7 @@ export function GeneratedHero({
         primary={primary}
         secondary={secondary}
         desktopImageSrc={heroImageUrl}
-        mobileImageSrc={getHeroIllustration(themeName)}
+        mobileImageSrc={heroImageUrlMobile ?? getHeroIllustration(themeName)}
       />
     );
   }
@@ -348,11 +366,15 @@ export function GeneratedHero({
 
   // 'image' — a real hero photo, exactly hero-dimensioned. Desktop keeps
   // today's full-bleed photo treatment (the legacy section above) exactly
-  // as-is; mobile does not show the real photo (deferred — see the Props
-  // comment) and instead borrows the same no-photo split shell that
-  // 'illustration'/'imageSplit' use, themed to match.
+  // as-is; mobile borrows the same no-photo split shell that
+  // 'illustration'/'imageSplit' use, showing `heroImageUrlMobile` when set,
+  // else the theme illustration (independent of the desktop photo above —
+  // this branch's desktop rendering is `legacySection`, a completely
+  // separate element, so `desktopImageSrc` here only matters for the
+  // `desktopSrc === mobileSrc` single-`<Image>` optimization inside
+  // `HeroCornerImage`, never for anything actually shown at `lg:`+).
   if (resolvedStyle === 'image' && showImage) {
-    const illustrationSrc = getHeroIllustration(themeName);
+    const mobileHeroSrc = heroImageUrlMobile ?? getHeroIllustration(themeName);
     return (
       <>
         <div className="lg:hidden">
@@ -362,8 +384,8 @@ export function GeneratedHero({
             serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
-            desktopImageSrc={illustrationSrc}
-            mobileImageSrc={illustrationSrc}
+            desktopImageSrc={mobileHeroSrc}
+            mobileImageSrc={mobileHeroSrc}
           />
         </div>
         <div className="hidden lg:block">{legacySection}</div>

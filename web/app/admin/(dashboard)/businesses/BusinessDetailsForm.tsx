@@ -213,6 +213,19 @@ export function BusinessDetailsForm({ action, defaults, submitLabel = 'Save', sh
         </div>
       </section>
 
+      {/* Social links — admin-entered, always wins over whatever Firecrawl
+          discovers on a scrape (see generatePreviewContent). */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Social Links</h2>
+        <TextareaField
+          label="Social profile URLs"
+          name="socialLinks"
+          placeholder={'One URL per line, up to 6\ne.g. https://facebook.com/yourbusiness\nhttps://instagram.com/yourbusiness'}
+          defaultValue={defaults?.socialLinks?.join('\n')}
+          errors={errors.socialLinks}
+        />
+      </section>
+
       <div className="flex items-center gap-3 pt-2">
         <SubmitButton label={submitLabel} />
       </div>

@@ -32,11 +32,15 @@ export interface PreviewService {
 /**
  * A single social/review-platform profile link, classified by hostname
  * (`lib/social-links.ts`) so the Social Links section can render the right
- * icon. Sourced exclusively from Firecrawl's normalized enrichment snapshot
- * (`WebsiteEnrichmentSnapshot.socialLinks`, Stage 13) — there is no manual
- * admin-entry path, matching the same "no admin hand-typing" treatment the
- * Reviews section already gets, since a link presented as a business's
- * official profile should be evidence-sourced, not freely typed.
+ * icon. Sourced from `Business.socialLinks` (admin-entered, wins when
+ * present) or, absent that, Firecrawl's normalized enrichment snapshot
+ * (`WebsiteEnrichmentSnapshot.socialLinks`, Stage 13) — see
+ * `generatePreviewContent` in `lib/ai/generate-preview.ts` for the merge.
+ * Not directly hand-editable on the `SitePreview` itself (no inline content
+ * editor — see `SectionConfigForm.tsx`'s `NO_EDITOR_SECTIONS`), so a link
+ * presented as a business's official profile is always either admin-entered
+ * on `Business` or evidence-sourced from a real scrape, never typed
+ * mid-preview to look like a verified link.
  */
 export interface PreviewSocialLink {
   platform: SocialPlatform;
@@ -207,6 +211,15 @@ export interface PreviewTheme {
   /** URL of the hero section background image. Uses a gradient fallback when absent. */
   heroImageUrl?: string;
   /**
+   * Optional mobile-only hero photo, independent of `heroImageUrl`/`heroStyle`
+   * (both desktop-oriented — see `heroStyle`'s doc comment below). Unset
+   * always falls back to the theme illustration on mobile, exactly as
+   * before this field existed; set from `Business.heroPhotoUrlMobile` at
+   * generation time (`lib/ai/generate-preview.ts`), manual-only — no
+   * automatic upload-order assignment, unlike the desktop slots.
+   */
+  heroImageUrlMobile?: string;
+  /**
    * URL of the WhyChooseUs section image. Name predates that component's
    * current title — kept as-is to avoid another breaking rename; see
    * `aboutSectionImageUrl` for the image actually shown in the AboutSection
@@ -226,10 +239,11 @@ export interface PreviewTheme {
    * two-column split, real photo on the right, desktop only) for any other
    * size. `'illustration'` (a theme-matched static graphic, see
    * `template/hero-illustrations.ts`) is used whenever no hero photo
-   * resolves at all. On mobile, `'image'` and `'imageSplit'` both currently
-   * render the same no-photo illustration treatment as `'illustration'` —
-   * a real uploaded photo is not yet shown on mobile at any size (deferred
-   * to a future session). `gradient`/`pattern`/`solid` are legacy values
+   * resolves at all. On mobile, `'image'` and `'imageSplit'` both render the
+   * theme illustration by default, same as `'illustration'` — unless
+   * `heroImageUrlMobile` (above) is set, in which case that photo renders
+   * on mobile instead, independent of whatever this field resolved for
+   * desktop. `gradient`/`pattern`/`solid` are legacy values
    * only — no new preview generates them, but previews saved before
    * `'illustration'` existed keep rendering with them unchanged (at every
    * viewport size, exactly as before this hero-dimension-classification

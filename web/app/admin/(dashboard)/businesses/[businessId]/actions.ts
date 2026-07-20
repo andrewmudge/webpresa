@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import type { Business } from '@/domain/models/business';
-import type { HeroStyle, PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewTheme } from '@/domain/models/site-preview';
+import type { HeroStyle, PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewSocialLink, PreviewTheme } from '@/domain/models/site-preview';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { PreviewContentSchema, PreviewThemeSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
@@ -31,6 +31,8 @@ import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import { uploadBusinessAssets, uploadBusinessAsset, fileExtension } from '@/lib/s3/business-assets';
+import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
+import { classifySocialPlatform } from '@/lib/social-links';
 import type { BusinessFormState } from '../actions';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
 import type { GalleryImage, PreviewService } from '@/domain/models/site-preview';
@@ -53,7 +55,27 @@ const WEBSITE_GENERATION_FIELDS = {
   differentiators: z.string().max(2000).optional(),
   brandTone: z.enum(BRAND_TONES).optional(),
   notes: z.string().max(2000).optional(),
+  /** Raw multi-line textarea input, one URL per line — parsed/validated/deduped by `parseSocialLinksInput` before persisting. */
+  socialLinks: z.string().max(2000).optional(),
 };
+
+/**
+ * Splits the "Social Links" textarea into a bounded, deduped list of valid
+ * URLs — same sanitization Firecrawl's own discovered links go through.
+ * Each line is scheme-normalized first (same as `normalizeUrl` already does
+ * for `websiteUrl`) — `sanitizeAndDedupeSocialLinks` requires a real
+ * `http(s)://` scheme to consider a URL valid, so a bare domain typed
+ * without one (e.g. `facebook.com/yourbusiness`) would otherwise be
+ * silently dropped instead of accepted.
+ */
+function parseSocialLinksInput(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const lines = raw
+    .split('\n')
+    .map((line) => normalizeUrl(line.trim()))
+    .filter((line): line is string => !!line);
+  return sanitizeAndDedupeSocialLinks(lines, 6);
+}
 
 const UpdateBusinessDetailsSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -112,6 +134,7 @@ export async function updateBusinessDetailsAction(
     differentiators: coerceOptional(formData.get('differentiators') as string | undefined),
     brandTone: (formData.get('brandTone') as string) || undefined,
     notes: coerceOptional(formData.get('notes') as string | undefined),
+    socialLinks: coerceOptional(formData.get('socialLinks') as string | undefined),
   };
 
   const parsed = UpdateBusinessDetailsSchema.safeParse(raw);
@@ -119,6 +142,17 @@ export async function updateBusinessDetailsAction(
     return { errors: parsed.error.flatten().fieldErrors };
   }
   const data = parsed.data;
+  const socialLinks = parseSocialLinksInput(data.socialLinks);
+  // Surface parsing failures instead of silently saving nothing — every
+  // line failed sanitization (e.g. not a real URL) if non-blank input
+  // produced zero valid links.
+  if (data.socialLinks && socialLinks.length === 0) {
+    return {
+      errors: {
+        socialLinks: ['No valid URLs found — enter one per line, e.g. https://facebook.com/yourbusiness'],
+      },
+    };
+  }
 
   try {
     const existing = await getBusinessById(businessId);
@@ -151,8 +185,31 @@ export async function updateBusinessDetailsAction(
       differentiators: data.differentiators,
       brandTone: data.brandTone,
       notes: data.notes,
+      socialLinks: socialLinks.length > 0 ? socialLinks : undefined,
       updatedAt: new Date().toISOString(),
     });
+
+    // Dual-write: admin-entered social links apply to the live preview
+    // immediately, not just the next regeneration — same reasoning as the
+    // theme/photo-slot dual-writes below. Only ever patches when the admin
+    // has non-empty social links to apply — an empty/cleared field is left
+    // alone so this can never silently wipe out Firecrawl-discovered links
+    // that a prior enrichment run already put on the current preview
+    // (mirrors generatePreviewContent's own "Business wins only when
+    // non-empty" rule).
+    if (socialLinks.length > 0) {
+      const previews = await listPreviewsForBusiness(businessId);
+      const latest = previews[0];
+      if (latest) {
+        const newSocialLinks: PreviewSocialLink[] = socialLinks.map((url) => ({
+          platform: classifySocialPlatform(url),
+          url,
+        }));
+        const content: PreviewContent = { ...latest.content, socialLinks: newSocialLinks };
+        PreviewContentSchema.parse(content);
+        await putSitePreview({ ...latest, content, updatedAt: new Date().toISOString() });
+      }
+    }
   } catch (err) {
     console.error('Failed to update business details:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
@@ -251,6 +308,7 @@ export async function updateAdminFieldsAction(
 
 const UpdatePhotosSchema = z.object({
   heroPhotoUrl: z.string().optional(),
+  heroPhotoUrlMobile: z.string().optional(),
   aboutPhotoUrl: z.string().optional(),
   whyChooseUsPhotoUrl: z.string().optional(),
   servicesPhotoUrl: z.string().optional(),
@@ -293,6 +351,7 @@ const MAX_BUSINESS_PHOTOS = 6;
  */
 const SLOT_UPLOAD_FIELDS = {
   heroPhotoUrl: 'heroPhotoFile',
+  heroPhotoUrlMobile: 'heroPhotoFileMobile',
   aboutPhotoUrl: 'aboutPhotoFile',
   whyChooseUsPhotoUrl: 'whyChooseUsPhotoFile',
   servicesPhotoUrl: 'servicesPhotoFile',
@@ -318,6 +377,7 @@ export async function updatePhotosAction(
 
   const raw = {
     heroPhotoUrl: (formData.get('heroPhotoUrl') as string) || undefined,
+    heroPhotoUrlMobile: (formData.get('heroPhotoUrlMobile') as string) || undefined,
     aboutPhotoUrl: (formData.get('aboutPhotoUrl') as string) || undefined,
     whyChooseUsPhotoUrl: (formData.get('whyChooseUsPhotoUrl') as string) || undefined,
     servicesPhotoUrl: (formData.get('servicesPhotoUrl') as string) || undefined,
@@ -358,6 +418,7 @@ export async function updatePhotosAction(
     }
 
     const heroPhotoUrl = slotOverrides.heroPhotoUrl ?? data.heroPhotoUrl;
+    const heroPhotoUrlMobile = slotOverrides.heroPhotoUrlMobile ?? data.heroPhotoUrlMobile;
     const aboutPhotoUrl = slotOverrides.aboutPhotoUrl ?? data.aboutPhotoUrl;
     const whyChooseUsPhotoUrl = slotOverrides.whyChooseUsPhotoUrl ?? data.whyChooseUsPhotoUrl;
     const servicesPhotoUrl = slotOverrides.servicesPhotoUrl ?? data.servicesPhotoUrl;
@@ -365,6 +426,7 @@ export async function updatePhotosAction(
     await putBusiness({
       ...existing,
       heroPhotoUrl,
+      heroPhotoUrlMobile,
       aboutPhotoUrl,
       whyChooseUsPhotoUrl,
       servicesPhotoUrl,
@@ -375,11 +437,12 @@ export async function updatePhotosAction(
 
     // Dual-write: apply explicitly-set slots to the live preview too.
     const hero = resolveThemePhotoPatch(heroPhotoUrl);
+    const heroMobile = resolveThemePhotoPatch(heroPhotoUrlMobile);
     const about = resolveThemePhotoPatch(aboutPhotoUrl);
     const whyChooseUs = resolveThemePhotoPatch(whyChooseUsPhotoUrl);
     const services = resolveThemePhotoPatch(servicesPhotoUrl);
 
-    if (hero.apply || about.apply || whyChooseUs.apply || services.apply) {
+    if (hero.apply || heroMobile.apply || about.apply || whyChooseUs.apply || services.apply) {
       const previews = await listPreviewsForBusiness(businessId);
       const latest = previews[0];
       if (latest) {
@@ -402,6 +465,7 @@ export async function updatePhotosAction(
         const theme: PreviewTheme = {
           ...latest.theme,
           ...(hero.apply ? { heroImageUrl: hero.url, heroStyle } : {}),
+          ...(heroMobile.apply ? { heroImageUrlMobile: heroMobile.url } : {}),
           ...(about.apply ? { aboutSectionImageUrl: about.url } : {}),
           ...(whyChooseUs.apply ? { aboutImageUrl: whyChooseUs.url } : {}),
           ...(services.apply ? { servicesImageUrl: services.url } : {}),

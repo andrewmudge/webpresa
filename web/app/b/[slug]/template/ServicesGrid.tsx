@@ -11,8 +11,12 @@ interface Props {
   sectionSubheadline?: string;
 }
 
+const MAX_FULL_SERVICES = 5;
+
 export function ServicesGrid({ services, featuredImageUrl, sectionHeadline, sectionSubheadline }: Props) {
-  const [featured, ...rest] = services;
+  const fullServices = services.slice(0, MAX_FULL_SERVICES);
+  const compactServices = services.slice(MAX_FULL_SERVICES);
+  const [featured, ...rest] = fullServices;
 
   return (
     <section id="services" className="py-20 bg-(--site-background)">
@@ -31,14 +35,15 @@ export function ServicesGrid({ services, featuredImageUrl, sectionHeadline, sect
           </p>
         </div>
 
-        {/* Services layout */}
-        {services.length === 1 ? (
+        {/* Services layout — capped to MAX_FULL_SERVICES full cards; any
+            remaining services render as name-only pills below. */}
+        {fullServices.length === 1 ? (
           // Single service: full-width
           <ServiceCard service={featured} featured imageUrl={featuredImageUrl} />
-        ) : services.length === 2 ? (
+        ) : fullServices.length === 2 ? (
           // Two services: equal columns
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {services.map((s, i) => <ServiceCard key={i} service={s} />)}
+            {fullServices.map((s, i) => <ServiceCard key={i} service={s} />)}
           </div>
         ) : (
           // 3+ services: featured card + grid
@@ -51,6 +56,20 @@ export function ServicesGrid({ services, featuredImageUrl, sectionHeadline, sect
             <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-5 content-start">
               {rest.map((s, i) => <ServiceCard key={i} service={s} />)}
             </div>
+          </div>
+        )}
+
+        {/* Secondary services: name only, no card chrome */}
+        {compactServices.length > 0 && (
+          <div className="mt-6 flex flex-wrap gap-2">
+            {compactServices.map((s, i) => (
+              <span
+                key={i}
+                className="rounded-full border border-(--site-border) bg-(--site-surface) px-4 py-2 text-sm font-medium text-(--site-text)"
+              >
+                {s.name}
+              </span>
+            ))}
           </div>
         )}
 
@@ -118,7 +137,7 @@ function ServiceCard({
       <h3 className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${showPicture ? 'lg:text-white' : ''}`}>
         {service.name}
       </h3>
-      <p className={`relative z-10 text-sm leading-relaxed flex-1 text-(--site-muted) ${showPicture ? 'lg:text-white/80' : ''}`}>
+      <p className={`relative z-10 text-sm leading-relaxed flex-1 line-clamp-4 text-(--site-muted) ${showPicture ? 'lg:text-white/80' : ''}`}>
         {service.description}
       </p>
     </div>

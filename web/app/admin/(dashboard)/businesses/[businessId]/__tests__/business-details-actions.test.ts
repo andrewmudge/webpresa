@@ -66,6 +66,11 @@ vi.mock('@/lib/image/hero-dimensions', () => ({
   checkHeroPhotoDimensions: vi.fn().mockResolvedValue({ isFullBleedEligible: true, width: 1920, height: 1080 }),
 }));
 
+vi.mock('@/lib/firecrawl/normalize', () => ({
+  sanitizeAndDedupeSocialLinks: (values: string[], maxLen: number) =>
+    values.filter((v, i) => values.indexOf(v) === i).slice(0, maxLen),
+}));
+
 vi.mock('next/navigation', () => ({
   redirect: (url: string) => {
     throw new Error(`REDIRECT:${url}`);

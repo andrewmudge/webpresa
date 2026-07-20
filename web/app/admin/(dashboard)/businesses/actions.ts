@@ -8,6 +8,7 @@ import { BUSINESS_SOURCES } from '@/domain/models/business';
 import { createBusiness, type CreateBusinessInput } from '@/domain/factories/business.factory';
 import { putBusiness, resolveUniqueSlug } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
+import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -29,7 +30,27 @@ const WEBSITE_GENERATION_FIELDS = {
   notes: z.string().max(2000).optional(),
   /** Manual Brand Theme System override — undefined means "Auto" (see ThemeField in FormFields.tsx). */
   theme: z.enum(THEME_NAMES).optional(),
+  /** Raw multi-line textarea input, one URL per line — parsed/validated/deduped by `parseSocialLinksInput` before persisting. */
+  socialLinks: z.string().max(2000).optional(),
 };
+
+/**
+ * Splits the "Social Links" textarea into a bounded, deduped list of valid
+ * URLs — same sanitization Firecrawl's own discovered links go through.
+ * Each line is scheme-normalized first (same as `normalizeUrl` already does
+ * for `websiteUrl`) — `sanitizeAndDedupeSocialLinks` requires a real
+ * `http(s)://` scheme to consider a URL valid, so a bare domain typed
+ * without one (e.g. `facebook.com/yourbusiness`) would otherwise be
+ * silently dropped instead of accepted.
+ */
+function parseSocialLinksInput(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const lines = raw
+    .split('\n')
+    .map((line) => normalizeUrl(line.trim()))
+    .filter((line): line is string => !!line);
+  return sanitizeAndDedupeSocialLinks(lines, 6);
+}
 
 const CreateBusinessFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -82,6 +103,7 @@ function websiteGenerationFields(formData: FormData) {
     brandTone: (formData.get('brandTone') as string) || undefined,
     notes: coerceOptional(formData.get('notes') as string | undefined),
     theme: (formData.get('theme') as string) || undefined,
+    socialLinks: coerceOptional(formData.get('socialLinks') as string | undefined),
   };
 }
 
@@ -121,6 +143,17 @@ export async function createBusinessAction(
   }
 
   const data = parsed.data;
+  const socialLinks = parseSocialLinksInput(data.socialLinks);
+  // Surface parsing failures instead of silently saving nothing — every
+  // line failed sanitization (e.g. not a real URL) if non-blank input
+  // produced zero valid links.
+  if (data.socialLinks && socialLinks.length === 0) {
+    return {
+      errors: {
+        socialLinks: ['No valid URLs found — enter one per line, e.g. https://facebook.com/yourbusiness'],
+      },
+    };
+  }
   let businessId: string;
 
   try {
@@ -166,6 +199,7 @@ export async function createBusinessAction(
       brandTone: data.brandTone,
       notes: data.notes,
       theme: data.theme,
+      socialLinks: socialLinks.length > 0 ? socialLinks : undefined,
     });
   } catch (err) {
     console.error('Failed to create business:', err instanceof Error ? err.message : err);

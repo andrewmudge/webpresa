@@ -140,6 +140,7 @@ export const PreviewThemeSchema = z
     accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     fontFamily: z.string().min(1),
     heroImageUrl: UrlOrPathSchema.optional(),
+    heroImageUrlMobile: UrlOrPathSchema.optional(),
     aboutImageUrl: UrlOrPathSchema.optional(),
     aboutSectionImageUrl: UrlOrPathSchema.optional(),
     servicesImageUrl: UrlOrPathSchema.optional(),

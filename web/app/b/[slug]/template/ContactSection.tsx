@@ -26,11 +26,11 @@ export function ContactSection({ phone, email, address, hours }: Props) {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-3xl mx-auto">
+        <div className="flex flex-wrap justify-center gap-4 max-w-3xl mx-auto">
           {hasPhone && (
             <a
               href={toTelHref(phone!)}
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 text-white transition-all hover:scale-[1.02] hover:shadow-lg text-center"
+              className="w-full sm:w-[calc(50%-0.5rem)] lg:w-60 flex flex-col items-center justify-center gap-2 rounded-2xl p-6 text-white transition-all hover:scale-[1.02] hover:shadow-lg text-center"
               style={{ backgroundColor: V.primary }}
             >
               <svg className="w-7 h-7 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,7 +45,7 @@ export function ContactSection({ phone, email, address, hours }: Props) {
           {hasEmail && (
             <a
               href={toMailtoHref(email!)}
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 transition-all hover:scale-[1.02] hover:shadow-md border-2 text-center"
+              className="w-full sm:w-[calc(50%-0.5rem)] lg:w-60 flex flex-col items-center justify-center gap-2 rounded-2xl p-6 transition-all hover:scale-[1.02] hover:shadow-md border-2 text-center"
               style={{ borderColor: V.primary, color: V.primary }}
             >
               <svg className="w-7 h-7 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,7 +59,7 @@ export function ContactSection({ phone, email, address, hours }: Props) {
 
           {(address || hours) && (
             <div
-              className="flex flex-col items-center justify-center gap-2 rounded-2xl p-6 bg-(--site-surface) border border-(--site-border) text-center"
+              className="w-full sm:w-[calc(50%-0.5rem)] lg:w-60 flex flex-col items-center justify-center gap-2 rounded-2xl p-6 bg-(--site-surface) border border-(--site-border) text-center"
             >
               <svg className="w-7 h-7 text-(--site-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -73,7 +73,7 @@ export function ContactSection({ phone, email, address, hours }: Props) {
           )}
 
           {!hasPhone && !hasEmail && !address && !hours && (
-            <div className="sm:col-span-2 lg:col-span-3 text-center text-(--site-muted) py-6">
+            <div className="w-full text-center text-(--site-muted) py-6">
               <p className="text-sm">Contact information coming soon.</p>
             </div>
           )}

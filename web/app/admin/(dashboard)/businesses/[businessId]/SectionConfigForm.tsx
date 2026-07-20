@@ -18,10 +18,14 @@ const FOOTER_ORDER = 1000;
 const REORDER_STEP = 10;
 
 /**
- * Sections with no content editor at all — no expand chevron shown for
- * these. `socialLinks` joins `reviews` here for the same reason: it's
- * evidence sourced from Firecrawl, not something an admin should be able
- * to hand-type and have it look like a verified official profile link.
+ * Sections with no per-preview content editor at all — no expand chevron
+ * shown for these. `socialLinks` joins `reviews` here for the same reason:
+ * an admin should never be able to hand-type a link mid-preview and have it
+ * look like a verified official profile. Social links are still
+ * admin-editable, but only durably, at the `Business` level (the "Social
+ * Links" field on the Business Details card) — the same distinction
+ * `theme`/`cta` already draw between "a business-level decision" and
+ * "freely typed into one preview's content."
  */
 const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'reviews', 'socialLinks']);
 

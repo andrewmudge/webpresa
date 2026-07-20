@@ -3498,4 +3498,171 @@ web/app/b/[slug]/template/
 web/docs/
 ├── architecture.md                                                               MODIFIED — this round's five-item bullet
 └── build_log.md                                                                  MODIFIED — this entry
+
+---
+
+# Template polish and manual social links (2026-07-19)
+
+**Scope:** Four direct UI-feedback items against live screenshots (hero image panel, services grid height, contact card centering, admin scans list), plus one gap found while investigating a fifth report ("Social Links shows enabled but never renders").
+
+## 1. Hero split-image panel — visual polish
+
+`GeneratedHero.tsx`'s `HeroCornerImage` (the shared image panel for the `'illustration'`/`'imageSplit'` styles and `'image'`'s mobile rendering) rendered the photo/illustration edge-to-edge with no rounded corners and no shading — flat compared to the rest of the template. Added `rounded-l-2xl overflow-hidden` (mobile) / `lg:rounded-l-[2.5rem] lg:overflow-hidden` (desktop) on the wrapper, and an always-on inset shadow gradient along the seam with the text column (`boxShadow: inset 24px 0 48px -24px rgba(0,0,0,0.18)`). Right/top/bottom edges stay flush with the viewport — only the inward (left) edge gets the rounded/shaded treatment, preserving the existing full-bleed design intent.
+
+## 2. ServicesGrid — capped card height, name-only secondary services
+
+A business with many services (up to the schema max of 10) produced an uncapped, very tall section — every service rendered as a full card with icon + name + full description, no `line-clamp`. Fixed in `ServicesGrid.tsx`:
+- New `MAX_FULL_SERVICES = 5` — the existing featured-card + grid layout now operates on `services.slice(0, 5)` only.
+- Services beyond the 5th (`services.slice(5)`) render as plain name-only pills (`rounded-full border ... px-4 py-2`) below the grid — no icon, no description, no card chrome.
+- Each full card's description gets `line-clamp-4`, so even within the top 5 a single long description (schema allows up to 500 chars) can no longer stretch its row's siblings arbitrarily tall.
+
+## 3. ContactSection — center cards regardless of count
+
+`ContactSection.tsx` used a fixed `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`. A business with no email (a valid, supported state — `PreviewContact.email` is optional) left exactly 2 of 3 `lg:` grid cells filled, and CSS grid's default `justify-items: start` stuck them to the left instead of centering. Replaced the grid with `flex flex-wrap justify-center gap-4`, giving each card element a fixed-ish width (`w-full sm:w-[calc(50%-0.5rem)] lg:w-60`) in place of an implicit grid-column width — any count of 1–3 visible cards now centers naturally, no per-count conditional needed. The all-missing fallback block is now `w-full` instead of a grid `col-span`.
+
+## 4. Admin `/admin/scans` — group by business
+
+The unfiltered `/admin/scans` view rendered one row per `ScanEvent`, so a business enriched 5 times showed 5 rows. The existing `?businessId=...` filtered view (already used by the business detail page's "View all" link — see 2026-07-18's entry above) already shows full per-business history, so only the *unfiltered* path changed: since `listAllScans()` is already sorted newest-first, a single in-memory pass keeps the first occurrence per `businessId` (`latestScanByBusiness`), giving one row per business (its latest scan) plus a computed `scanCountByBusiness` shown as "· N scans" next to the name. The business-name link in this grouped view now points at `/admin/scans?businessId=...` (full history) instead of `/admin/businesses/...`; the filtered view's own business-name link is unchanged. No new repository function — matches the existing dev-scale, in-memory-filter precedent this file already used for the `businessId` filter itself.
+
+## 5. Business.socialLinks — manual social-links entry
+
+**The gap:** investigating a report that the "Social Links" section showed "enabled" in the admin Website Sections list but never rendered on a real business's public preview (despite the business clearly having Instagram/Facebook links) traced to `computeSectionAvailability`'s `socialLinks` check requiring `PreviewContent.socialLinks.length >= 1` — and that field (`lib/ai/generate-preview.ts`) was populated *exclusively* from a Firecrawl `WebsiteEnrichmentSnapshot`, never set by the manual "Generate Website" path (`generateWebsiteAction` calls `generatePreviewContent(business)` with no `enrichment` option), and with no `Business` field or admin form to enter links manually at all. `enabled: true` in `WebsiteSectionsConfig` is independent of and insufficient for `computeSectionAvailability` — a real, reproducible admin-facing confusion, not a one-off.
+
+**The fix — new durable `Business.socialLinks?: string[]` field**, following the same "Business is canonical, persists across every regeneration" precedent already established for `theme`/`cta`:
+- `domain/models/business.ts` — `socialLinks?: string[]`.
+- `domain/schemas/business.schema.ts` — `z.array(z.string().url()).max(6).optional()`.
+- `lib/firecrawl/normalize.ts` — `sanitizeAndDedupeSocialLinks` is now exported (was a private helper) and reused by the admin action's parsing, so manually-entered and Firecrawl-discovered links get identical validation/host-dedup treatment.
+- New "Social Links" section on `BusinessDetailsForm.tsx` — a `TextareaField` ("Social profile URLs", one URL per line, up to 6), wired into both `businesses/actions.ts` (`createBusinessAction`, wizard step 1) and `[businessId]/actions.ts` (`updateBusinessDetailsAction`, the inline "Business Details" card) via a shared-shape `parseSocialLinksInput()` helper (duplicated in each file, matching how `WEBSITE_GENERATION_FIELDS` is already duplicated between the two action files) that splits the textarea on newlines, trims, filters blanks, and runs the result through `sanitizeAndDedupeSocialLinks(lines, 6)`.
+- `lib/ai/generate-preview.ts` — `business.socialLinks` now wins outright when non-empty; the Firecrawl enrichment snapshot is only consulted as a fallback when the business left it blank (mirrors `buildGenerationContext`'s existing "Business always wins" merge rule for the free-text generation-input fields).
+- Doc-comment updates to remove the now-inaccurate "no manual admin-entry path" claim in three places: `PreviewSocialLink` (`site-preview.ts`), `SocialLinksSection.tsx`, and `SectionConfigForm.tsx`'s `NO_EDITOR_SECTIONS` comment (still correctly excludes `socialLinks` from the *per-preview* inline content editor — the durable field lives on `Business`, not `SitePreview`, same distinction `theme`/`cta` already draw).
+
+**Test fallout:** four existing action test files (`businesses/__tests__/actions.test.ts`, `[businessId]/__tests__/actions.test.ts`, `business-details-actions.test.ts`, `website-sections-actions.test.ts`) started failing after `actions.ts` gained a real (unmocked) import of `@/lib/firecrawl/normalize`, which has a top-level `import 'server-only'` — that package's `index.js` unconditionally throws outside a bundler's `react-server` export-condition resolution (confirmed by reading `node_modules/server-only/index.js`/`package.json` directly), so importing it for real in plain Node/vitest always throws, regardless of the `environment: 'node'` vitest config. Every other `server-only`-importing module these tests touch (`lib/db/businesses.ts`, `lib/ai/generate-preview.ts`, `lib/image/hero-dimensions.ts`) was already `vi.mock()`'d for unrelated reasons, which incidentally prevented the real file (and its `server-only` import) from ever loading — `lib/firecrawl/normalize.ts` was the first module these four files pulled in for real. Fixed by adding a `vi.mock('@/lib/firecrawl/normalize', ...)` (a plain dedupe-and-cap stub, sufficient since none of these four suites test social-link parsing directly — that's `lib/firecrawl/__tests__/normalize.test.ts`'s job, already 10 passing tests, unchanged) to each of the four files.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     515 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/
+├── GeneratedHero.tsx                                                             MODIFIED — HeroCornerImage rounded/shaded panel
+├── ServicesGrid.tsx                                                              MODIFIED — MAX_FULL_SERVICES cap, name-only pills, line-clamp
+├── ContactSection.tsx                                                            MODIFIED — flex-wrap centered layout
+└── SocialLinksSection.tsx                                                        MODIFIED — doc comment only
+
+web/app/admin/(dashboard)/
+├── scans/page.tsx                                                                MODIFIED — group-by-business unfiltered view
+└── businesses/
+    ├── FormFields.tsx                                                            (unchanged — reused TextareaField)
+    ├── BusinessDetailsForm.tsx                                                   MODIFIED — Social Links textarea section
+    ├── actions.ts                                                                MODIFIED — socialLinks in create action
+    ├── __tests__/actions.test.ts                                                 MODIFIED — mock @/lib/firecrawl/normalize
+    └── [businessId]/
+        ├── actions.ts                                                            MODIFIED — socialLinks in update action
+        ├── SectionConfigForm.tsx                                                 MODIFIED — doc comment only
+        └── __tests__/
+            ├── actions.test.ts                                                   MODIFIED — mock @/lib/firecrawl/normalize
+            ├── business-details-actions.test.ts                                  MODIFIED — mock @/lib/firecrawl/normalize
+            └── website-sections-actions.test.ts                                  MODIFIED — mock @/lib/firecrawl/normalize
+
+web/domain/
+├── models/business.ts                                                            MODIFIED — Business.socialLinks field
+├── models/site-preview.ts                                                        MODIFIED — PreviewSocialLink doc comment
+└── schemas/business.schema.ts                                                    MODIFIED — socialLinks schema
+
+web/lib/
+├── firecrawl/normalize.ts                                                        MODIFIED — exported sanitizeAndDedupeSocialLinks
+└── ai/generate-preview.ts                                                        MODIFIED — Business.socialLinks wins over enrichment
+
+web/docs/
+├── architecture.md                                                               MODIFIED — this round's entry
+└── build_log.md                                                                  MODIFIED — this entry
+```
+
+---
+
+# Mobile hero background photo + social-links live-preview sync (2026-07-20)
+
+**Scope:** Two follow-ups from direct feedback on the 2026-07-19 hero-panel polish and social-links work.
+
+## A. Mobile hero background photo
+
+The hero's mobile view has never shown a real uploaded photo — `GeneratedHero.tsx` always fell back to the theme illustration on mobile regardless of whether a real desktop hero photo existed, with doc comments explicitly marking this "deferred to a future session." Added a **separate, optional mobile hero photo**, following the exact same "photo-slot override" pattern as the four existing slots (`heroPhotoUrl`/`aboutPhotoUrl`/`whyChooseUsPhotoUrl`/`servicesPhotoUrl`):
+
+- `domain/models/business.ts` / `domain/schemas/business.schema.ts` — `Business.heroPhotoUrlMobile?: string` (`PhotoSlotOverrideSchema`). **Deliberately manual-only, no automatic upload-order fallback** — `resolvePhotoSlot(business.heroPhotoUrlMobile)` is called with zero fallback args in `lib/ai/generate-preview.ts`, unlike every other slot's `resolvePhotoSlot(override, ...autoFallbacks)` call. Silently defaulting an unset mobile slot to an arbitrary uploaded photo risked a bad, nobody-chose-this crop — exactly why real mobile photos were deferred in the first place.
+- `domain/models/site-preview.ts` / `domain/schemas/site-preview.schema.ts` — `PreviewTheme.heroImageUrlMobile?: string`, written into the generated `theme` object (`lib/ai/generate-preview.ts`) alongside `heroImageUrl`/`heroStyle`, conditionally spread only when resolved.
+- `app/b/[slug]/template/GeneratedHero.tsx` — new `heroImageUrlMobile` prop, threaded into the three branches capable of showing a real photo: `'illustration'` (`mobileImageSrc={heroImageUrlMobile ?? illustrationSrc}`), `'imageSplit'` (`mobileImageSrc={heroImageUrlMobile ?? getHeroIllustration(themeName)}`), and `'image'`'s `lg:hidden` mobile sub-render (both `desktopImageSrc`/`mobileImageSrc` set to `heroImageUrlMobile ?? illustrationSrc`, preserving `HeroCornerImage`'s existing "same src on both = single `<Image>`" optimization since that sub-render is never actually visible at `lg:`+ anyway). **No changes needed to `HeroCornerImage` itself** — its existing "two different `<Image>`s, each CSS-hidden per breakpoint" branch, and the gradient overlay that blends the image's left edge into the background so text stays legible, were both already built for the illustration case and are completely agnostic to what's actually rendered underneath. `app/b/[slug]/template/section-registry.tsx` passes `heroImageUrlMobile={ctx.theme.heroImageUrlMobile}` through to `GeneratedHero`.
+- `app/admin/(dashboard)/businesses/PhotosForm.tsx` — new "Mobile hero image" `PhotoPickerField` right after "Desktop hero image," `uploadFieldName="heroPhotoFileMobile"`, hint clarifying both "Auto" and "No photo" fall back to the theme illustration. No dimension-warning wiring (that's a desktop full-bleed-eligibility concern; mobile is always shown cropped via `object-cover`, nothing to warn about).
+- `app/admin/(dashboard)/businesses/[businessId]/actions.ts`'s `updatePhotosAction` — extended with the new slot using every existing helper unchanged: `UpdatePhotosSchema`, `SLOT_UPLOAD_FIELDS` (direct-upload support), the `raw`/`data`/`putBusiness` plumbing, and the dual-write block (`resolveThemePhotoPatch(heroPhotoUrlMobile)` → `...(heroMobile.apply ? { heroImageUrlMobile: heroMobile.url } : {})`). No `heroStyle` recomputation needed for this slot — unlike the desktop hero photo, mobile image presence doesn't decide *which* `heroStyle` branch renders, only what `mobileImageSrc` shows within whichever branch already applies.
+
+Not added to `businesses/actions.ts` (wizard step 1 / `createBusinessAction`) — photo-slot overrides are photos-step-only, matching how `heroPhotoUrl` itself was never in the create action either.
+
+## B. Social-links dual-write
+
+**The bug:** an admin added `Business.socialLinks` (2026-07-19's manual-entry field) and enabled the "Social Links" section, but "Review draft" never showed it. Root cause: `updateBusinessDetailsAction` only ever wrote `Business.socialLinks` — nothing patched the *already-generated* `SitePreview.content.socialLinks` the public page actually renders from (`app/b/[slug]/template/index.tsx` reads `preview.content`, never `Business` directly). `generatePreviewContent()` (which derives `content.socialLinks` from `business.socialLinks`) only runs on "Generate Website"/"Enrich Website," never on a plain Business Details save — confirmed the only two call sites are `runWebsiteGeneration` (`actions.ts`) and `enrichBusinessWebsite` (`lib/firecrawl/enrich-business.ts`). "Review draft" (`PreviewLink` in the business detail page) is a static link to whatever the current `SitePreview.content` already holds — no regeneration, no live merge.
+
+**The fix:** the same "dual-write" pattern `updateThemeAction`/`updatePhotosAction` already use for `theme` — after `putBusiness`, patch the business's most recent `SitePreview` in place too, so the change is visible immediately instead of only on the next regeneration. Added to `updateBusinessDetailsAction`, mirroring `updateThemeAction`'s exact shape (fetch `listPreviewsForBusiness`, take `previews[0]`, build the patched object, validate via schema, `putSitePreview`) but patching `content.socialLinks` instead of `theme.themeName`:
+
+```ts
+if (socialLinks.length > 0) {
+  const previews = await listPreviewsForBusiness(businessId);
+  const latest = previews[0];
+  if (latest) {
+    const newSocialLinks = socialLinks.map((url) => ({ platform: classifySocialPlatform(url), url }));
+    const content = { ...latest.content, socialLinks: newSocialLinks };
+    PreviewContentSchema.parse(content);
+    await putSitePreview({ ...latest, content, updatedAt: new Date().toISOString() });
+  }
+}
+```
+
+Deliberately **one-directional and additive-only** — only patches when `socialLinks.length > 0`, never clears `content.socialLinks` when the business-level field is empty. `updateBusinessDetailsAction` runs on *every* Business Details save (name, phone, description — anything), not just when `socialLinks` specifically changed, so a "clear when empty" version would silently destroy legitimate Firecrawl-sourced `content.socialLinks` on a completely unrelated field edit. An admin who wants to fully clear the section from an existing preview still needs a regeneration — unchanged, not a new limitation.
+
+**Note:** this fix is prospective. The business already stuck on the reported bug needs one more Business Details save (even re-clicking Save with the same values) to sync its current preview; no backfill script was written for one business.
+
+## B.1 Follow-up: URLs without an explicit scheme were silently dropped
+
+The dual-write above shipped, but the user reported the section *still* didn't render after re-entering URLs and re-saving. Root cause: `parseSocialLinksInput` (`[businessId]/actions.ts` and `businesses/actions.ts`, both copies) fed each textarea line straight into `sanitizeAndDedupeSocialLinks`, which requires a real `http://`/`https://` scheme (`isValidHttpUrl` in `lib/firecrawl/normalize.ts` calls `new URL(value)` and checks `protocol`) — unlike `websiteUrl`, which has always been scheme-normalized via `normalizeUrl()` before validation. A bare domain typed without a scheme (e.g. `facebook.com/yourbusiness`) failed `new URL()` and was silently filtered out, with no error shown — `Business.socialLinks` ended up saved as `undefined` even though the admin had visibly typed URLs in, and the dual-write's `if (socialLinks.length > 0)` guard never fired since there was nothing to apply.
+
+**Fix:** `parseSocialLinksInput` now runs each line through the existing `normalizeUrl()` helper (auto-prepends `https://` when no scheme is present) before handing it to `sanitizeAndDedupeSocialLinks`, in both files. **Also added a validation error path** that was missing before: if the textarea had non-blank content but zero lines survived sanitization (e.g. genuinely malformed input), `updateBusinessDetailsAction`/`createBusinessAction` now return a field error ("No valid URLs found — enter one per line, e.g. https://facebook.com/yourbusiness") instead of silently saving nothing — closing off this entire class of silent-data-loss bug, not just the specific missing-scheme case.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     515 passed  (npm test)
+Build:     next build succeeds — no new routes
+Manual:    Not yet performed — user asked to visually verify in-browser (mobile hero photo upload/render, and social-links dual-write on "Review draft") before considering this fully done.
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/
+├── GeneratedHero.tsx                                                             MODIFIED — heroImageUrlMobile prop, threaded into 3 branches
+└── section-registry.tsx                                                          MODIFIED — passes heroImageUrlMobile
+
+web/app/admin/(dashboard)/businesses/
+├── PhotosForm.tsx                                                                MODIFIED — "Mobile hero image" PhotoPickerField
+├── actions.ts                                                                    MODIFIED — parseSocialLinksInput scheme-normalization + validation error
+└── [businessId]/actions.ts                                                       MODIFIED — heroPhotoUrlMobile slot (updatePhotosAction) + socialLinks dual-write & scheme-normalization fix (updateBusinessDetailsAction)
+
+web/domain/
+├── models/business.ts                                                            MODIFIED — Business.heroPhotoUrlMobile field
+├── models/site-preview.ts                                                        MODIFIED — PreviewTheme.heroImageUrlMobile field, heroStyle doc update
+├── schemas/business.schema.ts                                                    MODIFIED — heroPhotoUrlMobile schema
+└── schemas/site-preview.schema.ts                                                MODIFIED — heroImageUrlMobile schema
+
+web/lib/ai/generate-preview.ts                                                    MODIFIED — heroImageUrlMobile resolution
+
+web/docs/
+├── architecture.md                                                               MODIFIED — this round's entry
+└── build_log.md                                                                  MODIFIED — this entry
 ```

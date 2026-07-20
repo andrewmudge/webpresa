@@ -28,6 +28,11 @@ vi.mock('@/lib/image/hero-dimensions', () => ({
   checkHeroPhotoDimensions: vi.fn(),
 }));
 
+vi.mock('@/lib/firecrawl/normalize', () => ({
+  sanitizeAndDedupeSocialLinks: (values: string[], maxLen: number) =>
+    values.filter((v, i) => values.indexOf(v) === i).slice(0, maxLen),
+}));
+
 vi.mock('@/lib/db/site-previews', () => ({
   listPreviewsForBusiness: mockListPreviewsForBusiness,
   getSitePreviewById: vi.fn(),

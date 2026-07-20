@@ -108,6 +108,15 @@ export function PhotosForm({ action, defaults, submitLabel = 'Save', heroPhotoWa
               )}
             </div>
             <PhotoPickerField
+              label="Mobile hero image"
+              name="heroPhotoUrlMobile"
+              photoUrls={photoUrls}
+              defaultValue={defaults?.heroPhotoUrlMobile}
+              errors={errors.heroPhotoUrlMobile}
+              hint='Optional — shown only on mobile, blended left-to-right so your headline stays legible. "Auto" and "No photo" both fall back to the theme illustration.'
+              uploadFieldName="heroPhotoFileMobile"
+            />
+            <PhotoPickerField
               label="About Us section"
               name="aboutPhotoUrl"
               photoUrls={photoUrls}

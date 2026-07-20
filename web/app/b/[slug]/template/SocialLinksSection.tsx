@@ -10,7 +10,8 @@ interface Props {
 
 /**
  * A row of platform-icon links to the business's own social/review
- * profiles, discovered by Firecrawl during Stage 13 enrichment
+ * profiles — admin-entered (`Business.socialLinks`) when present, else
+ * discovered by Firecrawl during Stage 13 enrichment
  * (`WebsiteEnrichmentSnapshot.socialLinks` → `PreviewContent.socialLinks`
  * at generation time — see `lib/ai/generate-preview.ts`). Never rendered
  * with no data — `computeSectionAvailability`'s `socialLinks` check keeps

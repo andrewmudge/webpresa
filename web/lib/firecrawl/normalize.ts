@@ -81,7 +81,7 @@ function sanitizeUrlList(values: string[] | undefined, maxLen: number): string[]
  * `https://facebook.com/x` and `https://www.facebook.com/x`, which are the
  * same destination and shouldn't render as two icons.
  */
-function sanitizeAndDedupeSocialLinks(values: string[], maxLen: number): string[] {
+export function sanitizeAndDedupeSocialLinks(values: string[], maxLen: number): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of values) {

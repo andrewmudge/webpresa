@@ -24,6 +24,11 @@ vi.mock('@/lib/auth/session', () => ({
   getSession: mockGetSession,
 }));
 
+vi.mock('@/lib/firecrawl/normalize', () => ({
+  sanitizeAndDedupeSocialLinks: (values: string[], maxLen: number) =>
+    values.filter((v, i) => values.indexOf(v) === i).slice(0, maxLen),
+}));
+
 // next/navigation redirect throws in test env — treat it as a success sentinel.
 vi.mock('next/navigation', () => ({
   redirect: (url: string) => {

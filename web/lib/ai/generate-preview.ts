@@ -261,6 +261,11 @@ export async function generatePreviewContent(
   const otherScanImageUrls = acceptedScanImages.filter((img) => img.url !== scanHeroImageUrl).map((img) => img.url);
 
   const heroImageUrl = resolvePhotoSlot(business.heroPhotoUrl, business.photoUrls?.[0], scanHeroImageUrl);
+  // Manual only — no auto-fallback args. Unlike the desktop hero slot, an
+  // unset mobile hero photo should never silently pick an arbitrary uploaded
+  // photo nobody chose for that crop; it falls back to the theme
+  // illustration instead (see GeneratedHero.tsx).
+  const heroImageUrlMobile = resolvePhotoSlot(business.heroPhotoUrlMobile);
   const aboutImageUrl = resolvePhotoSlot(
     business.whyChooseUsPhotoUrl,
     business.photoUrls?.[1],
@@ -282,13 +287,17 @@ export async function generatePreviewContent(
     otherScanImageUrls[2] ?? otherScanImageUrls[0],
   );
 
-  // --- Social links: Firecrawl-found only — see PreviewSocialLink's doc
-  // comment for why there's no manual admin-entry path. Deterministic
-  // hostname classification (lib/social-links.ts), never AI. Capped to 6 —
-  // the snapshot itself already caps at 10, but a row of icons doesn't need
-  // that many. ---
-  const socialLinks: PreviewSocialLink[] | undefined = options.enrichment?.snapshot.socialLinks.length
-    ? options.enrichment.snapshot.socialLinks.slice(0, 6).map((url) => ({ platform: classifySocialPlatform(url), url }))
+  // --- Social links: Business-entered wins outright (same "Business is
+  // canonical" precedent as every other manually-entered field); Firecrawl's
+  // discovered links are only used when the business left this blank. See
+  // PreviewSocialLink's doc comment. Deterministic hostname classification
+  // (lib/social-links.ts), never AI. Capped to 6 — the schema/snapshot cap
+  // higher, but a row of icons doesn't need that many. ---
+  const rawSocialLinks = business.socialLinks?.length
+    ? business.socialLinks
+    : options.enrichment?.snapshot.socialLinks;
+  const socialLinks: PreviewSocialLink[] | undefined = rawSocialLinks?.length
+    ? rawSocialLinks.slice(0, 6).map((url) => ({ platform: classifySocialPlatform(url), url }))
     : undefined;
 
   const content: PreviewContent = {
@@ -320,6 +329,7 @@ export async function generatePreviewContent(
     themeName,
     fontFamily: output.fontFamily,
     ...(heroImageUrl ? { heroImageUrl, heroStyle } : { heroStyle: 'illustration' as const }),
+    ...(heroImageUrlMobile ? { heroImageUrlMobile } : {}),
     ...(aboutImageUrl ? { aboutImageUrl } : {}),
     ...(aboutSectionImageUrl ? { aboutSectionImageUrl } : {}),
     ...(servicesImageUrl ? { servicesImageUrl } : {}),

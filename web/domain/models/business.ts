@@ -153,6 +153,21 @@ export interface Business extends MutableTimestampedRecord {
   notes?: string;
 
   // -------------------------------------------------------------------------
+  // Manual social links
+  //
+  // Admin-entered social/review profile URLs — the durable, business-level
+  // counterpart to Firecrawl-discovered social links (see
+  // `WebsiteEnrichmentSnapshot.socialLinks` and `PreviewContent.socialLinks`
+  // in site-preview.ts). Whenever this is non-empty, `generatePreviewContent`
+  // uses these instead of whatever Firecrawl found — the same "Business is
+  // canonical" precedent every other manually-entered field already gets.
+  // Persisted here (not on SitePreview) so it survives every regeneration,
+  // exactly like `theme`/`cta`.
+  // -------------------------------------------------------------------------
+
+  socialLinks?: string[];
+
+  // -------------------------------------------------------------------------
   // Uploaded assets (Stage 9 `businesses/` prefix)
   //
   // Both fields store the public `/api/assets/...` proxy URL, never a raw
@@ -177,6 +192,16 @@ export interface Business extends MutableTimestampedRecord {
   aboutPhotoUrl?: string;
   whyChooseUsPhotoUrl?: string;
   servicesPhotoUrl?: string;
+  /**
+   * Optional mobile-only hero photo — independent of `heroPhotoUrl` (the
+   * desktop slot). Unlike the four slots above, there is no automatic
+   * upload-order fallback for this one: leaving it unset always falls back
+   * to the theme illustration on mobile (never an arbitrary uploaded photo
+   * nobody chose for that crop), exactly as before this field existed. Set
+   * to one of `photoUrls` to show a real photo on mobile, blended
+   * left-to-right so the hero text stays legible (see `GeneratedHero.tsx`).
+   */
+  heroPhotoUrlMobile?: string;
 
   // -------------------------------------------------------------------------
   // Brand Theme System
