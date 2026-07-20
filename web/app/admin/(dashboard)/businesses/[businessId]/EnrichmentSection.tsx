@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Business, EnrichmentStatus, ManualApprovalReason } from '@/domain/models/business';
 import type { ScanEvent, ScanFailureCategory } from '@/domain/models/scan-event';
 import type { SitePreview } from '@/domain/models/site-preview';
@@ -92,10 +93,16 @@ export function EnrichmentSection({ business, scans, previews, resultQuery }: Pr
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <Field label="Website URL" value={business.websiteUrl || '—'} mono={!!business.websiteUrl} />
         <Field label="Enrichment status" value={ENRICHMENT_STATUS_LABELS[displayStatus]} />
-        <Field
-          label="Latest scan status"
-          value={latestScan ? SCAN_STATUS_LABELS[latestScan.status] : 'Never run'}
-        />
+        <div>
+          <div className="text-xs text-gray-400">Latest scan status</div>
+          {latestScan ? (
+            <Link href={`/admin/scans/${latestScan.scanId}`} className="text-(--color-brand) hover:underline">
+              {SCAN_STATUS_LABELS[latestScan.status]} →
+            </Link>
+          ) : (
+            <div className="text-gray-900">Never run</div>
+          )}
+        </div>
         <Field
           label="Latest scan time"
           value={latestScan ? new Date(latestScan.createdAt).toLocaleString() : '—'}

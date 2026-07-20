@@ -27,6 +27,7 @@ export const WEBSITE_SECTION_TYPES = [
   'process',
   'faq',
   'ctaBanner',
+  'socialLinks',
   'contact',
   'footer',
 ] as const;
@@ -94,6 +95,7 @@ export const WEBSITE_SECTION_CATALOG: Record<WebsiteSectionType, WebsiteSectionC
   process: { label: 'Process / How It Works', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 110 },
   faq: { label: 'FAQ', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 120 },
   ctaBanner: { label: 'CTA Banner', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 130 },
+  socialLinks: { label: 'Social Links', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 135 },
   contact: { label: 'Contact', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 140 },
   footer: { label: 'Footer', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 150 },
 };

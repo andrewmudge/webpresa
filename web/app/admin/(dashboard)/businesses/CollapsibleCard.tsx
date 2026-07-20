@@ -20,14 +20,16 @@ interface Props {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  /** Anchor target for a "Needs Attention" strip (or any other in-page link) to scroll straight to this card. */
+  id?: string;
 }
 
 /** A bordered card whose body collapses behind a chevron toggle. Defaults closed unless `defaultOpen`. */
-export function CollapsibleCard({ title, children, defaultOpen = false }: Props) {
+export function CollapsibleCard({ title, children, defaultOpen = false, id }: Props) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white mb-6">
+    <div id={id} className="rounded-xl border border-gray-200 bg-white mb-6 scroll-mt-20">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

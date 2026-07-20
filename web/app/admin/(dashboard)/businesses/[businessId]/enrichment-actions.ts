@@ -169,9 +169,16 @@ export async function approveScanImagesAction(businessId: string, redirectTo: st
 // Business record itself automatically. This is the explicit admin action
 // that applies one found value onto the canonical Business field, mirroring
 // the scan-image promotion pattern above.
+//
+// Only `phone`/`email` are actually promotable this way — `Business.address`
+// is a structured `Address` object (`line1`/`city`/`state`/`postalCode`),
+// while a Firecrawl-found address is a single unstructured string with no
+// reliable way to split it into those fields. `FoundContactInfo.tsx` shows
+// a found address as read-only, for the admin to copy into the Business
+// Details form's address fields by hand, rather than risking a bad parse.
 // ---------------------------------------------------------------------------
 
-const CONTACT_FIELDS = ['phone', 'email', 'address'] as const;
+const CONTACT_FIELDS = ['phone', 'email'] as const;
 type ContactField = (typeof CONTACT_FIELDS)[number];
 
 export async function applyFoundContactFieldAction(

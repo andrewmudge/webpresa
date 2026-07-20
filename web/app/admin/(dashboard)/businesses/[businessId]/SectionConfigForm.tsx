@@ -17,8 +17,13 @@ const HEADER_ORDER = 0;
 const FOOTER_ORDER = 1000;
 const REORDER_STEP = 10;
 
-/** Sections with no content editor at all — no expand chevron shown for these. */
-const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'reviews']);
+/**
+ * Sections with no content editor at all — no expand chevron shown for
+ * these. `socialLinks` joins `reviews` here for the same reason: it's
+ * evidence sourced from Firecrawl, not something an admin should be able
+ * to hand-type and have it look like a verified official profile link.
+ */
+const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'reviews', 'socialLinks']);
 
 function SubmitButton({
   label,
@@ -212,8 +217,9 @@ export function SectionConfigForm({
   // "Save Sections" click — see the Props doc comment above.
   const [state, formAction, isPending] = useActionState<SectionsFormState, FormData>(autoSaveAction ?? action, undefined);
 
-  // Only the 13 reorderable identifiers live in client state — header/footer
-  // are pinned (see HEADER_ORDER/FOOTER_ORDER). Defensively sorted by the
+  // Only the reorderable identifiers (every catalog entry except header/
+  // footer) live in client state — header/footer are pinned (see
+  // HEADER_ORDER/FOOTER_ORDER). Defensively sorted by the
   // incoming `order` first: callers are expected to already sort, but this
   // guards against ever silently misordering the first-time onboarding view.
   const [orderedTypes, setOrderedTypes] = useState<WebsiteSectionType[]>(() =>

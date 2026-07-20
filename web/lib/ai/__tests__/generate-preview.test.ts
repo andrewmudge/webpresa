@@ -282,6 +282,37 @@ describe('generatePreviewContent — Stage 13 enrichment (optional third argumen
     expect(result.content.contact.email).toBe('owner@acme.com');
   });
 
+  it('populates content.socialLinks from the enrichment snapshot, classified by platform', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness();
+    const snapshotWithSocial = {
+      ...snapshot,
+      socialLinks: ['https://www.facebook.com/acme', 'https://instagram.com/acme', 'https://acme-unrelated.com'],
+    };
+
+    const result = await generatePreviewContent(business, {
+      enrichment: { snapshot: snapshotWithSocial, scanImages: [], scanId: 'scan_1' },
+    });
+
+    expect(result.content.socialLinks).toEqual([
+      { platform: 'facebook', url: 'https://www.facebook.com/acme' },
+      { platform: 'instagram', url: 'https://instagram.com/acme' },
+      { platform: 'other', url: 'https://acme-unrelated.com' },
+    ]);
+  });
+
+  it('leaves content.socialLinks unset when the snapshot has none, or there is no enrichment', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const noEnrichmentResult = await generatePreviewContent(makeBusiness());
+    expect(noEnrichmentResult.content.socialLinks).toBeUndefined();
+
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const emptySocialResult = await generatePreviewContent(makeBusiness(), {
+      enrichment: { snapshot, scanImages: [], scanId: 'scan_1' },
+    });
+    expect(emptySocialResult.content.socialLinks).toBeUndefined();
+  });
+
   it('still throws when neither the business nor the enrichment snapshot has any services', async () => {
     const business = makeBusiness({ servicesOffered: undefined });
     const emptySnapshot = { ...snapshot, services: [] };

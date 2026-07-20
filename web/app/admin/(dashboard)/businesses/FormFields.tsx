@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import Image from 'next/image';
+import { ChevronDown } from 'lucide-react';
 import { THEME_OPTIONS } from '@/lib/themes';
 
 // ---------------------------------------------------------------------------
@@ -189,42 +190,88 @@ function ThemeSwatches({ colors }: { colors: string[] }) {
  * OpenAI personality-based pick — see `lib/theme/select-theme.ts`. Only
  * the 10 curated presets in `lib/themes.ts` are selectable here; there is
  * no free-color input, by design. A native `<select>` can't render color
- * swatches inside its options, so this is a custom radio-style list
- * instead, backed by a hidden input for the actual submitted value.
+ * swatches inside its options, so this is a custom dropdown instead,
+ * backed by a hidden input for the actual submitted value — closed by
+ * default, showing only the current selection, so the admin doesn't have
+ * to scroll past all 10 presets just to see today's setting.
  */
 export function ThemeField({ label, name, defaultValue, errors }: ThemeFieldProps) {
   const [selected, setSelected] = useState(defaultValue ?? '');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  function choose(value: string) {
+    setSelected(value);
+    setOpen(false);
+  }
+
+  const selectedOption = THEME_OPTIONS.find((t) => t.name === selected);
 
   return (
-    <div className="md:col-span-2">
+    <div className="md:col-span-2 relative" ref={containerRef}>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <input type="hidden" name={name} value={selected} />
-      <div className="space-y-1.5">
-        <button
-          type="button"
-          onClick={() => setSelected('')}
-          className={`w-full flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
-            selected === '' ? 'border-(--color-brand)' : 'border-gray-200 hover:bg-gray-50'
-          }`}
-        >
-          <span className="font-medium text-gray-800">Auto</span>
-          <span className="text-xs text-gray-400">— chosen from logo color or brand personality</span>
-        </button>
-        {THEME_OPTIONS.map((t) => (
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 rounded-lg border-2 border-gray-200 px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors"
+      >
+        <span className="flex items-center min-w-0">
+          {selectedOption ? (
+            <>
+              <ThemeSwatches colors={[selectedOption.primary, selectedOption.accent, selectedOption.surface]} />
+              <span className="font-medium text-gray-800 truncate">{selectedOption.displayName}</span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-gray-800">Auto</span>
+              <span className="ml-2 text-xs text-gray-400 truncate">— chosen from logo color or brand personality</span>
+            </>
+          )}
+        </span>
+        <ChevronDown className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-10 mt-1.5 w-full rounded-lg border border-gray-200 bg-white shadow-lg max-h-80 overflow-y-auto">
           <button
             type="button"
-            key={t.name}
-            onClick={() => setSelected(t.name)}
-            className={`w-full flex items-center rounded-lg border-2 px-3 py-2 text-left text-sm transition-colors ${
-              selected === t.name ? 'border-(--color-brand)' : 'border-gray-200 hover:bg-gray-50'
+            onClick={() => choose('')}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+              selected === '' ? 'bg-(--color-brand)/10' : 'hover:bg-gray-50'
             }`}
           >
-            <ThemeSwatches colors={[t.primary, t.accent, t.surface]} />
-            <span className="font-medium text-gray-800">{t.displayName}</span>
-            <span className="ml-2 text-xs text-gray-400 truncate">— best for {t.bestFor.join(', ')}</span>
+            <span className="font-medium text-gray-800">Auto</span>
+            <span className="text-xs text-gray-400">— chosen from logo color or brand personality</span>
           </button>
-        ))}
-      </div>
+          {THEME_OPTIONS.map((t) => (
+            <button
+              type="button"
+              key={t.name}
+              onClick={() => choose(t.name)}
+              className={`w-full flex items-center px-3 py-2 text-left text-sm transition-colors ${
+                selected === t.name ? 'bg-(--color-brand)/10' : 'hover:bg-gray-50'
+              }`}
+            >
+              <ThemeSwatches colors={[t.primary, t.accent, t.surface]} />
+              <span className="font-medium text-gray-800">{t.displayName}</span>
+              <span className="ml-2 text-xs text-gray-400 truncate">— best for {t.bestFor.join(', ')}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <p className="mt-2 text-xs text-gray-400">
         Regenerating a website always reuses the stored theme unless you change it here.
       </p>

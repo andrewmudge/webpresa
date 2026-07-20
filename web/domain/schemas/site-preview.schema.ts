@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SITE_PREVIEW_STATUSES, CTA_ACTION_TYPES, HERO_STYLES, GENERATION_SOURCES } from '@/domain/models/site-preview';
 import { THEME_NAMES } from '@/domain/constants/themes';
+import { SOCIAL_PLATFORMS } from '@/domain/constants/social-platforms';
 import { IsoTimestampSchema, UrlOrPathSchema } from './common.schema';
 
 /**
@@ -79,6 +80,11 @@ const GalleryImageSchema = z.object({
   caption: z.string().max(200).optional(),
 });
 
+const PreviewSocialLinkSchema = z.object({
+  platform: z.enum(SOCIAL_PLATFORMS),
+  url: z.string().url(),
+});
+
 /**
  * The canonical content schema for a website preview.
  *
@@ -104,6 +110,7 @@ export const PreviewContentSchema = z.object({
     .max(8)
     .optional(),
   hours: z.string().max(200).optional(),
+  socialLinks: z.array(PreviewSocialLinkSchema).max(10).optional(),
   seo: z
     .object({
       title: z.string().min(1).max(60),

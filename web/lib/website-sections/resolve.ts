@@ -1,6 +1,7 @@
 import type { WebsiteSectionConfig, WebsiteSectionsConfig } from '@/domain/models/website-sections';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
 import {
+  WEBSITE_SECTION_TYPES,
   WEBSITE_SECTION_CATALOG,
   REQUIRED_SECTION_TYPES,
   SECTION_CONFIG_VERSION,
@@ -20,8 +21,17 @@ import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-s
  *    successful `BusinessSchema.parse()` on read already guarantees).
  * 3. Drop duplicate `component` entries, keeping the first occurrence.
  * 4. Drop entries whose `variant` isn't supported for that `component`.
- * 5. Force every required section present and `enabled: true`, inserting
- *    catalog defaults for any that are missing entirely.
+ * 5. Insert catalog defaults for any section type missing from the cleaned
+ *    list that was ALSO never present in the raw stored data at all — this
+ *    is what happens when the catalog gains a new optional section type
+ *    after a business's config was already saved (e.g. `socialLinks`), so
+ *    it appears using the catalog's `defaultEnabled` rather than staying
+ *    invisible forever. A type that WAS present in the raw data but got
+ *    dropped by steps 2–4 (malformed / unsupported variant) is left absent
+ *    — that's a deliberate safety drop, not something to silently
+ *    resurrect with defaults. Required sections are always backfilled
+ *    regardless, and forced back to `enabled: true` if somehow stored as
+ *    disabled.
  * 6. Sort by `order` ascending.
  */
 export function resolveStoredOrDefaultSections(
@@ -31,6 +41,12 @@ export function resolveStoredOrDefaultSections(
     stored && Array.isArray(stored.sections) && stored.sectionConfigVersion <= SECTION_CONFIG_VERSION
       ? stored.sections
       : createDefaultWebsiteSectionsConfig().sections;
+
+  const presentInRaw = new Set<string>(
+    usableStored
+      .map((s) => (s as { component?: unknown }).component)
+      .filter((c): c is string => typeof c === 'string'),
+  );
 
   const seen = new Set<WebsiteSectionType>();
   const cleaned: WebsiteSectionConfig[] = [];
@@ -44,17 +60,21 @@ export function resolveStoredOrDefaultSections(
     cleaned.push(entry);
   }
 
-  for (const required of REQUIRED_SECTION_TYPES) {
-    const existingIndex = cleaned.findIndex((s) => s.component === required);
+  const requiredTypes = REQUIRED_SECTION_TYPES as readonly string[];
+  for (const type of WEBSITE_SECTION_TYPES) {
+    const existingIndex = cleaned.findIndex((s) => s.component === type);
+    const isRequired = requiredTypes.includes(type);
     if (existingIndex === -1) {
-      const catalogEntry = WEBSITE_SECTION_CATALOG[required];
-      cleaned.push({
-        component: required,
-        enabled: true,
-        order: catalogEntry.defaultOrder,
-        variant: catalogEntry.defaultVariant,
-      });
-    } else if (!cleaned[existingIndex].enabled) {
+      if (isRequired || !presentInRaw.has(type)) {
+        const catalogEntry = WEBSITE_SECTION_CATALOG[type];
+        cleaned.push({
+          component: type,
+          enabled: isRequired ? true : catalogEntry.defaultEnabled,
+          order: catalogEntry.defaultOrder,
+          variant: catalogEntry.defaultVariant,
+        });
+      }
+    } else if (isRequired && !cleaned[existingIndex].enabled) {
       cleaned[existingIndex] = { ...cleaned[existingIndex], enabled: true };
     }
   }

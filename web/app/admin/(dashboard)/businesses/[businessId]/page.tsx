@@ -24,6 +24,7 @@ import { EnrichmentSection } from './EnrichmentSection';
 import { ScanImageReview } from './ScanImageReview';
 import { FoundContactInfo } from './FoundContactInfo';
 import { getLatestSnapshotForBusiness } from '@/lib/firecrawl/snapshot';
+import { isRetryableFailureCategory } from '@/lib/firecrawl/retry';
 import { SectionConfigForm } from './SectionConfigForm';
 import { BusinessDetailsForm } from '../BusinessDetailsForm';
 import { ThemeForm } from '../ThemeForm';
@@ -118,6 +119,16 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
         </div>
       </div>
 
+      {/* Needs Attention — links straight down to whichever card actually needs a look, so setup doesn't require scanning the whole page. */}
+      <NeedsAttentionStrip
+        hasPendingScanImageReview={hasPendingScanImageReview}
+        hasPendingContactReview={hasPendingContactReview}
+        manualApprovalRequired={business.enrichmentStatus === 'manual_approval_required'}
+        retryEligible={
+          scans[0]?.status === 'failed' && !!scans[0]?.failureCategory && isRetryableFailureCategory(scans[0].failureCategory)
+        }
+      />
+
       {/* Meta info */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <DetailCard title="Timestamps">
@@ -157,16 +168,18 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
             id: p.previewId,
             label: `v${p.version} — ${p.status}`,
             date: p.createdAt,
+            href: p.status === 'archived' ? undefined : `/b/${p.slug}`,
           }))}
         />
         <HistoryCard
           title="Scans"
           count={scans.length}
-          viewAllHref="/admin/scans"
+          viewAllHref={`/admin/scans?businessId=${businessId}`}
           items={scans.slice(0, 3).map((s) => ({
             id: s.scanId,
             label: s.status,
             date: s.createdAt,
+            href: `/admin/scans/${s.scanId}`,
           }))}
         />
         <HistoryCard
@@ -181,8 +194,17 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
         />
       </div>
 
+      {/* Firecrawl website enrichment (Stage 13) — moved up front: for a newly-imported business this is usually the first thing an admin does. */}
+      <div id="enrichment-section" className="mb-6 scroll-mt-20">
+        <EnrichmentSection business={business} scans={scans} previews={previews} resultQuery={enrichmentResult} />
+      </div>
+
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}
-      <CollapsibleCard title="Business Details" defaultOpen={!!contactApproval || hasPendingContactReview}>
+      <CollapsibleCard
+        id="business-details-card"
+        title="Business Details"
+        defaultOpen={!!contactApproval || hasPendingContactReview}
+      >
         <BusinessDetailsForm
           action={updateBusinessDetailsAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
@@ -218,7 +240,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       </div>
 
       {/* Photos */}
-      <CollapsibleCard title="Photos" defaultOpen={hasPendingScanImageReview}>
+      <CollapsibleCard id="photos-card" title="Photos" defaultOpen={hasPendingScanImageReview}>
         <PhotosForm
           action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
           defaults={business}
@@ -312,9 +334,6 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
             />
           </div>
         </div>
-
-        {/* Firecrawl website enrichment (Stage 13) */}
-        <EnrichmentSection business={business} scans={scans} previews={previews} resultQuery={enrichmentResult} />
 
         {/* Deferred actions */}
         <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">
@@ -440,7 +459,7 @@ function HistoryCard({
   title: string;
   count: number;
   viewAllHref: string;
-  items: { id: string; label: string; date: string }[];
+  items: { id: string; label: string; date: string; href?: string }[];
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -452,12 +471,25 @@ function HistoryCard({
         <p className="text-sm text-gray-300 italic">None</p>
       ) : (
         <ul className="space-y-1">
-          {items.map((item) => (
-            <li key={item.id} className="flex justify-between text-xs">
-              <span className="text-gray-600 capitalize">{item.label}</span>
-              <span className="text-gray-400">{new Date(item.date).toLocaleDateString()}</span>
-            </li>
-          ))}
+          {items.map((item) => {
+            const row = (
+              <>
+                <span className="text-gray-600 capitalize">{item.label}</span>
+                <span className="text-gray-400">{new Date(item.date).toLocaleDateString()}</span>
+              </>
+            );
+            return (
+              <li key={item.id} className="text-xs">
+                {item.href ? (
+                  <Link href={item.href} target={item.href.startsWith('/b/') ? '_blank' : undefined} className="flex justify-between hover:text-(--color-brand) -mx-1 px-1 rounded hover:bg-gray-50 transition-colors">
+                    {row}
+                  </Link>
+                ) : (
+                  <div className="flex justify-between">{row}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {count > 3 && (
@@ -465,6 +497,40 @@ function HistoryCard({
           View all {count} →
         </Link>
       )}
+    </div>
+  );
+}
+
+function NeedsAttentionStrip({
+  hasPendingScanImageReview,
+  hasPendingContactReview,
+  manualApprovalRequired,
+  retryEligible,
+}: {
+  hasPendingScanImageReview: boolean;
+  hasPendingContactReview: boolean;
+  manualApprovalRequired: boolean;
+  retryEligible: boolean;
+}) {
+  const items: { label: string; href: string }[] = [];
+  if (manualApprovalRequired) items.push({ label: 'Manual approval required', href: '#enrichment-section' });
+  if (retryEligible) items.push({ label: 'Enrichment failed — retry available', href: '#enrichment-section' });
+  if (hasPendingContactReview) items.push({ label: 'Contact info found on website', href: '#business-details-card' });
+  if (hasPendingScanImageReview) items.push({ label: 'Images awaiting review', href: '#photos-card' });
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Needs attention:</span>
+      {items.map((item, i) => (
+        <span key={item.href + item.label} className="text-xs">
+          <a href={item.href} className="text-amber-800 underline hover:text-amber-900">
+            {item.label}
+          </a>
+          {i < items.length - 1 && <span className="text-amber-300 ml-2">·</span>}
+        </span>
+      ))}
     </div>
   );
 }

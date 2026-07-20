@@ -57,6 +57,12 @@ function slugify(text: string): string {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    // Strip apostrophes entirely (straight, curly, and backtick variants) so
+    // "Paul's" becomes "pauls", not "paul-s" \u2014 a possessive apostrophe isn't
+    // a word separator. Must run before the general non-alphanumeric pass
+    // below, which would otherwise turn it into a hyphen like any other
+    // punctuation.
+    .replace(/['\u2018\u2019`]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }

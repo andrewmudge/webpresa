@@ -116,6 +116,18 @@ describe('computeSectionAvailability', () => {
     expect(withProcess.process).toBe(true);
   });
 
+  it('socialLinks is available only when the generated content has at least one', () => {
+    const none = computeSectionAvailability({ business: business(), content: content(), hasCta: false });
+    expect(none.socialLinks).toBe(false);
+
+    const withLinks = computeSectionAvailability({
+      business: business(),
+      content: content({ socialLinks: [{ platform: 'facebook', url: 'https://facebook.com/acme' }] }),
+      hasCta: false,
+    });
+    expect(withLinks.socialLinks).toBe(true);
+  });
+
   it('ctaBanner mirrors the hasCta flag passed in', () => {
     const noCta = computeSectionAvailability({ business: business(), content: undefined, hasCta: false });
     expect(noCta.ctaBanner).toBe(false);

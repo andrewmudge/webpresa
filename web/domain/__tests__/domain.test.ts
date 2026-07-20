@@ -213,6 +213,23 @@ describe('Business — optional fields', () => {
   });
 });
 
+describe('Business — slug generation', () => {
+  it('strips apostrophes entirely rather than turning them into a hyphen', () => {
+    const biz = createBusiness({ name: "AAA-1 Paul's Plumbing Inc", industry: 'plumbing' });
+    expect(biz.slug).toBe('aaa-1-pauls-plumbing-inc');
+  });
+
+  it('strips curly (typographic) apostrophes too', () => {
+    const biz = createBusiness({ name: 'Joe’s Diner', industry: 'restaurant' });
+    expect(biz.slug).toBe('joes-diner');
+  });
+
+  it('still hyphenates other punctuation and whitespace normally', () => {
+    const biz = createBusiness({ name: 'Smith & Sons, LLC.', industry: 'roofing' });
+    expect(biz.slug).toBe('smith-sons-llc');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Website-generation input fields + asset URLs (Stage 11 foundation)
 // ---------------------------------------------------------------------------
@@ -331,6 +348,32 @@ describe('PreviewContent validation — AI output guard', () => {
 
   it('accepts valid structured content', () => {
     expect(PreviewContentSchema.safeParse(validContent).success).toBe(true);
+  });
+
+  it('accepts content with valid socialLinks', () => {
+    const withSocial = {
+      ...validContent,
+      socialLinks: [
+        { platform: 'facebook', url: 'https://facebook.com/acme' },
+        { platform: 'x', url: 'https://x.com/acme' },
+      ],
+    };
+    expect(PreviewContentSchema.safeParse(withSocial).success).toBe(true);
+  });
+
+  it('rejects a socialLinks entry with an unrecognized platform', () => {
+    const bad = { ...validContent, socialLinks: [{ platform: 'myspace', url: 'https://myspace.com/acme' }] };
+    expect(PreviewContentSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('rejects a socialLinks entry with a malformed URL', () => {
+    const bad = { ...validContent, socialLinks: [{ platform: 'facebook', url: 'not-a-url' }] };
+    expect(PreviewContentSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('is valid with socialLinks absent (backward compatible with previews saved before this field existed)', () => {
+    expect(PreviewContentSchema.safeParse(validContent).success).toBe(true);
+    expect(validContent.socialLinks).toBeUndefined();
   });
 
   it('accepts a theme with a valid heroStyle', () => {

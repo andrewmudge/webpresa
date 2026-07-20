@@ -1,4 +1,5 @@
 import type { ThemeName } from '@/domain/constants/themes';
+import type { SocialPlatform } from '@/domain/constants/social-platforms';
 import type { MutableTimestampedRecord } from './common';
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,20 @@ export interface PreviewHero {
 export interface PreviewService {
   name: string;
   description: string;
+}
+
+/**
+ * A single social/review-platform profile link, classified by hostname
+ * (`lib/social-links.ts`) so the Social Links section can render the right
+ * icon. Sourced exclusively from Firecrawl's normalized enrichment snapshot
+ * (`WebsiteEnrichmentSnapshot.socialLinks`, Stage 13) — there is no manual
+ * admin-entry path, matching the same "no admin hand-typing" treatment the
+ * Reviews section already gets, since a link presented as a business's
+ * official profile should be evidence-sourced, not freely typed.
+ */
+export interface PreviewSocialLink {
+  platform: SocialPlatform;
+  url: string;
 }
 
 /** Contact details surfaced on the preview. */
@@ -108,6 +123,13 @@ export interface PreviewContent {
   differentiators?: { title: string; description: string }[];
   /** Business hours as a single formatted display string, e.g. "Mon–Fri 8am–6pm, Sat 9am–2pm". */
   hours?: string;
+  /**
+   * Social/review-platform profile links found on the business's own
+   * website (Stage 13 Firecrawl enrichment only — no manual admin-entry
+   * path, same "evidence, not hand-typed" treatment as Reviews). Absent
+   * for previews with no enrichment source or no social links found.
+   */
+  socialLinks?: PreviewSocialLink[];
   /** Search-engine metadata. Falls back to business-name-derived defaults when absent. */
   seo?: {
     title: string;

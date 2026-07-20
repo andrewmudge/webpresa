@@ -48,6 +48,7 @@ export function computeSectionAvailability({
     process: (business.processSteps?.length ?? 0) >= 1,
     faq: (business.faqItems?.length ?? 0) >= 1,
     ctaBanner: hasCta,
+    socialLinks: (content?.socialLinks?.length ?? 0) >= 1,
     contact: true,
     footer: true,
   };

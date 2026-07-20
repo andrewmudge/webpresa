@@ -4,6 +4,7 @@ import type { FirecrawlScrapeData } from './client';
 import type { WebsiteEnrichmentSnapshot } from '@/domain/models/website-enrichment';
 import { WEBSITE_ENRICHMENT_SCHEMA_VERSION } from '@/domain/models/website-enrichment';
 import { WebsiteEnrichmentSnapshotSchema } from '@/domain/schemas/website-enrichment.schema';
+import { isSocialLink } from '@/lib/social-links';
 
 /**
  * Deterministic normalization from a raw Firecrawl scrape response into the
@@ -37,8 +38,6 @@ const RawExtractionSchema = z
   })
   .partial();
 
-const SOCIAL_DOMAINS = ['facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com', 'yelp.com', 'tiktok.com'];
-
 /** Matches ASCII control characters (C0 range and DEL) — stripped from any text before storage. */
 const CONTROL_CHAR_PATTERN = new RegExp('[\\u0000-\\u001F\\u007F]', 'g');
 
@@ -69,6 +68,33 @@ function sanitizeUrlList(values: string[] | undefined, maxLen: number): string[]
     if (!isValidHttpUrl(raw)) continue;
     if (seen.has(raw)) continue;
     seen.add(raw);
+    out.push(raw);
+    if (out.length >= maxLen) break;
+  }
+  return out;
+}
+
+/**
+ * Same as `sanitizeUrlList`, but dedupes by normalized host+path (protocol,
+ * `www.`, and a trailing slash stripped) rather than exact string match — a
+ * real page very often links the same social profile twice as both
+ * `https://facebook.com/x` and `https://www.facebook.com/x`, which are the
+ * same destination and shouldn't render as two icons.
+ */
+function sanitizeAndDedupeSocialLinks(values: string[], maxLen: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    if (!isValidHttpUrl(raw)) continue;
+    let key: string;
+    try {
+      const url = new URL(raw);
+      key = `${url.hostname.replace(/^www\./, '')}${url.pathname.replace(/\/$/, '')}`.toLowerCase();
+    } catch {
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(raw);
     if (out.length >= maxLen) break;
   }
@@ -125,16 +151,8 @@ export function normalizeFirecrawlResponse(input: NormalizeInput): WebsiteEnrich
     new Set((extraction.contact?.addresses ?? []).map((a) => sanitizeText(a, 300)).filter((a): a is string => !!a)),
   ).slice(0, 5);
 
-  const discoveredSocialLinks = (input.data.links ?? []).filter((link) =>
-    SOCIAL_DOMAINS.some((domain) => {
-      try {
-        return new URL(link).hostname.replace(/^www\./, '').endsWith(domain);
-      } catch {
-        return false;
-      }
-    }),
-  );
-  const socialLinks = sanitizeUrlList([...(extraction.socialLinks ?? []), ...discoveredSocialLinks], 10);
+  const discoveredSocialLinks = (input.data.links ?? []).filter((link) => isSocialLink(link));
+  const socialLinks = sanitizeAndDedupeSocialLinks([...(extraction.socialLinks ?? []), ...discoveredSocialLinks], 10);
 
   const links = sanitizeUrlList(input.data.links, 50).map((url) => ({ url }));
 

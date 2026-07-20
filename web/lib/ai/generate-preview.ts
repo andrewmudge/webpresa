@@ -2,7 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import type { Business } from '@/domain/models/business';
-import type { GenerationMetadata, HeroStyle, PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
+import type { GenerationMetadata, HeroStyle, PreviewContent, PreviewSocialLink, PreviewTheme } from '@/domain/models/site-preview';
 import type { WebsiteEnrichmentSnapshot } from '@/domain/models/website-enrichment';
 import type { ScanImageAsset } from '@/domain/models/scan-image';
 import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
@@ -10,6 +10,7 @@ import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]
 import { resolveBusinessTheme } from '@/lib/theme/select-theme';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
 import { buildGenerationContext, type GenerationContext } from '@/lib/firecrawl/generation-context';
+import { classifySocialPlatform } from '@/lib/social-links';
 import { getOpenAiClient, getOpenAiModel } from './client';
 
 /**
@@ -281,6 +282,15 @@ export async function generatePreviewContent(
     otherScanImageUrls[2] ?? otherScanImageUrls[0],
   );
 
+  // --- Social links: Firecrawl-found only — see PreviewSocialLink's doc
+  // comment for why there's no manual admin-entry path. Deterministic
+  // hostname classification (lib/social-links.ts), never AI. Capped to 6 —
+  // the snapshot itself already caps at 10, but a row of icons doesn't need
+  // that many. ---
+  const socialLinks: PreviewSocialLink[] | undefined = options.enrichment?.snapshot.socialLinks.length
+    ? options.enrichment.snapshot.socialLinks.slice(0, 6).map((url) => ({ platform: classifySocialPlatform(url), url }))
+    : undefined;
+
   const content: PreviewContent = {
     hero: { ...output.hero, ctaText: cta.primary.label || 'Contact Us' },
     services: output.services,
@@ -289,6 +299,7 @@ export async function generatePreviewContent(
     contact,
     ...(serviceAreas.length > 0 ? { serviceAreas } : {}),
     ...(output.differentiators.length > 0 ? { differentiators: output.differentiators } : {}),
+    ...(socialLinks ? { socialLinks } : {}),
     seo: { title: output.seoTitle, description: output.seoDescription },
     cta,
   };

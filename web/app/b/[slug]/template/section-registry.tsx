@@ -17,6 +17,7 @@ import { ServiceAreaSection } from './ServiceAreaSection';
 import { ProcessSection } from './ProcessSection';
 import { FaqSection } from './FaqSection';
 import { FinalCTA } from './FinalCTA';
+import { SocialLinksSection } from './SocialLinksSection';
 import { ContactSection } from './ContactSection';
 import { GeneratedSiteFooter } from './GeneratedSiteFooter';
 
@@ -130,6 +131,7 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
       sectionSubheadline={ctx.content.ctaBannerSection?.subheadline}
     />
   ),
+  socialLinks: (ctx) => <SocialLinksSection businessName={ctx.businessName} socialLinks={ctx.content.socialLinks ?? []} />,
   contact: (ctx) => (
     <ContactSection phone={ctx.phone} email={ctx.email} address={ctx.content.contact.address} hours={ctx.content.hours} />
   ),

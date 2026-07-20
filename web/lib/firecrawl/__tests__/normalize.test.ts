@@ -40,6 +40,19 @@ describe('normalizeFirecrawlResponse', () => {
     expect(snapshot.socialLinks).toContain('https://facebook.com/acmeplumbing');
   });
 
+  it('dedupes social links that point at the same profile via www./trailing-slash variants', () => {
+    const data = baseData({
+      links: [
+        'https://example.com/about',
+        'https://facebook.com/acmeplumbing',
+        'https://www.facebook.com/acmeplumbing/',
+      ],
+    });
+    const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data });
+    expect(snapshot.socialLinks).toHaveLength(1);
+    expect(snapshot.socialLinks[0]).toBe('https://facebook.com/acmeplumbing');
+  });
+
   it('drops malformed URLs from links/images rather than throwing', () => {
     const data = baseData({ links: ['not-a-url', 'https://example.com/valid'], images: ['javascript:alert(1)'] });
     const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data });

@@ -29,7 +29,12 @@ function StatusBadge({ status }: { status: ScanStatus }) {
   );
 }
 
-export default async function ScansPage() {
+interface Props {
+  searchParams: Promise<{ businessId?: string }>;
+}
+
+export default async function ScansPage({ searchParams }: Props) {
+  const { businessId: filterBusinessId } = await searchParams;
   let scans: ScanEvent[] = [];
   let loadError: string | undefined;
 
@@ -37,6 +42,14 @@ export default async function ScansPage() {
     scans = await listAllScans();
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load scans';
+  }
+
+  // Dev-scale: listAllScans() already fetches the whole table (see its own
+  // doc comment on why there's no GSI for this), so a business filter is
+  // just applied in-memory here rather than threaded into the repository.
+  const filterBusiness = filterBusinessId ? await getBusinessById(filterBusinessId).catch(() => null) : null;
+  if (filterBusinessId) {
+    scans = scans.filter((s) => s.businessId === filterBusinessId);
   }
 
   const uniqueBusinessIds = Array.from(new Set(scans.map((s) => s.businessId)));
@@ -50,7 +63,18 @@ export default async function ScansPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">Scans</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          {scans.length} scan{scans.length === 1 ? '' : 's'} — every Firecrawl website-enrichment attempt across all businesses.
+          {scans.length} scan{scans.length === 1 ? '' : 's'}
+          {filterBusinessId ? (
+            <>
+              {' '}
+              for <span className="font-medium text-gray-700">{filterBusiness?.name ?? filterBusinessId}</span> —{' '}
+              <Link href="/admin/scans" className="text-(--color-brand) hover:underline">
+                clear filter
+              </Link>
+            </>
+          ) : (
+            ' — every Firecrawl website-enrichment attempt across all businesses.'
+          )}
         </p>
       </div>
 

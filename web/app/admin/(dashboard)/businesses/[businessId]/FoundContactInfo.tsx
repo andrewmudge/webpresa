@@ -36,24 +36,24 @@ export function FoundContactInfo({
   const foundPhone = snapshot.contact.phones[0];
   const foundEmail = snapshot.contact.emails[0];
   const foundAddress = snapshot.contact.addresses[0];
+  const currentAddress = business.address
+    ? [business.address.line1, business.address.city, business.address.state, business.address.postalCode]
+        .filter(Boolean)
+        .join(', ')
+    : undefined;
 
-  const fields: { field: 'phone' | 'email' | 'address'; label: string; found: string | undefined; current: string | undefined }[] = [
+  // Only phone/email can be applied with one click — Business.address is a
+  // structured object (line1/city/state/postalCode) and a found address is
+  // just free text, with no reliable way to split it automatically. It's
+  // shown below as a read-only suggestion instead.
+  const fields: { field: 'phone' | 'email'; label: string; found: string | undefined; current: string | undefined }[] = [
     { field: 'phone', label: 'Phone', found: foundPhone, current: business.phone },
     { field: 'email', label: 'Email', found: foundEmail, current: business.email },
-    {
-      field: 'address',
-      label: 'Address',
-      found: foundAddress,
-      current: business.address
-        ? [business.address.line1, business.address.city, business.address.state, business.address.postalCode]
-            .filter(Boolean)
-            .join(', ')
-        : undefined,
-    },
   ];
 
   const applicable = fields.filter((f) => f.found && f.found !== f.current);
-  if (applicable.length === 0) return null;
+  const showFoundAddress = foundAddress && foundAddress !== currentAddress;
+  if (applicable.length === 0 && !showFoundAddress) return null;
 
   return (
     <div className="mt-5 pt-5 border-t border-gray-100">
@@ -84,6 +84,15 @@ export function FoundContactInfo({
             </form>
           </div>
         ))}
+        {showFoundAddress && (
+          <div className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+            <span className="text-gray-400">Address:</span> <span className="text-gray-900">{foundAddress}</span>
+            {currentAddress && <span className="ml-2 text-xs text-amber-600">(currently: {currentAddress})</span>}
+            <p className="mt-1 text-xs text-gray-400">
+              Not auto-applied — addresses are structured fields. Copy this into Business Details manually if correct.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

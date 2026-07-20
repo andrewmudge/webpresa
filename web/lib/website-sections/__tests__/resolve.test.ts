@@ -67,6 +67,14 @@ describe('resolveStoredOrDefaultSections', () => {
     expect(footer?.enabled).toBe(true);
   });
 
+  it('backfills an optional section type that never existed in the stored data (catalog added after config was saved)', () => {
+    const sections = createDefaultWebsiteSectionsConfig().sections.filter((s) => s.component !== 'socialLinks');
+    const resolved = resolveStoredOrDefaultSections({ sectionConfigVersion: SECTION_CONFIG_VERSION, sections });
+    const socialLinks = resolved.find((s) => s.component === 'socialLinks');
+    expect(socialLinks).toBeDefined();
+    expect(socialLinks?.enabled).toBe(true);
+  });
+
   it('forces a stored-disabled required section back to enabled', () => {
     const sections = createDefaultWebsiteSectionsConfig().sections.map((s) =>
       s.component === 'contact' ? { ...s, enabled: false } : s,

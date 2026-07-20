@@ -3354,3 +3354,148 @@ web/docs/
 ├── architecture.md                                                               MODIFIED — "Scan-image promotion" batch update, new logo/contact sections
 └── build_log.md                                                                  MODIFIED — this entry
 ```
+
+---
+
+## Admin ergonomics pass — business detail page navigation
+
+**Date:** 2026-07-18 (same day, fourth follow-up)
+**Trigger:** Asked for a retrospective before starting Stage 14. Flagged that admin setup "felt like jumping around" and asked about improving interconnectedness between related records. Reviewed the actual current admin UI (not from memory) and confirmed three real gaps: `HistoryCard` rows were plain text with no links; the Scans "View all" link went to the global unfiltered list even from a specific business's page; `EnrichmentSection` (usually the first thing an admin does for a newly-enriched business) sat at the very bottom of the page, below Theme/Admin/Photos/CTA/Sections. Approved implementing the fix (item "A" of the review) with no further checkpoints.
+
+### Changes (all navigational/layout — no new data, actions, or business logic)
+
+- `NeedsAttentionStrip` (new, inline in `page.tsx`) — one amber strip under the page header, rendered only when there's something to review (pending scan-image review, pending found-contact-info, `manual_approval_required`, or a retry-eligible failed scan); each item links via in-page anchor straight to the relevant card.
+- `CollapsibleCard.tsx` — added an optional `id` prop (+ `scroll-mt-20` on the wrapper) so cards can be anchor targets.
+- `EnrichmentSection` relocated from the end of the page to directly after the History cards.
+- `HistoryCard` rows are now links (scans → `/admin/scans/{scanId}`, previews → `/b/{slug}`, archived previews stay plain text since they 404 publicly); `EnrichmentSection`'s "Latest scan status" field is now a link to the same scan detail page.
+- `/admin/scans/page.tsx` accepts an optional `?businessId=` search param, filtering the already-fetched array in memory; the business detail page's Scans "View all" link now passes it. A "for {business name} — clear filter" line replaces the generic subtitle when filtered.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     497 passed  (npm test) — unchanged; pure UI/navigation change, no new logic to test
+Build:     next build succeeds — no new routes
+Manual:    Started the real dev server and fetched the real business detail page
+           (biz_39c2b268-36e8-48cf-9481-673921e12880) with a genuine authenticated session —
+           minted a valid session JWT locally using the real SESSION_SECRET from .env.local (the
+           same signing scheme lib/auth/session.ts already uses), rather than guessing the admin
+           password. Confirmed HTTP 200, a full real render (149KB), and that the "Needs attention"
+           strip correctly showed "Contact info found on website" and "Images awaiting review" for
+           this real business's actual data, each linking to the correct anchor IDs
+           (#business-details-card, #photos-card). Dev server and temporary session token file
+           cleaned up afterward.
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/
+├── CollapsibleCard.tsx                                                           MODIFIED — optional id prop
+└── [businessId]/
+    ├── page.tsx                                                                  MODIFIED — NeedsAttentionStrip, EnrichmentSection relocated, HistoryCard links, card ids
+    └── EnrichmentSection.tsx                                                     MODIFIED — latest-scan link
+
+web/app/admin/(dashboard)/scans/page.tsx                                          MODIFIED — businessId filter param
+
+web/docs/
+├── architecture.md                                                               MODIFIED — ergonomics-pass bullet
+└── build_log.md                                                                  MODIFIED — this entry
+```
+
+---
+
+## Contact-promotion crash fix, slug apostrophes, Theme dropdown, Social Links section
+
+**Date:** 2026-07-18 (same day, fifth follow-up)
+**Trigger:** Four-part bug/feature report: (1) a `ZodError` crash when overwriting business contact info from a found address value; (2) apostrophes in business names being hyphenated into slugs (`aaa-1-paul-s-plumbing-inc` instead of `aaa-1-pauls-plumbing-inc`); (3) a request to collapse the Theme card into a dropdown instead of always listing all 10 presets; (4) a request to surface Firecrawl-discovered social links as clickable platform icons in a selectable, default-on website section.
+
+### 1. Contact-promotion crash fix
+
+`applyFoundContactFieldAction` (`enrichment-actions.ts`) crashed with a Zod `invalid_type` error on `address` — `Business.address` is a structured `Address` object, but the action was calling `updateBusiness(businessId, { address: <string> })`. `CONTACT_FIELDS` is now `['phone', 'email']` only; `FoundContactInfo.tsx` still shows a found address, but as a read-only block ("Not auto-applied — addresses are structured fields...") with no Apply button.
+
+### 2. Slug apostrophe stripping
+
+`slugify()` (`domain/factories/business.factory.ts`) strips apostrophes (straight `'`, curly `‘’`, backtick) before the general `[^a-z0-9]+` → `-` pass, so "Paul's Plumbing" slugifies to `pauls-plumbing`, not `paul-s-plumbing`. New businesses only — existing slugs (e.g. the AAA-1 Paul's Plumbing test business, still `aaa-1-paul-s-plumbing-inc`) are not retroactively renamed.
+
+### 3. Theme card → dropdown
+
+`ThemeField` (`FormFields.tsx`) is now collapsed by default: a button shows the current selection (swatch chips + name, or "Auto — chosen from logo color or brand personality") with a rotating chevron; clicking opens an absolutely-positioned panel (click-outside-to-close via a `mousedown` listener) listing "Auto" plus all `THEME_OPTIONS`, each still with its swatches. No change to persisted data.
+
+### 4. Social Links section
+
+- `domain/constants/social-platforms.ts` (new) — `SOCIAL_PLATFORMS`/`SOCIAL_PLATFORM_LABELS`, layered under `domain/` (zero deps) per the existing `themes.ts` convention.
+- `lib/social-links.ts` (new) — `classifySocialPlatform(url)`, `isSocialLink(url)`.
+- `domain/models/site-preview.ts` / `site-preview.schema.ts` — `PreviewSocialLink` (`{ platform, url }`) and `PreviewContent.socialLinks?` (max 10, schema-validated).
+- `domain/constants/website-sections.ts` — new `socialLinks` catalog entry, `defaultEnabled: true`, ordered between `ctaBanner` and `contact`.
+- `lib/website-sections/availability.ts` — `socialLinks` available once `content.socialLinks.length >= 1`.
+- `app/b/[slug]/template/SocialIcon.tsx` / `SocialLinksSection.tsx` (new) — hand-embedded single-path SVGs for Facebook/Instagram/X/LinkedIn/YouTube (confirmed via direct inspection that `lucide-react` ships no brand icons — trademark reasons — rather than adding a new npm dependency), generic `Globe` fallback for other platforms. Wired into `section-registry.tsx`.
+- `lib/ai/generate-preview.ts` — derives `content.socialLinks` from `enrichment.snapshot.socialLinks` (max 6, classified per URL) at generation time. Never admin-editable — same "Firecrawl evidence, not admin-authored" precedent as `reviews`; `SectionConfigForm.tsx`'s `NO_EDITOR_SECTIONS` now includes it.
+- `lib/firecrawl/normalize.ts` — added `sanitizeAndDedupeSocialLinks()`, deduping by normalized host+path instead of exact string match. A real re-run of enrichment on the AAA-1 Paul's Plumbing test business showed the same Facebook profile listed twice (`facebook.com/AAA-1-...` and `www.facebook.com/AAA-1-.../`) before this fix — verified fixed (2 → 1) with a second real run.
+
+### 5. Bug found during verification: new optional sections were invisible on pre-existing businesses
+
+Live-testing item 4 against the real AAA-1 Paul's Plumbing business (which already had 5 preview versions and a stored `websiteSections` config predating `socialLinks`) turned up a real gap: `resolveStoredOrDefaultSections` (`lib/website-sections/resolve.ts`) only ever backfilled *required* sections missing from a stored config — a newly-catalogued *optional* section type (like `socialLinks`) stayed permanently absent and non-toggleable for any business whose config was saved before that section type existed, even though generation, rendering, and the section registry were all correctly wired up. Fixed by backfilling any section type that's entirely absent from the raw stored data (not just required ones) using its catalog `defaultEnabled` — a type that *was* present in the raw data but got dropped by the existing malformed-entry/bad-variant cleaning steps stays absent, preserving that safety behavior exactly as before (covered by the existing "drops an entry with an unsupported variant" test, which still passes unchanged). Added a new test for the backfill case.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     515 passed  (npm test) — +1 net (social-links.test.ts x6, resolve.test.ts backfill test x1,
+                        domain.test.ts slug/socialLinks schema tests, generate-preview.test.ts x2,
+                        availability.test.ts x1, normalize.test.ts dedup test)
+Build:     next build succeeds — no new routes
+Manual:    Started the real dev server, minted a valid session JWT locally using the real
+           SESSION_SECRET (lib/auth/session.ts's exact signing scheme: sub/expiresAt payload,
+           webpresa_admin_session cookie), and fetched real authenticated pages for
+           biz_39c2b268-36e8-48cf-9481-673921e12880 (AAA-1 Paul's Plumbing):
+             - Business detail page: Theme button rendered collapsed showing "Red" + swatches +
+               chevron (aria-expanded="false"), no preset names present in the initial HTML;
+               found-address block rendered read-only with no Apply button; "Social Links" now
+               appears as a toggleable entry in the section config UI (after the resolve.ts fix).
+             - Ran enrichBusinessWebsite() twice directly against real Firecrawl output to confirm
+               the social-link dedup fix (2 duplicate Facebook entries → 1).
+             - Public preview page (/b/aaa-1-paul-s-plumbing-inc, viewed via admin session since
+               this preview is still a draft): rendered a "Follow Us" section with a circular
+               Facebook icon link, correct href and aria-label, themed border/icon colors.
+           Dev server and all temporary scratchpad files (session JWT, fetched HTML, ad-hoc
+           verification scripts) cleaned up afterward.
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/
+├── FormFields.tsx                                                                MODIFIED — ThemeField as collapsed dropdown
+└── [businessId]/
+    ├── enrichment-actions.ts                                                     MODIFIED — CONTACT_FIELDS drops 'address'
+    ├── FoundContactInfo.tsx                                                      MODIFIED — read-only address display
+    └── SectionConfigForm.tsx                                                     MODIFIED — socialLinks added to NO_EDITOR_SECTIONS
+
+web/domain/
+├── constants/
+│   ├── social-platforms.ts                                                       NEW — SOCIAL_PLATFORMS, labels
+│   └── website-sections.ts                                                       MODIFIED — socialLinks catalog entry
+├── factories/business.factory.ts                                                 MODIFIED — slugify() strips apostrophes
+├── models/site-preview.ts                                                        MODIFIED — PreviewSocialLink, PreviewContent.socialLinks
+└── schemas/site-preview.schema.ts                                                MODIFIED — PreviewSocialLinkSchema
+
+web/lib/
+├── social-links.ts                                                               NEW — classifySocialPlatform, isSocialLink
+├── ai/generate-preview.ts                                                        MODIFIED — derives content.socialLinks
+├── firecrawl/normalize.ts                                                        MODIFIED — sanitizeAndDedupeSocialLinks
+└── website-sections/
+    ├── availability.ts                                                           MODIFIED — socialLinks availability
+    └── resolve.ts                                                                MODIFIED — backfills any missing catalog section, not just required
+
+web/app/b/[slug]/template/
+├── SocialIcon.tsx                                                                NEW — hand-embedded brand SVGs + Globe fallback
+├── SocialLinksSection.tsx                                                        NEW — public "Follow Us" section
+└── section-registry.tsx                                                          MODIFIED — socialLinks entry
+
+web/docs/
+├── architecture.md                                                               MODIFIED — this round's five-item bullet
+└── build_log.md                                                                  MODIFIED — this entry
+```
