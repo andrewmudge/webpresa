@@ -4003,3 +4003,252 @@ web/app/b/[slug]/template/index.tsx    MODIFIED — swapped nesting so the theme
 
 web/docs/build_log.md                  MODIFIED — this entry
 ```
+
+---
+
+# Bug fix — mobile hero photo rendered as a floating card instead of full-bleed (2026-07-22)
+
+**The ask:** a mobile-only hero photo, manually selected by an admin (`Business.heroPhotoUrlMobile` → `PreviewTheme.heroImageUrlMobile`), was rendering as a narrow inset strip with rounded corners and a shadow — the "floating card" treatment `HeroCornerImage` was built for the theme-illustration fallback and a non-hero-dimensioned *desktop* photo. The desired look (confirmed via a reference screenshot) is full-bleed, edge-to-edge, with only a dark gradient scrim behind the text — matching the desktop `'image'` style's existing full-bleed treatment elsewhere in the same file.
+
+**Root cause:** when `heroImageUrlMobile` shipped (2026-07-20), it was threaded into the *existing* `SplitHeroSection`/`HeroCornerImage` machinery purely because that machinery was already breakpoint-aware and convenient to reuse — not because the floating-card look was a deliberate design choice for a real, deliberately-chosen photo. `HeroCornerImage`'s `mobileIsPhoto` flag was simply `!!heroImageUrlMobile` in every branch, so any real mobile photo (not just the logo-reuse case) got the same rounded/inset/shadowed treatment intended for the "no real photo, dress up the illustration" case.
+
+**Fix (`app/b/[slug]/template/GeneratedHero.tsx`):**
+- Extracted the white-text eyebrow/headline/subheadline/CTA block (previously duplicated between the photo and non-photo branches of `legacySection`) into a new `HeroOverlayContent` component.
+- Added a new `FullBleedHeroSection` component: full-bleed `next/image` + the exact existing dark horizontal gradient overlay (`rgba(0,0,0,0.75)→0.45→0.15`, reused verbatim, not redesigned) + `HeroOverlayContent`. No industry watermark, no card styling.
+- `legacySection`'s `showImage` branch now renders `<FullBleedHeroSection imageSrc={heroImageUrl!} .../>` instead of inline duplicate markup — desktop `'image'` style output is pixel-identical to before.
+- `GeneratedHero` now computes `mobileHasPhoto = !!heroImageUrlMobile && !heroImageMobileIsLogo` — a deliberately chosen, non-logo mobile photo. When true, mobile renders `FullBleedHeroSection` with the real photo, and the existing per-`heroStyle` branch logic (unchanged) is wrapped in `hidden lg:block` to render desktop only.
+- The existing per-style branches (now inside a `renderStyleSection()` closure) receive `heroImageUrlMobileForStyle = mobileHasPhoto ? undefined : heroImageUrlMobile` instead of the raw prop, so their own (now mobile-invisible) internal mobile sub-tree falls back to the cheap theme illustration rather than redundantly re-fetching the same photo through the floating-card path it's no longer actually shown through.
+- **Unaffected:** desktop rendering in every `heroStyle`; the no-mobile-photo case (theme illustration, unchanged); a mobile hero photo that's the business's own logo (still gets the `LogoFrame`/floating-card treatment — a logo genuinely benefits from being contained rather than full-bleed-cropped, per the existing "Logo-as-hero cropping fix").
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test) — no existing test covers GeneratedHero/HeroCornerImage rendering; none added
+Build:     next build succeeds — no new routes
+```
+
+Not yet manually re-verified in a live browser (deferred per this session's scope, matching the earlier Request Service modal fix in this same session).
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — HeroOverlayContent + FullBleedHeroSection extracted; mobileHasPhoto full-bleed fix
+
+web/docs/
+├── architecture.md                            MODIFIED — "Hero split-image panel" scoped to logo-only mobile case; new "Mobile hero photo full-bleed fix" entry
+└── build_log.md                               MODIFIED — this entry
+```
+
+---
+
+# Correction — mobile hero photo full-bleed fix over-corrected (2026-07-22)
+
+**The follow-up:** the previous entry's fix ("mobile hero photo rendered as a floating card instead of full-bleed") over-corrected. Direct feedback with a reference screenshot showed the new full-bleed treatment filled the *entire* mobile viewport (`min-h-[88vh]`, full 100vw width), pushing the trust strip off-screen below the fold, and its CTA row rendered centered/stretched full-width buttons instead of the site's normal left-aligned, content-sized ones. The actual target (a second reference screenshot, "Summit Heating & Air") turned out to be much closer to what the app already had *before* either fix: text and CTAs left-aligned, a compact/natural-height hero (trust strip visible without scrolling), and the photo confined to roughly the right third of the screen — just without the rounded-corner/shadow/inset "card" look the very first bug report objected to.
+
+**Fix (`app/b/[slug]/template/GeneratedHero.tsx`):**
+- Removed the `mobileHasPhoto`/`FullBleedHeroSection`-on-mobile branch entirely. Mobile once again always renders through `SplitHeroSection` (left-aligned text, `max-w-[60%]`-capped non-stretched CTAs, natural content-driven height — never `min-h-[88vh]`), using the real `heroImageUrlMobile` directly, exactly as before the previous fix — this is what actually fixes the "filled the whole display" and "CTAs not left-justified" complaints.
+- Fixed the *original* bug directly in `HeroCornerImage` instead: removed the `mobileIsPhoto` prop and its conditional `mobileBox` (`inset-y-4 right-4 rounded-2xl overflow-hidden shadow-xl`) entirely — mobile is now unconditionally flush/edge-to-edge (`inset-y-0 right-0`) for every image, matching what the theme illustration already looked like. A real chosen mobile photo now renders through this exact same flush treatment instead of getting a distinct floating-card look.
+- `FullBleedHeroSection`/`HeroOverlayContent` (added in the previous fix) were **kept**, but now only ever render on desktop, for the `'image'` style's own full-bleed treatment — a legitimate, non-duplicative extraction of markup that already existed there, unrelated to either bug report.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+Not yet manually re-verified in a live browser (deferred per this session's scope).
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — reverted mobile full-bleed branch; mobile now unconditionally flush in HeroCornerImage
+
+web/docs/
+├── architecture.md                            MODIFIED — corrected "Hero split-image panel" / "Mobile hero photo" entries
+└── build_log.md                               MODIFIED — this entry
+```
+
+---
+
+# Polish — CTA label wrapping and mobile hero photo gradient (2026-07-22)
+
+**Two follow-ups from direct feedback:**
+
+1. **"Request Service" wrapping onto two lines.** `CtaButton.tsx` now always merges in `whitespace-nowrap` (in addition to whatever `className` the calling section passes) — a CTA label must never wrap inside its button/link, regardless of how narrow the surrounding container gets. Single fix point, applies everywhere a CTA renders (hero, header, mobile sticky bar, final CTA band, etc.) since they all go through `CtaButton`.
+2. **Mobile hero photo gradient too aggressive.** `HeroCornerImage`'s mobile blend (`GeneratedHero.tsx`) previously faded from opaque to transparent across 60% of the image column's width (`0% → 10% opaque, transparent by 60%`), washing out most of the photo. Softened to a short blend right at the seam only — opaque at 0%, fully transparent by 25% — so the large majority of the photo now shows clearly instead of fading into the background color.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/
+├── CtaButton.tsx          MODIFIED — always merges in whitespace-nowrap
+└── GeneratedHero.tsx       MODIFIED — softened mobile gradientOverlay in HeroCornerImage
+
+web/docs/build_log.md       MODIFIED — this entry
+```
+
+---
+
+# Mobile hero photo — blur/dim/reveal treatment replaces solid-color gradient (2026-07-22)
+
+**The ask:** direct follow-up on the mobile hero photo's edge treatment (previous entry, "Mobile hero photo gradient softened"). Two changes requested: (1) show the *entire* photo, no `object-cover` cropping; (2) replace the solid-color gradient blend with an actual blur + transparency effect on the image itself near the text/image seam, fading into the full, sharp photo moving right.
+
+**Implementation (`GeneratedHero.tsx`):**
+- New `MobileHeroPhoto({ src })` — mobile-only, used everywhere a real photo or the theme illustration would previously have rendered via a plain `<Image object-cover>`. Two stacked layers over the same `src`:
+  - A sharp base layer, `object-contain` (never cropped — the whole image is always visible, letterboxed against the section's own background if the aspect ratio doesn't fill the column).
+  - A blurred + dimmed copy on top (`filter: blur()`, reduced `opacity`), masked with a left-to-right `mask-image`/`WebkitMaskImage` linear-gradient — fully visible (blurred+dim) at the seam next to the text, fading to fully transparent by a tunable stop, which reveals the sharp layer beneath from that point on.
+  - Three named constants at the top of the file control the look: `MOBILE_HERO_BLUR_PX` (16), `MOBILE_HERO_DIM_OPACITY` (0.6), `MOBILE_HERO_REVEAL_STOP` ('45%') — easy to hand-tune.
+- `HeroCornerImage` no longer renders a single `object-cover` `<Image>` shared across breakpoints for the non-logo case — desktop and mobile are always separate elements now (desktop keeps its existing `object-cover`/floating-card treatment unchanged; mobile always goes through `MobileHeroPhoto`). The old solid-color `gradientOverlay` div is removed, superseded by the mask-based blur/dim/reveal effect.
+- `LogoFrame` (a logo reused as the mobile hero) is untouched — a logo isn't blurred, still just `object-contain` on a surface backdrop.
+- Desktop rendering is completely unaffected.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — MobileHeroPhoto (blur/dim/reveal mask) replaces the mobile solid-color gradient + object-cover crop
+
+web/docs/build_log.md                          MODIFIED — this entry
+```
+
+---
+
+# Bug fix — mobile hero photo blur/fade mask wasn't rendering (2026-07-22)
+
+**The report:** the blur/dim/reveal treatment (previous entry) showed no visible effect at all — just the plain sharp photo, letterboxed. The letterboxing (white gaps top/bottom) was flagged as looking "cropped vertically," but confirmed via `AskUserQuestion` to be intentional and wanted (`object-contain`, whole photo visible, no cropping) — the real bug was the missing blur/fade.
+
+**Root cause:** `MobileHeroPhoto`'s mask gradient was `linear-gradient(to right, black 0%, transparent ${MOBILE_HERO_REVEAL_STOP})`. CSS masking's default `mask-type` is **luminance**, not alpha — under luminance masking, `black` (0 luminance) reads as fully *hidden*, the opposite of the intended "fully visible" at the seam. Combined with `transparent` also being hidden (0 alpha), the blurred/dimmed top layer was invisible across virtually the whole image, so only the always-present sharp base layer ever showed.
+
+**Fix:** changed `black` → `white` in both the `maskImage` and `WebkitMaskImage` gradient stops. `white` is visible under both luminance masking (full luminance) and alpha masking (full alpha), so it works correctly regardless of the browser's default masking interpretation — the standard, robust choice for this pattern. One-line color change; no other logic changed.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — mask gradient color: black → white
+
+web/docs/build_log.md                          MODIFIED — this entry
+```
+
+---
+
+# Mobile hero photo — blur alone wasn't a reliable visual effect (2026-07-22)
+
+**The report (after the mask color fix):** still "looks like this" — same screenshot. Follow-up questions clarified the mask fix *did* work (some fading now visible near the top of the letterboxed area) but the effect was imperceptible over most of the photo. Root cause of the perceptual gap: layering a blurred copy of a photo over the same sharp photo (even reduced-opacity) is only visually distinguishable where the underlying content changes sharply at that spot — over a fairly uniform area (e.g. the light cabinet in the upper portion of this particular photo) a blurred version and the sharp version look nearly identical, so the effect reads as "not working" even though it technically is.
+
+**Fix (`MobileHeroPhoto`, `GeneratedHero.tsx`):** added a third layer — a `var(--site-background)`-colored tint gradient, stacked on top of the (still-present) blurred layer, fading out over a shorter distance (`MOBILE_HERO_TINT_STOP`, 22%) than the blur (`MOBILE_HERO_BLUR_REVEAL_STOP`, 38%). This guarantees a real, visible color shift toward the page background at the seam regardless of what the photo looks like there — the blur alone was necessary but not sufficient. Also bumped `MOBILE_HERO_BLUR_PX` from 16 to 20 and dropped the separate `DIM_OPACITY` constant (no longer needed now that the tint layer does the "fading to background" work).
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+Playwright isn't installed in this environment, so this couldn't be visually verified in a live browser before or after the change — iterated based on the user's description of what they saw instead. Recommend a direct look once available.
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — added background-color tint layer alongside the blur; renamed/retuned constants
+
+web/docs/build_log.md                          MODIFIED — this entry
+```
+
+---
+
+# Mobile hero image height fix — stopped short of the full text column (2026-07-22)
+
+**The report:** the blur/tint fade was working well, but the image itself stopped roughly halfway down the text column (around the gap between the two CTA buttons) instead of spanning the full height, leaving plain background below it.
+
+**Root cause:** `HeroCornerImage`'s mobile wrapper was `position: absolute` with `inset-y-0` (`top:0; bottom:0`), intended to stretch it to match the height of its containing block — the `grid-cols-1` div that also holds the text column. That stretch depends on the containing block already having a definite, fully-resolved height at the point the browser computes the absolute element's `top`/`bottom` arithmetic. In practice this didn't reliably hold for this nested grid/absolute-positioning combination, so the image wrapper ended up sized to roughly its own rendered content height instead of the full row height — visually, the photo (fit via `object-contain`) filled from the top down to wherever it naturally ran out, with everything below that just plain background outside the image's box entirely (not letterboxing *within* a correctly-sized box, which was the earlier, separate, already-resolved letterboxing question).
+
+**Fix (`HeroCornerImage`, `GeneratedHero.tsx`):** replaced `position: absolute` + `inset-y-0 right-0` with real CSS Grid placement — the wrapper is now `position: relative` (still a valid positioning context for the inner `MobileHeroPhoto`'s `absolute inset-0`), explicitly placed into the *same* grid cell as the text (`col-start-1 row-start-1`) via `self-stretch` + `justify-self-end` (instead of being pulled out of grid flow entirely). Because the image itself has no intrinsic size, it doesn't affect the row's height calculation — it purely stretches to match whatever height the text column establishes, using CSS Grid's normal, well-defined item-stretching behavior rather than absolute-position inset arithmetic against a not-yet-fully-resolved containing block. Desktop behavior is unaffected — new `lg:col-start-auto lg:row-start-auto lg:self-auto lg:justify-self-auto` classes revert to the existing normal auto-placed second-column behavior there.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+Playwright still isn't installed in this environment — this diagnosis and fix were reasoned from the user's description and CSS spec behavior (absolutely-positioned inset stretching vs. grid item stretching), not visually confirmed. Recommend a direct look once available.
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — mobile image wrapper: absolute+inset-y-0 → grid col-start-1/row-start-1 + self-stretch
+
+web/docs/build_log.md                          MODIFIED — this entry
+```
+
+---
+
+# Mobile hero photo — full-bleed redesign, freed from prior constraints (2026-07-22)
+
+**The ask, verbatim direction:** "don't worry about previous constraints... tell me the best way to achieve this." A reference screenshot ("Summit Heating & Air") plus a plain description — photo fills the screen, fades from the page's background color on the left to the full photo on the right, person on the right — made clear the whole approach so far (a two-column split, image confined to a ~35%-wide side strip) was the wrong shape entirely. The desktop `'image'` style's existing full-bleed treatment (photo as background, text as normal in-flow content on top) is architecturally what was being asked for, adapted for mobile.
+
+**Why the split-column approach kept failing:** every prior round (floating card, 88vh full-bleed, blur mask, grid-stretch height fix) was patching `HeroCornerImage`/`SplitHeroSection`'s two-column shape, which requires the image to match a *sibling* column's height — a structurally fragile problem (absolute-position/inset stretching against an auto-height ancestor, or CSS Grid item placement quirks). A single full-bleed section sidesteps this category of bug entirely: the image is `fill`+`object-cover` behind the section's own normal-flow text content, which is exactly how the desktop `'image'` style has worked, bug-free, all along.
+
+## Implementation (`GeneratedHero.tsx`)
+
+- **`HeroTextContent`** — extracted from `SplitHeroSection`'s previously-inline eyebrow/headline/subheadline/CTA JSX. Theme-colored (`text-(--site-text)`, `text-(--site-muted)`), deliberately kept separate from the existing white-text `HeroOverlayContent` (used over a black scrim) — a photo-fade background needs to work on *any* theme's own background color, not assume it's dark.
+- **`MobileFullBleedHeroPhoto`** — new mobile-only component: full-bleed `object-cover` photo, a `var(--site-background)` gradient (solid through `MOBILE_HERO_TINT_HOLD` → transparent by `MOBILE_HERO_TINT_END`, two tunable constants) instead of a black scrim, and `HeroTextContent` on top of the solid portion. No `min-h-*` — height comes entirely from the text content, keeping it compact (trust strip stays visible, the original complaint from several rounds back).
+- **`LegacyFallbackSection`** — extracted the gradient/pattern/solid legacy background (previously inlined once) since the redesign now needs it in two places (as a `mobileHasPhoto` business's *desktop* rendering, and as the original bottom-of-file fallback) — avoids duplicating it.
+- **`mobileHasPhoto = !!heroImageUrlMobile && !heroImageMobileIsLogo`** in `GeneratedHero` — the single routing decision, checked before any `heroStyle` branch. When true, desktop resolves independently (its own `heroStyle`-driven section, computed once, shown only at `lg:`+) while mobile always renders `MobileFullBleedHeroPhoto`. When false, execution falls through to the original, byte-for-byte unchanged `'illustration'`/`'imageSplit'`/`'image'`/legacy branches — **per explicit instruction, the no-photo (theme illustration) fallback was not touched**, and a mobile hero photo that's the business's own logo still renders via `SplitHeroSection`/`LogoFrame`, also unchanged.
+- Removed: the blur/mask `MobileHeroPhoto` component and the grid-stretch (`col-start-1`/`row-start-1`/`self-stretch`) height-matching logic from the previous two rounds — superseded, no longer reachable by any real-photo case.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+Playwright is still not installed in this environment. This redesign was driven by a concrete reference screenshot and an explicit architectural description rather than another round of guess-and-check on a narrow CSS property, which should make it far more likely to be right on the first look — but it's still unverified in an actual browser. Recommend checking it directly (mobile viewport, a business with `heroPhotoUrlMobile` set) before requesting further tuning; `MOBILE_HERO_TINT_HOLD`/`MOBILE_HERO_TINT_END` are there to hand-adjust the fade position.
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — HeroTextContent extraction, new MobileFullBleedHeroPhoto, LegacyFallbackSection extraction, mobileHasPhoto routing in GeneratedHero; old MobileHeroPhoto (blur/mask) and mobile grid-stretch logic removed
+
+web/docs/
+├── architecture.md                            MODIFIED — replaced prior "Mobile hero photo" entries with the final shape
+└── build_log.md                               MODIFIED — this entry
+```
