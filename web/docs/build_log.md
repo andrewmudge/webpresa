@@ -4252,3 +4252,30 @@ web/docs/
 ├── architecture.md                            MODIFIED — replaced prior "Mobile hero photo" entries with the final shape
 └── build_log.md                               MODIFIED — this entry
 ```
+
+---
+
+# Bug fix — featured service card text-shadow leaking onto mobile (2026-07-22)
+
+**The report:** the featured (first) service card's picture background (`ServicesGrid.tsx`) only renders on desktop (`hidden lg:block`), but its heading/description text still showed a dark drop-shadow on mobile, where there's no image behind it to justify one.
+
+**Root cause:** the text-shadow was applied via inline `style={{ textShadow: '...' }}`, gated only on `showPicture` (truthy whenever a featured image URL exists at all, regardless of viewport) — not on the `lg:` breakpoint the actual picture background is scoped to. Inline styles can't be made responsive, so there was no way for that `style` prop to "turn off" on mobile the way the picture background itself does.
+
+**Fix:** moved the shadow into a Tailwind arbitrary-property class scoped to `lg:` — `lg:[text-shadow:0_1px_3px_rgba(0,0,0,0.8)]` — alongside the existing `lg:text-white`/`lg:text-white/80` classes, and removed the inline `style` props entirely. Mobile now matches every other service card's plain text styling exactly; desktop is unchanged.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/ServicesGrid.tsx    MODIFIED — text-shadow moved from unconditional inline style to an lg:-scoped class
+
+web/docs/build_log.md                         MODIFIED — this entry
+```
