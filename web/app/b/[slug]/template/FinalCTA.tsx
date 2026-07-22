@@ -1,5 +1,6 @@
 import { V } from './tokens';
-import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
+import { CtaIcon, type ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 
 interface Props {
   primary: ResolvedCta | null;
@@ -28,24 +29,22 @@ export function FinalCTA({ primary, secondary, sectionHeadline, sectionSubheadli
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           {primary && (
-            <a
-              href={primary.href}
-              {...externalLinkAttrs(primary)}
+            <CtaButton
+              cta={primary}
               className="inline-flex items-center justify-center rounded-xl px-8 py-3.5 text-base font-bold transition-all hover:scale-[1.02] hover:shadow-lg"
               style={{ backgroundColor: V.accent, color: '#fff' }}
             >
               {primary.label}
-            </a>
+            </CtaButton>
           )}
           {secondary && (
-            <a
-              href={secondary.href}
-              {...externalLinkAttrs(secondary)}
+            <CtaButton
+              cta={secondary}
               className="inline-flex items-center gap-2 rounded-xl px-8 py-3.5 text-base font-bold text-white bg-white/15 border border-white/25 transition-all hover:bg-white/25"
             >
               <CtaIcon type={secondary.type} className="w-5 h-5" />
               {secondary.label}
-            </a>
+            </CtaButton>
           )}
         </div>
       </div>

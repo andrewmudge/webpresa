@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import { V } from './tokens';
-import { externalLinkAttrs, type ResolvedCta } from './cta';
+import type { ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 
 interface Props {
   businessName: string;
@@ -30,9 +31,8 @@ export function AboutSection({ businessName, tagline, aboutText, primary, imageU
             </h2>
             <p className="text-(--site-muted) leading-relaxed mb-7 max-w-prose">{aboutText}</p>
             {primary && (
-              <a
-                href={primary.href}
-                {...externalLinkAttrs(primary)}
+              <CtaButton
+                cta={primary}
                 className="inline-flex items-center gap-2 font-bold rounded-xl px-6 py-3 text-white text-sm transition-opacity hover:opacity-90"
                 style={{ backgroundColor: V.primary }}
               >
@@ -40,7 +40,7 @@ export function AboutSection({ businessName, tagline, aboutText, primary, imageU
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>
-              </a>
+              </CtaButton>
             )}
           </div>
 

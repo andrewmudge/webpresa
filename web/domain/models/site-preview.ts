@@ -78,7 +78,7 @@ export interface GalleryImage {
   caption?: string;
 }
 
-export const CTA_ACTION_TYPES = ['phone', 'email', 'sms', 'external_url', 'none'] as const;
+export const CTA_ACTION_TYPES = ['phone', 'email', 'sms', 'external_url', 'request_service', 'none'] as const;
 export type CtaActionType = (typeof CTA_ACTION_TYPES)[number];
 
 /**
@@ -89,6 +89,9 @@ export type CtaActionType = (typeof CTA_ACTION_TYPES)[number];
  * - `email`: overrides `contact.email` when present.
  * - `external_url`: required — the destination the button links to
  *   (a client's existing quote form, booking page, Calendly, etc).
+ * - `request_service`: opens the reusable `RequestServiceForm` (modal on
+ *   desktop, full-screen drawer on mobile) instead of navigating anywhere;
+ *   `value` is unused.
  * - `none`: not rendered; `value` is unused.
  */
 export interface PreviewCta {

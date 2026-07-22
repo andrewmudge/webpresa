@@ -1,6 +1,7 @@
 'use client';
 import { V } from './tokens';
-import { CtaIcon, externalLinkAttrs, getMobileBarActions, type ResolvedCta } from './cta';
+import { CtaIcon, getMobileBarActions, type ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 
 interface Props {
   primary: ResolvedCta | null;
@@ -20,16 +21,15 @@ export function MobileCallBar({ primary, secondary }: Props) {
     <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden safe-area-inset-bottom">
       <div className="flex gap-0 border-t border-white/20 shadow-2xl">
         {actions.map((cta, i) => (
-          <a
+          <CtaButton
             key={cta.variant}
-            href={cta.href}
-            {...externalLinkAttrs(cta)}
+            cta={cta}
             className="flex-1 flex items-center justify-center gap-2 py-4 text-sm font-bold text-white"
             style={{ backgroundColor: BAR_COLORS[i] }}
           >
             <CtaIcon type={cta.type} className="w-4 h-4" />
             {cta.label}
-          </a>
+          </CtaButton>
         ))}
       </div>
     </div>

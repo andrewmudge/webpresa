@@ -118,6 +118,22 @@ describe('resolvePreviewCta — external_url', () => {
   });
 });
 
+describe('resolvePreviewCta — request_service', () => {
+  it('resolves without needing any contact info', () => {
+    const result = resolvePreviewCta({
+      cta: { type: 'request_service', label: 'Request Service' },
+      contact: {},
+      variant: 'secondary',
+    });
+    expect(result).toEqual({
+      type: 'request_service',
+      label: 'Request Service',
+      href: '#request-service',
+      variant: 'secondary',
+    });
+  });
+});
+
 describe('resolvePreviewCta — none', () => {
   it('always returns null for type "none"', () => {
     const result = resolvePreviewCta({
@@ -150,10 +166,25 @@ function baseContent(overrides: Partial<PreviewContent> = {}): PreviewContent {
 }
 
 describe('resolvePreviewCtaConfig — structured config', () => {
-  it('resolves one valid CTA when only primary is configured', () => {
+  it('defaults secondary to Request Service when only primary is configured', () => {
     const content = baseContent({
       contact: { phone: '512-555-0100' },
       cta: { primary: { type: 'phone', label: 'Call Now' } },
+    });
+    const { primary, secondary } = resolvePreviewCtaConfig(content);
+    expect(primary).not.toBeNull();
+    expect(secondary).toEqual({
+      type: 'request_service',
+      label: 'Request Service',
+      href: '#request-service',
+      variant: 'secondary',
+    });
+  });
+
+  it('respects an explicitly hidden secondary instead of defaulting to Request Service', () => {
+    const content = baseContent({
+      contact: { phone: '512-555-0100' },
+      cta: { primary: { type: 'phone', label: 'Call Now' }, secondary: { type: 'none', label: '' } },
     });
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     expect(primary).not.toBeNull();
@@ -199,10 +230,20 @@ describe('resolvePreviewCtaConfig — structured config', () => {
     expect(secondary?.href).toBe('tel:+18885551111');
   });
 
-  it('returns null for both when nothing resolves', () => {
+  it('returns null for primary but still defaults secondary to Request Service when primary fails to resolve', () => {
     const content = baseContent({
       contact: {},
       cta: { primary: { type: 'phone', label: 'Call Now' } },
+    });
+    const { primary, secondary } = resolvePreviewCtaConfig(content);
+    expect(primary).toBeNull();
+    expect(secondary?.type).toBe('request_service');
+  });
+
+  it('returns null for both when primary fails to resolve and secondary is explicitly hidden', () => {
+    const content = baseContent({
+      contact: {},
+      cta: { primary: { type: 'phone', label: 'Call Now' }, secondary: { type: 'none', label: '' } },
     });
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     expect(primary).toBeNull();
@@ -219,7 +260,7 @@ describe('resolvePreviewCtaConfig — legacy normalization', () => {
     });
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     expect(primary).toEqual({ type: 'phone', label: 'Get a Free Quote', href: 'tel:+15125550100', variant: 'primary' });
-    expect(secondary).toBeNull();
+    expect(secondary?.type).toBe('request_service');
   });
 
   it('falls back to email when there is no phone', () => {
@@ -236,11 +277,11 @@ describe('resolvePreviewCtaConfig — legacy normalization', () => {
     });
   });
 
-  it('hides the CTA entirely when there is no phone, no email, and no structured cta', () => {
+  it('hides the primary CTA when there is no phone, no email, and no structured cta, but still offers Request Service', () => {
     const content = baseContent({ contact: {} });
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     expect(primary).toBeNull();
-    expect(secondary).toBeNull();
+    expect(secondary?.type).toBe('request_service');
   });
 });
 
@@ -249,15 +290,26 @@ describe('resolvePreviewCtaConfig — legacy normalization', () => {
 // ---------------------------------------------------------------------------
 
 describe('getMobileBarActions', () => {
-  it('returns a single action when only one CTA resolves', () => {
+  it('returns a single action when secondary is explicitly hidden', () => {
+    const content = baseContent({
+      contact: { phone: '512-555-0100' },
+      cta: { primary: { type: 'phone', label: 'Call Now' }, secondary: { type: 'none', label: '' } },
+    });
+    const { primary, secondary } = resolvePreviewCtaConfig(content);
+    const actions = getMobileBarActions(primary, secondary);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].type).toBe('phone');
+  });
+
+  it('returns two actions (phone + default Request Service) when only primary is configured', () => {
     const content = baseContent({
       contact: { phone: '512-555-0100' },
       cta: { primary: { type: 'phone', label: 'Call Now' } },
     });
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     const actions = getMobileBarActions(primary, secondary);
-    expect(actions).toHaveLength(1);
-    expect(actions[0].type).toBe('phone');
+    expect(actions).toHaveLength(2);
+    expect(actions.map((a) => a.type)).toEqual(['phone', 'request_service']);
   });
 
   it('returns two actions when both primary and secondary resolve', () => {

@@ -52,6 +52,13 @@ export function resolvePreviewCta({
       if (!value || !isHttpsUrl(value)) return null;
       return { type: 'external_url', label: cta.label, href: value, variant };
     }
+    case 'request_service':
+      // Opens the reusable RequestServiceForm (see RequestServiceModal.tsx /
+      // CtaButton.tsx) instead of navigating — needs no contact info to
+      // resolve, so it's always available as a default secondary action.
+      // `href` is a harmless in-page anchor; CtaButton never actually
+      // navigates it, it intercepts the click.
+      return { type: 'request_service', label: cta.label, href: '#request-service', variant };
     default:
       return null;
   }
@@ -71,6 +78,16 @@ function normalizeLegacyCtaConfig(content: PreviewContent): PreviewCtaConfig {
 }
 
 /**
+ * The site-wide default secondary CTA — every business page shows a
+ * "Request Service" button unless an admin has explicitly configured a
+ * secondary CTA (including explicitly hiding it via `type: 'none'`). This
+ * makes the pairing universal immediately, without requiring a preview
+ * regeneration or admin action, even for previews that today only have a
+ * primary CTA on file.
+ */
+const DEFAULT_SECONDARY_CTA: PreviewCta = { type: 'request_service', label: 'Request Service' };
+
+/**
  * Resolve the full primary/secondary CTA configuration for a preview.
  * This is the single source every template section reads from — do not
  * construct CTA links ad hoc in individual components.
@@ -82,9 +99,11 @@ export function resolvePreviewCtaConfig(content: PreviewContent): {
   const config = content.cta ?? normalizeLegacyCtaConfig(content);
 
   const primary = resolvePreviewCta({ cta: config.primary, contact: content.contact, variant: 'primary' });
-  let secondary = config.secondary
-    ? resolvePreviewCta({ cta: config.secondary, contact: content.contact, variant: 'secondary' })
-    : null;
+  let secondary = resolvePreviewCta({
+    cta: config.secondary ?? DEFAULT_SECONDARY_CTA,
+    contact: content.contact,
+    variant: 'secondary',
+  });
 
   // Two CTAs resolving to the same action + destination collapse to one.
   if (primary && secondary && primary.type === secondary.type && primary.href === secondary.href) {
@@ -126,6 +145,13 @@ export function CtaIcon({ type, className }: { type: CtaActionType; className?: 
         <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      );
+    case 'request_service':
+      return (
+        <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-5 9l2 2 4-4" />
         </svg>
       );
     default:

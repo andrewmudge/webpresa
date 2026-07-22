@@ -10,6 +10,7 @@ const ACTION_TYPE_LABELS: Record<CtaActionType, string> = {
   email: 'Email',
   sms: 'Text (SMS)',
   external_url: 'External link',
+  request_service: 'Request Service (form)',
   none: 'Hidden — no button',
 };
 
@@ -22,6 +23,8 @@ function destinationHelp(type: CtaActionType): string | null {
       return 'Uses the preview email by default. Leave blank unless overriding.';
     case 'external_url':
       return 'Required — must be a valid https:// URL (quote form, booking page, Calendly, etc).';
+    case 'request_service':
+      return 'Opens the built-in Request Service form (modal on desktop, full-screen on mobile). No destination needed.';
     default:
       return null;
   }
@@ -116,7 +119,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
               <FieldErrors errors={errors.primaryLabel} />
             </div>
           )}
-          {primaryType !== 'none' && (
+          {primaryType !== 'none' && primaryType !== 'request_service' && (
             <div className="md:col-span-2">
               <label htmlFor="primaryValue" className="block text-sm font-medium text-gray-700 mb-1">
                 Destination {primaryType === 'external_url' && <span className="text-red-500">*</span>}
@@ -133,6 +136,11 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                 <p className="mt-1 text-xs text-gray-400">{destinationHelp(primaryType)}</p>
               )}
               <FieldErrors errors={errors.primaryValue} />
+            </div>
+          )}
+          {primaryType === 'request_service' && destinationHelp(primaryType) && (
+            <div className="md:col-span-2">
+              <p className="text-xs text-gray-400">{destinationHelp(primaryType)}</p>
             </div>
           )}
         </div>
@@ -189,7 +197,7 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                 <FieldErrors errors={errors.secondaryLabel} />
               </div>
             )}
-            {secondaryType !== 'none' && (
+            {secondaryType !== 'none' && secondaryType !== 'request_service' && (
               <div className="md:col-span-2">
                 <label htmlFor="secondaryValue" className="block text-sm font-medium text-gray-700 mb-1">
                   Destination {secondaryType === 'external_url' && <span className="text-red-500">*</span>}
@@ -206,6 +214,11 @@ export function CtaConfigForm({ action, defaults }: CtaConfigFormProps) {
                   <p className="mt-1 text-xs text-gray-400">{destinationHelp(secondaryType)}</p>
                 )}
                 <FieldErrors errors={errors.secondaryValue} />
+              </div>
+            )}
+            {secondaryType === 'request_service' && destinationHelp(secondaryType) && (
+              <div className="md:col-span-2">
+                <p className="text-xs text-gray-400">{destinationHelp(secondaryType)}</p>
               </div>
             )}
           </div>

@@ -18,7 +18,7 @@ export function buildDefaultCta(
   labels?: { primary?: string; secondary?: string },
 ): PreviewCtaConfig {
   if (contact.phone) {
-    const primary: PreviewCta = { type: 'phone', label: labels?.primary || 'Call Now' };
+    const primary: PreviewCta = { type: 'phone', label: labels?.primary || 'Call Us' };
     if (contact.email) {
       return { primary, secondary: { type: 'email', label: labels?.secondary || 'Email Us' } };
     }

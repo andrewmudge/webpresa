@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import { V } from './tokens';
-import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
+import { CtaIcon, type ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 
 interface Props {
   businessName: string;
@@ -60,33 +61,31 @@ export function GeneratedSiteHeader({ businessName, logoUrl, serviceAreas, servi
         {/* Desktop CTAs */}
         <div className="hidden md:flex items-center gap-3">
           {secondary && (
-            <a
-              href={secondary.href}
-              {...externalLinkAttrs(secondary)}
+            <CtaButton
+              cta={secondary}
               className="flex items-center gap-1.5 text-sm font-semibold rounded-full border-2 px-4 py-1.5 transition-colors hover:text-white"
               style={{ borderColor: V.primary, color: V.primary }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.backgroundColor = V.primary;
-                (e.currentTarget as HTMLAnchorElement).style.color = '#fff';
+                (e.currentTarget as HTMLElement).style.backgroundColor = V.primary;
+                (e.currentTarget as HTMLElement).style.color = '#fff';
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.backgroundColor = '';
-                (e.currentTarget as HTMLAnchorElement).style.color = V.primary;
+                (e.currentTarget as HTMLElement).style.backgroundColor = '';
+                (e.currentTarget as HTMLElement).style.color = V.primary;
               }}
             >
               <CtaIcon type={secondary.type} className="w-4 h-4" />
               {secondary.label}
-            </a>
+            </CtaButton>
           )}
           {primary && (
-            <a
-              href={primary.href}
-              {...externalLinkAttrs(primary)}
+            <CtaButton
+              cta={primary}
               className="text-sm font-bold rounded-full px-5 py-2 text-white transition-opacity hover:opacity-90"
               style={{ backgroundColor: V.accent }}
             >
               {primary.label}
-            </a>
+            </CtaButton>
           )}
         </div>
 
@@ -122,27 +121,25 @@ export function GeneratedSiteHeader({ businessName, logoUrl, serviceAreas, servi
           ))}
           <div className="pt-3 flex flex-col gap-2">
             {secondary && (
-              <a
-                href={secondary.href}
-                {...externalLinkAttrs(secondary)}
-                onClick={() => setOpen(false)}
+              <CtaButton
+                cta={secondary}
+                onNavigate={() => setOpen(false)}
                 className="flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white"
                 style={{ backgroundColor: V.primary }}
               >
                 <CtaIcon type={secondary.type} className="w-4 h-4" />
                 {secondary.label}
-              </a>
+              </CtaButton>
             )}
             {primary && (
-              <a
-                href={primary.href}
-                {...externalLinkAttrs(primary)}
-                onClick={() => setOpen(false)}
+              <CtaButton
+                cta={primary}
+                onNavigate={() => setOpen(false)}
                 className="flex items-center justify-center rounded-xl py-3 text-sm font-bold text-white"
                 style={{ backgroundColor: V.accent }}
               >
                 {primary.label}
-              </a>
+              </CtaButton>
             )}
           </div>
         </div>

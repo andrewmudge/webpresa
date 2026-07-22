@@ -1,7 +1,8 @@
 import { createElement, type ReactNode } from 'react';
 import Image from 'next/image';
 import { V } from './tokens';
-import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
+import { CtaIcon, type ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 import { getHeroIcon } from './industry-icons';
 import { getHeroIllustration } from './hero-illustrations';
 import type { HeroStyle } from '@/domain/models/site-preview';
@@ -237,25 +238,23 @@ function SplitHeroSection({
                 the image's edge, so they get more clearance. */}
             <div className="max-w-[60%] lg:max-w-none flex flex-col sm:flex-row gap-3">
               {primary && (
-                <a
-                  href={primary.href}
-                  {...externalLinkAttrs(primary)}
+                <CtaButton
+                  cta={primary}
                   className="inline-flex items-center justify-center rounded-xl px-7 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-[1.02] hover:shadow-xl"
                   style={{ backgroundColor: V.primary }}
                 >
                   <CtaIcon type={primary.type} className="w-5 h-5 mr-2" />
                   {primary.label}
-                </a>
+                </CtaButton>
               )}
               {secondary && (
-                <a
-                  href={secondary.href}
-                  {...externalLinkAttrs(secondary)}
+                <CtaButton
+                  cta={secondary}
                   className="inline-flex items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-bold border-2 border-(--site-primary) text-(--site-primary) transition-colors hover:bg-(--site-primary) hover:text-white"
                 >
                   <CtaIcon type={secondary.type} className="w-5 h-5" />
                   {secondary.label}
-                </a>
+                </CtaButton>
               )}
             </div>
           </div>
@@ -428,24 +427,22 @@ export function GeneratedHero({
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row gap-3">
             {primary && (
-              <a
-                href={primary.href}
-                {...externalLinkAttrs(primary)}
+              <CtaButton
+                cta={primary}
                 className="inline-flex items-center justify-center rounded-xl px-7 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-[1.02] hover:shadow-xl"
                 style={{ backgroundColor: V.accent }}
               >
                 {primary.label}
-              </a>
+              </CtaButton>
             )}
             {secondary && (
-              <a
-                href={secondary.href}
-                {...externalLinkAttrs(secondary)}
+              <CtaButton
+                cta={secondary}
                 className="inline-flex items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-bold text-white bg-white/15 backdrop-blur-sm border border-white/30 transition-all hover:bg-white/25"
               >
                 <CtaIcon type={secondary.type} className="w-5 h-5" />
                 {secondary.label}
-              </a>
+              </CtaButton>
             )}
           </div>
         </div>

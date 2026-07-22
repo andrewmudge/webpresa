@@ -1,5 +1,6 @@
 import { V } from './tokens';
-import { externalLinkAttrs, type ResolvedCta } from './cta';
+import type { ResolvedCta } from './cta';
+import { CtaButton } from './CtaButton';
 
 interface Props {
   serviceAreas: string[];
@@ -41,14 +42,13 @@ export function ServiceAreaSection({ serviceAreas, primary, sectionHeadline, sec
         </div>
         {primary && (
           <div className="mt-10">
-            <a
-              href={primary.href}
-              {...externalLinkAttrs(primary)}
+            <CtaButton
+              cta={primary}
               className="text-sm font-bold transition-opacity hover:opacity-80"
               style={{ color: V.primary }}
             >
               {primary.label} →
-            </a>
+            </CtaButton>
           </div>
         )}
       </div>

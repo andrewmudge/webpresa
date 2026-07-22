@@ -3915,3 +3915,91 @@ web/docs/
 ├── architecture.md                                                            MODIFIED — this round's entry
 └── build_log.md                                                               MODIFIED — this entry
 ```
+
+---
+
+# Universal hero CTA defaults + Request Service form (2026-07-22)
+
+**The ask:** the hero (and every other section reading the shared CTA config) should show **Primary: Call Us / Secondary: Request Service** on every business page — even businesses whose preview today only has a primary CTA configured. The "Request Service" button opens a reusable form: a centered modal on desktop, a full-screen drawer on mobile. Frontend only — no lead-persistence backend yet.
+
+**Scope note:** explicitly frontend-only per direct instruction. `RequestServiceForm`'s submission is simulated locally (a `setTimeout`, then a success state) — nothing is sent anywhere yet. Wiring it to a real lead-capture destination is deferred, tracked-later work, same as the rest of this stage's "architecture later" boundary.
+
+## Design
+
+- **New CTA action type — `request_service`** (`CTA_ACTION_TYPES`, `domain/models/site-preview.ts`): opens the shared dialog instead of navigating; needs no destination `value` (unlike `external_url`, which still requires one). Selectable in the admin `CtaConfigForm` alongside the existing phone/SMS/email/external-link options — nothing was removed from the admin portal, only added to it.
+- **Universal secondary default, resolved at render time, not via a data migration** (`resolvePreviewCtaConfig`, `template/cta.tsx`): whenever a preview's `content.cta.secondary` is entirely unset, it now resolves to a built-in `{ type: 'request_service', label: 'Request Service' }` default. This makes the pairing apply immediately to every existing business page — including ones that today only ever configured a primary CTA — without regenerating a preview or requiring any admin action. An admin who has *explicitly* configured a secondary (including explicitly hiding it via `type: 'none'`) is still respected; only the "never configured" case gets the new default. `request_service` always resolves (no phone/email dependency), so it's a safe universal fallback.
+- **`buildDefaultCta`** (`app/admin/.../cta-defaults.ts`) — primary label default changed from "Call Now" to "Call Us." Left its optional email-secondary branch alone (still reachable when a caller explicitly requests it via `labels`); the render-layer default above is what actually guarantees "Request Service" appears, so this function didn't need a structural change.
+- **`RequestServiceProvider` / `useRequestService`** (new `template/RequestServiceModal.tsx`) — a client-side React Context wrapping the entire template (`template/index.tsx`), so any CTA button anywhere in the section tree can open the same dialog. Renders as a `framer-motion` `AnimatePresence` panel: `items-end` (bottom sheet, `rounded-t-3xl`, `h-[92vh]`) on mobile, `md:items-center` (centered card, `md:rounded-2xl`, `md:max-w-lg`) on desktop — one component, breakpoint-driven via Tailwind classes, not two separate implementations. Closes on Escape, backdrop click, or the `X` button; locks `document.body` scroll while open.
+- **`RequestServiceForm`** (new `template/RequestServiceForm.tsx`) — reusable, business-agnostic: name (required), phone/email (at least one required), service needed, free-text details. Kept independent of the modal/drawer shell so it could be embedded elsewhere later (e.g. a dedicated `/contact` section) without change.
+- **`CtaButton`** (new `template/CtaButton.tsx`, client) — the single place a resolved CTA's `type` decides "navigate" vs. "open the dialog." Renders a real `<a>` for every existing action type (unchanged behavior, including `externalLinkAttrs`' `target="_blank"` for `external_url`) or a `<button onClick={openRequestService}>` for `request_service`. Every section that renders a primary/secondary CTA (`GeneratedHero`, `GeneratedSiteHeader`, `WhyChooseUs`, `ServiceAreaSection`, `FinalCTA`, `MobileCallBar`, `AboutSection`) now renders `<CtaButton cta={...} className="...">` instead of a raw `<a>`, passing through its existing styling unchanged — server components can render this client component directly without becoming client components themselves.
+- **`CtaIcon`** gained a `request_service` glyph (clipboard-check style) so the mobile sticky bar and header keep their icon+label treatment for the new type.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test) — cta.test.ts updated: 5 assertions rewritten for the new default-secondary
+           behavior (secondary now resolves to Request Service instead of null when unconfigured), 2 new tests
+           added (explicit `type: 'none'` still hides it; request_service resolves without contact info)
+Build:     next build succeeds — no new routes
+```
+
+Not yet done: manual browser verification of the modal (desktop) / drawer (mobile) interaction — deferred at the user's request in this session. Lead submission has no backend — a real destination (email, DynamoDB, CRM, etc.) is future work.
+
+## Files changed
+
+```
+web/domain/models/site-preview.ts                                             MODIFIED — added 'request_service' to CTA_ACTION_TYPES
+
+web/app/b/[slug]/template/
+├── cta.tsx                                                                    MODIFIED — resolves request_service; universal default secondary; new CtaIcon glyph
+├── CtaButton.tsx                                                              NEW — client component: link vs. dialog-trigger per CTA type
+├── RequestServiceModal.tsx                                                    NEW — RequestServiceProvider/useRequestService context + modal/drawer shell
+├── RequestServiceForm.tsx                                                     NEW — reusable request-service form (frontend-only, simulated submit)
+├── index.tsx                                                                  MODIFIED — wraps template in RequestServiceProvider
+├── GeneratedHero.tsx                                                          MODIFIED — CtaButton in place of raw <a> (both hero styles)
+├── GeneratedSiteHeader.tsx                                                    MODIFIED — CtaButton in place of raw <a> (desktop + mobile drawer)
+├── WhyChooseUs.tsx                                                            MODIFIED — CtaButton in place of raw <a>
+├── ServiceAreaSection.tsx                                                     MODIFIED — CtaButton in place of raw <a>
+├── FinalCTA.tsx                                                               MODIFIED — CtaButton in place of raw <a>
+├── MobileCallBar.tsx                                                          MODIFIED — CtaButton in place of raw <a>
+├── AboutSection.tsx                                                           MODIFIED — CtaButton in place of raw <a>
+└── __tests__/cta.test.ts                                                      MODIFIED — updated for the new default-secondary behavior
+
+web/app/admin/(dashboard)/businesses/[businessId]/
+├── cta-defaults.ts                                                            MODIFIED — primary label default "Call Now" → "Call Us"
+└── CtaConfigForm.tsx                                                          MODIFIED — 'request_service' option, help text, hides destination field for it
+
+web/docs/
+├── architecture.md                                                            MODIFIED — this round's entry
+└── build_log.md                                                               MODIFIED — this entry
+```
+
+---
+
+# Bug fix — Request Service dialog theming (2026-07-22)
+
+**The ask:** the Request Service modal rendered with a transparent panel and low-contrast/white text on desktop, even though the site behind it has a normal light theme.
+
+**Root cause:** `GeneratedWebsite` (`template/index.tsx`) nested the themed wrapper `<div>` (carrying `--site-*` custom properties via inline `style={buildSiteTokens(theme)}`) *inside* `RequestServiceProvider`. `RequestServiceProvider` renders its dialog as a sibling of `{children}`, not a descendant — so in the actual DOM, the dialog ended up a **sibling** of the themed div, not nested inside it. CSS custom properties only cascade to descendants, so every `var(--site-*)`/`bg-(--site-background)`/`text-(--site-text)` reference inside the dialog resolved to nothing — transparent background, unset (browser-default/inherited) text color.
+
+**Fix:** swapped the nesting — the themed div now wraps `RequestServiceProvider`, so the dialog (rendered inside the provider, which itself has no DOM wrapper of its own) is a true descendant of the div carrying the CSS variables and inherits them correctly.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     534 passed  (npm test)
+```
+
+Not yet manually re-verified in a live browser (deferred per this session's scope) — fix confirmed by inspection of the resulting DOM nesting.
+
+## Files changed
+
+```
+web/app/b/[slug]/template/index.tsx    MODIFIED — swapped nesting so the themed div wraps RequestServiceProvider
+
+web/docs/build_log.md                  MODIFIED — this entry
+```

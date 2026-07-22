@@ -6,6 +6,7 @@ import { buildSiteTokens, isValidPhone, isValidEmail } from './tokens';
 import { resolvePreviewCtaConfig } from './cta';
 import { ClaimBanner } from '../ClaimBanner';
 import { MobileCallBar } from './MobileCallBar';
+import { RequestServiceProvider } from './RequestServiceModal';
 import { sectionRegistry, type SectionRenderContext } from './section-registry';
 import { computeSectionAvailability } from '@/lib/website-sections/availability';
 import { resolveRenderableSections } from '@/lib/website-sections/resolve';
@@ -62,26 +63,36 @@ export function GeneratedWebsite({
       style={{ ...buildSiteTokens(theme), fontFamily: theme.fontFamily }}
       className="min-h-screen bg-(--site-background) text-(--site-text)"
     >
-      {/* Admin draft indicator */}
-      {isDraft && isAdmin && (
-        <div className="bg-yellow-400 text-yellow-900 text-center text-xs font-bold py-2 px-4 sticky top-0 z-[60]">
-          DRAFT PREVIEW — visible to admins only · not publicly accessible
-        </div>
-      )}
+      {/*
+        RequestServiceProvider's dialog must render *inside* this div, not
+        as its sibling — CSS custom properties (--site-*, set via the
+        inline `style` above) only cascade to descendants. A sibling dialog
+        would see none of them, rendering with a transparent background and
+        unreadable text (see build_log.md, "Request Service dialog theming
+        fix").
+      */}
+      <RequestServiceProvider businessName={businessName} phone={phone}>
+        {/* Admin draft indicator */}
+        {isDraft && isAdmin && (
+          <div className="bg-yellow-400 text-yellow-900 text-center text-xs font-bold py-2 px-4 sticky top-0 z-[60]">
+            DRAFT PREVIEW — visible to admins only · not publicly accessible
+          </div>
+        )}
 
-      {/* Claim banner */}
-      {!isClaimed && !isDraft && <ClaimBanner businessName={businessName} />}
+        {/* Claim banner */}
+        {!isClaimed && !isDraft && <ClaimBanner businessName={businessName} />}
 
-      {/* Configured sections, rendered in order through the controlled registry */}
-      {sections.map((section) => (
-        <Fragment key={section.component}>{sectionRegistry[section.component](ctx)}</Fragment>
-      ))}
+        {/* Configured sections, rendered in order through the controlled registry */}
+        {sections.map((section) => (
+          <Fragment key={section.component}>{sectionRegistry[section.component](ctx)}</Fragment>
+        ))}
 
-      {/* Mobile sticky CTA bar — not a configurable page section */}
-      <MobileCallBar primary={primary} secondary={secondary} />
+        {/* Mobile sticky CTA bar — not a configurable page section */}
+        <MobileCallBar primary={primary} secondary={secondary} />
 
-      {/* Bottom padding on mobile to keep content above the sticky bar */}
-      {(primary || secondary) && <div className="h-16 md:hidden" />}
+        {/* Bottom padding on mobile to keep content above the sticky bar */}
+        {(primary || secondary) && <div className="h-16 md:hidden" />}
+      </RequestServiceProvider>
     </div>
   );
 }
