@@ -53,6 +53,7 @@ export interface WebsiteEnrichmentSnapshot {
   about?: string;
   services: WebsiteEnrichmentService[];
   serviceAreas: string[];
+  differentiators: string[];
   faq: WebsiteEnrichmentFaqItem[];
   navigationLabels: string[];
   callsToAction: string[];

@@ -117,15 +117,25 @@ describe('approveScanImageAction', () => {
       approveScanImageAction('biz_1', 'scan_1', 'img_1', '/admin/businesses/biz_1'),
     ).rejects.toThrow('REDIRECT:/admin/businesses/biz_1?photoApproval=added');
 
-    expect(mockPutAsset).toHaveBeenCalledWith('businesses/biz_1/assets/photos/1.jpg', expect.any(Buffer), 'image/jpeg');
+    // The new photo's S3 key is randomized (never positional — see
+    // appendBusinessPhotos in lib/s3/business-assets.ts), so pull the
+    // actual generated key/URL out of the mock call rather than hardcoding it.
+    expect(mockPutAsset).toHaveBeenCalledWith(
+      expect.stringMatching(/^businesses\/biz_1\/assets\/photos\/[^/]+\.jpg$/),
+      expect.any(Buffer),
+      'image/jpeg',
+    );
+    const promotedKey = mockPutAsset.mock.calls[0][0] as string;
+    const promotedUrl = `/api/assets/${promotedKey}`;
+
     expect(mockPutBusiness).toHaveBeenCalledWith(
       expect.objectContaining({
-        photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', '/api/assets/businesses/biz_1/assets/photos/1.jpg'],
+        photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', promotedUrl],
       }),
     );
     expect(mockPutScanEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        images: [expect.objectContaining({ imageId: 'img_1', promotedPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/1.jpg' })],
+        images: [expect.objectContaining({ imageId: 'img_1', promotedPhotoUrl: promotedUrl })],
       }),
     );
   });
@@ -228,10 +238,13 @@ describe('approveScanImagesAction (batch)', () => {
       approveScanImagesAction('biz_1', '/admin/businesses/biz_1', formDataWith(['scan_1::img_1', 'scan_1::img_2'])),
     ).rejects.toThrow('REDIRECT:/admin/businesses/biz_1?photoApproval=batch_added&added=2&skipped=0');
 
-    expect(currentPhotoUrls).toEqual([
-      '/api/assets/businesses/biz_1/assets/photos/0.jpg',
-      '/api/assets/businesses/biz_1/assets/photos/1.jpg',
-    ]);
+    // Keys are randomized (never positional), so assert growth/uniqueness
+    // rather than exact key values — see appendBusinessPhotos.
+    expect(currentPhotoUrls).toHaveLength(2);
+    expect(new Set(currentPhotoUrls).size).toBe(2);
+    for (const url of currentPhotoUrls) {
+      expect(url).toMatch(/^\/api\/assets\/businesses\/biz_1\/assets\/photos\/[^/]+\.jpg$/);
+    }
   });
 
   it('counts an already-promoted or over-limit image as skipped rather than failing the whole batch', async () => {

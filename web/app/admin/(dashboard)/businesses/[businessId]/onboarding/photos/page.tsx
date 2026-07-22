@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
 import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
 import { PhotosForm } from '../../../PhotosForm';
-import { updatePhotosAction } from '../../actions';
+import { updatePhotosAction, addBusinessPhotosAction, deleteBusinessPhotoAction, updateBusinessLogoAction } from '../../actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +57,9 @@ export default async function OnboardingPhotosPage({ params }: Props) {
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <PhotosForm
           action={boundAction}
+          addPhotosAction={addBusinessPhotosAction.bind(null, businessId)}
+          deletePhotoAction={deleteBusinessPhotoAction.bind(null, businessId)}
+          updateLogoAction={updateBusinessLogoAction.bind(null, businessId)}
           defaults={business}
           submitLabel={submitLabel}
           heroPhotoWarnings={heroPhotoWarnings}

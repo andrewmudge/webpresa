@@ -86,16 +86,26 @@ export default async function ScanDetailPage({ params, searchParams }: Props) {
             )}
           </p>
         </div>
-        {preview && (
-          <a
-            href={`/b/${preview.slug}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors"
-          >
-            View generated preview (v{preview.version}) ↗
-          </a>
-        )}
+        <div className="flex items-center gap-3 shrink-0">
+          {business && (
+            <Link
+              href={`/admin/businesses/${business.businessId}`}
+              className="rounded-lg border border-gray-300 text-gray-700 px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              View business
+            </Link>
+          )}
+          {preview && (
+            <a
+              href={`/b/${preview.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors"
+            >
+              View generated preview (v{preview.version}) ↗
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Summary */}

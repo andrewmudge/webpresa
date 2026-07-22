@@ -3666,3 +3666,163 @@ web/docs/
 ├── architecture.md                                                               MODIFIED — this round's entry
 └── build_log.md                                                                  MODIFIED — this entry
 ```
+
+---
+
+# Hero panel: rounded/shadowed card only for real photos, not the illustration fallback (2026-07-21)
+
+**The ask:** the rounded-corner/shadow/gap card treatment applied to the hero split-image panel (2026-07-19/20 work) looked good on a real desktop hero photo, but shouldn't apply to the theme illustration ("no photo" fallback) — that should stay exactly as it originally looked (flush, edge-to-edge, no rounding, no shadow).
+
+**Fix:** `HeroCornerImage` (`app/b/[slug]/template/GeneratedHero.tsx`) gained two new required props, `desktopIsPhoto`/`mobileIsPhoto`, decided independently per breakpoint (a business can have a real mobile photo with an illustration desktop, or vice versa — see the mobile hero photo work from 2026-07-20). The wrapper's className is now built from two mutually-exclusive branches per breakpoint instead of one fixed string:
+
+```ts
+const mobileBox = mobileIsPhoto ? 'inset-y-4 right-4 rounded-2xl overflow-hidden shadow-xl' : 'inset-y-0 right-0';
+const desktopBox = desktopIsPhoto ? 'lg:rounded-2xl lg:overflow-hidden lg:shadow-xl lg:my-8 lg:mr-8 xl:mr-12' : '';
+```
+(Each ternary picks one *complete* set of classes rather than layering a base set + override — avoids Tailwind utility-conflict ordering issues, e.g. `inset-y-0` vs `inset-y-4` both present simultaneously.)
+
+`SplitHeroSectionProps` threads the two booleans down from `GeneratedHero`'s three branches:
+- `'illustration'`: `desktopIsPhoto={false}` (always — this branch only exists because no desktop photo resolved), `mobileIsPhoto={!!heroImageUrlMobile}`.
+- `'imageSplit'`: `desktopIsPhoto` (always true — this branch only exists because a real desktop photo resolved), `mobileIsPhoto={!!heroImageUrlMobile}`.
+- `'image'`'s `lg:hidden` mobile sub-render: both set to `!!heroImageUrlMobile` (this instance's own "desktop" side is never actually visible — the real desktop rendering is the separate full-bleed `legacySection` — so the flag only affects what's shown on mobile).
+
+No change to `gradientOverlay` (the left-edge blend into the text column) — unchanged for both photo and illustration cases, exactly as before.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     515 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/GeneratedHero.tsx    MODIFIED — desktopIsPhoto/mobileIsPhoto props gate the rounded/shadowed card treatment
+
+web/docs/
+├── architecture.md                            MODIFIED — this round's entry
+└── build_log.md                               MODIFIED — this entry
+```
+
+---
+
+# Firecrawl differentiators extraction — fixes blank Why Choose Us for enriched businesses (2026-07-21)
+
+**The ask:** A-1 Plumbing (`biz_34eb24fd-85fc-4413-a138-c40aaa5b2185`) was enriched via Firecrawl, which scraped a real summary from its own site — "family-owned... over 40 years of industry experience... 24/7 emergency services" — but its public preview's Why Choose Us section rendered nothing.
+
+**Root cause:** `PreviewContent.differentiators` (what `WhyChooseUs.tsx` renders from) comes from OpenAI's structured output, which only ever writes one entry per line in `GenerationContext.differentiatorLines`. That list was built solely from `Business.differentiators` (a manual admin free-text field) — unlike every other field in `buildGenerationContext()` (services, service areas, description, contact), it had no Firecrawl-snapshot fallback at all, a previously deliberate design choice (see the now-superseded comment/test: "Firecrawl has no equivalent field to fall back to"). A-1 Plumbing's scraped summary landed in `snapshot.summary` and did reach the prompt as `description`, but the model was never told it could derive `differentiators` output from anything besides an explicit list — so a business with no manually-typed differentiators always got an empty array regardless of what Firecrawl actually found.
+
+**Fix:** gave `differentiators` the same per-field Firecrawl fallback every other enrichable field already has, rather than special-casing it in the OpenAI prompt:
+
+- `lib/firecrawl/client.ts`: added `differentiators: string[]` to `EXTRACTION_JSON_SCHEMA` and extended `EXTRACTION_PROMPT` to ask Firecrawl's own extraction LLM for short "why choose us" phrases literally stated on the page (years in business, family-owned/local, licensed/insured, 24/7 availability, awards/certifications, guarantees) — same "only what's literally stated, never inferred" constraint as every other extracted field.
+- `lib/firecrawl/normalize.ts` / `domain/models/website-enrichment.ts` / `domain/schemas/website-enrichment.schema.ts`: `WebsiteEnrichmentSnapshot.differentiators` (`string[]`, deduped/sanitized/capped at 8 — matches `PreviewContent.differentiators`'s own cap) normalized exactly like `serviceAreas`.
+- `lib/firecrawl/generation-context.ts`: `buildGenerationContext()` now resolves `differentiatorLines` as business-wins-else-snapshot, folded into `usedEnrichmentFallback`, matching `servicesLines`/`serviceAreaLines`.
+- `lib/ai/generate-preview.ts`: reworded the differentiators prompt line (no longer claims "verbatim from the owner," since the list may now be website-sourced) and extended the existing enrichment-fallback disclosure note to mention differentiators alongside services/service areas/description.
+
+Businesses already enriched before this change (including A-1 Plumbing) need "Enrich Website"/"Retry" run again to pick up the new field, since their stored `extracted.json` predates it.
+
+**Out of scope:** no new admin "found differentiators, apply?" review UI (unlike `FoundContactInfo.tsx`'s phone/email flow) — the fallback flows straight into generation input the same way services/service areas already do. `Business.differentiators` (the manual field) is unchanged and still always wins when non-empty.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     519 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/lib/firecrawl/
+├── client.ts                                                      MODIFIED — differentiators added to EXTRACTION_JSON_SCHEMA + EXTRACTION_PROMPT
+├── normalize.ts                                                   MODIFIED — differentiators dedup/sanitize/cap, matching serviceAreas
+├── generation-context.ts                                          MODIFIED — differentiatorLines business-wins-else-snapshot fallback
+└── __tests__/
+    ├── normalize.test.ts                                          MODIFIED — differentiators extraction/cap tests
+    └── generation-context.test.ts                                 MODIFIED — replaced "no fallback" test with fallback tests
+
+web/lib/ai/
+├── generate-preview.ts                                            MODIFIED — prompt wording no longer claims "verbatim from the owner"
+└── __tests__/generate-preview.test.ts                              MODIFIED — enrichment-sourced differentiators reach the prompt
+
+web/domain/
+├── models/website-enrichment.ts                                   MODIFIED — WebsiteEnrichmentSnapshot.differentiators field
+├── schemas/website-enrichment.schema.ts                            MODIFIED — differentiators validation
+└── __tests__/stage13.test.ts                                       MODIFIED — fixture updated with differentiators field
+
+web/lib/firecrawl/__tests__/enrich-business.test.ts                 MODIFIED — fixture updated with differentiators field
+
+web/docs/
+├── architecture.md                                                MODIFIED — this round's entry
+└── build_log.md                                                   MODIFIED — this entry
+```
+
+---
+
+# Scan-page business link + Logo & Photos manager redesign (2026-07-21)
+
+**The asks:** (1) a quick "View business" link on the admin scan detail page, left of "View generated preview". (2) On the business detail page's Photos card: the uploaded logo never rendered as an image anywhere in the admin (only a plain "view" text link); uploading additional photos silently replaced the existing set instead of adding to it; and a request to redesign the top of the Photos card into a unified photo manager that shows every photo (and the logo) with upload and delete.
+
+**Root causes, confirmed by reading the code:** `FileField`'s `currentUrl` branch (logo) only ever rendered a text link, never an `<Image>`, unlike the `currentUrls` (photos) branch which got a real `PhotoThumbnail` grid elsewhere on the page. `updatePhotosAction` replaced `Business.photoUrls` wholesale whenever the bulk "Business photos" field was used (`assets.photoUrls ?? existing.photoUrls`, not a spread/append), and the underlying S3 keys were positional (`photos/{n}.ext`), so a re-upload — or, once delete existed, a later upload after a delete — could silently overwrite a still-referenced S3 object at the same key. No delete capability existed anywhere (no S3 delete helper, no action, no UI).
+
+**Fix — Task 1:** `app/admin/(dashboard)/scans/[scanId]/page.tsx` — added a "View business" `Link` to `/admin/businesses/{businessId}` immediately left of "View generated preview," gated on `business` being present (independent of whether a preview exists yet).
+
+**Fix — Task 2, unified Logo & Photos manager:**
+- `lib/s3/assets.ts`: new `deleteAsset(key)`, mirroring `putAsset`'s shape. No IAM change needed — the live `webpresa-vercel-dev` policy already grants `s3:DeleteObject` (verified against the real AWS account).
+- `lib/s3/business-assets.ts`: removed `uploadBusinessAssets()` entirely (dead code once bulk logo/photo upload moved out of `updatePhotosAction` — confirmed no other caller). Added `appendBusinessPhotos(businessId, existingPhotoUrls, files)` — uploads each file to `photos/${crypto.randomUUID()}.${ext}` (never positional) and appends, fixing the collision risk for good since `Business.photoUrls` is treated as an opaque list of URLs everywhere it's consumed (`resolvePhotoSlot()` never parses a filename). Added `assetKeyFromUrl(url)` to recover an S3 key from a proxy URL for deletion.
+- `enrichment-actions.ts`'s `promoteScanImage` (scan-image approval) gets the same `crypto.randomUUID()` key fix — it writes into the same `photoUrls`/S3 prefix, so leaving it positional would have reintroduced the identical collision bug through a second entry point.
+- `actions.ts`: `updatePhotosAction` narrowed back to its original scope (Photo Assignment slot overrides only) — `photoUrls` now only ever grows via the five per-slot direct-upload inputs (switched to random keys). Three new instant, no-redirect Server Actions, dispatched via `useActionState` (same convention as `autoSaveWebsiteSectionsAction`), sharing a new `PhotoManagerState = { message?; photoUrls?; logoUrl? }` return shape (extends the usual `{ message? }` shape since there's no redirect to fall back on for conveying the mutated state to an optimistic client):
+  - `addBusinessPhotosAction` — appends new photos (rejects the whole batch, not a partial truncate, if it would exceed the 6-photo cap).
+  - `deleteBusinessPhotoAction` — removes a URL from `photoUrls`; clears any of `heroPhotoUrl`/`heroPhotoUrlMobile`/`aboutPhotoUrl`/`whyChooseUsPhotoUrl`/`servicesPhotoUrl`/`logoUrl` that pointed at it (falling back to Auto); best-effort deletes the S3 object (log-and-swallow on failure — the DB record is already correct); dual-writes the latest `SitePreview.theme` for exactly the slot(s) just cleared, mirroring `updatePhotosAction`'s existing dual-write block; idempotent on an already-deleted URL.
+  - `updateBusinessLogoAction` — uploads a new logo file and sets `Business.logoUrl` (fixed `logo.{ext}` key, not randomized — a single dedicated slot, never appended/deleted from an array).
+- `FormFields.tsx`'s `PhotoThumbnail` widened (backward compatible) with optional `label` (overrides "Photo N") and `overlay` (for a delete button), so the logo gets the exact same real-thumbnail treatment as every other photo.
+- New `PhotoManager.tsx` (`'use client'`): logo row (thumbnail + "Upload logo"/"Replace logo" button) and a photo grid (thumbnail + overlay ✕ button per photo, two-click inline confirm — armed red for 3s then auto-reverts, no `window.confirm`/modal — plus an "Add photos" button, disabled at the 6-photo cap). All controls disabled while any of its three actions is pending. On a successful response, lifts the new `photoUrls`/`logoUrl` up via callback props and calls `router.refresh()` so the enclosing page recomputes everything it derives from `business` that PhotoManager doesn't own directly (hero-dimension warnings, the onboarding wizard's step-advance logic, fresh Photo Assignment defaults).
+- `PhotosForm.tsx`: renders `<PhotoManager>` in place of the old top-of-form Logo/Business-photos `FileField` pair; lifts `photoUrls`/`logoUrl` into local state fed only by `PhotoManager`'s callbacks (never re-synced from props after mount, so a `router.refresh()` can't clobber a just-applied optimistic update); removed the now-redundant `PhotoThumbnail` display grid inside "Photo Assignment" (the manager above already shows every photo); each Photo Assignment `PhotoPickerField` now gets a `key` derived from its own current server value, so a slot a delete just cleared visually resets to Auto instead of silently re-submitting a now-deleted URL on the next "Save Photos" — `PhotoPickerField` only ever seeds its selection from `defaultValue` once, at mount.
+- Both `[businessId]/page.tsx` and `onboarding/photos/page.tsx` (the two `PhotosForm` render sites) bind and pass the three new actions the same way `updatePhotosAction` already was.
+
+**Tests:** new `[businessId]/__tests__/photos-actions.test.ts` (13 tests) covering all three new actions — append/cap-rejection/zero-files/auth for `addBusinessPhotosAction`; URL removal, exact-slot-clearing (and non-clearing of unrelated slots), S3 deletion, conditional dual-write, idempotency for `deleteBusinessPhotoAction`; upload/no-file/auth for `updateBusinessLogoAction`. Updated `business-details-actions.test.ts` (removed two tests whose premise — bulk logo/photo upload inside `updatePhotosAction` — no longer exists) and `actions.test.ts`/`website-sections-actions.test.ts` (mock-shape only). Updated `enrichment-actions.test.ts`'s two tests that asserted exact positional S3 keys to assert the new random-key pattern/uniqueness instead.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     530 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+Live-verified the `webpresa-vercel-dev` IAM user's `webpresa-dev-s3-assets` policy already includes `s3:DeleteObject` (`aws iam get-user-policy --profile webpresa`) — no infra change needed for `deleteAsset()`. Dev server boot/route smoke-tested (homepage 200, `/admin/sign-in` 200, unauthenticated `/admin/businesses` redirects 307) — full interactive click-through (upload/delete flow, scan-page button) was **not** verified in a live browser this round (no browser-automation tool available, no admin credentials on hand) and should be manually checked.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/scans/[scanId]/page.tsx                               MODIFIED — "View business" link left of "View generated preview"
+
+web/lib/s3/
+├── assets.ts                                                                   MODIFIED — new deleteAsset()
+└── business-assets.ts                                                         MODIFIED — removed uploadBusinessAssets; added appendBusinessPhotos, assetKeyFromUrl
+
+web/app/admin/(dashboard)/businesses/
+├── FormFields.tsx                                                              MODIFIED — PhotoThumbnail gained label/overlay props
+├── PhotoManager.tsx                                                            NEW — unified logo + photo upload/delete manager
+├── PhotosForm.tsx                                                              MODIFIED — renders PhotoManager, lifts photoUrls/logoUrl state, keys Photo Assignment pickers
+└── [businessId]/
+    ├── actions.ts                                                              MODIFIED — updatePhotosAction narrowed; addBusinessPhotosAction/deleteBusinessPhotoAction/updateBusinessLogoAction added
+    ├── enrichment-actions.ts                                                   MODIFIED — promoteScanImage random S3 key
+    ├── onboarding/photos/page.tsx                                              MODIFIED — binds the three new actions
+    └── __tests__/
+        ├── photos-actions.test.ts                                             NEW — 13 tests for the three new actions
+        ├── business-details-actions.test.ts                                   MODIFIED — removed tests for now-removed bulk-upload behavior
+        ├── actions.test.ts                                                    MODIFIED — mock shape only
+        ├── website-sections-actions.test.ts                                   MODIFIED — mock shape only
+        └── enrichment-actions.test.ts                                         MODIFIED — random-key assertions
+
+web/docs/
+├── architecture.md                                                            MODIFIED — this round's entry
+└── build_log.md                                                               MODIFIED — this entry
+```

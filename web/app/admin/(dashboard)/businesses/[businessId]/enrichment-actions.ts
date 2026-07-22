@@ -94,7 +94,11 @@ async function promoteScanImage(businessId: string, scanId: string, imageId: str
   if (!buffer) return 'not_found';
 
   const extension = image.s3Key.split('.').pop() || 'jpg';
-  const canonicalKey = `businesses/${businessId}/assets/photos/${existingPhotoUrls.length}.${extension}`;
+  // Random, never positional — see appendBusinessPhotos in
+  // lib/s3/business-assets.ts for why a positional index is unsafe once
+  // photos can be deleted (a later upload could reuse a freed index and
+  // silently overwrite the S3 object still sitting at that key).
+  const canonicalKey = `businesses/${businessId}/assets/photos/${crypto.randomUUID()}.${extension}`;
   await putAsset(canonicalKey, buffer, image.contentType || 'application/octet-stream');
   const promotedPhotoUrl = `/api/assets/${canonicalKey}`;
 

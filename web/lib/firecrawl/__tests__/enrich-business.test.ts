@@ -93,6 +93,7 @@ const VALID_SNAPSHOT = {
   sourceUrl: 'https://acmeplumbing.example.com',
   services: [{ name: 'Drain Cleaning' }],
   serviceAreas: [],
+  differentiators: [],
   faq: [],
   navigationLabels: [],
   callsToAction: [],

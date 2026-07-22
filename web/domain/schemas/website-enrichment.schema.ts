@@ -51,6 +51,7 @@ export const WebsiteEnrichmentSnapshotSchema = z.object({
   about: z.string().max(3000).optional(),
   services: z.array(ServiceSchema).max(20),
   serviceAreas: z.array(z.string().min(1).max(100)).max(20),
+  differentiators: z.array(z.string().min(1).max(100)).max(8),
   faq: z.array(FaqItemSchema).max(20),
   navigationLabels: z.array(z.string().min(1).max(60)).max(20),
   callsToAction: z.array(z.string().min(1).max(100)).max(10),

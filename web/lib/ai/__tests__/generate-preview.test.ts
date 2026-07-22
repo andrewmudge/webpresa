@@ -226,6 +226,7 @@ describe('generatePreviewContent — Stage 13 enrichment (optional third argumen
     sourceUrl: 'https://acme.com/',
     services: [{ name: 'Sewer Line Repair' }],
     serviceAreas: ['Austin'],
+    differentiators: [],
     faq: [],
     navigationLabels: [],
     callsToAction: [],
@@ -254,6 +255,20 @@ describe('generatePreviewContent — Stage 13 enrichment (optional third argumen
     expect(result.metadata.source).toBe('firecrawl_enriched');
     expect(result.metadata.scanId).toBe('scan_1');
     expect(mockGetOpenAiClient).toHaveBeenCalled();
+  });
+
+  it('includes enrichment-sourced differentiators in the prompt when the business has none of its own', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ differentiators: undefined });
+    const snapshotWithDifferentiators = { ...snapshot, differentiators: ['Family owned', '40+ years of experience'] };
+
+    await generatePreviewContent(business, {
+      enrichment: { snapshot: snapshotWithDifferentiators, scanImages: [], scanId: 'scan_1' },
+    });
+
+    const userMessage = mockParse.mock.calls[0][0].messages[1].content as string;
+    expect(userMessage).toContain('Family owned');
+    expect(userMessage).toContain('40+ years of experience');
   });
 
   it('fills in the generated preview\'s contact email from the snapshot when the business has none on file', async () => {

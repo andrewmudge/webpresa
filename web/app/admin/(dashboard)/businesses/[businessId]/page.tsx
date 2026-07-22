@@ -11,6 +11,9 @@ import {
   updateThemeAction,
   updateAdminFieldsAction,
   updatePhotosAction,
+  addBusinessPhotosAction,
+  deleteBusinessPhotoAction,
+  updateBusinessLogoAction,
   saveWebsiteSectionsAction,
   autoSaveWebsiteSectionsAction,
   applyRecommendedSectionsAction,
@@ -243,6 +246,9 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       <CollapsibleCard id="photos-card" title="Photos" defaultOpen={hasPendingScanImageReview}>
         <PhotosForm
           action={updatePhotosAction.bind(null, businessId, detailPageUrl)}
+          addPhotosAction={addBusinessPhotosAction.bind(null, businessId)}
+          deletePhotoAction={deleteBusinessPhotoAction.bind(null, businessId)}
+          updateLogoAction={updateBusinessLogoAction.bind(null, businessId)}
           defaults={business}
           submitLabel="Save Photos"
           heroPhotoWarnings={heroPhotoWarnings}

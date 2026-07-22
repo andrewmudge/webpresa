@@ -18,6 +18,7 @@ function baseData(overrides: Partial<FirecrawlScrapeData> = {}): FirecrawlScrape
       businessName: 'Acme Plumbing',
       services: [{ name: 'Drain Cleaning', description: 'Fast service' }],
       serviceAreas: ['Austin', 'Round Rock'],
+      differentiators: ['Family owned', '40+ years of experience'],
       faq: [{ question: 'Do you offer emergency service?', answer: 'Yes, 24/7.' }],
       contact: { phones: ['512-555-0100'], emails: ['hi@acme.com'], addresses: [] },
     },
@@ -31,8 +32,17 @@ describe('normalizeFirecrawlResponse', () => {
     expect(snapshot.schemaVersion).toBe('1');
     expect(snapshot.services).toEqual([{ name: 'Drain Cleaning', description: 'Fast service' }]);
     expect(snapshot.serviceAreas).toEqual(['Austin', 'Round Rock']);
+    expect(snapshot.differentiators).toEqual(['Family owned', '40+ years of experience']);
     expect(snapshot.contact.phones).toEqual(['512-555-0100']);
     expect(snapshot.contact.emails).toEqual(['hi@acme.com']);
+  });
+
+  it('dedupes and caps differentiators to 8 entries', () => {
+    const many = Array.from({ length: 12 }, (_, i) => `Differentiator ${i}`);
+    const data = baseData({ json: { differentiators: [...many, 'Differentiator 0'] } });
+    const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data });
+    expect(snapshot.differentiators.length).toBe(8);
+    expect(snapshot.differentiators).toEqual(many.slice(0, 8));
   });
 
   it('derives social links from discovered page links even when the model omits them', () => {
@@ -94,6 +104,7 @@ describe('normalizeFirecrawlResponse', () => {
     const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data: { metadata: { statusCode: 200 } } });
     expect(snapshot.services).toEqual([]);
     expect(snapshot.serviceAreas).toEqual([]);
+    expect(snapshot.differentiators).toEqual([]);
     expect(snapshot.contact).toEqual({ phones: [], emails: [], addresses: [] });
   });
 });

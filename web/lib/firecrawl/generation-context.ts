@@ -32,7 +32,7 @@ export interface GenerationContext {
   servicesLines: string[];
   /** One service area per line — business's own list wins outright when non-empty. */
   serviceAreaLines: string[];
-  /** Business's own differentiators — Firecrawl has no equivalent field to fall back to. */
+  /** One differentiator per line — business's own list wins outright when non-empty. */
   differentiatorLines: string[];
   /** Business's own description, else the snapshot's `about`/`summary`. */
   description: string | undefined;
@@ -65,10 +65,12 @@ export function buildGenerationContext({
     .map((s) => s.name.trim())
     .filter(Boolean);
   const snapshotServiceAreaLines = (snapshot?.serviceAreas ?? []).filter(Boolean);
+  const snapshotDifferentiatorLines = (snapshot?.differentiators ?? []).filter(Boolean);
   const snapshotDescription = snapshot?.about?.trim() || snapshot?.summary?.trim() || undefined;
 
   const servicesLines = ownServiceLines.length > 0 ? ownServiceLines : snapshotServiceLines;
   const serviceAreaLines = ownServiceAreaLines.length > 0 ? ownServiceAreaLines : snapshotServiceAreaLines;
+  const differentiatorLines = ownDifferentiatorLines.length > 0 ? ownDifferentiatorLines : snapshotDifferentiatorLines;
   const description = ownDescription ?? snapshotDescription;
 
   // Contact: business's own phone/email/address each win independently when
@@ -97,6 +99,7 @@ export function buildGenerationContext({
   const usedEnrichmentFallback =
     (ownServiceLines.length === 0 && snapshotServiceLines.length > 0) ||
     (ownServiceAreaLines.length === 0 && snapshotServiceAreaLines.length > 0) ||
+    (ownDifferentiatorLines.length === 0 && snapshotDifferentiatorLines.length > 0) ||
     (!ownDescription && !!snapshotDescription) ||
     (!ownPhone && !!snapshotPhone) ||
     (!ownEmail && !!snapshotEmail) ||
@@ -105,7 +108,7 @@ export function buildGenerationContext({
   return {
     servicesLines,
     serviceAreaLines,
-    differentiatorLines: ownDifferentiatorLines,
+    differentiatorLines,
     description,
     contact,
     usedEnrichmentFallback,

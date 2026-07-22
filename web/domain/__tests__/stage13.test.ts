@@ -105,6 +105,7 @@ describe('WebsiteEnrichmentSnapshotSchema', () => {
     sourceUrl: 'https://acme.com/',
     services: [],
     serviceAreas: [],
+    differentiators: [],
     faq: [],
     navigationLabels: [],
     callsToAction: [],

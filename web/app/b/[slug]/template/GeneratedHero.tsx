@@ -43,14 +43,28 @@ interface Props {
  * illustration by default, or a real photo when `heroImageUrlMobile` is
  * set), desktop shows `desktopSrc`.
  */
-function HeroCornerImage({ desktopSrc, mobileSrc }: { desktopSrc: string; mobileSrc: string }) {
-  // A floating rounded card, inset from the section's top/right/bottom edges
-  // (`inset-y-4 right-4` mobile, `lg:my-8 lg:mr-8 xl:mr-12` desktop) with a
-  // shadow — all 4 corners rounded. The left edge is the one exception, left
-  // flush against the text column and blended via the gradient overlay
-  // below rather than gapped, so it still reads as one continuous section.
+function HeroCornerImage({
+  desktopSrc,
+  mobileSrc,
+  desktopIsPhoto,
+  mobileIsPhoto,
+}: {
+  desktopSrc: string;
+  mobileSrc: string;
+  /**
+   * The floating rounded/shadowed/gapped card treatment is for real uploaded
+   * photos only — the theme illustration fallback keeps its original flush,
+   * edge-to-edge look at whichever breakpoint it's actually showing on.
+   * These are independent per breakpoint (e.g. a real mobile photo can be
+   * rounded while desktop still shows the flush illustration, or vice versa).
+   */
+  desktopIsPhoto: boolean;
+  mobileIsPhoto: boolean;
+}) {
+  const mobileBox = mobileIsPhoto ? 'inset-y-4 right-4 rounded-2xl overflow-hidden shadow-xl' : 'inset-y-0 right-0';
+  const desktopBox = desktopIsPhoto ? 'lg:rounded-2xl lg:overflow-hidden lg:shadow-xl lg:my-8 lg:mr-8 xl:mr-12' : '';
   const wrapperClassName =
-    'absolute inset-y-4 right-4 w-[35%] rounded-2xl overflow-hidden shadow-xl lg:relative lg:inset-auto lg:w-auto lg:order-2 lg:min-h-[280px] lg:my-8 lg:mr-8 xl:mr-12';
+    `absolute w-[35%] ${mobileBox} lg:relative lg:inset-auto lg:w-auto lg:order-2 lg:min-h-[280px] ${desktopBox}`.trim();
   const gradientOverlay = (
     <div
       className="absolute inset-0 lg:hidden"
@@ -91,6 +105,9 @@ interface SplitHeroSectionProps {
   secondary: ResolvedCta | null;
   desktopImageSrc: string;
   mobileImageSrc: string;
+  /** See `HeroCornerImage` — only a real photo gets the rounded/shadowed/gapped card treatment. */
+  desktopIsPhoto: boolean;
+  mobileIsPhoto: boolean;
 }
 
 /**
@@ -104,12 +121,14 @@ interface SplitHeroSectionProps {
  * Desktop (`lg:`+): the section itself has no `max-w-6xl` wrapper, unlike
  * every other section, so the text column can run the full width of its
  * half — light background, no dark readability scrim (text sits on a plain
- * panel, not on top of the image). The image itself is not full-bleed
- * though — see `HeroCornerImage` — it floats as a rounded, shadowed card
- * inset from the section's top/right/bottom edges.
+ * panel, not on top of the image). The image's own treatment depends on
+ * whether it's a real photo or the theme illustration — see
+ * `HeroCornerImage`: a real photo floats as a rounded, shadowed card inset
+ * from the section's top/right/bottom edges; the illustration stays flush,
+ * edge-to-edge, exactly as originally designed.
  * Mobile: the image is `position: absolute`, cropped to the right ~35% of
- * the screen (also inset top/right/bottom into a rounded card — see
- * `HeroCornerImage`), height-matched to the text column's own natural
+ * the screen (also only inset into a rounded card when it's a real photo —
+ * see `HeroCornerImage`), height-matched to the text column's own natural
  * content height, with a gradient blending its left portion into
  * `var(--site-background)` so text stays legible.
  */
@@ -121,6 +140,8 @@ function SplitHeroSection({
   secondary,
   desktopImageSrc,
   mobileImageSrc,
+  desktopIsPhoto,
+  mobileIsPhoto,
 }: SplitHeroSectionProps) {
   return (
     <section className="relative overflow-hidden bg-(--site-background)">
@@ -189,7 +210,12 @@ function SplitHeroSection({
           </div>
         </div>
 
-        <HeroCornerImage desktopSrc={desktopImageSrc} mobileSrc={mobileImageSrc} />
+        <HeroCornerImage
+          desktopSrc={desktopImageSrc}
+          mobileSrc={mobileImageSrc}
+          desktopIsPhoto={desktopIsPhoto}
+          mobileIsPhoto={mobileIsPhoto}
+        />
       </div>
     </section>
   );
@@ -228,6 +254,8 @@ export function GeneratedHero({
         secondary={secondary}
         desktopImageSrc={illustrationSrc}
         mobileImageSrc={heroImageUrlMobile ?? illustrationSrc}
+        desktopIsPhoto={false}
+        mobileIsPhoto={!!heroImageUrlMobile}
       />
     );
   }
@@ -247,6 +275,8 @@ export function GeneratedHero({
         secondary={secondary}
         desktopImageSrc={heroImageUrl}
         mobileImageSrc={heroImageUrlMobile ?? getHeroIllustration(themeName)}
+        desktopIsPhoto
+        mobileIsPhoto={!!heroImageUrlMobile}
       />
     );
   }
@@ -386,6 +416,8 @@ export function GeneratedHero({
             secondary={secondary}
             desktopImageSrc={mobileHeroSrc}
             mobileImageSrc={mobileHeroSrc}
+            desktopIsPhoto={!!heroImageUrlMobile}
+            mobileIsPhoto={!!heroImageUrlMobile}
           />
         </div>
         <div className="hidden lg:block">{legacySection}</div>

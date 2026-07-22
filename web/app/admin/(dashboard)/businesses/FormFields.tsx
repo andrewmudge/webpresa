@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import Image from 'next/image';
 import { ChevronDown } from 'lucide-react';
@@ -389,13 +389,24 @@ export function PhotoPickerField({
   );
 }
 
-export function PhotoThumbnail({ url, index }: { url: string; index: number }) {
+interface PhotoThumbnailProps {
+  url: string;
+  index?: number;
+  /** Overrides the "Photo N" label — e.g. "Logo". */
+  label?: string;
+  /** Optional overlay rendered on top of the image (a delete button, a pending spinner, etc.). */
+  overlay?: ReactNode;
+}
+
+export function PhotoThumbnail({ url, index, label, overlay }: PhotoThumbnailProps) {
+  const displayLabel = label ?? (index !== undefined ? `Photo ${index + 1}` : undefined);
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
-        <Image src={url} alt={`Photo ${index + 1}`} fill className="object-cover" sizes="64px" />
+        <Image src={url} alt={displayLabel ?? 'Photo'} fill className="object-cover" sizes="64px" />
+        {overlay}
       </div>
-      <span className="text-[11px] text-gray-400">Photo {index + 1}</span>
+      {displayLabel && <span className="text-[11px] text-gray-400">{displayLabel}</span>}
     </div>
   );
 }

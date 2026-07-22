@@ -30,6 +30,7 @@ function makeSnapshot(overrides: Partial<WebsiteEnrichmentSnapshot> = {}): Websi
     sourceUrl: 'https://example.com/',
     services: [],
     serviceAreas: [],
+    differentiators: [],
     faq: [],
     navigationLabels: [],
     callsToAction: [],
@@ -89,7 +90,23 @@ describe('buildGenerationContext', () => {
     expect(JSON.stringify(business)).toBe(before);
   });
 
-  it('has no fallback for differentiators — Firecrawl has no equivalent field', () => {
+  it('uses the business own differentiators when present, ignoring the snapshot entirely', () => {
+    const business = makeBusiness({ differentiators: 'Family owned\nUpfront pricing' });
+    const snapshot = makeSnapshot({ differentiators: ['Scraped: 24/7 emergency service'] });
+    const ctx = buildGenerationContext({ business, snapshot });
+    expect(ctx.differentiatorLines).toEqual(['Family owned', 'Upfront pricing']);
+    expect(ctx.usedEnrichmentFallback).toBe(false);
+  });
+
+  it('falls back to snapshot differentiators when the business left the field blank', () => {
+    const business = makeBusiness({ differentiators: undefined });
+    const snapshot = makeSnapshot({ differentiators: ['Family owned', '40+ years of experience', '24/7 emergency service'] });
+    const ctx = buildGenerationContext({ business, snapshot });
+    expect(ctx.differentiatorLines).toEqual(['Family owned', '40+ years of experience', '24/7 emergency service']);
+    expect(ctx.usedEnrichmentFallback).toBe(true);
+  });
+
+  it('returns no differentiators when both the business and snapshot are empty', () => {
     const business = makeBusiness({ differentiators: undefined });
     const snapshot = makeSnapshot({ services: [{ name: 'x' }] });
     const ctx = buildGenerationContext({ business, snapshot });

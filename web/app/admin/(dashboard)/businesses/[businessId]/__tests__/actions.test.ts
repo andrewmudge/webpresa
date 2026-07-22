@@ -75,9 +75,14 @@ vi.mock('@/lib/auth/session', () => ({
 }));
 
 vi.mock('@/lib/s3/business-assets', () => ({
-  uploadBusinessAssets: vi.fn(),
   uploadBusinessAsset: vi.fn(),
+  appendBusinessPhotos: vi.fn(),
+  assetKeyFromUrl: vi.fn(),
   fileExtension: vi.fn(),
+}));
+
+vi.mock('@/lib/s3/assets', () => ({
+  deleteAsset: vi.fn(),
 }));
 
 vi.mock('@/lib/image/hero-dimensions', () => ({

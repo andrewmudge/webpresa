@@ -153,10 +153,10 @@ function buildPrompt(business: Business, generationContext: GenerationContext): 
     services.length > 0 && `Services offered (one per line):\n${services.join('\n')}`,
     serviceAreas.length > 0 && `Service areas (context only — do not restate as a separate field): ${serviceAreas.join(', ')}`,
     generationContext.description && `Business description: ${generationContext.description}`,
-    differentiators.length > 0 && `Differentiators (one per line, verbatim from the owner):\n${differentiators.join('\n')}`,
+    differentiators.length > 0 && `Differentiators (one per line):\n${differentiators.join('\n')}`,
     business.notes && `Additional notes from the owner: ${business.notes}`,
     generationContext.usedEnrichmentFallback &&
-      'Note: some of the fields above (services, service areas, and/or description) were filled in from the business\'s own existing website because the owner left them blank — not typed directly by the owner.',
+      'Note: some of the fields above (services, service areas, differentiators, and/or description) were filled in from the business\'s own existing website because the owner left them blank — not typed directly by the owner.',
   ]
     .filter(Boolean)
     .join('\n\n');

@@ -10,14 +10,12 @@ const {
   mockGetBusinessById,
   mockPutBusiness,
   mockGetSession,
-  mockUploadBusinessAssets,
   mockListPreviewsForBusiness,
   mockPutSitePreview,
 } = vi.hoisted(() => ({
   mockGetBusinessById: vi.fn(),
   mockPutBusiness: vi.fn(),
   mockGetSession: vi.fn(),
-  mockUploadBusinessAssets: vi.fn(),
   mockListPreviewsForBusiness: vi.fn(),
   mockPutSitePreview: vi.fn(),
 }));
@@ -57,9 +55,14 @@ vi.mock('@/lib/theme/select-theme', () => ({
 }));
 
 vi.mock('@/lib/s3/business-assets', () => ({
-  uploadBusinessAssets: mockUploadBusinessAssets,
   uploadBusinessAsset: vi.fn(),
+  appendBusinessPhotos: vi.fn(),
+  assetKeyFromUrl: vi.fn(),
   fileExtension: vi.fn(),
+}));
+
+vi.mock('@/lib/s3/assets', () => ({
+  deleteAsset: vi.fn(),
 }));
 
 vi.mock('@/lib/image/hero-dimensions', () => ({
@@ -110,7 +113,6 @@ beforeEach(() => {
   mockGetSession.mockResolvedValue({ sub: 'admin', expiresAt: new Date().toISOString() });
   mockGetBusinessById.mockResolvedValue(EXISTING_BUSINESS);
   mockPutBusiness.mockResolvedValue(undefined);
-  mockUploadBusinessAssets.mockResolvedValue({});
   mockListPreviewsForBusiness.mockResolvedValue([]);
   mockPutSitePreview.mockResolvedValue(undefined);
 });
@@ -185,7 +187,6 @@ describe('updateBusinessDetailsAction', () => {
       updateBusinessDetailsAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, makeFormData(DETAILS_FIELDS)),
     ).rejects.toThrow('REDIRECT:');
 
-    expect(mockUploadBusinessAssets).not.toHaveBeenCalled();
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
     expect(saved.photoUrls).toEqual(['/api/assets/businesses/biz_1/assets/photos/0.jpg']);
@@ -237,27 +238,11 @@ describe('updatePhotosAction', () => {
     expect(result?.message).toBe('Business not found');
   });
 
-  it('uploads assets and persists the resulting URLs, redirecting to the given URL', async () => {
-    mockUploadBusinessAssets.mockResolvedValue({
-      logoUrl: '/api/assets/businesses/biz_1/assets/logo.png',
-      photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'],
-    });
-
-    await expect(
-      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, new FormData()),
-    ).rejects.toThrow(`REDIRECT:${REDIRECT_TO}`);
-
-    const saved = mockPutBusiness.mock.calls[0][0];
-    expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
-    expect(saved.photoUrls).toEqual(['/api/assets/businesses/biz_1/assets/photos/0.jpg']);
-  });
-
-  it('preserves existing photoUrls when no new files are uploaded', async () => {
+  it('preserves existing photoUrls (bulk logo/photo uploads no longer happen through this action — see photos-actions.test.ts)', async () => {
     mockGetBusinessById.mockResolvedValue({
       ...EXISTING_BUSINESS,
       photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'],
     });
-    mockUploadBusinessAssets.mockResolvedValue({});
 
     await expect(
       updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, new FormData()),
@@ -328,15 +313,4 @@ describe('updatePhotosAction', () => {
     expect(saved.logoUrl).toBeUndefined();
   });
 
-  it('a fresh logo file upload wins over the logo picker selection', async () => {
-    mockUploadBusinessAssets.mockResolvedValue({ logoUrl: '/api/assets/businesses/biz_1/assets/logo.png' });
-    const fd = makeFormData({ logoPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/2.jpg' });
-
-    await expect(
-      updatePhotosAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, fd),
-    ).rejects.toThrow('REDIRECT:');
-
-    const saved = mockPutBusiness.mock.calls[0][0];
-    expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
-  });
 });

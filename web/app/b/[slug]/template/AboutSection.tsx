@@ -55,8 +55,9 @@ export function AboutSection({ businessName, tagline, aboutText, primary, imageU
                   className="object-cover object-top"
                   sizes="(max-width: 1024px) 100vw, 50vw"
                 />
-                {/* Scrim for text legibility over an arbitrary photo */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                {/* Scrim for text legibility over an arbitrary photo — strong enough
+                    through the padded text zone at the bottom, not just the edge. */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent" />
               </>
             ) : (
               <>
@@ -70,10 +71,15 @@ export function AboutSection({ businessName, tagline, aboutText, primary, imageU
               </>
             )}
             <div className="relative z-10 p-10 flex flex-col justify-end h-full">
-              <blockquote className="text-white/90 text-lg font-medium italic leading-relaxed">
+              <blockquote
+                className="text-white/90 text-lg font-medium italic leading-relaxed"
+                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
+              >
                 &ldquo;{quote || 'Our goal is simple: deliver quality work on time, every time.'}&rdquo;
               </blockquote>
-              <p className="text-white/60 text-sm mt-3">— {businessName}</p>
+              <p className="text-white/60 text-sm mt-3" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+                — {businessName}
+              </p>
             </div>
           </div>
         </div>

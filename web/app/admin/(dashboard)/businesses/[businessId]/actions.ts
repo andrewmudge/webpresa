@@ -30,7 +30,8 @@ import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
-import { uploadBusinessAssets, uploadBusinessAsset, fileExtension } from '@/lib/s3/business-assets';
+import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl, fileExtension } from '@/lib/s3/business-assets';
+import { deleteAsset } from '@/lib/s3/assets';
 import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
 import { classifySocialPlatform } from '@/lib/social-links';
 import type { BusinessFormState } from '../actions';
@@ -394,12 +395,14 @@ export async function updatePhotosAction(
     const existing = await getBusinessById(businessId);
     if (!existing) return { message: 'Business not found' };
 
-    // Only replaces photoUrls wholesale when the main multi-photo field was
-    // used (matches FileField's existing "choosing new files replaces all
-    // of them" behavior); otherwise starts from what's already there so
-    // per-slot direct uploads below can append to it.
-    const assets = await uploadBusinessAssets(businessId, formData);
-    let photoUrls = assets.photoUrls ?? existing.photoUrls ?? [];
+    // Logo/bulk-photo uploads no longer go through this action — the
+    // top-level Logo/Business-photos fields were replaced by the Photo
+    // Manager's own instant actions (addBusinessPhotosAction,
+    // deleteBusinessPhotoAction, updateBusinessLogoAction, below). This
+    // action's remaining job is exactly Photo Assignment: slot overrides,
+    // plus the five per-slot direct-upload inputs, which only ever grow
+    // photoUrls, never replace it.
+    let photoUrls = existing.photoUrls ?? [];
 
     const slotOverrides: Partial<Record<keyof typeof SLOT_UPLOAD_FIELDS, string>> = {};
     for (const [slotKey, fieldName] of Object.entries(SLOT_UPLOAD_FIELDS) as [
@@ -411,7 +414,7 @@ export async function updatePhotosAction(
         if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
           return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in the Photos card first.` };
         }
-        const url = await uploadBusinessAsset(businessId, file, `photos/${photoUrls.length}.${fileExtension(file)}`);
+        const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
         photoUrls = [...photoUrls, url];
         slotOverrides[slotKey] = url;
       }
@@ -430,7 +433,7 @@ export async function updatePhotosAction(
       aboutPhotoUrl,
       whyChooseUsPhotoUrl,
       servicesPhotoUrl,
-      logoUrl: assets.logoUrl ?? resolveLogoUrl(data.logoPhotoUrl, existing.logoUrl),
+      logoUrl: resolveLogoUrl(data.logoPhotoUrl, existing.logoUrl),
       photoUrls,
       updatedAt: new Date().toISOString(),
     });
@@ -480,6 +483,181 @@ export async function updatePhotosAction(
   }
 
   redirect(redirectTo);
+}
+
+// ---------------------------------------------------------------------------
+// Photo Manager — instant, no-redirect logo/photo upload and delete
+// (business detail page + onboarding wizard step 2, see PhotoManager.tsx).
+// Unlike updatePhotosAction above, these never redirect — they're dispatched
+// imperatively from client state via useActionState, matching the
+// auto-save convention autoSaveWebsiteSectionsAction already established
+// elsewhere in this file, so the client can apply the result optimistically
+// without a full page reload.
+// ---------------------------------------------------------------------------
+
+export type PhotoManagerState = { message?: string; photoUrls?: string[]; logoUrl?: string } | undefined;
+
+export async function addBusinessPhotosAction(
+  businessId: string,
+  _prevState: PhotoManagerState,
+  formData: FormData,
+): Promise<PhotoManagerState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const files = formData.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length === 0) return { message: 'Choose at least one photo to upload.' };
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const existingPhotoUrls = existing.photoUrls ?? [];
+    if (existingPhotoUrls.length + files.length > MAX_BUSINESS_PHOTOS) {
+      return {
+        message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed (${existingPhotoUrls.length} existing, ${files.length} selected) — remove some first or select fewer.`,
+      };
+    }
+
+    const photoUrls = await appendBusinessPhotos(businessId, existingPhotoUrls, files);
+    await putBusiness({ ...existing, photoUrls, updatedAt: new Date().toISOString() });
+
+    return { photoUrls };
+  } catch (err) {
+    console.error('Failed to add business photos:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to upload photos. Please try again.' };
+  }
+}
+
+const DeletePhotoSchema = z.object({ photoUrl: z.string().min(1) });
+
+/**
+ * Removes one photo from Business.photoUrls and its S3 object. Clears any
+ * slot override (hero/heroMobile/about/whyChooseUs/services) or logoUrl
+ * that was pinned to the deleted photo, falling back to Auto, and — for
+ * exactly the slots that were just cleared — dual-writes the business's
+ * latest SitePreview.theme the same way updatePhotosAction already does for
+ * an explicit slot change, so a deleted photo never keeps rendering on the
+ * live preview.
+ */
+export async function deleteBusinessPhotoAction(
+  businessId: string,
+  _prevState: PhotoManagerState,
+  formData: FormData,
+): Promise<PhotoManagerState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = DeletePhotoSchema.safeParse({ photoUrl: formData.get('photoUrl') });
+  if (!parsed.success) return { message: 'No photo specified.' };
+  const { photoUrl } = parsed.data;
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const existingPhotoUrls = existing.photoUrls ?? [];
+    if (!existingPhotoUrls.includes(photoUrl)) {
+      // Already gone (e.g. a second tab deleted it first) — succeed idempotently.
+      return { photoUrls: existingPhotoUrls, logoUrl: existing.logoUrl };
+    }
+
+    const photoUrls = existingPhotoUrls.filter((u) => u !== photoUrl);
+
+    const heroCleared = existing.heroPhotoUrl === photoUrl;
+    const heroMobileCleared = existing.heroPhotoUrlMobile === photoUrl;
+    const aboutCleared = existing.aboutPhotoUrl === photoUrl;
+    const whyChooseUsCleared = existing.whyChooseUsPhotoUrl === photoUrl;
+    const servicesCleared = existing.servicesPhotoUrl === photoUrl;
+    const logoCleared = existing.logoUrl === photoUrl;
+
+    const heroPhotoUrl = heroCleared ? undefined : existing.heroPhotoUrl;
+    const heroPhotoUrlMobile = heroMobileCleared ? undefined : existing.heroPhotoUrlMobile;
+    const aboutPhotoUrl = aboutCleared ? undefined : existing.aboutPhotoUrl;
+    const whyChooseUsPhotoUrl = whyChooseUsCleared ? undefined : existing.whyChooseUsPhotoUrl;
+    const servicesPhotoUrl = servicesCleared ? undefined : existing.servicesPhotoUrl;
+    const logoUrl = logoCleared ? undefined : existing.logoUrl;
+
+    await putBusiness({
+      ...existing,
+      photoUrls,
+      heroPhotoUrl,
+      heroPhotoUrlMobile,
+      aboutPhotoUrl,
+      whyChooseUsPhotoUrl,
+      servicesPhotoUrl,
+      logoUrl,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const key = assetKeyFromUrl(photoUrl);
+    if (key) {
+      // Business record is already updated; an S3 delete failure here is an
+      // orphaned-object cleanup concern, not a reason to fail the
+      // user-facing action.
+      await deleteAsset(key).catch((err) => {
+        console.error('Failed to delete S3 object for removed photo:', err instanceof Error ? err.message : err);
+      });
+    }
+
+    // Dual-write, mirroring updatePhotosAction's block: apply 'none' to
+    // exactly the slots that were just cleared, so the live preview never
+    // keeps rendering a now-deleted image.
+    const hero = resolveThemePhotoPatch(heroCleared ? 'none' : undefined);
+    const heroMobile = resolveThemePhotoPatch(heroMobileCleared ? 'none' : undefined);
+    const about = resolveThemePhotoPatch(aboutCleared ? 'none' : undefined);
+    const whyChooseUs = resolveThemePhotoPatch(whyChooseUsCleared ? 'none' : undefined);
+    const services = resolveThemePhotoPatch(servicesCleared ? 'none' : undefined);
+
+    if (hero.apply || heroMobile.apply || about.apply || whyChooseUs.apply || services.apply) {
+      const previews = await listPreviewsForBusiness(businessId);
+      const latest = previews[0];
+      if (latest) {
+        const heroStyle: HeroStyle | undefined = hero.apply ? 'illustration' : undefined;
+
+        const theme: PreviewTheme = {
+          ...latest.theme,
+          ...(hero.apply ? { heroImageUrl: hero.url, heroStyle } : {}),
+          ...(heroMobile.apply ? { heroImageUrlMobile: heroMobile.url } : {}),
+          ...(about.apply ? { aboutSectionImageUrl: about.url } : {}),
+          ...(whyChooseUs.apply ? { aboutImageUrl: whyChooseUs.url } : {}),
+          ...(services.apply ? { servicesImageUrl: services.url } : {}),
+        };
+        PreviewThemeSchema.parse(theme);
+        await putSitePreview({ ...latest, theme, updatedAt: new Date().toISOString() });
+      }
+    }
+
+    return { photoUrls, logoUrl };
+  } catch (err) {
+    console.error('Failed to delete business photo:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to delete photo. Please try again.' };
+  }
+}
+
+export async function updateBusinessLogoAction(
+  businessId: string,
+  _prevState: PhotoManagerState,
+  formData: FormData,
+): Promise<PhotoManagerState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const file = formData.get('logo');
+  if (!(file instanceof File) || file.size === 0) return { message: 'Choose a logo file to upload.' };
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const logoUrl = await uploadBusinessAsset(businessId, file, `logo.${fileExtension(file)}`);
+    await putBusiness({ ...existing, logoUrl, updatedAt: new Date().toISOString() });
+
+    return { logoUrl };
+  } catch (err) {
+    console.error('Failed to update business logo:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to upload logo. Please try again.' };
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ const RawExtractionSchema = z
     about: z.string().optional(),
     services: z.array(z.object({ name: z.string().optional(), description: z.string().optional() })).optional(),
     serviceAreas: z.array(z.string()).optional(),
+    differentiators: z.array(z.string()).optional(),
     faq: z.array(z.object({ question: z.string().optional(), answer: z.string().optional() })).optional(),
     navigationLabels: z.array(z.string()).optional(),
     callsToAction: z.array(z.string()).optional(),
@@ -133,6 +134,10 @@ export function normalizeFirecrawlResponse(input: NormalizeInput): WebsiteEnrich
     new Set((extraction.serviceAreas ?? []).map((a) => sanitizeText(a, 100)).filter((a): a is string => !!a)),
   ).slice(0, 20);
 
+  const differentiators = Array.from(
+    new Set((extraction.differentiators ?? []).map((d) => sanitizeText(d, 100)).filter((d): d is string => !!d)),
+  ).slice(0, 8);
+
   const navigationLabels = Array.from(
     new Set((extraction.navigationLabels ?? []).map((n) => sanitizeText(n, 60)).filter((n): n is string => !!n)),
   ).slice(0, 20);
@@ -171,6 +176,7 @@ export function normalizeFirecrawlResponse(input: NormalizeInput): WebsiteEnrich
     ...(sanitizeText(extraction.about, 3000) ? { about: sanitizeText(extraction.about, 3000) } : {}),
     services,
     serviceAreas,
+    differentiators,
     faq,
     navigationLabels,
     callsToAction,

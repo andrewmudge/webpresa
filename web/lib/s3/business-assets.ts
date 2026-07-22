@@ -2,9 +2,9 @@ import 'server-only';
 import { putAsset } from './assets';
 
 /**
- * Business logo/photo upload helpers, shared by `createBusinessAction`
- * (wizard step 1 no longer touches assets, but kept here for any future
- * caller) and the business detail page's `updatePhotosAction`. Not a
+ * Business logo/photo upload helpers, shared by the business detail page's
+ * Photo Manager actions (`addBusinessPhotosAction`, `deleteBusinessPhotoAction`,
+ * `updateBusinessLogoAction`, `updatePhotosAction` — see `actions.ts`). Not a
  * Server Action module itself — every export of a `'use server'` file must
  * be an async action, so this plain helper lives in `lib/` instead of
  * being a private function duplicated in each `actions.ts` that needs it.
@@ -18,10 +18,10 @@ export function fileExtension(file: File): string {
 
 /**
  * Uploads one file under a business's asset prefix and returns its public
- * proxy URL. Exported (not just used internally by `uploadBusinessAssets`)
- * so callers that need to upload a single photo directly into a specific
- * section slot — rather than the generic multi-photo `photos` field — can
- * reuse the same key structure and upload path.
+ * proxy URL. Exported (not just used internally by `appendBusinessPhotos`)
+ * so callers that need to upload a single file directly — a logo, or a
+ * photo straight into a specific section slot — can reuse the same key
+ * structure and upload path.
  */
 export async function uploadBusinessAsset(businessId: string, file: File, filename: string): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -31,30 +31,32 @@ export async function uploadBusinessAsset(businessId: string, file: File, filena
 }
 
 /**
- * Uploads any logo/photo files present in the form to S3 and returns the
- * resulting public proxy URLs. Returns an empty object for a field when no
- * new file was chosen, so callers can spread the result over existing
- * values without clobbering them.
+ * Uploads a batch of new photo files under a business's canonical photos
+ * prefix and appends them to `existingPhotoUrls`. Each new file gets a
+ * random (collision-proof) filename — never a positional index — so a
+ * later photo deletion can never free up a slot whose S3 key a subsequent
+ * upload would silently reuse and overwrite. Callers are responsible for
+ * enforcing `MAX_BUSINESS_PHOTOS` before calling this.
  */
-export async function uploadBusinessAssets(
+export async function appendBusinessPhotos(
   businessId: string,
-  formData: FormData,
-): Promise<{ logoUrl?: string; photoUrls?: string[] }> {
-  const result: { logoUrl?: string; photoUrls?: string[] } = {};
+  existingPhotoUrls: string[],
+  files: File[],
+): Promise<string[]> {
+  if (files.length === 0) return existingPhotoUrls;
+  const uploaded = await Promise.all(
+    files.map((file) => uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`)),
+  );
+  return [...existingPhotoUrls, ...uploaded];
+}
 
-  const logo = formData.get('logo');
-  if (logo instanceof File && logo.size > 0) {
-    result.logoUrl = await uploadBusinessAsset(businessId, logo, `logo.${fileExtension(logo)}`);
-  }
+const ASSET_PROXY_PREFIX = '/api/assets/';
 
-  const photos = formData
-    .getAll('photos')
-    .filter((f): f is File => f instanceof File && f.size > 0);
-  if (photos.length > 0) {
-    result.photoUrls = await Promise.all(
-      photos.map((file, i) => uploadBusinessAsset(businessId, file, `photos/${i}.${fileExtension(file)}`)),
-    );
-  }
-
-  return result;
+/**
+ * Extracts the S3 key from a business asset's `/api/assets/{key}` proxy
+ * URL, or `null` if the URL isn't one of ours. Used to recover the S3 key
+ * of a photo the admin is deleting from `Business.photoUrls`.
+ */
+export function assetKeyFromUrl(url: string): string | null {
+  return url.startsWith(ASSET_PROXY_PREFIX) ? url.slice(ASSET_PROXY_PREFIX.length) : null;
 }

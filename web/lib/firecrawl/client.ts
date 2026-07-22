@@ -53,6 +53,7 @@ const EXTRACTION_JSON_SCHEMA = {
       },
     },
     serviceAreas: { type: 'array', items: { type: 'string' } },
+    differentiators: { type: 'array', items: { type: 'string' } },
     faq: {
       type: 'array',
       items: {
@@ -78,10 +79,13 @@ const EXTRACTION_JSON_SCHEMA = {
 const EXTRACTION_PROMPT =
   'Extract only information that is literally present on this page: business name, a short summary, ' +
   'an "about" paragraph if present, the list of services offered with short descriptions, cities/areas ' +
-  'the business says it serves, any FAQ question/answer pairs, the main navigation link labels, any ' +
-  'call-to-action button/link text, contact phone numbers/emails/addresses, and social media profile ' +
-  'URLs. Do not infer, guess, or add anything not literally stated on the page. Omit a field entirely ' +
-  'if the page does not contain it.';
+  'the business says it serves, short differentiator/"why choose us" phrases the business states about ' +
+  'itself (e.g. years in business, family-owned/local, licensed/insured, 24/7 availability, awards or ' +
+  'certifications, satisfaction guarantees) — only if literally stated on the page, never inferred or ' +
+  'estimated — any FAQ question/answer pairs, the main navigation link labels, any call-to-action ' +
+  'button/link text, contact phone numbers/emails/addresses, and social media profile URLs. Do not ' +
+  'infer, guess, or add anything not literally stated on the page. Omit a field entirely if the page ' +
+  'does not contain it.';
 
 export const FIRECRAWL_ERROR_CATEGORIES = [
   'auth',

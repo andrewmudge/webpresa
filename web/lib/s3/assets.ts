@@ -1,5 +1,6 @@
 import 'server-only';
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   NoSuchKey,
   PutObjectCommand,
@@ -44,6 +45,17 @@ export async function putAsset(
       Key: key,
       Body: body,
       ContentType: contentType,
+    }),
+  );
+}
+
+export async function deleteAsset(key: string): Promise<void> {
+  assertAllowedKey(key);
+  const client = getS3Client();
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: getAssetsBucketName(),
+      Key: key,
     }),
   );
 }
