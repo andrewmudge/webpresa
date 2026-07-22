@@ -120,7 +120,7 @@ function ServiceCard({
             className="hidden lg:block object-cover object-center"
             sizes="(min-width: 1024px) 40vw, 0px"
           />
-          <div className="hidden lg:block absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} />
+          <div className="hidden lg:block absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }} />
         </>
       )}
 
@@ -134,10 +134,16 @@ function ServiceCard({
             d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
         </svg>
       </div>
-      <h3 className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${showPicture ? 'lg:text-white' : ''}`}>
+      <h3
+        className={`relative z-10 font-bold text-lg mb-2 text-(--site-text) ${showPicture ? 'lg:text-white' : ''}`}
+        style={showPicture ? { textShadow: '0 1px 3px rgba(0,0,0,0.8)' } : undefined}
+      >
         {service.name}
       </h3>
-      <p className={`relative z-10 text-sm leading-relaxed flex-1 line-clamp-4 text-(--site-muted) ${showPicture ? 'lg:text-white/80' : ''}`}>
+      <p
+        className={`relative z-10 text-sm leading-relaxed flex-1 line-clamp-4 text-(--site-muted) ${showPicture ? 'lg:text-white/80' : ''}`}
+        style={showPicture ? { textShadow: '0 1px 3px rgba(0,0,0,0.8)' } : undefined}
+      >
         {service.description}
       </p>
     </div>

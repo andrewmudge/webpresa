@@ -3826,3 +3826,92 @@ web/docs/
 ├── architecture.md                                                            MODIFIED — this round's entry
 └── build_log.md                                                               MODIFIED — this entry
 ```
+
+---
+
+# Follow Us section visual prominence fix (2026-07-22)
+
+**The ask:** the Follow Us (social links) section didn't stand out — it looked like a continuation of the About Us section above it, and the platform icons were too small.
+
+**Root cause:** both `SocialLinksSection` and `AboutSection` used the same `bg-(--site-background)` token, so the two sections blended into one continuous white block with no visual break between them.
+
+**Fix:** `SocialLinksSection.tsx` — switched to `bg-(--site-surface)`, alternating from `AboutSection` above it, matching the banding convention already used by `FaqSection`/`ServiceAreaSection`/`ReviewsSection`. Icon badges enlarged from `w-11 h-11` (44px) to `w-16 h-16` (64px), glyphs from `w-5 h-5` to `w-7 h-7`, given a solid `V.background` fill (previously transparent/outline-only) plus a subtle shadow so they read as distinct badges against the new surface band. Section padding increased slightly (`py-12` → `py-16`) to match the heavier visual weight.
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     530 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/SocialLinksSection.tsx    MODIFIED — surface band background, larger filled icon badges
+
+web/docs/
+├── architecture.md                                MODIFIED — this round's entry
+└── build_log.md                                   MODIFIED — this entry
+```
+
+---
+
+# Featured service card contrast fix (2026-07-22)
+
+**The ask:** same failure mode as the earlier About-section quote fix — `ServicesGrid`'s featured (first) service card overlays white heading/description text on a photo background, and on a bright photo (a white service truck) the text was hard to read.
+
+**Root cause:** the card's dark overlay (`ServicesGrid.tsx`) was a flat `rgba(0,0,0,0.45)` — not strong enough over a bright image, and no `text-shadow` fallback existed either.
+
+**Fix:** strengthened the overlay to `rgba(0,0,0,0.6)` and added the same `textShadow: '0 1px 3px rgba(0,0,0,0.8)'` fallback to both the heading and description (only applied when `showPicture`, i.e. only the featured card at `lg:`+ — every other card is unaffected).
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     530 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/ServicesGrid.tsx    MODIFIED — stronger overlay + text-shadow on the featured card's heading/description
+
+web/docs/
+├── architecture.md                            MODIFIED — this round's entry
+└── build_log.md                               MODIFIED — this entry
+```
+
+---
+
+# Logo-as-hero cropping fix (2026-07-22)
+
+**The ask:** an admin picked A-1 Plumbing's own circular badge logo (text running around the rim) as the desktop hero photo. The `'imageSplit'` layout's photo panel (`HeroCornerImage`) uses `object-cover` to fill its card, which cropped the top and bottom off the circular logo, cutting off the rim text.
+
+**Root cause:** `object-cover` always crops a source image to fill its container's aspect ratio. That's the right behavior for an environmental photo (some cropping is expected/fine), but wrong for a logo/badge — edge-to-edge artwork where any crop cuts off part of the design. Nothing in `GeneratedHero.tsx` distinguished "this hero image is a real photo" from "this hero image happens to be the business's own logo, reused."
+
+**Fix:** `GeneratedHero.tsx` now accepts a `logoUrl` prop (threaded from `section-registry.tsx`'s `ctx.logoUrl`, which the header already used) and compares it against the resolved `heroImageUrl`/`heroImageUrlMobile`, independently per breakpoint (`heroImageIsLogo`/`heroImageMobileIsLogo`). Threaded as `desktopIsLogo`/`mobileIsLogo` through `SplitHeroSection` into `HeroCornerImage`. A new `LogoFrame` helper renders that breakpoint's image `object-contain` on a `V.surface` (theme surface color) backdrop, padded, instead of `object-cover` — so the whole logo is always visible regardless of the panel's aspect ratio. Non-logo photos are completely unaffected. The full-bleed legacy `'image'` style (exactly 1920×1080/1600×900) never needed this — a logo essentially never matches that dimension tolerance, so it always resolves to `'imageSplit'` instead, the one path this fix targets (plus the mobile-only split shell `'image'`'s own mobile rendering reuses).
+
+### Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     530 passed  (npm test)
+Build:     next build succeeds — no new routes
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/
+├── GeneratedHero.tsx                                                          MODIFIED — logoUrl prop, isLogo detection, LogoFrame (object-contain backdrop)
+└── section-registry.tsx                                                       MODIFIED — passes ctx.logoUrl into GeneratedHero
+
+web/docs/
+├── architecture.md                                                            MODIFIED — this round's entry
+└── build_log.md                                                               MODIFIED — this entry
+```

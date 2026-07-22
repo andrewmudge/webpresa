@@ -1,4 +1,4 @@
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import Image from 'next/image';
 import { V } from './tokens';
 import { CtaIcon, externalLinkAttrs, type ResolvedCta } from './cta';
@@ -19,6 +19,15 @@ interface Props {
    * mobile, exactly as before this prop existed.
    */
   heroImageUrlMobile?: string;
+  /**
+   * The business's own logo (`Business.logoUrl`). Only used to detect when
+   * `heroImageUrl`/`heroImageUrlMobile` is the same file — a logo/badge
+   * design is usually edge-to-edge artwork (e.g. text running around a
+   * circular rim), which gets cropped by the normal `object-cover`
+   * treatment on any breakpoint whose container isn't the logo's own aspect
+   * ratio. See `HeroCornerImage`'s `desktopIsLogo`/`mobileIsLogo`.
+   */
+  logoUrl?: string;
   /** Falls back to `heroImageUrl ? 'image' : 'illustration'` when absent (legacy previews). */
   heroStyle?: HeroStyle;
   /** Drives the industry watermark icon shown for the legacy gradient/pattern/solid fallbacks. */
@@ -43,11 +52,22 @@ interface Props {
  * illustration by default, or a real photo when `heroImageUrlMobile` is
  * set), desktop shows `desktopSrc`.
  */
+/** Renders a logo image `object-contain`ed on a neutral surface backdrop, inset by `padding`, instead of `object-cover` cropping it. */
+function LogoFrame({ image, padding, breakpointClassName }: { image: ReactNode; padding: string; breakpointClassName: string }) {
+  return (
+    <div className={`absolute inset-0 ${padding} ${breakpointClassName}`} style={{ backgroundColor: V.surface }}>
+      <div className="relative w-full h-full">{image}</div>
+    </div>
+  );
+}
+
 function HeroCornerImage({
   desktopSrc,
   mobileSrc,
   desktopIsPhoto,
   mobileIsPhoto,
+  desktopIsLogo,
+  mobileIsLogo,
 }: {
   desktopSrc: string;
   mobileSrc: string;
@@ -60,6 +80,9 @@ function HeroCornerImage({
    */
   desktopIsPhoto: boolean;
   mobileIsPhoto: boolean;
+  /** True when that breakpoint's resolved image is the business's own logo — see `LogoFrame`. */
+  desktopIsLogo?: boolean;
+  mobileIsLogo?: boolean;
 }) {
   const mobileBox = mobileIsPhoto ? 'inset-y-4 right-4 rounded-2xl overflow-hidden shadow-xl' : 'inset-y-0 right-0';
   const desktopBox = desktopIsPhoto ? 'lg:rounded-2xl lg:overflow-hidden lg:shadow-xl lg:my-8 lg:mr-8 xl:mr-12' : '';
@@ -73,16 +96,23 @@ function HeroCornerImage({
   );
 
   if (desktopSrc === mobileSrc) {
+    const image = (
+      <Image src={desktopSrc} alt="" fill className="object-contain" priority sizes="(min-width: 1024px) 50vw, 35vw" />
+    );
     return (
       <div className={wrapperClassName}>
-        <Image
-          src={desktopSrc}
-          alt=""
-          fill
-          className="object-cover object-right lg:object-center"
-          priority
-          sizes="(min-width: 1024px) 50vw, 35vw"
-        />
+        {desktopIsLogo || mobileIsLogo ? (
+          <LogoFrame image={image} padding="p-6 lg:p-10" breakpointClassName="" />
+        ) : (
+          <Image
+            src={desktopSrc}
+            alt=""
+            fill
+            className="object-cover object-right lg:object-center"
+            priority
+            sizes="(min-width: 1024px) 50vw, 35vw"
+          />
+        )}
         {gradientOverlay}
       </div>
     );
@@ -90,8 +120,24 @@ function HeroCornerImage({
 
   return (
     <div className={wrapperClassName}>
-      <Image src={mobileSrc} alt="" fill className="lg:hidden object-cover object-right" priority sizes="35vw" />
-      <Image src={desktopSrc} alt="" fill className="hidden lg:block object-cover object-center" priority sizes="50vw" />
+      {mobileIsLogo ? (
+        <LogoFrame
+          image={<Image src={mobileSrc} alt="" fill className="object-contain" priority sizes="35vw" />}
+          padding="p-6"
+          breakpointClassName="lg:hidden"
+        />
+      ) : (
+        <Image src={mobileSrc} alt="" fill className="lg:hidden object-cover object-right" priority sizes="35vw" />
+      )}
+      {desktopIsLogo ? (
+        <LogoFrame
+          image={<Image src={desktopSrc} alt="" fill className="object-contain" priority sizes="50vw" />}
+          padding="p-10"
+          breakpointClassName="hidden lg:block"
+        />
+      ) : (
+        <Image src={desktopSrc} alt="" fill className="hidden lg:block object-cover object-center" priority sizes="50vw" />
+      )}
       {gradientOverlay}
     </div>
   );
@@ -108,6 +154,9 @@ interface SplitHeroSectionProps {
   /** See `HeroCornerImage` — only a real photo gets the rounded/shadowed/gapped card treatment. */
   desktopIsPhoto: boolean;
   mobileIsPhoto: boolean;
+  /** See `HeroCornerImage`/`LogoFrame` — renders `object-contain` on a surface backdrop instead of cropping. */
+  desktopIsLogo?: boolean;
+  mobileIsLogo?: boolean;
 }
 
 /**
@@ -142,6 +191,8 @@ function SplitHeroSection({
   mobileImageSrc,
   desktopIsPhoto,
   mobileIsPhoto,
+  desktopIsLogo,
+  mobileIsLogo,
 }: SplitHeroSectionProps) {
   return (
     <section className="relative overflow-hidden bg-(--site-background)">
@@ -215,6 +266,8 @@ function SplitHeroSection({
           mobileSrc={mobileImageSrc}
           desktopIsPhoto={desktopIsPhoto}
           mobileIsPhoto={mobileIsPhoto}
+          desktopIsLogo={desktopIsLogo}
+          mobileIsLogo={mobileIsLogo}
         />
       </div>
     </section>
@@ -227,6 +280,7 @@ export function GeneratedHero({
   serviceArea,
   heroImageUrl,
   heroImageUrlMobile,
+  logoUrl,
   heroStyle,
   industry,
   themeName,
@@ -235,6 +289,8 @@ export function GeneratedHero({
 }: Props) {
   const resolvedStyle: HeroStyle = heroStyle ?? (heroImageUrl ? 'image' : 'illustration');
   const showImage = (resolvedStyle === 'image' || resolvedStyle === 'imageSplit') && !!heroImageUrl;
+  const heroImageIsLogo = !!logoUrl && !!heroImageUrl && heroImageUrl === logoUrl;
+  const heroImageMobileIsLogo = !!logoUrl && !!heroImageUrlMobile && heroImageUrlMobile === logoUrl;
 
   // The 'illustration' fallback (the universal no-photo default for every
   // newly generated preview) is a structurally different layout — a plain
@@ -256,6 +312,7 @@ export function GeneratedHero({
         mobileImageSrc={heroImageUrlMobile ?? illustrationSrc}
         desktopIsPhoto={false}
         mobileIsPhoto={!!heroImageUrlMobile}
+        mobileIsLogo={heroImageMobileIsLogo}
       />
     );
   }
@@ -277,6 +334,8 @@ export function GeneratedHero({
         mobileImageSrc={heroImageUrlMobile ?? getHeroIllustration(themeName)}
         desktopIsPhoto
         mobileIsPhoto={!!heroImageUrlMobile}
+        desktopIsLogo={heroImageIsLogo}
+        mobileIsLogo={heroImageMobileIsLogo}
       />
     );
   }
@@ -418,6 +477,8 @@ export function GeneratedHero({
             mobileImageSrc={mobileHeroSrc}
             desktopIsPhoto={!!heroImageUrlMobile}
             mobileIsPhoto={!!heroImageUrlMobile}
+            desktopIsLogo={heroImageMobileIsLogo}
+            mobileIsLogo={heroImageMobileIsLogo}
           />
         </div>
         <div className="hidden lg:block">{legacySection}</div>

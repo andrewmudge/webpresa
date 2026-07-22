@@ -21,12 +21,12 @@ export function SocialLinksSection({ businessName, socialLinks }: Props) {
   if (socialLinks.length === 0) return null;
 
   return (
-    <section className="py-12 bg-(--site-background)">
+    <section className="py-16 bg-(--site-surface)">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 text-center">
-        <p className="text-xs font-bold tracking-widest uppercase mb-4" style={{ color: V.accent }}>
+        <p className="text-xs font-bold tracking-widest uppercase mb-5" style={{ color: V.accent }}>
           Follow Us
         </p>
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-4">
           {socialLinks.map((link) => (
             <a
               key={link.url}
@@ -34,10 +34,10 @@ export function SocialLinksSection({ businessName, socialLinks }: Props) {
               target="_blank"
               rel="noopener noreferrer nofollow"
               aria-label={`${businessName} on ${SOCIAL_PLATFORM_LABELS[link.platform]}`}
-              className="flex items-center justify-center w-11 h-11 rounded-full border transition-colors hover:opacity-80"
-              style={{ borderColor: V.border, color: V.primary }}
+              className="flex items-center justify-center w-16 h-16 rounded-full border-2 shadow-sm transition-all hover:opacity-80 hover:shadow-md"
+              style={{ borderColor: V.border, color: V.primary, backgroundColor: V.background }}
             >
-              <SocialIcon platform={link.platform} className="w-5 h-5" />
+              <SocialIcon platform={link.platform} className="w-7 h-7" />
             </a>
           ))}
         </div>
