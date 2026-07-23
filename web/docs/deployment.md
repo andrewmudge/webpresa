@@ -93,6 +93,8 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `GOOGLE_PLACES_SECRET_NAME` | Deterministic name — `webpresa-dev-google-places` | Secrets Manager (Stage 10) |
 | `STRIPE_SECRET_NAME` | Deterministic name — `webpresa-dev-stripe` | Secrets Manager (Stage 10) |
 | `LOB_SECRET_NAME` | Deterministic name — `webpresa-dev-lob` | Secrets Manager (Stage 10) |
+| `CAPTURE_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-capture-token` | Secrets Manager (Stage 14) — **not yet deployed**, see "Stage 14" below |
+| `SCREENSHOT_LAMBDA_FUNCTION_NAME` | CloudFormation export `webpresa-dev-screenshot-capture-name` | Stage 14 — **not yet deployed**, see "Stage 14" below |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
@@ -354,17 +356,98 @@ To repeat this smoke test:
 
 ---
 
+## Stage 14 — Playwright Screenshots deployment guidance
+
+**Application and infrastructure code is implemented and locally verified — NOT deployed.** `cdk synth`/`cdk diff` were run against the real dev account (read-only); the Lambda package builds and runs correctly in a local Docker container (manual smoke tests only — no AWS calls). No `cdk deploy` has been run for either `WebpresaDevDataStack`'s new secret or the new `WebpresaDevScreenshotStack`, and no container image has been pushed to ECR. See `build_log.md`, "Stage 14 — Playwright Screenshots" for the full implementation record. The steps below are what deploying this stage for real requires — **all pending explicit approval**, per this project's deployment gate (`AGENTS.md`).
+
+### Deploy sequence (first time)
+
+```bash
+# 1. Data stack — adds the one new capture-token secret. Review first:
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
+npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Populate the real signing key (same pattern as every other secret —
+#    this one is generated locally, not obtained from a third party):
+openssl rand -base64 48 | tr -d '\n' > /tmp/capture-token-key.txt
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-capture-token \
+  --secret-string "{\"signingKey\":\"$(cat /tmp/capture-token-key.txt)\"}" \
+  --profile webpresa
+rm /tmp/capture-token-key.txt
+
+# 3. Screenshot stack — creates the ECR repo, Lambda, DLQ. The repo must
+#    exist before step 4 can push an image, so this runs BEFORE the image
+#    exists; the Lambda itself won't be invokable until step 4 completes.
+#    Requires WEBPRESA_APP_BASE_URL set to the real deployed app URL first
+#    — see "Required environment variables" below.
+WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk diff WebpresaDevScreenshotStack --profile webpresa
+WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
+
+# 4. Build and push the container image:
+./scripts/build-and-push-screenshot-lambda.sh dev webpresa
+
+# 5. If the Lambda's imageTag prop pins a digest rather than 'latest',
+#    redeploy the screenshot stack so it picks up the new image:
+WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
+```
+
+`WEBPRESA_APP_BASE_URL` is read directly from the shell environment by `infra/bin/webpresa.ts` — it is not (and should not be) stored in `.env.local`, since `infra/` is a separate CLI project from `web/`. Omitting it falls back to a synth-only placeholder (`https://REPLACE_WITH_..._APP_BASE_URL.invalid`) so `cdk synth`/`cdk diff` never hard-fail — but that placeholder must never actually be deployed, since the Lambda would construct unreachable preview URLs.
+
+### Extending `webpresa-vercel-dev` (manual, outside CDK)
+
+This IAM user is created and managed via AWS CLI commands (see "AWS credentials for Vercel" above), not CDK — it needs two new grants before the Next.js app can invoke the Lambda and verify capture tokens:
+
+```bash
+aws iam put-user-policy \
+  --user-name webpresa-vercel-dev \
+  --policy-name webpresa-dev-screenshot-lambda-invoke \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["lambda:InvokeFunction"],
+      "Resource": "arn:aws:lambda:us-east-1:<account-id>:function:webpresa-dev-screenshot-capture"
+    }]
+  }' --profile webpresa
+```
+
+Extend the existing `webpresa-dev-secrets` inline policy (do not create a new one) to add the capture-token secret's ARN alongside the other five — see "Adding a new secret" below.
+
+### Vercel environment variables
+
+Add `CAPTURE_TOKEN_SECRET_NAME` (`webpresa-dev-capture-token`) and `SCREENSHOT_LAMBDA_FUNCTION_NAME` (the CloudFormation output from step 3 above, or read directly: `webpresa-dev-screenshot-capture`) to Vercel's environment variables, alongside the existing table/bucket/secret-name variables.
+
+### Verifying the image is not stale after a code change
+
+Unlike every other stage in this app (plain Vercel Server Actions — pushing to `main`/`dev` redeploys automatically), a change to `infra/lambda/screenshot-capture/src/**` requires **both** re-running `build-and-push-screenshot-lambda.sh` **and** a `cdk deploy` of the screenshot stack if the image is referenced by a specific digest rather than a mutable tag — `cdk deploy` alone does not know the underlying `:latest` image content changed unless the referenced tag/digest itself changes. Confirm the deployed Lambda's `LastModified`/image digest in the AWS Console (or `aws lambda get-function`) matches the just-pushed image before considering a fix live.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `SCREENSHOT_LAMBDA_FUNCTION_NAME` unset or wrong | `InvokeCommand` throws synchronously in the Server Action; the `ScanEvent` is marked `failed` (`unknown` category) immediately rather than left `queued` forever — see `lib/screenshots/capture.ts` |
+| `webpresa-vercel-dev` missing `lambda:InvokeFunction` | Same as above — an `AccessDeniedException` from the invoke call itself, caught the same way |
+| No image pushed to ECR yet | The Lambda function exists (post step 3) but every invocation fails at the platform level; failures land in the DLQ, and the ScanEvent goes stale after 10 minutes — visible via the admin "Mark as failed" prompt |
+| Business has no website, `existing_site` requested | Never invokes the Lambda at all — `not_eligible`, no `ScanEvent` created |
+| Capture-token secret missing/misconfigured | The Lambda cannot mint a token for a `generated_preview` capture of a draft preview; that specific capture fails (`unknown` or a more specific category depending on where the Secrets Manager call fails), `existing_site` captures are unaffected |
+
+---
+
 ## Deployment order
 
 Infrastructure must be deployed before application code that depends on it.
 
 ```
 1. CDK bootstrap (once per account/region)
-2. WebpresaDevDataStack  ← DynamoDB tables
+2. WebpresaDevDataStack       ← DynamoDB tables, S3 bucket, secrets (incl. Stage 14's capture-token)
 3. Create webpresa-vercel-dev IAM user and add keys to Vercel
-4. (future) Auth stack   ← Cognito (when multi-user admin is needed)
-5. (future) API stack    ← Lambda / API Gateway
-6. Web application       ← Vercel deployment (automatic on push)
+4. WebpresaDevScreenshotStack ← Stage 14 — ECR repo, container-image Lambda, DLQ (depends on #2;
+                                  not yet deployed — see "Stage 14" above)
+5. Build/push the screenshot-capture image (scripts/build-and-push-screenshot-lambda.sh)
+6. Extend webpresa-vercel-dev with Lambda invoke + capture-token secret access (see "Stage 14" above)
+7. (future) Auth stack   ← Cognito (when multi-user admin is needed)
+8. Web application       ← Vercel deployment (automatic on push)
 ```
 
 The web application reads table names from environment variables (set in Vercel). If the tables do not exist when the application deploys, DynamoDB calls will fail at runtime.

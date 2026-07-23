@@ -12,7 +12,7 @@ const { mockPutAsset, mockValidateOutboundUrl, mockSharpMetadata } = vi.hoisted(
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/s3/assets', () => ({ putAsset: mockPutAsset }));
-vi.mock('../url-validation', () => ({ validateOutboundUrl: mockValidateOutboundUrl }));
+vi.mock('@/lib/security/url-validation', () => ({ validateOutboundUrl: mockValidateOutboundUrl }));
 vi.mock('sharp', () => ({ default: () => ({ metadata: mockSharpMetadata }) }));
 
 import { ingestScanImages } from '../images';

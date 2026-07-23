@@ -1,0 +1,26 @@
+{
+  "name": "webpresa-screenshot-capture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stage 14 (Playwright Screenshots) — AWS Lambda container image. A standalone deployable, independent of both web/ and infra/'s own npm projects (no workspace tooling exists in this repo — see src/url-validation.ts for the one deliberate consequence of that).",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1085.0",
+    "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/client-secrets-manager": "^3.1085.0",
+    "@aws-sdk/lib-dynamodb": "^3.1085.0",
+    "aws-lambda-ric": "^3.0.0",
+    "jose": "^6.2.3",
+    "playwright-core": "1.49.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}

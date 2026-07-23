@@ -4,6 +4,7 @@ import {
   SCAN_PROVIDERS,
   SCAN_OPERATIONS,
   SCAN_FAILURE_CATEGORIES,
+  SCAN_TARGET_TYPES,
 } from '@/domain/models/scan-event';
 import { IsoTimestampSchema, ScoreSchema } from './common.schema';
 import { ScanImageAssetSchema } from './scan-image.schema';
@@ -21,6 +22,18 @@ const ScanStorageKeysSchema = z.object({
   screenshotKey: z.string().optional(),
   htmlSnapshotKey: z.string().optional(),
   lighthouseKey: z.string().optional(),
+});
+
+const ViewportCaptureResultSchema = z.object({
+  status: z.enum(['completed', 'failed']),
+  storageKey: z.string().max(500).optional(),
+  failureCategory: z.enum(SCAN_FAILURE_CATEGORIES).optional(),
+  failureMessage: z.string().max(500).optional(),
+});
+
+const ScanCaptureResultsSchema = z.object({
+  desktop: ViewportCaptureResultSchema.optional(),
+  mobile: ViewportCaptureResultSchema.optional(),
 });
 
 export const ScanEventSchema = z.object({
@@ -46,6 +59,12 @@ export const ScanEventSchema = z.object({
   images: z.array(ScanImageAssetSchema).max(20).optional(),
   generatedPreviewId: z.string().optional(),
   storageKeys: ScanStorageKeysSchema.optional(),
+  targetType: z.enum(SCAN_TARGET_TYPES).optional(),
+  previewId: z
+    .string()
+    .regex(/^preview_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    .optional(),
+  captureResults: ScanCaptureResultsSchema.optional(),
   scores: ScanScoresSchema.optional(),
   startedAt: IsoTimestampSchema.optional(),
   completedAt: IsoTimestampSchema.optional(),

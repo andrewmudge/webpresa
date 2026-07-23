@@ -9,6 +9,7 @@ const STATUS_STYLES: Record<ScanStatus, string> = {
   queued: 'bg-gray-50 text-gray-600',
   running: 'bg-blue-50 text-blue-700',
   completed: 'bg-green-50 text-green-700',
+  partial: 'bg-amber-50 text-amber-700',
   failed: 'bg-red-50 text-red-600',
   manual_approval_required: 'bg-amber-50 text-amber-700',
 };
@@ -17,6 +18,7 @@ const STATUS_LABELS: Record<ScanStatus, string> = {
   queued: 'Queued',
   running: 'Running',
   completed: 'Completed',
+  partial: 'Partially completed',
   failed: 'Failed',
   manual_approval_required: 'Manual approval required',
 };

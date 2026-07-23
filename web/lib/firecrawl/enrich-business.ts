@@ -8,7 +8,7 @@ import { createScanEvent } from '@/domain/factories/scan-event.factory';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 import { putAsset } from '@/lib/s3/assets';
 import { scrapeWebsite, FirecrawlApiError, type FirecrawlErrorCategory, type FirecrawlScrapeData } from './client';
-import { validateOutboundUrl } from './url-validation';
+import { validateOutboundUrl } from '@/lib/security/url-validation';
 import { normalizeFirecrawlResponse } from './normalize';
 import { ingestScanImages } from './images';
 import { generatePreviewContent } from '@/lib/ai/generate-preview';

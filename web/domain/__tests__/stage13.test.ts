@@ -53,7 +53,7 @@ describe('ScanEvent (Stage 13 shape)', () => {
   it('rejects an invalid provider', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'plumbing' });
     const scan = createScanEvent({ businessId: biz.businessId, provider: 'firecrawl', operation: 'scrape' });
-    const result = ScanEventSchema.safeParse({ ...scan, provider: 'playwright' });
+    const result = ScanEventSchema.safeParse({ ...scan, provider: 'lighthouse' });
     expect(result.success).toBe(false);
   });
 

@@ -1,7 +1,7 @@
 # Webpresa — Architecture
 
 **Last updated:** 2026-07-22  
-**Status:** **Stage 13 (Firecrawl Website Enrichment) implemented and manually verified** (2026-07-18) — an admin can enrich a business's `Business` record by scraping its known website with Firecrawl (single-page Scrape, REST client), normalizing the result into a validated `WebsiteEnrichmentSnapshot`, merging it in memory with canonical `Business` data (Business always wins), and generating a new versioned `SitePreview` through the existing Stage 11 pipeline — including creating a business's *first* preview, not only enriching an existing one. Businesses with no website enter an explicit `manual_approval_required` disposition instead of a generic failure; Google Places photos are never downloaded. Verified end-to-end against the real Firecrawl v2 API, the real OpenAI API, and the real dev S3/DynamoDB. See "Firecrawl Website Enrichment" below. Stage 10 complete in development. **Stage 11 (Manual AI Website Generation) foundation implemented and live-tested in development** — an admin can enter verified business facts, upload a logo/photos, and generate a real `SitePreview` (content, CTA, theme, hero presentation) via the OpenAI API; generated previews stay in draft until manually published. **Brand Theme System implemented** — AI (and admins) select from 10 curated theme presets by name only; no free-form color generation remains anywhere in the app. **Stage 11.x — Configurable Website-Section System implemented** — the public preview renders from a stored, per-business `websiteSections` configuration through a controlled component registry instead of a permanently fixed layout; an admin can enable/disable optional sections (required sections are locked on), reorder them via up/down controls, and apply a deterministic (non-AI) recommendation — see "Configurable Website-Section System" below. This is the foundation Stage 12 (Google Places discovery) populates eligibility data into. **Stage 12 (Google Places Discovery) implemented and manually verified** (2026-07-17) — strictly server-side search, review, and selective import into the existing `Business` model via a new `/admin/discover` admin page; no photo downloading, no automatic handoff into Stage 13 enrichment. Verified end-to-end against the real Google Places API and the real dev DynamoDB table (see `build_log.md`). See "Google Places Discovery Boundary (Stage 12)" below. **Theme-matched hero illustrations implemented** — every newly generated no-photo preview gets a deterministic, theme-matched illustration background (never AI-chosen) in place of the old AI-picked CSS gradient/pattern/solid fallback; see "Hero presentation" below. **Desktop hero image dimension classification implemented** — a resolved hero photo only renders full-bleed when within 100px of 1920×1080 or 1600×900px, otherwise it renders in a new two-column split layout instead; mobile does not yet show a real hero photo at any size (deferred). Admin business creation is a 3-step wizard (details → photos → sections) with no separate edit page — every field is editable inline on the business detail page; step 2 now surfaces the Photo Assignment section immediately after upload, before advancing to step 3. Premium generated website template live with a configurable primary/secondary CTA system and a picture background on the featured service card; admin with cascade delete; DynamoDB tables, S3 assets bucket, and Secrets Manager secrets live in `us-east-1`. Hosting on Vercel. **Universal hero CTA defaults + Request Service form implemented (2026-07-22, frontend only)** — every business page now shows Primary: Call Us / Secondary: Request Service by default (resolved at render time, applies immediately to existing previews without regeneration); "Request Service" opens a new reusable `RequestServiceForm` in a modal (desktop) / full-screen drawer (mobile) instead of navigating. See "Configurable CTA system" below.
+**Status:** **Stage 14 (Playwright Screenshots) implemented, code-complete, not yet deployed** — the project's first compute infrastructure. An admin can trigger two independent screenshot captures per business — the existing website and the generated preview — each running asynchronously in a new ECR-hosted container-image Lambda (Microsoft's Playwright base image + `aws-lambda-ric`), never blocking the triggering Server Action. Automatic Lambda retries are disabled; a dead-letter queue plus a 10-minute stale-scan admin override are the failure-recovery path instead. Per-viewport results (`ScanEvent.captureResults`) support a new `'partial'` terminal status. A `generated_preview` capture of an unpublished draft authenticates via a Lambda-minted, single-preview HTTP-only cookie rather than an admin session. See "Playwright Screenshots (Stage 14)" below. **Verified locally only** — `cdk synth`/`cdk diff` against the real dev account (additive-only diff), the Lambda package's own typecheck/tests, and a real local Docker build with manual runtime smoke tests (handler load, Chromium launch + screenshot, capture-token mint) all pass; no `cdk deploy` and no image push to ECR have been performed — see `build_log.md`, "Stage 14", "Deployment status" for the explicit remaining steps. **Stage 13 (Firecrawl Website Enrichment) implemented and manually verified** (2026-07-18) — an admin can enrich a business's `Business` record by scraping its known website with Firecrawl (single-page Scrape, REST client), normalizing the result into a validated `WebsiteEnrichmentSnapshot`, merging it in memory with canonical `Business` data (Business always wins), and generating a new versioned `SitePreview` through the existing Stage 11 pipeline — including creating a business's *first* preview, not only enriching an existing one. Businesses with no website enter an explicit `manual_approval_required` disposition instead of a generic failure; Google Places photos are never downloaded. Verified end-to-end against the real Firecrawl v2 API, the real OpenAI API, and the real dev S3/DynamoDB. See "Firecrawl Website Enrichment" below. Stage 10 complete in development. **Stage 11 (Manual AI Website Generation) foundation implemented and live-tested in development** — an admin can enter verified business facts, upload a logo/photos, and generate a real `SitePreview` (content, CTA, theme, hero presentation) via the OpenAI API; generated previews stay in draft until manually published. **Brand Theme System implemented** — AI (and admins) select from 10 curated theme presets by name only; no free-form color generation remains anywhere in the app. **Stage 11.x — Configurable Website-Section System implemented** — the public preview renders from a stored, per-business `websiteSections` configuration through a controlled component registry instead of a permanently fixed layout; an admin can enable/disable optional sections (required sections are locked on), reorder them via up/down controls, and apply a deterministic (non-AI) recommendation — see "Configurable Website-Section System" below. This is the foundation Stage 12 (Google Places discovery) populates eligibility data into. **Stage 12 (Google Places Discovery) implemented and manually verified** (2026-07-17) — strictly server-side search, review, and selective import into the existing `Business` model via a new `/admin/discover` admin page; no photo downloading, no automatic handoff into Stage 13 enrichment. Verified end-to-end against the real Google Places API and the real dev DynamoDB table (see `build_log.md`). See "Google Places Discovery Boundary (Stage 12)" below. **Theme-matched hero illustrations implemented** — every newly generated no-photo preview gets a deterministic, theme-matched illustration background (never AI-chosen) in place of the old AI-picked CSS gradient/pattern/solid fallback; see "Hero presentation" below. **Desktop hero image dimension classification implemented** — a resolved hero photo only renders full-bleed when within 100px of 1920×1080 or 1600×900px, otherwise it renders in a new two-column split layout instead; mobile does not yet show a real hero photo at any size (deferred). Admin business creation is a 3-step wizard (details → photos → sections) with no separate edit page — every field is editable inline on the business detail page; step 2 now surfaces the Photo Assignment section immediately after upload, before advancing to step 3. Premium generated website template live with a configurable primary/secondary CTA system and a picture background on the featured service card; admin with cascade delete; DynamoDB tables, S3 assets bucket, and Secrets Manager secrets live in `us-east-1`. Hosting on Vercel. **Universal hero CTA defaults + Request Service form implemented (2026-07-22, frontend only)** — every business page now shows Primary: Call Us / Secondary: Request Service by default (resolved at render time, applies immediately to existing previews without regeneration); "Request Service" opens a new reusable `RequestServiceForm` in a modal (desktop) / full-screen drawer (mobile) instead of navigating. See "Configurable CTA system" below.
 
 ---
 
@@ -21,7 +21,12 @@ webpresa/
 │   │   ├── config/        Environment configuration (dev / prod)
 │   │   ├── constructs/    Reusable CDK constructs
 │   │   └── stacks/        CloudFormation stacks
-│   └── test/              CDK assertion tests
+│   ├── test/              CDK assertion tests
+│   ├── scripts/           Deploy-adjacent helper scripts (e.g. build/push the Stage 14 Lambda image)
+│   └── lambda/            Container-image Lambda source — each subdirectory its own
+│       └── screenshot-capture/  fully independent npm project (Stage 14; see "Playwright
+│                                 Screenshots (Stage 14)" below for why it can't share code
+│                                 with web/ or infra/'s own TypeScript)
 └── vercel.json            Vercel monorepo config (rootDirectory: "web")
 ```
 
@@ -143,7 +148,7 @@ TypeScript interfaces only. No runtime code.
 |---|---|
 | `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), photo-slot overrides (`heroPhotoUrl?`, `aboutPhotoUrl?`, `whyChooseUsPhotoUrl?`, `servicesPhotoUrl?` — see "Photo slot assignment" below), `theme?` (the stored Brand Theme System preset), Stage 11.x section-eligibility signals (`googleRating?`, `googleReviewCount?`, `testimonials?`, `faqItems?`, `processSteps?` — see "Configurable Website-Section System" below), `websiteSections?` (the stored per-business section configuration), and Stage 13 enrichment disposition (`enrichmentStatus?`, `manualApprovalReason?`, `manualApprovalNote?` — see "Firecrawl Website Enrichment" below) |
 | `SitePreview` | `previewId`, `businessId`, `slug`, `version` (monotonic), `status`, `templateId`, `content` (strict shape, includes optional `cta` — see `PreviewCtaConfig`), `theme` (`PreviewTheme.themeName` — see "Brand Theme System"), `generationMetadata?` (now includes `source?: 'seed' \| 'manual_ai' \| 'firecrawl_enriched'` and `scanId?` — Stage 13 provenance) |
-| `ScanEvent` | Redesigned in Stage 13 (its first real caller — Stage 12 creates none): `scanId`, `businessId`, `provider` (`'firecrawl'`), `operation` (`'scrape'`), `status` (`queued`\|`running`\|`completed`\|`failed`\|`manual_approval_required`), `sourceUrl?`, `finalUrl?`, `httpStatus?`, `failureCategory?` (`ScanFailureCategory`, 14 values), `failureMessage?`, `attempt`, `retryOfScanId?`, `rawArtifactKey?`, `extractedArtifactKey?`, `images?` (`ScanImageAsset[]`), `generatedPreviewId?`, `scores?`, `storageKeys?` (reserved for Stage 14), `startedAt?`, `completedAt?` |
+| `ScanEvent` | Redesigned in Stage 13 (its first real caller — Stage 12 creates none), extended in Stage 14: `scanId`, `businessId`, `provider` (`'firecrawl'` \| `'playwright'`), `operation` (`'scrape'` \| `'screenshot'`), `status` (`queued`\|`running`\|`completed`\|`partial`\|`failed`\|`manual_approval_required` — `partial` is Stage 14 only, one viewport succeeded and one failed), `sourceUrl?`, `finalUrl?`, `httpStatus?`, `failureCategory?` (`ScanFailureCategory`, 19 values — 13 Firecrawl, 6 Playwright), `failureMessage?`, `attempt`, `retryOfScanId?`, `rawArtifactKey?`, `extractedArtifactKey?`, `images?` (`ScanImageAsset[]`), `generatedPreviewId?`, `scores?`, `storageKeys?` (reserved, unused — see "S3 asset storage" above), `targetType?` (`'existing_site'` \| `'generated_preview'`, Stage 14 only), `previewId?` (Stage 14 only — the preview *being captured*, distinct from `generatedPreviewId`), `captureResults?` (Stage 14 only — per-viewport `{ desktop?, mobile? }` outcome), `startedAt?`, `completedAt?` |
 | `Postcard` | `postcardId`, `businessId`, `previewId`, `provider`, `campaignCode`, `qrDestination`, `status`, `mailedAt?`, `deliveredAt?` |
 
 All records extend `MutableTimestampedRecord` → `createdAt` + `updatedAt` (ISO 8601 UTC strings).
@@ -193,16 +198,20 @@ All configuration is centralised in `infra/lib/config/environments.ts`. The CDK 
 
 No account IDs are hard-coded. The CDK app resolves `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` from the active CLI profile at synth time.
 
-### Reusable construct
+### Reusable constructs
 
 `WebpresaTable` (`infra/lib/constructs/webpresa-table.ts`) wraps `dynamodb.Table` and automatically applies billing mode, encryption, removal policy, PITR, deletion protection, and two CloudFormation outputs (`TableName`, `TableArn`) for every table. Adding a new table requires only a name, partition key, and optional GSI list.
+
+`WebpresaScreenshotLambda` (`infra/lib/constructs/webpresa-screenshot-lambda.ts`, Stage 14) — the first *compute* construct, alongside the data constructs above: an ECR repository, container-image Lambda, dead-letter queue, and async invoke config, plus their least-privilege IAM grants. See "Playwright Screenshots (Stage 14)" below.
 
 ### Stacks
 
 | Stack | Deployed | Description |
 |---|---|---|
-| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket + 5 Secrets Manager secrets, dev settings |
+| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket + 6 Secrets Manager secrets, dev settings |
 | `WebpresaProdDataStack` | ❌ not deployed | Same tables, bucket, and secrets, prod settings |
+| `WebpresaDevScreenshotStack` | ❌ not deployed | Stage 14 — ECR repo + container-image Lambda + DLQ, depends on `WebpresaDevDataStack`; code-complete, `cdk synth`/`cdk diff` verified against the real account, but no `cdk deploy` has been run yet — see `build_log.md`, "Stage 14", "Deployment status" |
+| `WebpresaProdScreenshotStack` | ❌ not deployed | Same, prod settings |
 
 ---
 
@@ -273,15 +282,17 @@ The `createdAt` sort key on `business-id-index` for SitePreviews, ScanEvents, an
 scans/{businessId}/{scanId}/crawl.json
 scans/{businessId}/{scanId}/extracted.json
 scans/{businessId}/{scanId}/images/{imageId}.{ext}
-scans/{businessId}/{scanId}/desktop.png
-scans/{businessId}/{scanId}/mobile.png
+scans/{businessId}/{scanId}/existing/desktop.png
+scans/{businessId}/{scanId}/existing/mobile.png
+scans/{businessId}/{scanId}/preview/desktop.png
+scans/{businessId}/{scanId}/preview/mobile.png
 previews/{businessId}/{previewId}/...
 postcards/{businessId}/{postcardId}/...
 businesses/{businessId}/assets/logo.{ext}
 businesses/{businessId}/assets/photos/{n}.{ext}
 ```
 
-`crawl.json` (Stage 13) is the sanitized raw Firecrawl response (markdown/links/images/structured-extraction JSON/metadata — `html`/`rawHtml` are never requested, so there's nothing to strip there; no secrets are ever present in a Firecrawl response). `extracted.json` (Stage 13) is the validated `WebsiteEnrichmentSnapshot`. `images/{imageId}.{ext}` (Stage 13) holds accepted/review-required website images discovered by Firecrawl, fetched and rehosted server-side — see "Firecrawl Website Enrichment" below.
+`crawl.json` (Stage 13) is the sanitized raw Firecrawl response (markdown/links/images/structured-extraction JSON/metadata — `html`/`rawHtml` are never requested, so there's nothing to strip there; no secrets are ever present in a Firecrawl response). `extracted.json` (Stage 13) is the validated `WebsiteEnrichmentSnapshot`. `images/{imageId}.{ext}` (Stage 13) holds accepted/review-required website images discovered by Firecrawl, fetched and rehosted server-side — see "Firecrawl Website Enrichment" below. `existing/`/`preview/{desktop,mobile}.png` (Stage 14) are Playwright screenshot captures, each `ScanEvent` populating only the one subfolder matching its own `targetType` — see "Playwright Screenshots (Stage 14)" below. These are never proxied publicly (private only, signed-URL admin viewing).
 
 Two prefixes have a public-facing read path, both through `app/api/assets/[...key]/route.ts` (the app's first Route Handler) — no other prefix is ever proxied, and the raw bucket itself stays fully private:
 - `businesses/{businessId}/assets/...` (added in the Stage 11 foundation work) — admin-uploaded logo/photos, unconditionally.
@@ -289,23 +300,23 @@ Two prefixes have a public-facing read path, both through `app/api/assets/[...ke
 
 Both paths stream via `getAsset()` with a one-year `Cache-Control`.
 
-The `retain=false` object tag is *not yet written by anything* — Stage 9 only provisions the lifecycle rule. Stage 13 does not set it either (scan artifacts are kept indefinitely, matching `SitePreview`'s own "never delete history" convention); Stage 14 (screenshots) and 22 (postcards) remain expected future adopters.
+The `retain=false` object tag is *not yet written by anything* — Stage 9 only provisions the lifecycle rule. Stage 13 does not set it either (scan artifacts are kept indefinitely, matching `SitePreview`'s own "never delete history" convention); Stage 14 doesn't set it either, for the same reason (each capture is its own permanent `scanId` history entry). Stage 22 (postcards) remains an expected future adopter.
 
 ### Application-side access
 
 - `web/lib/s3/client.ts` — `server-only` singleton `S3Client`, same region/credential pattern as `web/lib/db/client.ts` (`AWS_REGION`, `AWS_PROFILE` locally, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` on Vercel). `getAssetsBucketName()` reads `ASSETS_BUCKET_NAME`.
 - `web/lib/s3/assets.ts` — `server-only` generic helpers: `putAsset`, `getAsset` (returns `null` on `NoSuchKey`), `getSignedAssetUrl` (short-lived signed URL, 300s default, for private admin viewing). All three reject keys outside the `scans/`, `previews/`, `postcards/`, `businesses/` prefixes before calling S3.
-- `ScanEvent.storageKeys` (Stage 14 screenshots) and any `Postcard` creative-file field remain unpopulated — Stage 13 only ever writes `ScanEvent.rawArtifactKey`/`extractedArtifactKey`/`images[].s3Key`, not `storageKeys`.
+- `ScanEvent.storageKeys` remains unpopulated by every stage — Stage 13 only ever writes `rawArtifactKey`/`extractedArtifactKey`/`images[].s3Key`, and Stage 14 writes the more specific `captureResults.desktop`/`.mobile[].storageKey` instead (see "Playwright Screenshots (Stage 14)" below) — `storageKeys` stays reserved, unused, for a possible future adopter. Any `Postcard` creative-file field also remains unpopulated (Stage 22).
 
 ### IAM
 
-The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the assets bucket only. Stage 13 runs entirely inside existing Next.js Server Actions on Vercel — no dedicated Lambda or execution role was introduced, so it reuses this existing broad grant rather than a prefix-scoped one. Future Lambda execution roles (Stage 14 screenshot capture, Stage 22 postcard service) should still be scoped further, to their own prefix only, rather than the whole bucket — not yet created since those roles don't exist yet.
+The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the assets bucket only. Stage 13 runs entirely inside existing Next.js Server Actions on Vercel — no dedicated Lambda or execution role was introduced, so it reuses this existing broad grant rather than a prefix-scoped one. Stage 14's screenshot-capture Lambda is the first execution role that *is* properly scoped further — `s3:PutObject` only, restricted to the `scans/*/*/existing/*` and `scans/*/*/preview/*` prefixes (see "Playwright Screenshots (Stage 14)" below) — the pattern this note previously described as aspirational for a not-yet-created role. Stage 22 (postcard service) remains an expected future adopter of the same narrower approach.
 
 ---
 
 ## Secrets Manager
 
-**Implemented in Stage 10.** Five secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
+**Implemented in Stage 10; extended in Stage 14.** Six secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
 
 | Secret name | JSON shape | Owner (stage) |
 |---|---|---|
@@ -314,16 +325,17 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 | `webpresa-{env}-google-places` | `{ apiKey }` | Stage 12 — business discovery |
 | `webpresa-{env}-stripe` | `{ secretKey, webhookSecret }` | Stage 18 — subscriptions |
 | `webpresa-{env}-lob` | `{ apiKey }` | Stage 22 — postcard integration |
+| `webpresa-{env}-capture-token` | `{ signingKey }` | Stage 14 — Playwright preview capture token. Not a third-party credential like the other five — an internally-generated HMAC key, read (never minted) by this app, minted (never read-only-verified) by the screenshot Lambda. |
 
 ### Application-side access
 
 - `web/lib/secrets/client.ts` — `server-only` singleton `SecretsManagerClient`, same region/credential pattern as `web/lib/db/client.ts` and `web/lib/s3/client.ts`. `getSecretJson(secretName)` fetches and JSON-parses a secret's `SecretString`, caching the result **indefinitely for the lifetime of the process** (matches Vercel's serverless function instance reuse — a fresh cold start re-fetches). Automated rotation is deferred work; today, rotating a secret requires a redeploy or cold start to take effect.
-- `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
-- `getOpenAiSecret()` got its first real caller in Stage 11 (see "AI / OpenAI integration" below); `getGooglePlacesSecret()` in Stage 12; `getFirecrawlSecret()` in Stage 13 (see "Firecrawl Website Enrichment" above) — the real API key was populated via the standard `aws secretsmanager put-secret-value` pattern (see `deployment.md`), no infra change needed since the secret was already provisioned in Stage 10. Stripe and Lob remain foundation-only for their respective later stages. Never log a secret's parsed value or raw `SecretString`.
+- `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`, `getCaptureTokenSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
+- `getOpenAiSecret()` got its first real caller in Stage 11 (see "AI / OpenAI integration" below); `getGooglePlacesSecret()` in Stage 12; `getFirecrawlSecret()` in Stage 13 (see "Firecrawl Website Enrichment" above) — the real API key was populated via the standard `aws secretsmanager put-secret-value` pattern (see `deployment.md`), no infra change needed since the secret was already provisioned in Stage 10. `getCaptureTokenSecret()` (Stage 14, `web/lib/capture-token.ts`) is the first secret this app only ever *reads*, never writes or forwards to a third party — the same value is independently read by the screenshot Lambda (its own Secrets Manager client, `infra/lambda/screenshot-capture/src/aws.ts`) to mint tokens this app verifies. Stripe and Lob remain foundation-only for their respective later stages. Never log a secret's parsed value or raw `SecretString`.
 
 ### IAM
 
-The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `secretsmanager:GetSecretValue` scoped to the 5 dev secret ARNs. As with the S3 bucket, future dedicated Lambda execution roles (Stages 13, 18, 22) should be scoped to only the one secret each integration needs, not this broad grant.
+The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants `secretsmanager:GetSecretValue` scoped to the dev secret ARNs — extend this policy to include the new `webpresa-dev-capture-token` ARN before this app can verify Stage 14 capture tokens in production (not yet done — see `build_log.md`, "Stage 14", "Deployment status"). Stage 14's screenshot-capture Lambda is the first dedicated execution role with its own narrower Secrets Manager grant (`secretsmanager:GetSecretValue` on just the capture-token secret) rather than reusing this broad user policy — Stages 18 and 22 remain expected future adopters of the same narrower pattern.
 
 ---
 
@@ -512,6 +524,68 @@ Two tiers, matching the "never retry the same ScanEvent" requirement: (1) bounde
 ### Admin UI
 
 `EnrichmentSection.tsx` on the business detail page is a plain server component — no client JS needed, since active-scan/retry eligibility is fully determined server-side from already-loaded `scans`/`business` data. Both actions (`enrichment-actions.ts`) redirect back to the detail page with an `?enrichmentResult=` query param rather than returning `useActionState` feedback, since enrichment can take several seconds and has more distinct terminal outcomes (completed, manual approval, conflict, failed) than a simple inline message suits.
+
+---
+
+## Playwright Screenshots (Stage 14)
+
+**Implemented 2026-07-22 — code-complete, not deployed.** The project's first compute infrastructure: an ECR-hosted container-image Lambda, asynchronously invoked from a Vercel Server Action, capturing screenshots of a business's existing website and of its generated preview independently. See `build_log.md`, "Stage 14 — Playwright Screenshots" for the full implementation record, and `implementation.md`, Stage 14, for the requirements this implements.
+
+### Two independent targets, two independent ScanEvents
+
+`existing_site` (`Business.websiteUrl`) and `generated_preview` (the business's current `SitePreview`) are captured by separate admin actions on the business detail page (`ScreenshotsSection.tsx`), each creating its own `ScanEvent` (`provider: 'playwright'`, `operation: 'screenshot'`, `targetType` set accordingly). An active capture for one target never blocks the other. `existing_site` is unavailable (no button shown) when the business has no website; `generated_preview` works even for a business that never had one, since Webpresa still needs a screenshot of the site *it* generated.
+
+### Asynchronous invocation, retries disabled
+
+`web/lib/screenshots/capture.ts`'s `captureExistingSiteScreenshot()`/`captureGeneratedPreviewScreenshot()` create a `queued` `ScanEvent` and fire `@aws-sdk/client-lambda`'s `InvokeCommand` with `InvocationType: 'Event'`, then return immediately — the Server Action never waits on Playwright. The Lambda's own async invocation configuration (`infra/lib/constructs/webpresa-screenshot-lambda.ts`) sets `MaximumRetryAttempts: 0`: AWS never automatically re-invokes on failure, since a naive retry could otherwise race a `queued`→`running` conditional transition into a lease conflict. A hard invocation failure (throws or times out before writing any terminal `ScanEvent` state) goes to a dedicated SQS dead-letter queue (`onFailure` destination, 14-day retention) instead — inspectable, never silently lost. The actual recovery path for a stuck scan is the existing 10-minute staleness check (`isStaleScan()`/`markStaleScanFailed()`), surfaced in the admin UI, not an automatic mechanism.
+
+### Idempotency — conditional DynamoDB updates
+
+Every `ScanEvent` status transition (`web/lib/screenshots/capture.ts`'s repository calls on the app side; `infra/lambda/screenshot-capture/src/aws.ts`'s `conditionalUpdateStatus()` on the Lambda side) is a conditional update: `queued`→`running` only succeeds when the current status is still `queued`; the final terminal write only succeeds from `running`. On load, a `ScanEvent` already in a terminal state causes the Lambda to exit immediately without launching a browser — the concrete guard against Lambda's rare at-least-once duplicate delivery (a real property of async invocation, independent of the disabled retry count).
+
+### The Lambda owns the whole capture lifecycle
+
+The invocation payload is identifiers only — `{ businessId, scanId, targetType, previewId? }` — never a URL. The Lambda re-resolves the actual target from DynamoDB itself:
+- `existing_site` → `Business.websiteUrl`, validated through the shared SSRF guard (`web/lib/security/url-validation.ts` — see "Relocated SSRF guard" below).
+- `generated_preview` → the `SitePreview.slug`, resolved into a URL via a strict same-origin policy (`infra/lambda/screenshot-capture/src/same-origin.ts`) against the `WEBPRESA_APP_BASE_URL` Lambda environment variable — never the general SSRF guard, since this destination is always Webpresa's own app, never genuinely untrusted.
+
+For each of the two fixed viewports (desktop `1440×1000`, mobile `390×844`), `infra/lambda/screenshot-capture/src/browser.ts` launches headless Chromium (`playwright-core`, no sandbox/dev-shm flags for the container environment), navigates with a `domcontentloaded`-first wait sequence (never `networkidle`-primary, which is unreliable on real sites with persistent analytics/chat-widget connections), waits briefly for web fonts and a visible body, disables CSS animations, and captures `fullPage: false` only — never a full-page scrolling capture (postcard usability, bounded file size). A 403/429 on the top-level navigation response is treated as a coarse bot-protection signal (`blocked_by_bot_protection`), distinct from a generic load failure. One viewport's failure never aborts the other; each viewport's own outcome — `completed` (with its S3 storage key) or `failed` (with a category/message) — is written to `ScanEvent.captureResults.desktop`/`.mobile`. Overall `ScanEvent.status` is `'completed'` (both), `'partial'` (one — a new terminal status), or `'failed'` (neither).
+
+### Draft preview visibility — Lambda-minted capture-token cookie
+
+A `generated_preview` capture of an unpublished draft needs to render `/b/[slug]` without an admin session. The Lambda mints a short-lived, single-purpose JWT (`purpose: 'preview_capture'`, `previewId`, `scanId`, 5-minute expiry) immediately before navigating — never the Server Action, which would risk the token expiring before a delayed/redelivered invocation and would also break the identifiers-only payload contract. The token is delivered as an HTTP-only, `Secure`, `SameSite=Strict` cookie (`__Host-webpresa_capture`), never a URL query parameter (which would leak into request logs, browser history, and referrer headers). `app/b/[slug]/page.tsx`'s `resolvePreview()` checks this cookie as an alternate to an admin session — via `web/lib/capture-token.ts`'s `verifyCaptureToken()` (signature + every claim, not just the signature) plus a live lookup confirming `scanId` still names an actual `queued`/`running` `generated_preview` `ScanEvent` for that exact `previewId`. A new dedicated secret, `webpresa-{env}-capture-token` (`{ signingKey }`), backs the HMAC key — read-only by this Next.js app, mint-only by the Lambda.
+
+### Relocated SSRF guard
+
+`web/lib/security/url-validation.ts` (moved from `web/lib/firecrawl/` — same `validateOutboundUrl()` implementation, used unchanged by Stage 13's Firecrawl code and Stage 14's `existing_site` target). The Lambda package (`infra/lambda/screenshot-capture/`) is a fully independent npm project — this repo has no workspace tooling connecting `web/`, `infra/`, and the Lambda — so its own `src/url-validation.ts` is a deliberate, explicitly-documented duplicate of the same logic, not an oversight; the two must be kept in sync by hand if either changes.
+
+### Storage layout
+
+```
+scans/{businessId}/{scanId}/existing/desktop.png
+scans/{businessId}/{scanId}/existing/mobile.png
+
+scans/{businessId}/{scanId}/preview/desktop.png
+scans/{businessId}/{scanId}/preview/mobile.png
+```
+
+A new sub-shape of the `scans/{businessId}/{scanId}/...` prefix already reserved since Stage 9 — no `ALLOWED_PREFIXES` change needed in `web/lib/s3/assets.ts`. Screenshots are **not** added to the public `/api/assets/...` proxy — private only, admin-viewable via `getSignedAssetUrl()` (reusing the existing `viewRawArtifactAction` from `/admin/scans/[scanId]/actions.ts`, since it already redirects to a signed URL for any key under `scans/`).
+
+### Infrastructure — first compute construct
+
+`infra/lib/constructs/webpresa-screenshot-lambda.ts` — ECR repository (own name, own lifecycle rule capping stored images at 8), `DockerImageFunction` (3072 MB, 180s timeout, reserved concurrency 5, **no VPC** — this Lambda only calls public websites/the public preview URL plus AWS APIs that don't need VPC placement, so attaching one would add a NAT Gateway for no benefit), an explicit `LogGroup` (14-day retention — CDK's construct default is unbounded), and the `EventInvokeConfig` described above. Least-privilege IAM is written as explicit `PolicyStatement`s where CDK's convenience grant helpers turned out to be broader than needed: `Table.grant()` for exactly `dynamodb:GetItem` (Businesses, SitePreviews) and `GetItem`+`UpdateItem` (ScanEvents) matched the spec directly, but `Bucket.grantPut()` does **not** — it grants `PutObjectTagging`/`PutObjectLegalHold`/`PutObjectRetention`/`PutObjectVersionTagging` and an `s3:Abort*` wildcard (covering `AbortMultipartUpload`) alongside `PutObject`, confirmed via a real `cdk diff` against the dev account. Replaced with an explicit statement granting exactly `s3:PutObject`, scoped to the two screenshot prefixes.
+
+`infra/lib/stacks/screenshot-stack.ts` (`WebpresaScreenshotStack`) depends on `WebpresaDataStack` via typed constructor props (`businessesTable`, `sitePreviewsTable`, `scanEventsTable`, `assetsBucket`, `captureTokenSecret`, all now exposed as public readonly fields on `WebpresaDataStack`) — not a string-based cross-stack lookup.
+
+### Image build — deliberately separate from `cdk deploy`
+
+`DockerImageCode.fromEcr(repository, { tagOrDigest })` references a pre-built, pre-pushed image by tag — chosen over `DockerImageCode.fromImageAsset()` (which would have CDK silently build-and-push to its own bootstrap-managed repo on every `cdk deploy`) specifically so this stage has an explicit, inspectable build/push step (`infra/scripts/build-and-push-screenshot-lambda.sh`) rather than an implicit one. **No image has been pushed yet** — `cdk deploy` for the screenshot stack will fail at Lambda creation until the script has been run at least once for the target environment.
+
+### Dockerfile — base image, and two version-pin lessons learned the hard way
+
+Base image `mcr.microsoft.com/playwright:v1.49.0-noble` ships Chromium plus every OS dependency it needs. `aws-lambda-ric` (the Lambda Runtime Interface Client) has a native component requiring `cmake`/`build-essential`/`autoconf`/`automake`/`libtool`/`python3-setuptools` (the last for a `distutils` shim `node-gyp`'s bundled version needs against Python 3.12) — none present in the base image by default, all installed via `apt-get` in the Dockerfile. Two real bugs were only caught by actually building and running the image locally (not by `tsc --noEmit`, which doesn't check runtime module/version compatibility):
+1. **`jose` v6 is ESM-only** — a plain `import`/`require('jose')` fails at runtime (`ERR_REQUIRE_ESM`) once compiled to CommonJS. A plain `await import('jose')` doesn't fix it either — `tsc` silently downlevels dynamic imports back into `require()` when targeting `module: commonjs`. The working fix (`infra/lambda/screenshot-capture/src/capture-token.ts`) is `new Function('return import("jose")')` — a runtime-constructed import expression `tsc` cannot statically rewrite.
+2. **`playwright-core` must be pinned to the exact base-image browser version**, not a caret range — `^1.49.0` resolved to `1.61.1` at `npm install` time, and Chromium launch failed (`Executable doesn't exist at ...`) against the older browser build baked into the `v1.49.0-noble` image. Fixed by pinning `playwright-core` to an exact, unranged `1.49.0` in `package.json`.
 
 ---
 

@@ -11,7 +11,7 @@ vi.mock('node:dns', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { validateOutboundUrl } from '../url-validation';
+import { validateOutboundUrl } from '@/lib/security/url-validation';
 
 beforeEach(() => {
   vi.clearAllMocks();

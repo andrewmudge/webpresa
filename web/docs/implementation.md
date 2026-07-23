@@ -1328,7 +1328,7 @@ Implemented after the initial build, in response to real usage — see `architec
 
 ## Status
 
-Not started. This section is fully specified ahead of implementation — the same level of detail Stages 12 and 13 were given before their own implementation began — so that building it requires no further architectural decisions. `architecture.md`'s S3 key structure and `ScanEvent.storageKeys` field already anticipate this stage (reserved since Stage 9/13); this is the first stage to actually populate that part of the model, via the more specific `captureResults` shape defined below.
+**Implemented 2026-07-22 — code-complete, not yet deployed.** Application and infrastructure code written and locally verified against every requirement below (domain model, Server Actions/admin UI, Lambda package, CDK constructs/stacks) — `cdk synth`/`cdk diff` run against the real dev account (additive-only diff, IAM reviewed by hand), the Lambda package's own typecheck/tests pass, and a real local Docker build with manual runtime smoke tests (handler load, Chromium launch + real screenshot, capture-token mint) all succeed. **No `cdk deploy` and no container-image push have been performed** — see `build_log.md`, "Stage 14 — Playwright Screenshots", "Deployment status" for the exact remaining steps, all pending explicit approval per this project's deployment gate. See `architecture.md`, "Playwright Screenshots (Stage 14)" for the full implementation record.
 
 ## Objective
 

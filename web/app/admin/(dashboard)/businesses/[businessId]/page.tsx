@@ -24,6 +24,7 @@ import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
 import { EnrichmentSection } from './EnrichmentSection';
+import { ScreenshotsSection } from './ScreenshotsSection';
 import { ScanImageReview } from './ScanImageReview';
 import { FoundContactInfo } from './FoundContactInfo';
 import { getLatestSnapshotForBusiness } from '@/lib/firecrawl/snapshot';
@@ -47,6 +48,7 @@ interface Props {
   searchParams: Promise<{
     expandedSection?: string;
     enrichmentResult?: string;
+    screenshotResult?: string;
     photoApproval?: string;
     contactApproval?: string;
   }>;
@@ -54,7 +56,7 @@ interface Props {
 
 export default async function BusinessDetailPage({ params, searchParams }: Props) {
   const { businessId } = await params;
-  const { expandedSection: expandedSectionRaw, enrichmentResult, photoApproval, contactApproval } = await searchParams;
+  const { expandedSection: expandedSectionRaw, enrichmentResult, screenshotResult, photoApproval, contactApproval } = await searchParams;
   const initialExpandedSection = (WEBSITE_SECTION_TYPES as readonly string[]).includes(expandedSectionRaw ?? '')
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
@@ -200,6 +202,11 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       {/* Firecrawl website enrichment (Stage 13) — moved up front: for a newly-imported business this is usually the first thing an admin does. */}
       <div id="enrichment-section" className="mb-6 scroll-mt-20">
         <EnrichmentSection business={business} scans={scans} previews={previews} resultQuery={enrichmentResult} />
+      </div>
+
+      {/* Playwright screenshots (Stage 14) — existing-site and generated-preview captures, independent of each other and of Firecrawl enrichment above. */}
+      <div className="mb-6">
+        <ScreenshotsSection business={business} scans={scans} resultQuery={screenshotResult} />
       </div>
 
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}

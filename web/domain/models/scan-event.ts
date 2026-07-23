@@ -16,21 +16,26 @@ export const SCAN_STATUSES = [
   'queued',
   'running',
   'completed',
+  'partial',
   'failed',
   'manual_approval_required',
 ] as const;
 export type ScanStatus = (typeof SCAN_STATUSES)[number];
 
-export const SCAN_PROVIDERS = ['firecrawl'] as const;
+// 'playwright' (Stage 14 — screenshot capture) added alongside 'firecrawl'.
+export const SCAN_PROVIDERS = ['firecrawl', 'playwright'] as const;
 export type ScanProvider = (typeof SCAN_PROVIDERS)[number];
 
-export const SCAN_OPERATIONS = ['scrape'] as const;
+// 'screenshot' (Stage 14) added alongside 'scrape'.
+export const SCAN_OPERATIONS = ['scrape', 'screenshot'] as const;
 export type ScanOperation = (typeof SCAN_OPERATIONS)[number];
 
 /**
  * Why a scan attempt did not complete successfully. Drives both admin-facing
  * copy and automatic-retry eligibility — see
- * `lib/firecrawl/retry.ts`'s `isRetryableFailureCategory`.
+ * `lib/firecrawl/retry.ts`'s `isRetryableFailureCategory`. The six
+ * `browser_launch_failed`…`upload_failed` categories are Stage 14
+ * (Playwright) specific; everything above them is Stage 13 (Firecrawl).
  */
 export const SCAN_FAILURE_CATEGORIES = [
   'missing_website',
@@ -46,9 +51,22 @@ export const SCAN_FAILURE_CATEGORIES = [
   'artifact_storage_failed',
   'generation_failed',
   'preview_persistence_failed',
+  'browser_launch_failed',
+  'navigation_timeout',
+  'page_load_failed',
+  'blocked_by_bot_protection',
+  'screenshot_failed',
+  'upload_failed',
   'unknown',
 ] as const;
 export type ScanFailureCategory = (typeof SCAN_FAILURE_CATEGORIES)[number];
+
+/**
+ * Stage 14 (Playwright) capture target — which URL a screenshot ScanEvent
+ * points at. See implementation.md, Stage 14, "Screenshot targets".
+ */
+export const SCAN_TARGET_TYPES = ['existing_site', 'generated_preview'] as const;
+export type ScanTargetType = (typeof SCAN_TARGET_TYPES)[number];
 
 // ---------------------------------------------------------------------------
 // Sub-types
@@ -68,8 +86,11 @@ export interface ScanScores {
 }
 
 /**
- * Object-storage keys for Stage 14 (Playwright screenshot) artifacts.
- * Untouched by Stage 13 — kept for forward compatibility.
+ * Object-storage keys — an early, generic placeholder reserved ahead of
+ * Stage 14. Superseded by the more specific `captureResults` below, which
+ * records each viewport's own outcome (not just its storage key) and is
+ * what Stage 14 Playwright scans actually populate. Left in place, unused,
+ * for backward compatibility with the reservation — no code path sets it.
  */
 export interface ScanStorageKeys {
   screenshotKey?: string;
@@ -77,19 +98,49 @@ export interface ScanStorageKeys {
   lighthouseKey?: string;
 }
 
+/**
+ * One viewport's own capture outcome within a Stage 14 (Playwright)
+ * ScanEvent. A single scan-level `failureCategory` can't say *which*
+ * viewport failed on a `'partial'` result — this can.
+ */
+export interface ViewportCaptureResult {
+  status: 'completed' | 'failed';
+  /** S3 key, e.g. `scans/{businessId}/{scanId}/existing/desktop.png`. Set only when status is 'completed'. */
+  storageKey?: string;
+  failureCategory?: ScanFailureCategory;
+  failureMessage?: string;
+}
+
+/**
+ * Per-viewport results for a Stage 14 (Playwright) screenshot ScanEvent.
+ * Top-level `ScanEvent.status`/`failureCategory`/`failureMessage` remain the
+ * whole-scan summary; this is the diagnosable detail behind a `'partial'`
+ * result. Firecrawl ScanEvents never set this field.
+ */
+export interface ScanCaptureResults {
+  desktop?: ViewportCaptureResult;
+  mobile?: ViewportCaptureResult;
+}
+
 // ---------------------------------------------------------------------------
 // ScanEvent record
 // ---------------------------------------------------------------------------
 
 /**
- * A single provider attempt (currently: one Firecrawl scrape) run against a
- * business's website.
+ * A single provider attempt — a Firecrawl scrape (Stage 13) or a Playwright
+ * screenshot capture (Stage 14) — run against a business's website or one of
+ * its own generated previews.
  *
- * Lifecycle: `queued` → `running` → `completed` | `failed` |
- * `manual_approval_required` (the last only for the no-website path, which
- * never calls the provider at all). A `failed` ScanEvent is an immutable
- * historical record — it is never transitioned back to `running`; a retry
- * always creates a brand-new ScanEvent linked via `retryOfScanId`.
+ * Lifecycle: `queued` → `running` → `completed` | `partial` | `failed` |
+ * `manual_approval_required` (`manual_approval_required` only for
+ * Firecrawl's no-website path, which never calls the provider at all;
+ * `partial` only for Playwright, when one of its two viewports succeeds and
+ * the other fails — see `captureResults`). A terminal ScanEvent is an
+ * immutable historical record — it is never transitioned back to `running`;
+ * a retry always creates a brand-new ScanEvent linked via `retryOfScanId`.
+ * Every status transition is a conditional DynamoDB update guarding against
+ * Lambda's at-least-once delivery — see implementation.md, Stage 14,
+ * "Idempotency and status transitions".
  */
 export interface ScanEvent extends MutableTimestampedRecord {
   /** Globally unique identifier.  Format: `scan_<uuid>` */
@@ -119,6 +170,20 @@ export interface ScanEvent extends MutableTimestampedRecord {
   /** Set once generation succeeds and a new SitePreview is persisted. */
   generatedPreviewId?: string;
   storageKeys?: ScanStorageKeys;
+  /**
+   * Stage 14 (Playwright) only — which URL this scan captures. Absent for
+   * Firecrawl scans.
+   */
+  targetType?: ScanTargetType;
+  /**
+   * Stage 14 (Playwright) only — the SitePreview being captured, set only
+   * when `targetType` is `'generated_preview'`. Distinct from
+   * `generatedPreviewId` above (a preview a Firecrawl scan *produced*) —
+   * this is an input reference, not an output.
+   */
+  previewId?: string;
+  /** Stage 14 (Playwright) only — per-viewport capture outcome. */
+  captureResults?: ScanCaptureResults;
   scores?: ScanScores;
   /** ISO 8601 timestamp — set when the scan transitions to `running`. */
   startedAt?: string;

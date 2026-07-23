@@ -57,6 +57,11 @@ export const SECRET_FIRECRAWL = () => getSecretName('FIRECRAWL_SECRET_NAME');
 export const SECRET_GOOGLE_PLACES = () => getSecretName('GOOGLE_PLACES_SECRET_NAME');
 export const SECRET_STRIPE = () => getSecretName('STRIPE_SECRET_NAME');
 export const SECRET_LOB = () => getSecretName('LOB_SECRET_NAME');
+// Stage 14 — signs/verifies the Playwright Lambda's preview capture token
+// (see lib/capture-token.ts). Also readable by the screenshot Lambda itself
+// (a separate deployable — see infra/lambda/screenshot-capture/), which
+// mints tokens with the same secret; this app only ever verifies.
+export const SECRET_CAPTURE_TOKEN = () => getSecretName('CAPTURE_TOKEN_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval

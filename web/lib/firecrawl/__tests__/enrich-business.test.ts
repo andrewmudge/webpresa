@@ -51,7 +51,7 @@ vi.mock('@/lib/db/site-previews', () => ({
 }));
 vi.mock('@/lib/s3/assets', () => ({ putAsset: mockPutAsset }));
 vi.mock('@/lib/ai/generate-preview', () => ({ generatePreviewContent: mockGeneratePreviewContent }));
-vi.mock('../url-validation', () => ({ validateOutboundUrl: mockValidateOutboundUrl }));
+vi.mock('@/lib/security/url-validation', () => ({ validateOutboundUrl: mockValidateOutboundUrl }));
 vi.mock('../normalize', () => ({ normalizeFirecrawlResponse: mockNormalizeFirecrawlResponse }));
 vi.mock('../images', () => ({ ingestScanImages: mockIngestScanImages }));
 

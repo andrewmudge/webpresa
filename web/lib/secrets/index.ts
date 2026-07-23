@@ -6,6 +6,7 @@ import {
   SECRET_GOOGLE_PLACES,
   SECRET_STRIPE,
   SECRET_LOB,
+  SECRET_CAPTURE_TOKEN,
 } from './client';
 
 /**
@@ -37,6 +38,11 @@ export interface LobSecret {
   apiKey: string;
 }
 
+/** Stage 14 — HMAC signing key shared with the screenshot Lambda (mints tokens this app only verifies). */
+export interface CaptureTokenSecret {
+  signingKey: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -55,4 +61,8 @@ export async function getStripeSecret(): Promise<StripeSecret> {
 
 export async function getLobSecret(): Promise<LobSecret> {
   return (await getSecretJson(SECRET_LOB())) as unknown as LobSecret;
+}
+
+export async function getCaptureTokenSecret(): Promise<CaptureTokenSecret> {
+  return (await getSecretJson(SECRET_CAPTURE_TOKEN())) as unknown as CaptureTokenSecret;
 }

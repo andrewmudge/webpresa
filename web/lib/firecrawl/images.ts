@@ -2,7 +2,7 @@ import 'server-only';
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
 import { putAsset } from '@/lib/s3/assets';
-import { validateOutboundUrl } from './url-validation';
+import { validateOutboundUrl } from '@/lib/security/url-validation';
 import type { ScanImageAsset, WebsiteImageRole, WebsiteImageStatus } from '@/domain/models/scan-image';
 
 /**

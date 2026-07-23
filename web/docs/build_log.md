@@ -4279,3 +4279,184 @@ web/app/b/[slug]/template/ServicesGrid.tsx    MODIFIED — text-shadow moved fro
 
 web/docs/build_log.md                         MODIFIED — this entry
 ```
+
+---
+
+# Stage 14 — Playwright Screenshots
+
+**Date:** 2026-07-22
+**Scope:** Full implementation per the fully-specified Stage 14 section of `implementation.md` (three planning rounds preceded this: an architecture-readiness review, then two rounds of user-driven technical refinement covering async-Lambda design, capture-token delivery, DLQ/retry configuration, and IAM). Implements both screenshot targets (`existing_site`, `generated_preview`), the project's first compute infrastructure (ECR-hosted container-image Lambda, CDK-managed), asynchronous invocation with retries disabled, a dead-letter queue as the sole failure path, and per-viewport capture results on `ScanEvent`. **Not deployed** — `cdk deploy` and the first image push are explicit follow-up steps requiring approval (see "Deployment status" below).
+
+## Overview
+
+An admin can trigger two independent captures from the business detail page: "Capture Existing Site Screenshots" (`Business.websiteUrl`, skipped entirely when absent) and "Capture Generated Preview Screenshots" (the business's current `SitePreview`, works even with no website). Each creates a `queued` `ScanEvent` (`provider: 'playwright'`, `operation: 'screenshot'`) and asynchronously invokes a new Lambda (`InvocationType: 'Event'`) with an identifiers-only payload — the Server Action returns immediately, never waiting on Playwright. The Lambda owns the entire capture lifecycle: it re-resolves the target URL from DynamoDB itself (never trusts a URL from the invocation payload), validates it (shared SSRF guard for `existing_site`, strict same-origin policy for `generated_preview`), launches headless Chromium, captures desktop (1440×1000) and mobile (390×844) viewports independently (`fullPage: false`), uploads each to S3, and writes per-viewport results back onto the `ScanEvent` via conditional DynamoDB updates. A `generated_preview` capture of an unpublished draft authenticates via a short-lived, single-preview HTTP-only cookie the Lambda mints itself immediately before navigating — never a URL query parameter, and never minted by the Server Action (see "Key architectural decisions" below).
+
+## Key architectural decisions (see `implementation.md`, Stage 14 for the full spec these implement)
+
+1. **Container-image Lambda, not a zip bundle.** Base image is Microsoft's official Playwright image (`mcr.microsoft.com/playwright:v1.49.0-noble`), which ships Chromium plus every OS-level dependency it needs — reproducing that dependency list on a bare Lambda Node.js base was exactly the packaging fragility the original Stage 14 draft warned about. `aws-lambda-ric` (the Lambda Runtime Interface Client) adapts the otherwise-ordinary container to Lambda's invocation protocol.
+2. **Retries disabled, DLQ is the sole failure path.** `MaximumRetryAttempts: 0` on the Lambda's async invocation config — a `queued`→`running` ScanEvent is never silently retried by AWS into a lease conflict. A hard invocation failure (throw/timeout before any terminal write) goes to a new SQS dead-letter queue instead; the existing 10-minute stale-scan admin override (`markStaleScanFailed`) is what actually recovers a stuck `ScanEvent` — the DLQ exists purely so a permanent failure is inspectable, not silently lost.
+3. **Conditional DynamoDB updates for every status transition** (`aws.ts`'s `conditionalUpdateStatus`) — `queued`→`running` only from `queued`, terminal only from `running`; a ScanEvent already in a terminal state is never re-processed (no browser launched). Guards against Lambda's rare at-least-once duplicate delivery, not against automatic retries (which are disabled).
+4. **`ScanEvent.captureResults` (per-viewport), not the older reserved `storageKeys` field.** A single scan-level `failureCategory` can't say which viewport failed on a `'partial'` result (the new terminal status covering "one viewport succeeded, one failed"). `storageKeys` remains on the model, untouched, reserved for a future use.
+5. **Capture token minted by the Lambda, delivered as an HTTP-only cookie.** Never by the Server Action (would break the identifiers-only payload contract and risk expiring before a delayed/redelivered invocation), never as a URL query parameter (log/history/referrer leakage). New dedicated `webpresa-{env}-capture-token` secret backs the HMAC signing key — read-only by this Next.js app (`web/lib/capture-token.ts`), mint-only by the Lambda (`infra/lambda/screenshot-capture/src/capture-token.ts`).
+6. **SSRF guard relocated, not duplicated, on the web side; genuinely duplicated (documented) on the Lambda side.** `lib/firecrawl/url-validation.ts` moved to `lib/security/url-validation.ts` (Stage 13's Firecrawl code and Stage 14's web-side code both import the one copy). The Lambda package is a fully independent npm project — this repo has no workspace tooling — so its own `url-validation.ts` is a deliberate, explicitly-documented duplicate, not an oversight.
+7. **`generated_preview` uses a strict same-origin policy, not the SSRF guard** — the destination is always Webpresa's own app, never genuinely untrusted, so generic outbound DNS/private-range validation would be unneeded overhead. `same-origin.ts`'s `buildPreviewUrl()` constructs the URL from only the configured `WEBPRESA_APP_BASE_URL` and the canonical `SitePreview.slug`.
+8. **Least-privilege IAM, written as explicit `PolicyStatement`s where the CDK convenience grants are too broad.** `dynamodb:GetItem` (Businesses, SitePreviews) / `GetItem`+`UpdateItem` (ScanEvents) via `Table.grant()` — fine, matches the spec exactly. **S3 required a manual fix**: `Bucket.grantPut()` actually grants `PutObjectTagging`/`PutObjectLegalHold`/`PutObjectRetention`/`PutObjectVersionTagging` and an `s3:Abort*` wildcard (covering `AbortMultipartUpload`) alongside `PutObject` — confirmed via a real `cdk diff` against the dev account, not assumed. Replaced with an explicit `iam.PolicyStatement({ actions: ['s3:PutObject'], resources: [...] })` granting exactly one action.
+
+## Domain-model changes
+
+- `domain/models/scan-event.ts` — `SCAN_PROVIDERS` +`'playwright'`; `SCAN_OPERATIONS` +`'screenshot'`; `SCAN_STATUSES` +`'partial'`; `SCAN_FAILURE_CATEGORIES` +6 (`browser_launch_failed`, `navigation_timeout`, `page_load_failed`, `blocked_by_bot_protection`, `screenshot_failed`, `upload_failed`); new `SCAN_TARGET_TYPES` (`'existing_site' | 'generated_preview'`); `ScanEvent` gained `targetType?`, `previewId?` (distinct from the existing `generatedPreviewId` — an input reference, not Firecrawl's output field), and `captureResults?: ScanCaptureResults` (`{ desktop?, mobile? }` of `ViewportCaptureResult { status, storageKey?, failureCategory?, failureMessage? }`).
+- `domain/schemas/scan-event.schema.ts` — matching Zod additions (`ViewportCaptureResultSchema`, `ScanCaptureResultsSchema`, `targetType`/`previewId` fields).
+- `domain/factories/scan-event.factory.ts` — `createScanEvent()` accepts optional `targetType`/`previewId`, backward-compatible (existing Firecrawl call sites unaffected).
+- `domain/__tests__/stage13.test.ts` — one pre-existing test asserted `provider: 'playwright'` was *invalid*; fixed to use a genuinely-invalid provider string now that `'playwright'` is real.
+- `domain/__tests__/stage14.test.ts` — new, 7 tests covering both target types, `'partial'` + `captureResults`, every new failure category, and backward compatibility with Firecrawl scans.
+
+## `web/lib/security/` (relocated from `web/lib/firecrawl/`)
+
+`url-validation.ts` and its test moved via `git mv`; `lib/firecrawl/images.ts`, `lib/firecrawl/enrich-business.ts`, and their tests updated to import `@/lib/security/url-validation` instead of the old relative path. No behavior change — pure relocation plus an updated doc comment explaining why (see "Key architectural decisions" #6).
+
+## `web/lib/capture-token.ts` (new)
+
+Verification-only — `verifyCaptureToken(token, { previewId })` checks the JWT signature via `jose` plus every claim (`purpose`, `previewId`, `scanId` presence), returning the claims or `null`. `CAPTURE_TOKEN_COOKIE_NAME` (`__Host-webpresa_capture`) is exported for `app/b/[slug]/page.tsx` to read. New `getCaptureTokenSecret()` wrapper in `lib/secrets/index.ts` / `SECRET_CAPTURE_TOKEN` in `lib/secrets/client.ts` (reads `CAPTURE_TOKEN_SECRET_NAME`).
+
+## `web/lib/lambda/` and `web/lib/screenshots/` (new)
+
+- `lib/lambda/client.ts` — `server-only` singleton `LambdaClient` + `getScreenshotLambdaFunctionName()` (reads `SCREENSHOT_LAMBDA_FUNCTION_NAME`), mirroring every other AWS client in this codebase.
+- `lib/screenshots/capture.ts` — `captureExistingSiteScreenshot()` / `captureGeneratedPreviewScreenshot()`: validate eligibility, check for an active scan **of that specific target** (an active `existing_site` capture never blocks a `generated_preview` one), create the `queued` `ScanEvent`, invoke the Lambda asynchronously (`InvokeCommand`, `InvocationType: 'Event'`), return immediately. `isStaleScan()` / `markStaleScanFailed()` implement the 10-minute staleness admin override. If the `InvokeCommand` call itself throws synchronously (e.g. an IAM error) — distinct from the Lambda's own async failure path — the `ScanEvent` is marked `failed` immediately rather than left stuck `queued`.
+
+## Admin UI
+
+- `app/admin/(dashboard)/businesses/[businessId]/screenshot-actions.ts` (new) — `captureExistingSiteAction`, `captureGeneratedPreviewAction`, `markStaleScanFailedAction`; redirect + `?screenshotResult=` query param, mirroring `enrichment-actions.ts`'s pattern. Signed-URL viewing of a completed screenshot reuses the existing `viewRawArtifactAction` (`app/admin/(dashboard)/scans/[scanId]/actions.ts`) unchanged — it already redirects to a signed URL for any key under `scans/`.
+- `app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx` (new) — two independent target cards, each with its own capture button, latest-status display, per-viewport view links, and (when stale) a "Mark as failed" action. Wired into `page.tsx` immediately after `EnrichmentSection`.
+- `EnrichmentSection.tsx` and `app/admin/(dashboard)/scans/page.tsx` — their `Record<ScanStatus, ...>` / `Record<ScanFailureCategory, ...>` label maps required exhaustive updates for the new `'partial'` status and six new failure categories (TypeScript's `Record<>` type requires every member even though these two Firecrawl-focused surfaces only ever display Firecrawl scans in practice).
+
+## `app/b/[slug]/page.tsx` — capture-token cookie bypass
+
+`resolvePreview()` restructured: published previews return immediately (admin or not); an admin session sees draft/ready as before; otherwise, a new `hasValidCaptureToken()` helper checks the `__Host-webpresa_capture` cookie against each candidate preview, additionally confirming (via `getScanEventById`) that the token's `scanId` still names an actual `queued`/`running` `generated_preview` `ScanEvent` for exactly that `previewId` — a validly-signed token for a finished scan or the wrong preview is rejected, not just a bad signature.
+
+## Infrastructure (CDK)
+
+- `infra/lib/stacks/data-stack.ts` — new `CaptureTokenSecret` (`webpresa-{env}-capture-token`, `{ signingKey }`); `businessesTable`/`sitePreviewsTable`/`scanEventsTable`/`assetsBucket`/`captureTokenSecret` exposed as public readonly fields for the new stack to cross-reference.
+- `infra/lib/constructs/webpresa-screenshot-lambda.ts` (new) — the project's first compute construct: ECR repository (own lifecycle rule, `maxImageCount: 8`), `DockerImageFunction` (3072 MB, 180s timeout, reserved concurrency 5, **no VPC**), explicit `LogGroup` (14-day retention, vs. CDK's unbounded default), SQS dead-letter queue (14-day retention), `EventInvokeConfig` (`retryAttempts: 0`, `maxEventAge: 10m`, `onFailure` → the DLQ), and the least-privilege IAM grants described above.
+- `infra/lib/stacks/screenshot-stack.ts` (new) — `WebpresaScreenshotStack`, depends on `WebpresaDataStack` via typed props (not a string-based cross-stack import), four `CfnOutput`s (function name/ARN, ECR repo URI, DLQ URL).
+- `infra/bin/webpresa.ts` — instantiates both stacks; resolves `WEBPRESA_APP_BASE_URL` from the environment with a synth-only placeholder fallback so `cdk synth`/`cdk diff` never hard-fail with it unset (see "Deployment status" below — a real value is required before deploying for real).
+- `infra/scripts/build-and-push-screenshot-lambda.sh` (new) — the deliberate, separate build/push step `DockerImageCode.fromEcr()` requires (chosen over `fromImageAsset`'s auto-build specifically so this stage has an explicit, inspectable image build/push step rather than CDK silently building on every `cdk deploy`).
+- `infra/lambda/screenshot-capture/` (new) — the Lambda's own fully independent npm project (no workspace tooling in this repo): `Dockerfile`, `src/handler.ts` (orchestration), `src/browser.ts` (Playwright capture — `domcontentloaded`-first wait sequence, bounded fonts-ready wait, bounded best-effort `networkidle`, animation disabling, `fullPage: false`, an 8MB sanity size cap, a 403/429 bot-protection heuristic), `src/aws.ts` (thin SDK wrappers incl. the conditional-update helper), `src/capture-token.ts` (mint), `src/same-origin.ts`, `src/url-validation.ts` (documented duplicate — see decision #6), `src/types.ts` (hand-mirrored minimal record shapes, same reason as the URL-validation duplication).
+
+## Deployment status — NOT deployed
+
+No `cdk deploy` was run and no container image has been built/pushed to the real ECR repository. Before this stage can actually run in dev:
+
+1. `cdk deploy WebpresaDevDataStack --profile webpresa` (adds the one new secret) — reviewed via `cdk diff`, additive only (see Verification below).
+2. `cdk deploy WebpresaDevScreenshotStack --profile webpresa` (creates the ECR repo, Lambda, DLQ — the repo must exist before the first image push).
+3. `./infra/scripts/build-and-push-screenshot-lambda.sh dev webpresa` — builds and pushes the image; `cdk deploy` for the screenshot stack must run again afterward if the Lambda's `imageTag` prop pins a digest rather than `latest`.
+4. Populate the real `webpresa-dev-capture-token` secret value (`aws secretsmanager put-secret-value`, same pattern as every other secret).
+5. Set `WEBPRESA_APP_BASE_URL` to the real deployed app URL before any `cdk deploy` of the screenshot stack (the bin/webpresa.ts fallback is a synth-only placeholder, not deployable).
+6. Extend the `webpresa-vercel-dev` IAM user's policy (managed outside CDK, via `aws iam put-user-policy` — see `deployment.md`) with `lambda:InvokeFunction` scoped to the new function's ARN and `secretsmanager:GetSecretValue` on the new capture-token secret.
+7. Add `SCREENSHOT_LAMBDA_FUNCTION_NAME` and `CAPTURE_TOKEN_SECRET_NAME` to Vercel's environment variables.
+
+All of the above require explicit user approval per this project's deployment gate (`AGENTS.md`) — none were performed as part of this implementation pass.
+
+## Verification
+
+```
+web/  Lint:      0 errors    (npm run lint)
+web/  TypeCheck: 0 errors    (npx tsc --noEmit)
+web/  Tests:     562 passed  (npm test) — 7 new Stage 14 domain tests, 8 capture-token
+                  verification tests, 13 lib/screenshots/capture.ts tests; every
+                  pre-existing test still passes after the SCAN_STATUSES/
+                  SCAN_FAILURE_CATEGORIES/SCAN_PROVIDERS extensions and the
+                  url-validation relocation.
+web/  Build:     next build succeeds — /b/[slug] and the business detail page both
+                  affected, no new routes (Stage 14 is Server Actions, like Stage 13).
+
+infra/            Tests:     77 passed (data-stack.test.ts 55 incl. the new secret;
+                  screenshot-stack.test.ts 22, new — resource shape, container
+                  packaging, no-VPC, async-invoke config, ECR lifecycle, log
+                  retention, and least-privilege IAM incl. the exact-action S3 fix)
+infra/            TypeCheck: 0 errors  (npx tsc --noEmit)
+infra/            cdk synth: succeeds for both WebpresaDevDataStack and
+                  WebpresaDevScreenshotStack
+infra/            cdk diff:  run against the real dev account (--profile webpresa).
+                  WebpresaDevDataStack: additive only — one new secret + its
+                  outputs, nothing destructive. WebpresaDevScreenshotStack: entirely
+                  new (expected — stack doesn't exist yet); IAM statements reviewed
+                  by hand against implementation.md's spec (this is what caught the
+                  S3 grantPut over-grant — see decision #8).
+
+infra/lambda/screenshot-capture/  TypeCheck: 0 errors (npx tsc --noEmit)
+infra/lambda/screenshot-capture/  Tests:     7 passed (same-origin.ts unit tests;
+                  capture-token.ts's mint path is verified via the Docker smoke
+                  test below instead of Vitest — see that test file's doc comment)
+infra/lambda/screenshot-capture/  Docker build: succeeds locally (multi-minute —
+                  Playwright base image + apt-get build toolchain for
+                  aws-lambda-ric's native component + npm ci + tsc). NOT pushed to
+                  ECR. Manual runtime smoke tests inside the built image (no AWS
+                  calls, no network):
+                    - dist/handler.js loads, exports a function
+                    - playwright-core loads
+                    - mintCaptureToken() produces a real signed JWT (confirmed the
+                      `new Function('return import("jose")')` workaround for
+                      jose's ESM-only build actually works under plain Node,
+                      after an initial attempt using a plain `await import()`
+                      failed — tsc silently downlevels that back into a broken
+                      require() when targeting commonjs)
+                    - chromium.launch() + page.screenshot() succeeds end-to-end
+                      inside the container (caught a real playwright-core/base-image
+                      version mismatch first — the caret-range dependency resolved
+                      1.61.1 against a v1.49.0 base image; fixed by pinning
+                      playwright-core to an exact, unranged 1.49.0)
+```
+
+## Files changed
+
+```
+web/domain/
+├── models/scan-event.ts                                                          MODIFIED — providers/operations/statuses/failure categories/targetType/previewId/captureResults
+├── schemas/scan-event.schema.ts                                                  MODIFIED — matching Zod additions
+├── factories/scan-event.factory.ts                                              MODIFIED — targetType/previewId accepted
+└── __tests__/
+    ├── stage13.test.ts                                                          MODIFIED — fixed the now-stale "playwright is invalid" assertion
+    └── stage14.test.ts                                                          NEW — 7 tests
+
+web/lib/
+├── security/                                                                    NEW (relocated from lib/firecrawl/)
+│   ├── url-validation.ts
+│   └── __tests__/url-validation.test.ts
+├── firecrawl/images.ts, enrich-business.ts, __tests__/*.test.ts                 MODIFIED — import path updated
+├── capture-token.ts                                                             NEW — verification only
+├── __tests__/capture-token.test.ts                                              NEW — 8 tests
+├── secrets/client.ts, index.ts                                                  MODIFIED — SECRET_CAPTURE_TOKEN / getCaptureTokenSecret
+├── lambda/client.ts                                                             NEW
+├── screenshots/capture.ts                                                       NEW
+└── screenshots/__tests__/capture.test.ts                                        NEW — 13 tests
+
+web/app/
+├── admin/(dashboard)/businesses/[businessId]/
+│   ├── screenshot-actions.ts                                                    NEW
+│   ├── ScreenshotsSection.tsx                                                   NEW
+│   ├── EnrichmentSection.tsx                                                    MODIFIED — label-map exhaustiveness
+│   └── page.tsx                                                                MODIFIED — wired ScreenshotsSection, screenshotResult param
+├── admin/(dashboard)/scans/page.tsx                                             MODIFIED — label-map exhaustiveness
+└── b/[slug]/page.tsx                                                           MODIFIED — capture-token cookie bypass
+
+web/package.json                                                                 MODIFIED — @aws-sdk/client-lambda
+
+infra/lib/
+├── stacks/data-stack.ts                                                        MODIFIED — CaptureTokenSecret + exposed table/bucket/secret refs
+├── stacks/screenshot-stack.ts                                                  NEW
+└── constructs/webpresa-screenshot-lambda.ts                                    NEW
+
+infra/bin/webpresa.ts                                                            MODIFIED — instantiates WebpresaScreenshotStack
+infra/vitest.config.ts                                                           MODIFIED — excludes lambda/**, sequential file execution, longer hook timeout
+infra/test/
+├── data-stack.test.ts                                                          MODIFIED — 6-secret count
+└── screenshot-stack.test.ts                                                    NEW — 22 tests
+
+infra/scripts/build-and-push-screenshot-lambda.sh                               NEW
+
+infra/lambda/screenshot-capture/                                                NEW package
+├── Dockerfile, package.json, tsconfig.json
+└── src/{handler,browser,aws,capture-token,same-origin,url-validation,types}.ts, __tests__/
+
+web/docs/build_log.md                                                           MODIFIED — this entry
+```

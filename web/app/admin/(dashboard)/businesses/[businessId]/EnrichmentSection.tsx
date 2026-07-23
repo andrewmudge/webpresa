@@ -34,10 +34,15 @@ const SCAN_STATUS_LABELS: Record<ScanEvent['status'], string> = {
   queued: 'Queued',
   running: 'Running',
   completed: 'Completed',
+  partial: 'Partially completed',
   failed: 'Failed',
   manual_approval_required: 'Manual approval required',
 };
 
+// Covers every ScanFailureCategory, including the Stage 14 (Playwright)
+// values below — this card only ever displays Firecrawl scans in practice,
+// but the type is shared across both providers (see domain/models/
+// scan-event.ts), so TypeScript requires every member here regardless.
 const FAILURE_CATEGORY_LABELS: Record<ScanFailureCategory, string> = {
   missing_website: 'No website on file',
   invalid_url: 'Invalid website URL',
@@ -52,6 +57,12 @@ const FAILURE_CATEGORY_LABELS: Record<ScanFailureCategory, string> = {
   artifact_storage_failed: 'Failed to save scan data',
   generation_failed: 'Website generation failed',
   preview_persistence_failed: 'Failed to save generated preview',
+  browser_launch_failed: 'Browser failed to start',
+  navigation_timeout: 'Page navigation timed out',
+  page_load_failed: 'Page failed to load',
+  blocked_by_bot_protection: 'Blocked by bot protection',
+  screenshot_failed: 'Screenshot capture failed',
+  upload_failed: 'Failed to upload screenshot',
   unknown: 'Unknown error',
 };
 

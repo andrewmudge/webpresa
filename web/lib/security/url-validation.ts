@@ -3,10 +3,20 @@ import { promises as dns } from 'node:dns';
 import { isIPv4 } from 'node:net';
 
 /**
- * Server-side SSRF guard for any URL this app hands to Firecrawl or fetches
- * directly (website source URLs, Firecrawl's reported final redirect URL,
- * and discovered image URLs — see `lib/firecrawl/images.ts`). Never rely on
- * client-side validation alone.
+ * Server-side SSRF guard for any *genuinely untrusted* URL this app hands
+ * to a provider or fetches directly — website source URLs, Firecrawl's
+ * reported final redirect URL, discovered image URLs (see
+ * `lib/firecrawl/images.ts`), and Stage 14 Playwright's `existing_site`
+ * capture target (see `lib/screenshots/`). Never rely on client-side
+ * validation alone.
+ *
+ * Relocated here from `lib/firecrawl/` in Stage 14 — this was already a
+ * cross-cutting concern (see `implementation.md`, Stage 25, "Security
+ * Hardening"), not a Firecrawl-only one; Stage 14 needed the identical
+ * guard for a second untrusted-URL source. Stage 14's own `generated_preview`
+ * capture target does **not** use this guard — that destination is always
+ * Webpresa's own configured origin, so it enforces a strict same-origin
+ * policy instead (see `implementation.md`, Stage 14, "URL validation").
  */
 
 export const URL_REJECTION_REASONS = [

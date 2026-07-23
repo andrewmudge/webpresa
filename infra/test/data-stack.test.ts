@@ -238,9 +238,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 15 outputs — 8 table outputs, 2 bucket outputs, 5 secret ARN outputs', () => {
+  it('creates 16 outputs — 8 table outputs, 2 bucket outputs, 6 secret ARN outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(15);
+    expect(Object.keys(outputs)).toHaveLength(16);
   });
 });
 
@@ -465,8 +465,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly five secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 5);
+  it('creates exactly six secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 6);
   });
 
   const devSecretNames = [
@@ -475,6 +475,7 @@ describe('secrets', () => {
     'webpresa-dev-google-places',
     'webpresa-dev-stripe',
     'webpresa-dev-lob',
+    'webpresa-dev-capture-token',
   ];
 
   it.each(devSecretNames)('dev secret %s exists', (name) => {

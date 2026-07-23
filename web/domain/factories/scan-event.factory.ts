@@ -1,4 +1,4 @@
-import type { ScanEvent, ScanProvider, ScanOperation } from '@/domain/models/scan-event';
+import type { ScanEvent, ScanProvider, ScanOperation, ScanTargetType } from '@/domain/models/scan-event';
 import { ScanEventSchema } from '@/domain/schemas/scan-event.schema';
 import { generateId, nowIso } from './utils';
 
@@ -12,6 +12,10 @@ export interface CreateScanEventInput {
   attempt?: number;
   /** Set only when this ScanEvent is a retry of a prior failed attempt. */
   retryOfScanId?: string;
+  /** Stage 14 (Playwright) only — which URL this scan captures. */
+  targetType?: ScanTargetType;
+  /** Stage 14 (Playwright) only — set when targetType is 'generated_preview'. */
+  previewId?: string;
 }
 
 /**
@@ -35,6 +39,8 @@ export function createScanEvent(input: CreateScanEventInput): ScanEvent {
     ...(input.sourceUrl !== undefined && { sourceUrl: input.sourceUrl }),
     attempt: input.attempt ?? 1,
     ...(input.retryOfScanId !== undefined && { retryOfScanId: input.retryOfScanId }),
+    ...(input.targetType !== undefined && { targetType: input.targetType }),
+    ...(input.previewId !== undefined && { previewId: input.previewId }),
     createdAt: now,
     updatedAt: now,
   };
