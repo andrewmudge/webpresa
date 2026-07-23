@@ -22,7 +22,6 @@ It does not replace:
 - `architecture.md` — current system structure and technical architecture
 - `deployment.md` — deployment commands, environments, and safety gates
 - `build_log.md` — detailed record of completed implementation work
-- `stage_status.md` — current project ledger and verification status
 
 When this plan conflicts with the current repository, `architecture.md` and the actual codebase take priority. Update this document when an intentional architectural change is made.
 
@@ -61,7 +60,7 @@ These rules apply to every stage.
 
 13. A stage is not complete until its acceptance criteria and verification commands pass.
 
-14. Update `build_log.md`, `architecture.md`, `deployment.md`, and `stage_status.md` when the completed work changes their subject matter.
+14. Update `build_log.md`, `architecture.md`, and `deployment.md` when the completed work changes their subject matter.
 
 ---
 
@@ -1327,60 +1326,274 @@ Implemented after the initial build, in response to real usage — see `architec
 
 # Stage 14 — Playwright Screenshots
 
+## Status
+
+Not started. This section is fully specified ahead of implementation — the same level of detail Stages 12 and 13 were given before their own implementation began — so that building it requires no further architectural decisions. `architecture.md`'s S3 key structure and `ScanEvent.storageKeys` field already anticipate this stage (reserved since Stage 9/13); this is the first stage to actually populate that part of the model, via the more specific `captureResults` shape defined below.
+
 ## Objective
 
-Capture consistent desktop and mobile screenshots for admin review, AI scoring, and postcard creative.
+Capture consistent, timestamped screenshots — of a business's **existing website** and of Webpresa's own **generated preview** — for admin review, Stage 15 AI scoring, and postcard creative.
 
 ## Dependencies
 
 Stages 9 and 13.
 
+## Architectural commitment
+
+This is the project's **first compute infrastructure**. Every other stage so far runs as Next.js Server Actions/Route Handlers on Vercel talking to DynamoDB/S3/Secrets Manager directly. Stage 14 introduces a second deployable unit:
+
+- Playwright runs inside an **AWS Lambda container image** (headless Chromium doesn't fit a standard zip-based Lambda bundle) — built and stored in a new **ECR repository**.
+- The container is deployed via a new **CDK construct** (`infra/lib/constructs/`, alongside the existing `webpresa-table.ts`/`webpresa-bucket.ts`/`webpresa-secret.ts` data constructs — this is the first *compute* construct in the project).
+- The Lambda is **invoked asynchronously from a Vercel Server Action** via the AWS SDK (`@aws-sdk/client-lambda`, `InvocationType: 'Event'`) — not run inside the Vercel function itself, and not invoked synchronously.
+- The Lambda's asynchronous invocation configuration is set explicitly, not left at defaults: `MaximumRetryAttempts: 0` (AWS never automatically re-invokes on failure — see "Idempotency and status transitions" and "Failure destination and stale-scan recovery" below for why), `MaximumEventAge` ≈ 5–10 minutes, `OnFailure` → the Stage 14 SQS DLQ.
+- The Lambda is **not attached to a VPC**. It only ever calls public websites/the public preview URL plus AWS APIs (DynamoDB, S3, Secrets Manager, SQS) that don't require VPC placement — putting it in a VPC would need private subnets plus a NAT Gateway just to reach the public internet, an ongoing cost and networking complication this stage has no reason to take on.
+- There is no Vercel-hosted-Chromium alternative under consideration for this stage; the above is the committed architecture, not one option among several.
+
+## Screenshot targets
+
+Two distinct, independently triggerable capture targets exist. This is the central structural difference from the stage's original framing (which implied one screenshot pair per scan) and must not be collapsed back into one:
+
+| Target | `targetType` | Source URL | Purpose | Requires a website? |
+|---|---|---|---|---|
+| Existing website | `existing_site` | `Business.websiteUrl` | Stage 15 AI scoring; "before" comparisons | Yes — skipped entirely (Lambda never invoked) when the business has no `websiteUrl`; the admin UI shows "No existing website available" instead of a capture action |
+| Generated preview | `generated_preview` | The business's `SitePreview` (a specific `previewId`), rendered at its public `/b/{slug}` route | Postcard creative, admin review, before/after comparisons | No — must work for a business that never had a website, since Webpresa still needs a screenshot of the site *it* generated for that business |
+
+Each target is captured by its own admin action, its own `ScanEvent`, and its own `scanId` — "Capture Existing Site Screenshots" and "Capture Generated Preview Screenshots" are two separate buttons on the business detail page (mirroring Stage 13's existing "Enrich Website"/"Retry" pattern of one explicit action per outcome), not one combined action. A business can re-capture its generated preview after regenerating content without needing to re-capture the existing site, and vice versa.
+
 ## Major deliverables
 
-- Local screenshot script
-- Desktop viewport capture
-- Mobile viewport capture
-- Final redirected URL recording
-- S3 upload
-- Admin signed-URL viewing
-- AWS runtime packaging
-- Timeout and retry controls
+**Application-side (Vercel):**
+- Two Server Actions on the business detail page: one per target (see "Screenshot targets" above), each validating the request, creating a `queued` `ScanEvent`, invoking the Lambda asynchronously, and returning immediately — never blocking on Playwright.
+- Admin UI: capture buttons (disabled while that target has an active scan, matching Stage 13's `hasActiveScan()` pattern), scan status display, and a way to view the resulting screenshots (signed URL, matching the existing `getSignedAssetUrl()` pattern private artifacts already use — screenshots are not exposed through the public `businesses/`/`scans/.../images/` proxy paths, since they're internal review/creative assets, not public-facing content).
+- Polling or manual refresh on the business detail page to reflect `ScanEvent` status transitions after an async invocation (see "Workflow" below) — no long-lived connection back to the Lambda.
 
-## Target viewports
+**Infrastructure (CDK):**
+- ECR repository for the Playwright container image.
+- Lambda function (container image package), with its own least-privilege execution role (see "Infrastructure and IAM" below) — never a reuse of the broad `webpresa-vercel-dev` policy.
+- New Secrets Manager secret, `webpresa-{env}-capture-token` (`{ signingKey }`), via the existing `WebpresaSecret` construct — backs the preview capture token described under "Draft preview visibility."
+- New SQS dead-letter queue, configured as the Lambda's asynchronous `OnFailure` destination — see "Failure destination and stale-scan recovery."
+- CDK construct(s) wiring the above together, plus CloudWatch log group for the Lambda.
+- Lambda invoke permission granted to whatever identity the Vercel Server Action authenticates as (the existing `webpresa-vercel-dev` IAM user, extended with `lambda:InvokeFunction` scoped to this one function's ARN — invocation permission is the one thing the Vercel-side identity needs; it must not also gain the Lambda's own S3/DynamoDB/Secrets/SQS permissions).
 
-- Desktop: `1440 × 1000`
-- Mobile: `390 × 844`
+**Domain model:**
+- `ScanEvent` extended (not a new model) — see "Domain model changes" below.
 
-## Implementation requirements
+## Workflow (asynchronous, per target)
 
-- Build and validate the workflow locally before packaging it for AWS.
-- Use strict navigation and overall execution timeouts.
-- Avoid authentication bypasses.
-- Do not log into websites.
-- Block unnecessary large media when practical.
-- Attempt normal cookie-banner dismissal without defeating access controls.
-- Validate target URLs to prevent SSRF.
-- Consider Lambda container images if browser packaging is unreliable in a standard Lambda bundle.
-- Store files under the canonical scan prefix.
+```text
+Admin clicks "Capture Existing Site" or "Capture Generated Preview"
+        ↓
+Server Action validates the request (session, target eligibility —
+  e.g. existing_site requires Business.websiteUrl to be set)
+        ↓
+Reject if another scan of the SAME targetType is already queued/running
+  for this business (independent per target — an active existing_site
+  scan does not block a generated_preview scan, and vice versa)
+        ↓
+Create a queued ScanEvent (provider: 'playwright', operation: 'screenshot',
+  targetType, previewId set only for generated_preview)
+        ↓
+Invoke the Lambda asynchronously (InvocationType: 'Event') with an
+  identifiers-only payload — see "Lambda payload" below
+        ↓
+Server Action returns success immediately; admin UI shows "Capture queued"
+        ↓                                    (Server Action's job ends here)
+Lambda: load the ScanEvent by scanId. Already in a terminal state
+  (completed/partial/failed)? → exit successfully, no browser launched
+  (handles Lambda's rare at-least-once duplicate delivery — see
+  "Idempotency and status transitions" below)
+        ↓ (still queued)
+Lambda: conditionally transition ScanEvent → running (ConditionExpression:
+  status = 'queued'; a losing race here also exits cleanly)
+        ↓
+Lambda: resolve the actual target URL from DynamoDB (never trusts a URL
+  in the invocation payload) — see "Lambda payload" below
+        ↓
+Lambda: validate the URL (existing_site: shared SSRF guard; generated_preview:
+  strict same-origin policy — see "URL validation" below)
+        ↓
+Lambda: launch browser, navigate, capture desktop viewport
+        ↓
+Lambda: capture mobile viewport
+        ↓
+Lambda: upload each captured screenshot to S3 as it succeeds
+        ↓
+Lambda: conditionally transition ScanEvent → completed (both viewports
+  succeeded) / partial (one succeeded, one failed) / failed (neither
+  succeeded) — ConditionExpression: status = 'running'; captureResults
+  records each viewport's own outcome and storage key
+        ↓
+Admin page polls or is manually refreshed to see the terminal status
+
+  [alternate path] Lambda throws or times out before writing any
+  terminal status
+        ↓
+  MaximumRetryAttempts: 0 — AWS never automatically re-invokes
+        ↓
+  Failed invocation event delivered to the SQS DLQ (OnFailure destination)
+        ↓
+  ScanEvent stays running with no further automatic action
+        ↓
+  Stale-scan rule surfaces it once past the 10-minute threshold —
+  see "Failure destination and stale-scan recovery" below
+```
+
+The Server Action never remains open waiting for Playwright to finish. `'partial'` is a new terminal `ScanEvent` status (see below) — a real, expected outcome (e.g. mobile times out on a slow site while desktop succeeds), not an error condition requiring special handling beyond what `captureResults` already communicates per viewport.
+
+## Lambda payload — identifiers only
+
+The Lambda receives no URLs and does no trusting of caller-supplied data beyond IDs:
+
+```json
+{ "businessId": "biz_...", "scanId": "scan_...", "targetType": "existing_site" }
+```
+or
+```json
+{ "businessId": "biz_...", "scanId": "scan_...", "targetType": "generated_preview", "previewId": "preview_..." }
+```
+
+The Lambda re-reads the actual target from DynamoDB itself:
+- `existing_site` → `Business.websiteUrl`.
+- `generated_preview` → load the `SitePreview` by `previewId`, then construct its public URL as `{APP_BASE_URL}/b/{slug}` — `SitePreview` stores only a `slug`, never an absolute URL, so the Lambda needs the app's public origin. Provide this as a Lambda environment variable (e.g. `WEBPRESA_APP_BASE_URL`, set via the CDK construct's environment config) rather than hardcoding a domain.
+
+This keeps the trust boundary identical to every other integration in this codebase: the caller (Vercel) supplies identifiers, the callee re-resolves the actual sensitive value (here, a URL to navigate a browser to) from the canonical store rather than accepting it second-hand. Note the payload never carries a capture token either — see "Draft preview visibility" immediately below for why that's minted inside the Lambda, not passed in.
+
+### Draft preview visibility
+
+`/b/[slug]` restricts draft/ready previews to authenticated admins (see `architecture.md`, "Public preview website"). Most `generated_preview` captures happen on an unpublished draft — for internal review and postcard creative, well before a business is claimed — so the Lambda (which has no admin session/cookie) must still be able to render it. Do not weaken the public draft-protection guarantee to solve this.
+
+**The token is minted by the Lambda, immediately before navigation — never by the Server Action at invoke time.** A token generated when the Server Action fires the async invocation could expire before a delayed or AWS-redelivered execution actually runs, and passing a live credential through the invocation payload would also break the identifiers-only payload contract above. Instead:
+
+1. The Lambda loads and validates the `ScanEvent` (and, for `generated_preview`, the referenced `SitePreview`) from DynamoDB, as already described.
+2. Immediately before navigating, the Lambda mints a fresh, single-purpose token: `{ purpose: 'preview_capture', previewId, scanId, exp }` — a short expiry (minutes), signed with a dedicated signing key.
+3. **The token is delivered as an HTTP-only cookie, never a URL query parameter.** Playwright sets the cookie on its browser context (scoped to the configured Webpresa domain) before navigating, then requests the plain `/b/{slug}` URL with no token in it anywhere. A query-string token would end up in Vercel request logs, monitoring/analytics logs, browser navigation history, error reports, and potentially referrer headers on any downstream request the page itself makes — a cookie avoids all of that. Indicative cookie shape (exact `domain`/dev-vs-prod handling to be finalized during implementation): `{ name: '__Host-webpresa_capture', value: token, path: '/', httpOnly: true, secure: true, sameSite: 'Strict' }`.
+4. `/b/[slug]`'s existing auth gate reads that cookie and accepts it as an alternate, narrowly-scoped bypass **only** after verifying every claim — signature, `purpose === 'preview_capture'`, `previewId` matches the record being rendered, `scanId` matches an actual in-flight `ScanEvent`, and `exp` hasn't passed. Checking the signature alone is not sufficient — a validly-signed token for the wrong preview or a stale scan must still be rejected.
+
+This is a genuinely new piece of the auth surface and should be treated with the same care as `SESSION_SECRET`-signed cookies. The signing key is **not** an existing secret — see "Infrastructure and IAM" below for the new dedicated Secrets Manager secret this requires.
+
+## Storage key structure
+
+Each target's `scanId` gets its own subfolder, split by target name (redundant with `targetType` already being on the `ScanEvent` record, but kept as a second, physical safeguard — a code path that writes to the wrong target's folder is visibly wrong in S3, not just wrong in a database field):
+
+```
+scans/{businessId}/{scanId}/existing/desktop.png
+scans/{businessId}/{scanId}/existing/mobile.png
+
+scans/{businessId}/{scanId}/preview/desktop.png
+scans/{businessId}/{scanId}/preview/mobile.png
+```
+
+A given `ScanEvent` only ever populates one of the two subfolder shapes (`existing/` or `preview/`), matching its own `targetType`. This is a new sub-shape of the existing `scans/{businessId}/{scanId}/...` prefix already reserved since Stage 9 — no change to `ALLOWED_PREFIXES` (`web/lib/s3/assets.ts`) is needed. Screenshots are **not** added to the public `/api/assets/...` proxy's allowed patterns — they stay private, admin-viewable only via `getSignedAssetUrl()`, unlike Stage 13's accepted/review-required website images (which are legitimately public-facing content once promoted).
+
+## Domain model changes
+
+Extend the existing `ScanEvent` model (`domain/models/scan-event.ts`) — do not introduce a parallel model, and reuse the existing `createScanEvent()` factory (already generic over `provider`/`operation` since Stage 13):
+
+- `SCAN_PROVIDERS`: add `'playwright'`.
+- `SCAN_OPERATIONS`: add `'screenshot'`.
+- `SCAN_STATUSES`: add `'partial'` (a completed-but-incomplete terminal state — see "Workflow" above).
+- `SCAN_FAILURE_CATEGORIES`: add `browser_launch_failed`, `navigation_timeout`, `page_load_failed`, `blocked_by_bot_protection`, `screenshot_failed`, `upload_failed`. Top-level `failureCategory`/`failureMessage` remain the whole-scan summary (used as-is by Firecrawl scans, and set on a Playwright scan when neither viewport succeeds); per-viewport detail lives in `captureResults` (immediately below), which is what makes a `'partial'` result diagnosable.
+- New field `targetType: 'existing_site' | 'generated_preview'`.
+- New field `previewId?: string` — the `SitePreview` being captured, set only when `targetType` is `'generated_preview'`. This is distinct from the existing `generatedPreviewId` field (Stage 13's output — a preview a Firecrawl scan *produced*); Stage 14 never sets `generatedPreviewId`, since capturing screenshots never generates a preview.
+- New field `captureResults?: { desktop?: ViewportCaptureResult; mobile?: ViewportCaptureResult }`, where `ViewportCaptureResult = { status: 'completed' | 'failed'; storageKey?: string; failureCategory?: ScanFailureCategory; failureMessage?: string }`. **This supersedes the generic reserved `storageKeys` field for Playwright scans specifically** — a single scan-level `failureCategory` can't say *which* viewport failed on a `'partial'` result, and folding each viewport's own storage key into its own result avoids two fields (a flat `storageKeys` map and a separate failure map) that could disagree with each other. Firecrawl `ScanEvent`s are unaffected — this field is Playwright-specific, same as `images` is Firecrawl-specific.
+- Matching Zod schema updates in `scan-event.schema.ts`.
+
+## URL validation
+
+The two targets get **different, deliberately mismatched** validation policies, because they have different trust levels — treating both the same would either be too weak for an arbitrary external site or needlessly expensive/complex for a URL that's always our own app.
+
+### `existing_site` — shared SSRF guard
+
+`Business.websiteUrl` is a genuinely untrusted, admin-supplied external URL — reuse, do not duplicate, the SSRF guard Stage 13 built (`web/lib/firecrawl/url-validation.ts`'s `validateOutboundUrl()` — protocol allowlist, DNS resolution, private/loopback/link-local/AWS-metadata-endpoint rejection, redirect re-validation). Before this stage's implementation begins, relocate it to a shared, non-Firecrawl-specific module (e.g. `web/lib/security/url-validation.ts`) and update `lib/firecrawl/`'s own imports to point at the new location — it was already documented as a cross-cutting concern in Stage 25 (Security Hardening), not a Firecrawl-only one. Stage 14 imports the same shared implementation and calls it **inside the Lambda**, immediately before navigation.
+
+### `generated_preview` — strict same-origin policy, not the SSRF guard
+
+The preview target is never actually untrusted — it's always Webpresa's own generated site — so running the general-purpose DNS/private-range SSRF validator against our own app on every capture would be unnecessary overhead for a destination that was never in question. Instead, enforce same-origin directly:
+
+- The origin comes **only** from the `WEBPRESA_APP_BASE_URL` Lambda environment variable — never from any caller-supplied value.
+- The path comes **only** from the canonical `SitePreview.slug` looked up by `previewId` — never a caller-supplied slug or path.
+- Any redirect the browser follows away from that configured origin is rejected outright (the capture fails rather than silently following it elsewhere).
+
+This is simpler and safer for this specific case than reusing the general-purpose validator on a URL that was already fully constructed from trusted, code-controlled inputs.
+
+## Operational parameters
+
+- **Idempotency and status transitions:** the Lambda's asynchronous invocation is deliberately configured with `MaximumRetryAttempts: 0` (see "Architectural commitment" above) — **AWS never automatically re-invokes on failure.** This matters because a naive "just retry" design is actually unsafe without a lease system: a retry that lands after the first attempt already moved the `ScanEvent` to `running` would find `queued`→`running`'s condition failed, exit "successfully" having done no work, and the scan would sit `running` forever with no error surfaced anywhere. Rather than build the lease system that would make automatic retries safe, Stage 14 disables them outright and routes every failure to the DLQ instead (see "Failure destination and stale-scan recovery" below) — a stuck scan is always visible and actionable, never silently swallowed.
+  - Conditional updates are still required, but for a narrower reason: Lambda's async invocation model is inherently **at-least-once**, not exactly-once, so a rare duplicate delivery of the same event is possible even with retries disabled — a fundamental property of the delivery mechanism, unrelated to the retry-count setting. Every `ScanEvent` status transition uses a conditional DynamoDB update to stay safe against that:
+    - `queued` → `running`: `ConditionExpression` requires current status `= 'queued'`. A losing race (the duplicate delivery arriving second) exits cleanly rather than erroring.
+    - `running` → a terminal state (`completed`/`partial`/`failed`): `ConditionExpression` requires current status `= 'running'`.
+    - On load, if the `ScanEvent` is **already in a terminal state**, the Lambda exits successfully **without launching Chromium at all**. S3 keys are deterministic per `scanId`/viewport regardless, so even a write that does happen twice is a safe overwrite, not a duplicate.
+  - A brand-new **admin-triggered** re-capture is a different case entirely — it gets its own fresh `scanId` and its own permanent history entry, consistent with this project's "never delete history" convention (project-wide rule 11; the same convention `SitePreview` versions and Stage 13 `ScanEvent`s already follow). Idempotency applies within one `scanId`'s lifecycle, never across separate captures.
+  - **Known open risk, deliberately not fully solved in this stage:** the rare duplicate-delivery case could still theoretically land while an earlier attempt is mid-flight and both observe `running` (a narrow window between the conditional read and write). A full lease system (`executionId`/`startedAt`/`leaseExpiresAt`, with a lease-expiry takeover rule) would close this completely but is judged excessive for Stage 14's volume, especially now that automatic retries are disabled and no longer the primary driver of this risk; the minimum bar here is conditional transitions plus reserved concurrency (below). Revisit if real usage shows double-execution in practice.
+- **Reserved concurrency:** 2–5.
+- **Memory:** 2048–3072 MB.
+- **Timeout:** 180 seconds (overall Lambda timeout; navigation itself uses a shorter strict sub-timeout — see below).
+- **Viewport capture:** desktop `1440 × 1000`, mobile `390 × 844`, **`fullPage: false`** — the visible viewport only, never a full-page scrolling capture. A full-page screenshot of a long site is unusable on a postcard and makes memory/file-size unbounded; full-page capture stays explicitly deferred (see "Deferred work").
+- **Wait strategy:** `networkidle` is unreliable on real sites with persistent analytics/chat-widget/polling connections that never go quiet, so it is not the primary condition capture waits on. Sequence: (1) `page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })`; (2) wait for `document.fonts.ready`, bounded; (3) wait for a visible root/body element; (4) a short bounded stabilization delay (~1–2s); (5) disable animations (below); (6) capture. `networkidle` may still be attempted as a short, bounded, best-effort enhancement layered on top of this — it must never be able to block capture indefinitely the way it could as a primary condition.
+- **Animation disabling:** disable CSS/JS animations and transitions before capture (consistent screenshots, no mid-transition frames).
+- **Partial success handling:** capture desktop and mobile independently; one viewport's failure does not abort the other. Result: `'completed'` (both), `'partial'` (one), or `'failed'` (neither), with `captureResults.desktop`/`captureResults.mobile` recording each viewport's own outcome — see "Workflow" and "Domain model changes" above.
+- **Size bound:** with `fullPage: false` and fixed viewport dimensions, file size is already naturally bounded; still apply a sanity max-byte check before upload as a defensive backstop.
+- **Timeout handling:** a per-viewport navigation/capture timeout maps to `navigation_timeout`; other classified failures map to the other new failure categories above, recorded on that viewport's own `captureResults` entry. Never a bare `unknown` when a more specific category applies.
+- Do not log into websites, do not bypass authentication, block unnecessary large media where practical, and attempt normal cookie-banner dismissal without defeating access controls (all carried over from the original spec — still correct, unchanged).
+
+## Failure destination and stale-scan recovery
+
+An async Lambda invocation can fail (throw, time out, or be throttled away entirely) before the handler ever updates the `ScanEvent`. With automatic retries disabled (`MaximumRetryAttempts: 0` — see "Architectural commitment" and "Idempotency and status transitions" above), that failure is never silently retried into a lease conflict, but it also means there's no second attempt at the actual work — so a real, visible failure path is required, not optional:
+
+- **Asynchronous invocation configuration**, explicit: `MaximumRetryAttempts: 0`, `MaximumEventAge` ≈ 5–10 minutes (an event older than this is discarded rather than attempted), `OnFailure` destination → the DLQ below.
+- **CDK-managed SQS dead-letter queue** as the Lambda's asynchronous `OnFailure` destination (`DestinationConfig.OnFailure`) — chosen over a Lambda-to-Lambda failure handler as the simplest option that meets this stage's actual need, consistent with every other stage's "build only what's needed now" convention. The DLQ does not itself touch DynamoDB; it exists purely to preserve the failed invocation event for inspection and manual recovery, so a permanent failure is never silently lost. DLQ message retention: 14 days.
+- **The two failure paths, stated explicitly so they aren't conflated:**
+  - Invocation **succeeds** (even if the capture itself fails) → the normal `queued` → `running` → terminal (`completed`/`partial`/`failed`) workflow above, with `captureResults`/`failureCategory` describing what went wrong.
+  - Invocation **throws or times out before reaching the handler's own terminal write** → no automatic retry → the failed event lands in the DLQ → the `ScanEvent` itself stays `running` (or `queued`, if it failed before even that transition) with no further automatic action → the stale-scan rule below is what eventually surfaces it to an admin.
+- **Stale-scan rule:** a `queued` or `running` Playwright `ScanEvent` older than **10 minutes** is treated as stale. This is checked when the admin views the business detail page (a plain "is this scan older than the threshold and still non-terminal?" check against the already-loaded `ScanEvent`, not a background job or scheduled sweep — consistent with this stage having no automation, see "No automatic chaining" below) — a stale scan is presented with an option to mark it `failed` or trigger a fresh capture, the same way Stage 13's failed-scan retry already works.
+
+## Infrastructure and IAM
+
+Least-privilege, and never a reuse of the existing broad `webpresa-vercel-dev` grants (which are scoped to the Vercel app's own needs, not this Lambda's):
+
+- **S3:** `s3:PutObject` only, scoped to real object ARNs — `arn:aws:s3:::<assets-bucket-name>/scans/*/*/existing/*` and `arn:aws:s3:::<assets-bucket-name>/scans/*/*/preview/*` (bucket name resolved the same way every other prefix-scoped grant in `deployment.md` already resolves it) — not the whole bucket, not even the whole `scans/` prefix. Screenshots are single small PNGs uploaded via standard `PutObject`; no multipart upload is used, so `s3:AbortMultipartUpload` is not granted.
+- **DynamoDB:** `dynamodb:GetItem` on **all three** tables this Lambda reads — Businesses, SitePreviews, **and ScanEvents** (the Lambda must load its own `ScanEvent` to verify `targetType`/`previewId` against the canonical record and to check current status before every conditional transition — see "Idempotency and status transitions" above); `dynamodb:UpdateItem` on ScanEvents only, since that's the only table this Lambda ever writes. Every lookup is a direct `GetItem` by partition key (`businessId`/`previewId`/`scanId` are each the table's own PK — see `architecture.md`, "DynamoDB tables") — no `Query`, no GSI access needed.
+- **Secrets Manager:** `secretsmanager:GetSecretValue` scoped to one new secret, `webpresa-{env}-capture-token` (`{ signingKey }`), provisioned the same way as every existing secret (`WebpresaSecret` CDK construct, Stage 10's pattern) — needed to mint the preview capture token described under "Draft preview visibility" above. No other third-party API key is needed; this Lambda calls no external service besides the target website/preview itself.
+- **SQS:** `sqs:SendMessage` on the new dead-letter queue (see "Failure destination and stale-scan recovery" below) — required for the Lambda service to deliver a failed-invocation record to the configured `OnFailure` destination on this execution role's behalf.
+- **CloudWatch Logs:** the standard Lambda execution-role log-group grant (unavoidable minimum for any Lambda), with an explicit **14–30 day retention** set on the log group (CDK default is "never expire," which is unbounded cost for a Lambda that runs a real browser and can log verbosely).
+- **Vercel-side identity (`webpresa-vercel-dev`):** gains exactly one new permission, `lambda:InvokeFunction` scoped to this function's ARN — nothing else changes about its existing policy. It does not gain any of the Lambda's own S3/DynamoDB/Secrets/SQS permissions above.
+- **Housekeeping (cheap, non-architectural, but should be set from day one rather than left at defaults):** ECR lifecycle rule retaining only the most recent 5–10 container images (each build pushes a new one; unbounded retention is silent storage cost); DLQ message retention 14 days (see "Failure destination and stale-scan recovery" above).
+
+## No automatic chaining
+
+Preserves the manual-workflow philosophy Stages 12 and 13 already established: both capture actions are admin-initiated only. Stage 14 is never automatically triggered by Stage 13 (Firecrawl) completing, and never automatically triggers Stage 15 (AI scoring) on its own completion — each stage remains its own explicit action until Stage 23 (EventBridge Controlled Automation) exists and is deliberately turned on.
 
 ## Acceptance criteria
 
-- Desktop and mobile screenshots are produced.
-- Both upload to private S3 storage.
-- ScanEvent storage keys are updated.
-- Admin can view both through signed URLs.
-- Timeouts terminate cleanly.
-- Screenshot failures can be retried.
-- The runtime cannot write outside the assigned bucket or prefix.
-- Private and local-network URLs are blocked.
+- An admin can trigger an existing-site capture (when `Business.websiteUrl` is set) and a generated-preview capture independently, from the business detail page.
+- A business with no website shows "No existing website available" instead of an existing-site capture action, and the Lambda is never invoked for that target.
+- A `ScanEvent` (`provider: 'playwright'`, `operation: 'screenshot'`) is created per capture, transitions `queued` → `running` → a terminal state, and its `targetType` (plus `previewId` for preview captures) is recorded.
+- The triggering Server Action returns immediately and never blocks on Playwright execution.
+- Both viewports are captured independently, `fullPage: false`, at the exact specified dimensions; one viewport's failure does not prevent the other from completing, and produces `'partial'`, not a hard failure.
+- Screenshots upload to the private, target-split S3 key structure; `ScanEvent.captureResults.desktop`/`.mobile` each accurately reflect that viewport's own outcome and storage key.
+- Admin can view completed screenshots through short-lived signed URLs, not a public path.
+- The Lambda's asynchronous invocation configuration has `MaximumRetryAttempts: 0` confirmed in CDK/console — AWS never automatically re-invokes on failure.
+- In the rare case of Lambda's own at-least-once duplicate delivery for the same `scanId`, the second delivery finds the `ScanEvent` already in a terminal state and exits without launching a browser — no duplicate files, no corrupted status, no wasted browser launch.
+- Every `ScanEvent` status transition uses a conditional update (`queued`→`running` only from `queued`; terminal only from `running`); a losing race exits cleanly rather than corrupting the record.
+- A repeat admin-triggered capture of the same target creates a new `ScanEvent`/`scanId` and does not delete or overwrite a prior capture's history.
+- Concurrent active captures for the same business **and target** are prevented; an active `existing_site` capture does not block a `generated_preview` capture for the same business, or vice versa.
+- A draft (unpublished) generated preview can still be captured — the Lambda provides the short-lived capture token through a secure, HTTP-only cookie (never a URL query parameter or any other logged/visible location), and the preview route verifies every claim (purpose, `previewId`, `scanId`, expiry), not just its signature, working only for the one preview/scan it was issued for.
+- A `ScanEvent` stuck `queued`/`running` past the 10-minute staleness threshold is flagged on the business detail page, with an admin option to mark it failed or retry.
+- An invocation that throws or times out before the handler writes any terminal status is never automatically retried; it lands in the DLQ (inspectable, not silently lost) and its `ScanEvent` is caught by the stale-scan rule.
+- The Lambda is confirmed to have no VPC configuration (no ENI attachment, no NAT Gateway dependency).
+- The Lambda's IAM role cannot write outside its two S3 prefixes, read/write DynamoDB tables/items beyond exactly Businesses/SitePreviews/ScanEvents as specified, or read any Secrets Manager secret besides `webpresa-{env}-capture-token`.
+- Private, local-network, and otherwise SSRF-prohibited `existing_site` target URLs are blocked before navigation, using the shared (not duplicated) SSRF guard; a `generated_preview` capture is rejected if it ever resolves or redirects outside the configured `WEBPRESA_APP_BASE_URL` origin.
 
 ## Deferred work
 
-- Full-page and viewport variants
-- Visual-diff history
+- Full-page (`fullPage: true`) and multi-viewport variants beyond the two fixed desktop/mobile viewports
+- Visual-diff history between captures
 - Video capture
 - ECS/Fargate migration
 - Cookie-banner provider library
+- A full lease-based concurrency system (`executionId`/`startedAt`/`leaseExpiresAt`) beyond the conditional status transitions specified above — revisit only if real usage shows double-execution in practice
+- Automatic chaining into Stage 15 scoring (explicitly out of scope — see "No automatic chaining")
+- Scheduled/batch capture (Stage 23's concern, not this stage's)
 
 ---
 
@@ -2588,7 +2801,6 @@ Review:
 - web/docs/architecture.md
 - web/docs/deployment.md
 - web/docs/build_log.md
-- web/docs/stage_status.md
 
 Implement only Stage X and the minimum supporting work required by its dependencies.
 
@@ -2610,6 +2822,6 @@ During implementation:
 After implementation:
 1. Run all applicable verification commands.
 2. Report exact results.
-3. Update build_log.md, architecture.md, deployment.md, and stage_status.md as applicable.
+3. Update build_log.md, architecture.md, and deployment.md as applicable.
 4. Show the CDK diff if infrastructure changed.
 5. Stop before deployment and request explicit approval.
