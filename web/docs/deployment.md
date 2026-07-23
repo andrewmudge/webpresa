@@ -93,8 +93,8 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `GOOGLE_PLACES_SECRET_NAME` | Deterministic name — `webpresa-dev-google-places` | Secrets Manager (Stage 10) |
 | `STRIPE_SECRET_NAME` | Deterministic name — `webpresa-dev-stripe` | Secrets Manager (Stage 10) |
 | `LOB_SECRET_NAME` | Deterministic name — `webpresa-dev-lob` | Secrets Manager (Stage 10) |
-| `CAPTURE_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-capture-token` | Secrets Manager (Stage 14) — **not yet deployed**, see "Stage 14" below |
-| `SCREENSHOT_LAMBDA_FUNCTION_NAME` | CloudFormation export `webpresa-dev-screenshot-capture-name` | Stage 14 — **not yet deployed**, see "Stage 14" below |
+| `CAPTURE_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-capture-token` | Secrets Manager (Stage 14) — deployed, real signing key populated; **not yet added to Vercel**, see "Stage 14" below |
+| `SCREENSHOT_LAMBDA_FUNCTION_NAME` | CloudFormation export `webpresa-dev-screenshot-capture-name` | Stage 14 — deployed (`webpresa-dev-screenshot-capture`); **not yet added to Vercel**, see "Stage 14" below |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
@@ -358,7 +358,7 @@ To repeat this smoke test:
 
 ## Stage 14 — Playwright Screenshots deployment guidance
 
-**Application and infrastructure code is implemented and locally verified — NOT deployed.** `cdk synth`/`cdk diff` were run against the real dev account (read-only); the Lambda package builds and runs correctly in a local Docker container (manual smoke tests only — no AWS calls). No `cdk deploy` has been run for either `WebpresaDevDataStack`'s new secret or the new `WebpresaDevScreenshotStack`, and no container image has been pushed to ECR. See `build_log.md`, "Stage 14 — Playwright Screenshots" for the full implementation record. The steps below are what deploying this stage for real requires — **all pending explicit approval**, per this project's deployment gate (`AGENTS.md`).
+**Infrastructure deployed to dev and live-verified on 2026-07-23; `webpresa-vercel-dev`'s IAM extended the same day. Only the two Vercel environment variables remain.** `WebpresaDevDataStack` (capture-token secret, real signing key populated), `WebpresaDevScreenshotRepositoryStack` (ECR repo), and `WebpresaDevScreenshotStack` (Lambda/DLQ, `reservedConcurrentExecutions: 5` per spec) are all deployed; the container image is built and pushed; a real `existing_site` capture was invoked directly against the deployed Lambda and both viewports completed successfully (real screenshots verified in S3), the DLQ path was confirmed working, and capture-token rejection-after-terminal was confirmed. `webpresa-vercel-dev` now has `lambda:InvokeFunction` on the screenshot Lambda and `secretsmanager:GetSecretValue` on the capture-token secret (see "Extending `webpresa-vercel-dev`" below). Still pending: adding `SCREENSHOT_LAMBDA_FUNCTION_NAME`/`CAPTURE_TOKEN_SECRET_NAME` to Vercel's environment variables (manual, via the Vercel dashboard — no Vercel CLI credentials available in this environment) — see `build_log.md`, "Stage 14 — Playwright Screenshots", for the full record, including five real bugs hit and fixed getting here: two AWS account-quota issues (see "Account-quota fixes" below) and three Chromium/Lambda-runtime issues only reproducible on the real deployed Lambda, never in local Docker/RIE testing (see "Chromium-on-real-Lambda fixes" below). The steps below are the actual sequence used — three separate stacks, not two, since the ECR repository was split into its own stack (`WebpresaScreenshotRepositoryStack`) deployed before the Lambda stack that references it, to avoid a first-deploy rollback deleting a freshly-created repo. Any remaining/future-environment deploys (e.g. prod) still require explicit approval per this project's deployment gate (`AGENTS.md`).
 
 ### Deploy sequence (first time)
 
@@ -376,27 +376,62 @@ aws secretsmanager put-secret-value \
   --profile webpresa
 rm /tmp/capture-token-key.txt
 
-# 3. Screenshot stack — creates the ECR repo, Lambda, DLQ. The repo must
-#    exist before step 4 can push an image, so this runs BEFORE the image
-#    exists; the Lambda itself won't be invokable until step 4 completes.
-#    Requires WEBPRESA_APP_BASE_URL set to the real deployed app URL first
-#    — see "Required environment variables" below.
+# 3. Screenshot repository stack — creates only the ECR repo. Must be
+#    deployed and exist before step 4 can push an image, and before step 5
+#    deploys the Lambda that references it as a cross-stack import.
+npx cdk diff WebpresaDevScreenshotRepositoryStack --profile webpresa
+npx cdk deploy WebpresaDevScreenshotRepositoryStack --profile webpresa
+
+# 4. Build and push the container image (the Lambda in step 5 will fail to
+#    find an image if this hasn't run yet):
+./scripts/build-and-push-screenshot-lambda.sh dev webpresa
+
+# 5. Screenshot stack — Lambda, DLQ, IAM. Requires WEBPRESA_APP_BASE_URL set
+#    to the real deployed app URL first — see "Required environment
+#    variables" below.
 WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk diff WebpresaDevScreenshotStack --profile webpresa
 WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
 
-# 4. Build and push the container image:
-./scripts/build-and-push-screenshot-lambda.sh dev webpresa
-
-# 5. If the Lambda's imageTag prop pins a digest rather than 'latest',
+# 6. If the Lambda's imageTag prop pins a digest rather than 'latest',
 #    redeploy the screenshot stack so it picks up the new image:
 WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
 ```
 
+### Account-quota fixes (hit during the 2026-07-23 dev deploy)
+
+Two `cdk deploy WebpresaDevScreenshotStack` attempts failed at the AWS API level (not a CDK/synth error) and auto-rolled back cleanly before the fix:
+
+1. **`MemorySize` 3072 rejected.** This AWS account's Lambda service quota caps container-image functions at the legacy 3008 MB ceiling (some accounts don't automatically get the newer 10,240 MB limit). Fixed by lowering `memorySize` to `3008` in `webpresa-screenshot-lambda.ts` — still within implementation.md's specified 2048–3072 MB range.
+2. **`ReservedConcurrentExecutions: 5` rejected.** This account's total Lambda concurrency quota was only 10 (the account minimum — normal accounts default to 1000). AWS requires ≥10 unreserved concurrency to remain account-wide after any reservation, so with a quota of exactly 10, no reservation above 0 was possible at all until the account's quota itself was raised. Fixed at the time by omitting `reservedConcurrentExecutions` entirely. implementation.md's conditional-transition idempotency logic remained the primary guard against double-execution either way — reserved concurrency was documented as an additional backstop, not the only one.
+
+**Resolved 2026-07-23 (later the same day):** AWS raised this account's Lambda concurrent-executions quota to 1000. `reservedConcurrentExecutions: 5` was re-added to `webpresa-screenshot-lambda.ts` per implementation.md's 2-5 spec, `cdk diff` confirmed a single additive change (no image/digest involved — a plain `cdk deploy WebpresaDevScreenshotStack` was sufficient, no rebuild/push needed), and `aws lambda get-function --function-name webpresa-dev-screenshot-capture --query 'Concurrency'` confirmed `ReservedConcurrentExecutions: 5` live.
+
+### Chromium-on-real-Lambda fixes (hit during 2026-07-23 live testing, after the stack itself deployed successfully)
+
+Once the stack existed, a real end-to-end `existing_site` capture (invoked directly against the deployed Lambda, not through the app) failed three times in a row with Chromium crashing near-instantly — every time invisible to the pre-deploy Lambda Runtime Interface Emulator testing, because a local Docker/RIE container has a fully writable filesystem and a far less restricted process model than the real deployed Lambda:
+
+1. **`ENV HOME=/tmp` added to the Dockerfile.** Real Lambda's filesystem is read-only except `/tmp`; the base image's default `HOME` (`/root`) isn't writable there, so Chromium crashed the instant it tried to create its profile/cache dir.
+2. **`--single-process`/`--no-zygote` added to `launchBrowser()`'s args** (`infra/lambda/screenshot-capture/src/browser.ts`). Chromium's normal multi-process architecture can't reliably start inside Lambda's restricted process/PID namespace without these — the standard fix every serverless-Chromium project on Lambda uses.
+3. **`handler.ts` restructured to launch a fresh `Browser` per viewport** instead of sharing one across both desktop and mobile. A single-process Chromium instance (required by fix #2) is unstable when a second `BrowserContext` is created after the first has closed — the first viewport captured fine, the second crashed identically every time until this fix.
+
+**Rebuild → redeploy for a Lambda pinned to the `:latest` tag is NOT `cdk deploy` alone.** `DockerImageCode.fromEcr(repository, { tagOrDigest: 'latest' })` embeds the literal string `...:latest` in the CloudFormation template, not a resolved digest — CloudFormation can't detect the underlying image content changed and reports `(no changes)` even right after a real push (confirmed the hard way). The section below ("Verifying the image is not stale...") already covered the *digest-pinned* case; for the `latest`-tag case actually in use here, force the update directly:
+
+```bash
+aws lambda update-function-code \
+  --function-name webpresa-dev-screenshot-capture \
+  --image-uri <account>.dkr.ecr.<region>.amazonaws.com/webpresa-dev-screenshot-capture:latest \
+  --profile webpresa --region us-east-1
+aws lambda wait function-updated --function-name webpresa-dev-screenshot-capture --profile webpresa --region us-east-1
+# Confirm it actually picked up the new image:
+aws lambda get-function --function-name webpresa-dev-screenshot-capture --profile webpresa --region us-east-1 \
+  --query 'Configuration.CodeSha256' --output text
+```
+
 `WEBPRESA_APP_BASE_URL` is read directly from the shell environment by `infra/bin/webpresa.ts` — it is not (and should not be) stored in `.env.local`, since `infra/` is a separate CLI project from `web/`. Omitting it falls back to a synth-only placeholder (`https://REPLACE_WITH_..._APP_BASE_URL.invalid`) so `cdk synth`/`cdk diff` never hard-fail — but that placeholder must never actually be deployed, since the Lambda would construct unreachable preview URLs.
 
-### Extending `webpresa-vercel-dev` (manual, outside CDK)
+### Extending `webpresa-vercel-dev` (manual, outside CDK) — done 2026-07-23
 
-This IAM user is created and managed via AWS CLI commands (see "AWS credentials for Vercel" above), not CDK — it needs two new grants before the Next.js app can invoke the Lambda and verify capture tokens:
+This IAM user is created and managed via AWS CLI commands (see "AWS credentials for Vercel" above), not CDK — it needed two new grants before the Next.js app can invoke the Lambda and verify capture tokens, both applied:
 
 ```bash
 aws iam put-user-policy \
@@ -407,12 +442,12 @@ aws iam put-user-policy \
     "Statement": [{
       "Effect": "Allow",
       "Action": ["lambda:InvokeFunction"],
-      "Resource": "arn:aws:lambda:us-east-1:<account-id>:function:webpresa-dev-screenshot-capture"
+      "Resource": "arn:aws:lambda:us-east-1:539898341083:function:webpresa-dev-screenshot-capture"
     }]
   }' --profile webpresa
 ```
 
-Extend the existing `webpresa-dev-secrets` inline policy (do not create a new one) to add the capture-token secret's ARN alongside the other five — see "Adding a new secret" below.
+The existing `webpresa-dev-secrets` inline policy (not a new one) was extended to add the capture-token secret's ARN pattern (`arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-capture-token-*`) alongside the other five — see "Adding a new secret" below. Both grants verified via `aws iam get-user-policy`.
 
 ### Vercel environment variables
 
@@ -440,14 +475,17 @@ Infrastructure must be deployed before application code that depends on it.
 
 ```
 1. CDK bootstrap (once per account/region)
-2. WebpresaDevDataStack       ← DynamoDB tables, S3 bucket, secrets (incl. Stage 14's capture-token)
+2. WebpresaDevDataStack                 ← DynamoDB tables, S3 bucket, secrets (incl. Stage 14's
+                                            capture-token, deployed, real signing key populated)
 3. Create webpresa-vercel-dev IAM user and add keys to Vercel
-4. WebpresaDevScreenshotStack ← Stage 14 — ECR repo, container-image Lambda, DLQ (depends on #2;
-                                  not yet deployed — see "Stage 14" above)
-5. Build/push the screenshot-capture image (scripts/build-and-push-screenshot-lambda.sh)
-6. Extend webpresa-vercel-dev with Lambda invoke + capture-token secret access (see "Stage 14" above)
-7. (future) Auth stack   ← Cognito (when multi-user admin is needed)
-8. Web application       ← Vercel deployment (automatic on push)
+4. WebpresaDevScreenshotRepositoryStack ← Stage 14 — ECR repo (deployed)
+5. Build/push the screenshot-capture image (scripts/build-and-push-screenshot-lambda.sh) (done)
+6. WebpresaDevScreenshotStack           ← Stage 14 — container-image Lambda, DLQ (depends on #2, #4;
+                                            deployed — see "Stage 14" above)
+7. Extend webpresa-vercel-dev with Lambda invoke + capture-token secret access (see "Stage 14"
+                                            above) — not yet done
+8. (future) Auth stack   ← Cognito (when multi-user admin is needed)
+9. Web application       ← Vercel deployment (automatic on push)
 ```
 
 The web application reads table names from environment variables (set in Vercel). If the tables do not exist when the application deploys, DynamoDB calls will fail at runtime.

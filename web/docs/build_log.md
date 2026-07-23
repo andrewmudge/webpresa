@@ -4460,3 +4460,126 @@ infra/lambda/screenshot-capture/                                                
 
 web/docs/build_log.md                                                           MODIFIED — this entry
 ```
+
+---
+
+# Stage 14 — CDK stack-ordering fix, pre-deploy testing, and dev deployment (2026-07-22 – 2026-07-23)
+
+**Scope:** Two follow-up sessions to the Stage 14 implementation above, closing the gap between "code-complete" and actually running in dev. This entry covers work the original implementation-session commit message documented but this file never did (a documentation gap against `AGENTS.md`'s "update `build_log.md` after completing a stage" rule), plus today's actual `cdk deploy` sequence and two real account-quota bugs found and fixed along the way.
+
+## CDK stack-ordering fix (2026-07-22)
+
+The original single `WebpresaScreenshotStack` held both the ECR repository and the Lambda that pulls its image. On a genuine first deploy this is broken: CloudFormation creates the Lambda before any image has been pushed (nothing has run step 4 yet), the Lambda creation fails, and CloudFormation rolls back the *entire stack* — deleting the ECR repository the same deployment just created, along with it. Fixed by splitting into two stacks:
+
+- `infra/lib/stacks/screenshot-repository-stack.ts` (new) — `WebpresaScreenshotRepositoryStack`, just the ECR repository (`infra/lib/constructs/webpresa-screenshot-repository.ts`, new construct), deployed independently and first.
+- `infra/lib/stacks/screenshot-stack.ts` — `WebpresaScreenshotStack` now takes `repository: ecr.IRepository` as a typed cross-stack prop rather than creating its own.
+- `infra/bin/webpresa.ts` — instantiates `WebpresaScreenshotRepositoryStack` before `WebpresaScreenshotStack`, passing the repository through.
+- `infra/test/screenshot-repository-stack.test.ts` (new, 8 tests); `screenshot-stack.test.ts` updated for the prop-based repository reference.
+
+## Pre-deploy testing (2026-07-22, before this fix was known-good)
+
+- `infra/lambda/screenshot-capture/src/__tests__/handler.test.ts` (new, 14 tests) — the state-machine logic (idempotency, claim races, partial results, launch-failure vs. upload-failure distinction) had zero coverage before this pass.
+- Live-tested against real dev AWS resources via the Lambda Runtime Interface Emulator (local Docker container, real DynamoDB/S3, no real Lambda deployed yet): `existing_site` happy path (screenshot visually confirmed), SSRF blocking, idempotency, conflict detection, the "Lambda not deployed yet" failure path, and the stale-scan admin override — 6 of 7 planned scenarios verified this way; `generated_preview`'s round-trip was explicitly deferred (needs `dev`'s web app actually reachable, not just the Lambda). All throwaway `ScanEvent`/business rows cleaned up after each test.
+- Result: `infra` typecheck clean, 82/82 tests pass, `cdk synth` succeeds for all three dev stacks, `cdk diff` against the real dev account clean and additive across all three.
+
+## Dev deployment (2026-07-23)
+
+Deploy sequence executed in order, each step's `cdk diff` reviewed against the real account before running, per this project's deployment gate (`AGENTS.md`):
+
+1. `cdk deploy WebpresaDevDataStack` — additive only (capture-token secret + new cross-stack exports for the screenshot stacks to consume). Succeeded first try.
+2. Real capture-token signing key generated locally (`openssl rand -base64 48`) and written via `aws secretsmanager put-secret-value`; local key file removed immediately after.
+3. `cdk deploy WebpresaDevScreenshotRepositoryStack` — additive only (ECR repo + its Lambda-pull resource policy). Succeeded first try.
+4. `./infra/scripts/build-and-push-screenshot-lambda.sh dev webpresa` — built and pushed `webpresa-dev-screenshot-capture:latest` (digest `sha256:7c79f406...`).
+5. `cdk deploy WebpresaDevScreenshotStack` — **failed twice**, both times auto-rolled back cleanly by CloudFormation (no orphaned resources) before a fix:
+   - **Attempt 1:** `'MemorySize' value failed to satisfy constraint: Member must have value less than or equal to 3008` — this AWS account's Lambda service quota caps container-image functions at the legacy 3008 MB ceiling, not the newer 10,240 MB limit some accounts get automatically. Fixed: `webpresa-screenshot-lambda.ts`'s `memorySize` lowered from `3072` to `3008` (still within implementation.md's specified 2048–3072 MB range); `screenshot-stack.test.ts`'s matching assertion updated. Typecheck clean, 83/83 tests pass after the fix.
+   - **Attempt 2:** `Specified ReservedConcurrentExecutions for function decreases account's UnreservedConcurrentExecution below its minimum value of [10]` — `aws lambda get-account-settings` confirmed this account's *total* Lambda concurrency quota is exactly 10 (the account minimum; normal accounts default to 1000). AWS requires ≥10 unreserved concurrency to remain account-wide after any reservation, so with a quota of exactly 10, no `reservedConcurrentExecutions` value above 0 is possible until the account's own quota is raised — this wasn't a matter of picking a smaller number. Presented to the user as a real tradeoff (implementation.md specs reserved concurrency 2–5 partly as a backstop against a narrow duplicate-execution race, alongside conditional-transition idempotency, which stays intact either way); user chose to deploy without it now and revisit after requesting an AWS quota increase. Fixed: `reservedConcurrentExecutions` removed entirely from the construct (with an inline comment explaining why and what to do once the quota is raised); the old "sets memory, timeout, and reserved concurrency" test split into a memory/timeout test plus a new test asserting `ReservedConcurrentExecutions` is absent.
+   - **Attempt 3:** succeeded. `WebpresaDevScreenshotStack` created — Lambda (`webpresa-dev-screenshot-capture`), DLQ, log group, `EventInvokeConfig`, least-privilege IAM, all as designed.
+
+## Live testing against the real deployed Lambda (2026-07-23, same session) — 3 more real bugs
+
+Infra-level checks passed clean on the first try: CloudWatch log group retention (14 days, correct), ECR lifecycle policy (`maxImageCount: 8`, correct). But a real end-to-end `existing_site` capture — throwaway `Business`/`ScanEvent` created directly against real dev DynamoDB, Lambda invoked asynchronously with admin credentials (`webpresa-vercel-dev` doesn't have `lambda:InvokeFunction` yet — see "Not yet done" below), polled to a terminal state, screenshot bytes fetched from S3 and verified — surfaced three real bugs the pre-deploy RIE testing above never could, because the RIE's local Docker container has a fully writable filesystem and a far less restricted process model than a genuine deployed Lambda:
+
+1. **Chromium crashed instantly on the real Lambda** (`browserContext.newPage: Target page, context or browser has been closed`), both viewports, every time, in under half a second — far too fast to be a real navigation attempt. Root cause: AWS Lambda's real runtime filesystem is read-only except `/tmp`; the base image's default `HOME` (`/root`, running as root) isn't writable there, so Chromium crashed trying to create its profile/cache dir the instant it needed one — invisible in local Docker/RIE testing, where the whole container filesystem is writable. Fixed: `Dockerfile` — `ENV HOME=/tmp`.
+2. **Still crashed identically after fix #1.** Root cause: Chromium's normal multi-process architecture (zygote + sandbox-host + renderer) can't reliably start inside Lambda's restricted process/PID namespace without `--single-process`/`--no-zygote` — the standard, widely-documented workaround every serverless-Chromium project on Lambda uses (`@sparticuz/chromium`, `chrome-aws-lambda`, etc.). Fixed: `browser.ts`'s `launchBrowser()` args gained `--single-process`, `--no-zygote`.
+3. **Desktop viewport then captured a real screenshot; mobile still crashed identically.** Root cause: a single-process Chromium instance (required by fix #2) is unstable when a second `BrowserContext` is created after the first has closed — the handler was launching one `Browser` and reusing it for both viewports sequentially. Fixed: `handler.ts` restructured to launch a fresh `Browser` per viewport instead of sharing one across both (`launchBrowser()` moved inside the per-viewport loop) — costs roughly 1–2s extra per viewport, comfortably inside the 180s timeout. This also made a launch failure itself per-viewport rather than failing the whole scan outright in one shot, which is actually more consistent with every other failure mode here ("one viewport's failure never aborts the other") — the old single-launch-for-both-viewports code was a minor pre-existing inconsistency with that principle, not just a workaround for this bug. `ViewportCaptureResult` import in `handler.ts` became unused and was removed. No test changes needed — `handler.test.ts`'s existing "browser fails to launch" assertions (both viewports failed, one final conditional update, `captureViewport` never called) still hold under the new per-viewport-launch structure since the *observable* behavior for that scenario is unchanged.
+
+Each fix required a full rebuild/push/redeploy cycle (Docker build ~2–6 min depending on layer cache, since only `src/`/`Dockerfile` changed and the `apt-get`/`npm ci` layers cache across rebuilds). **Rebuild → redeploy is not just `cdk deploy`** — the Lambda's `DockerImageCode.fromEcr(repository, { tagOrDigest: 'latest' })` embeds the literal string `...:latest` in the CloudFormation template, not a resolved digest, so CloudFormation has no way to detect that the underlying image content changed and reports "no changes" even after a real push. Confirmed the hard way (`cdk deploy` after fix #1 reported `(no changes)` despite a new image sitting in ECR). The actual mechanism that forces the running Lambda to pick up a newly-pushed `:latest` image is `aws lambda update-function-code --image-uri <repo>:latest`, followed by `aws lambda wait function-updated` — verified via `Configuration.CodeSha256` matching the just-pushed digest before each retest. `deployment.md`'s existing "Verifying the image is not stale after a code change" section already warned about a *digest-pinned* image needing a stack redeploy; a *tag-pinned* (`latest`) image needs this instead, and that gap is now documented there.
+
+Before deciding to keep debugging live rather than stop and report, the fix-#2 attempt was explicitly confirmed with the user first, given three consecutive real bugs and multiple ~5–10 minute rebuild cycles already spent.
+
+### Final live-test results — all passing
+
+- **`existing_site` real end-to-end capture**: `queued` → `running` → `completed`, both viewports (`desktop`: 15,940 bytes; `mobile`: 12,715 bytes), both PNGs confirmed present and non-empty in S3, both deleted after verification.
+- **DLQ delivery**: Lambda invoked with a deliberately malformed payload (bare `null` — `event.scanId` access throws a `TypeError` uncaught inside `handler()`); the async `EventInvokeConfig`'s failure destination delivered the failure record to the DLQ with `condition: "RetriesExhausted"` and `approximateInvokeCount: 1` — confirming zero automatic retries, exactly as designed. Message inspected then deleted.
+- **capture-token rejected once the scan is terminal**: a token minted with a valid signature for a `ScanEvent` already in `'completed'` status is correctly rejected by `app/b/[slug]/page.tsx`'s acceptance logic (replicated inline against the real Secrets Manager-backed signing key, since the web app itself isn't deployed to `dev` yet) — signature/claims valid, but the terminal-status check correctly fails it.
+- **`generated_preview`'s live round-trip** stays deferred, as before — it needs `dev`'s actual web app reachable (Stage 14's web-app code hasn't been pushed there yet), not just the Lambda.
+
+All throwaway `Business`/`ScanEvent` DynamoDB rows and S3 objects created during testing were cleaned up; the temporary test script (`web/scripts/tmp-stage14-live-test.ts`, never committed) was deleted after use; the `node_modules/server-only/index.js` stub used to let the script run outside Next.js's bundler (which normally strips that module for server contexts) was restored to its original content.
+
+**Not yet done at the time this section was written:** extending `webpresa-vercel-dev`'s IAM policy and adding the two env vars to Vercel. The IAM extension is done — see "webpresa-vercel-dev IAM extension" below. Only the Vercel env vars remain, plus `generated_preview`'s live round-trip (deferred until Stage 14's web-app code is pushed to `dev`) — see `architecture.md`, "Playwright Screenshots (Stage 14)" and `deployment.md`, "Stage 14", for current status.
+
+## `webpresa-vercel-dev` IAM extension (2026-07-23, later the same day)
+
+Two grants applied via `aws iam put-user-policy` (per `deployment.md`, "Extending `webpresa-vercel-dev`"):
+
+1. **New policy** `webpresa-dev-screenshot-lambda-invoke` — `lambda:InvokeFunction` scoped to exactly `arn:aws:lambda:us-east-1:539898341083:function:webpresa-dev-screenshot-capture`.
+2. **Extended existing policy** `webpresa-dev-secrets` (not a new one) — added `arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-capture-token-*` to the `Resource` array alongside the five existing secret ARN patterns (openai, firecrawl, google-places, stripe, lob), all preserved unchanged.
+
+Both verified via `aws iam get-user-policy`. No Vercel CLI credentials were available in this environment (no `VERCEL_TOKEN`, no linked `.vercel` project) — adding `SCREENSHOT_LAMBDA_FUNCTION_NAME`/`CAPTURE_TOKEN_SECRET_NAME` to Vercel's environment variables remains a manual dashboard step for the user.
+
+## Verification
+
+```
+infra/                            TypeCheck: 0 errors (npx tsc --noEmit)
+infra/                            Tests:     83 passed
+infra/lambda/screenshot-capture/  TypeCheck: 0 errors (npx tsc --noEmit)
+infra/lambda/screenshot-capture/  Tests:     21 passed (unchanged assertions after the
+                                   per-viewport-launch restructure — see above)
+web/                               Lint:      0 errors (npm run lint)
+web/                               TypeCheck: 0 errors (npx tsc --noEmit)
+web/                               Tests:     562 passed (npm test) — unaffected by this
+                                   session's infra-only changes
+web/                               Build:     next build succeeds
+Live (real dev AWS, account 539898341083, us-east-1):
+                                   existing_site capture: both viewports completed, real
+                                   screenshots verified in S3, cleaned up
+                                   DLQ: forced failure delivered correctly, zero retries
+                                   confirmed, cleaned up
+                                   capture-token: correctly rejected once scan is terminal
+```
+
+## Files changed
+
+```
+infra/lib/constructs/webpresa-screenshot-lambda.ts   MODIFIED — memorySize 3072→3008,
+                                                       reservedConcurrentExecutions removed
+infra/test/screenshot-stack.test.ts                  MODIFIED — matching test updates
+infra/lambda/screenshot-capture/Dockerfile            MODIFIED — ENV HOME=/tmp
+infra/lambda/screenshot-capture/src/browser.ts        MODIFIED — --single-process/--no-zygote
+infra/lambda/screenshot-capture/src/handler.ts        MODIFIED — per-viewport browser launch,
+                                                       unused ViewportCaptureResult import removed
+```
+
+---
+
+## Reserved concurrency restored (2026-07-23, later the same day)
+
+AWS raised this account's Lambda concurrent-executions quota from 10 to 1000 (the user was notified directly by AWS). This removes the blocker that forced `reservedConcurrentExecutions` to be omitted entirely earlier today (see "Account-quota fixes" above) — re-added `reservedConcurrentExecutions: 5` to `webpresa-screenshot-lambda.ts` per implementation.md's 2-5 spec, with an updated inline comment. `screenshot-stack.test.ts`'s two split tests (memory/timeout, and "omits reserved concurrency") merged back into the original single "sets memory, timeout, and reserved concurrency" assertion.
+
+`cdk diff WebpresaDevScreenshotStack` (account `539898341083`, `us-east-1`) confirmed a single, additive, non-replacing change — `ReservedConcurrentExecutions: 5` added to the already-deployed function, no image/digest involved — reviewed with the user before deploying, per the deployment gate. `cdk deploy` (no image rebuild/push needed this time, unlike every fix in the "Chromium-on-real-Lambda" round above) applied cleanly in ~12s. Confirmed live via `aws lambda get-function --query 'Concurrency'` → `{"ReservedConcurrentExecutions": 5}`.
+
+### Verification
+
+```
+infra/  TypeCheck: 0 errors (npx tsc --noEmit)
+infra/  Tests:     82 passed (down from 83 — the two split tests merged back into one)
+infra/  cdk diff:  single additive change confirmed before deploy
+Live:              aws lambda get-function confirms ReservedConcurrentExecutions: 5
+```
+
+### Files changed
+
+```
+infra/lib/constructs/webpresa-screenshot-lambda.ts   MODIFIED — reservedConcurrentExecutions: 5 restored
+infra/test/screenshot-stack.test.ts                  MODIFIED — two tests merged back into one
+```
