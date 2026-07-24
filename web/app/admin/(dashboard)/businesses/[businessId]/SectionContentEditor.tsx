@@ -7,6 +7,8 @@ import type { SitePreview } from '@/domain/models/site-preview';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
 import { PhotoPickerField, SubmitButton } from '../FormFields';
 import { RepeatableListEditor } from './RepeatableListEditor';
+import { GoogleReviewsPanel } from './GoogleReviewsPanel';
+import { TestimonialsOrderEditor } from './TestimonialsOrderEditor';
 import {
   updateSectionContentAction,
   updateBusinessListFieldAction,
@@ -434,15 +436,44 @@ function BusinessListEditor({
 
   const config: Record<
     BusinessListField,
-    { name: string; fields: { key: string; label: string; multiline?: boolean; maxLength?: number }[]; items: Record<string, string>[]; addLabel: string; max: number }
+    {
+      name: string;
+      fields: { key: string; label: string; multiline?: boolean; maxLength?: number; type?: 'select' | 'hidden'; options?: { value: string; label: string }[] }[];
+      items: Record<string, string>[];
+      addLabel: string;
+      max: number;
+    }
   > = {
     testimonials: {
       name: 'testimonials',
       fields: [
+        // Round-trips each row's stable identity so a save can tell "this is
+        // still the same testimonial, just edited" from "this is a brand-new
+        // one" — needed to preserve the admin's custom ordering (see
+        // TestimonialsOrderEditor.tsx / mergeTestimonialsPreservingOrder).
+        { key: 'id', label: '', type: 'hidden' },
         { key: 'author', label: 'Author', maxLength: 100 },
         { key: 'quote', label: 'Quote', multiline: true, maxLength: 500 },
+        {
+          key: 'rating',
+          label: 'Rating',
+          type: 'select',
+          options: [
+            { value: '', label: 'No rating' },
+            { value: '5', label: '★★★★★ (5)' },
+            { value: '4', label: '★★★★☆ (4)' },
+            { value: '3', label: '★★★☆☆ (3)' },
+            { value: '2', label: '★★☆☆☆ (2)' },
+            { value: '1', label: '★☆☆☆☆ (1)' },
+          ],
+        },
       ],
-      items: (business.testimonials ?? []).map((t) => ({ author: t.author, quote: t.quote })),
+      // Manual entries only — Google-sourced testimonials are read-only and
+      // rendered separately by GoogleReviewsPanel below, never through this
+      // free-text form.
+      items: (business.testimonials ?? [])
+        .filter((t) => t.source === 'manual')
+        .map((t) => ({ id: t.id, author: t.author, quote: t.quote, rating: t.rating?.toString() ?? '' })),
       addLabel: 'Add testimonial',
       max: 20,
     },
@@ -472,6 +503,19 @@ function BusinessListEditor({
 
   return (
     <div className="px-4 pb-4">
+      {field === 'testimonials' && (
+        <>
+          <TestimonialsOrderEditor
+            businessId={businessId}
+            testimonials={(business.testimonials ?? []).filter((t) => !t.hidden)}
+          />
+          <GoogleReviewsPanel
+            businessId={businessId}
+            googlePlaceId={business.googlePlaceId}
+            googleTestimonials={(business.testimonials ?? []).filter((t) => t.source === 'google')}
+          />
+        </>
+      )}
       <form action={formAction} className="space-y-3">
         <ErrorAlert message={state?.message} />
         <RepeatableListEditor name={name} fields={fields} defaultItems={items} addLabel={addLabel} maxItems={max} />

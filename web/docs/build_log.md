@@ -4724,3 +4724,274 @@ web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx  MODIFI
 web/app/b/[slug]/template/GeneratedHero.tsx                        MODIFIED — HeroOverlayContent's
                                                                      primary CtaButton gained its icon
 ```
+
+---
+
+# Google Reviews in Testimonials (Stage 12 follow-on)
+
+**Date:** 2026-07-23
+**Scope:** Pull the individual reviews Google's Place Details API returns for a business (author, avatar, star rating, review text — capped at 5 per place, non-configurable, no pagination) and surface them in the existing Testimonials section, alongside admin-entered testimonials. Desktop shows every visible testimonial in a grid; mobile shows a one-at-a-time autoplay carousel with dot indicators. Long quotes clamp to 5 lines with a "Read more"/"Read less" toggle. Anything without a real photo (every manually-added testimonial) gets a circular first-initial avatar. Admin-only editing for this pass — no non-admin/"owner" auth exists anywhere in this app yet (Stage 17's claim flow is fully spec'd but unbuilt). Google-sourced reviews are read-only (hide/show only, never editable) per Google's API terms on not altering review content; manual testimonials stay fully editable exactly as before.
+
+## Overview
+
+Extended `BusinessTestimonial` with `source`/`hidden`/`rating`/`authorPhotoUrl`/`authorProfileUrl`/`googleReviewId`/`publishTimeDescription`, backward-compatible via Zod defaults (no migration). Added a new Google Place Details (New) call (`getPlaceReviews()`, reviews-only field mask) and a mapping helper (`fetchAndMapGoogleReviews()`) that fires automatically right after a business is imported via `/admin/discover`, non-fatal on failure so a reviews-fetch error never fails the business import itself. A new `enableWebsiteSection()` helper force-enables the Testimonials section whenever reviews are found, overriding even an explicitly-stored `enabled: false`. Fixed a real latent bug in `updateBusinessListFieldAction`'s testimonials branch — it previously replaced the whole `testimonials` array from form data without ever fetching the business first, which (combined with `updateBusiness()`'s shallow top-level merge) would have silently wiped every Google review the first time anyone saved the manual-testimonials form. Added a manual "Import/Refresh Google Reviews" admin action (preserves each review's hidden state across a refresh, matched by `googleReviewId`) and a per-review hide/show toggle, both surfaced in a new `GoogleReviewsPanel.tsx` alongside the existing manual-testimonials editor. Rebuilt the public `TestimonialsSection.tsx` around a new `TestimonialCard.tsx` (real photo or initial-letter avatar via a new shared `TestimonialAvatar.tsx`, star rating + "Posted on Google" attribution for Google-sourced entries, measured-overflow "Read more" toggle) and a new `TestimonialsMobileCarousel.tsx` (`framer-motion` `AnimatePresence`, ~6s autoplay, dot indicators) — the first carousel/rotator and the first line-clamp-toggle pattern in this codebase.
+
+## Key decisions (confirmed with the user before implementation)
+
+1. **Admin-only editing.** No new non-admin/"owner" auth was built — confirmed no such identity exists anywhere in the app (Stage 17 "Website Claim Flow" is fully spec'd in `implementation.md` but was never built; only a dismiss-only `ClaimBanner.tsx` exists).
+2. **Google reviews are read-only.** Only `hidden` can be toggled (`toggleGoogleReviewVisibilityAction`) — text/author/photo are never editable through the admin UI, matching Google's API terms on not materially altering review content. Manual testimonials remain fully editable via the existing `RepeatableListEditor` form (now filtered to `source: 'manual'` items only).
+3. **Automatic fetch at import time, plus a manual refresh action.** The user chose automatic-fetch-during-import; a manual "Import/Refresh Google Reviews" action was added on top since automatic-only would leave every business imported before this feature shipped with zero reviews forever.
+
+## Domain-model changes
+
+- `domain/models/business.ts` — `BusinessTestimonial` gained `source: 'manual' | 'google'`, `hidden?`, `rating?`, `authorPhotoUrl?`, `authorProfileUrl?`, `googleReviewId?`, `publishTimeDescription?`. New `TESTIMONIAL_SOURCES` const.
+- `domain/schemas/business.schema.ts` — matching schema extension, `source`/`hidden` given `.default('manual')`/`.default(false)` so `BusinessSchema.parse()` backfills every legacy `{author, quote}`-only record on read (`getBusinessById`) — zero DynamoDB migration, same pattern `Business.websiteSections` absence already established.
+- `domain/schemas/google-places.schema.ts` — new `GooglePlaceReviewSchema`/`GooglePlaceDetailsReviewsResponseSchema` validating the raw Place Details `reviews` response.
+
+## `web/lib/google-places/`
+
+- `client.ts` — extracted the existing non-2xx/error-categorization logic (previously inline in `searchPlacesText`) into a shared `requestPlacesApi()` helper; added `getPlaceReviews(placeId)` (`GET /v1/places/{placeId}`, `X-Goog-FieldMask: reviews.*` — no photo field, since a reviewer's own avatar is a separate, directly-hotlinkable Google CDN URL, not a Google Place Photo).
+- `reviews.ts` (new) — `mapGoogleReviewToTestimonial()` (pure mapping, returns `null` for a rating-only review with no text) and `fetchAndMapGoogleReviews()` (fetch + map; lets errors throw so each caller decides fatal vs. non-fatal).
+
+## `web/lib/website-sections/`
+
+- `resolve.ts` — new `enableWebsiteSection(business, sectionType)`: forces one section's `enabled` to `true`, overriding even an explicitly-stored `false` (unlike `resolveStoredOrDefaultSections`, which only ever backfills a section that was never stored at all) — the same "dual-write on population" precedent `updateThemeAction`/`updatePhotosAction` already established for theme/photos.
+- `availability.ts` — `testimonials` check now excludes hidden entries (`business.testimonials?.filter(t => !t.hidden)`); updated the file's header comment, which had gone stale (claimed testimonials/reviews were both always unavailable — no longer true since Stage 12 and the admin list editor already populate them).
+
+## Admin (`app/admin/(dashboard)/`)
+
+- `discover/actions.ts` — `importSelectedPlacesAction` now calls `fetchAndMapGoogleReviews()` right after a successful `putBusiness()`, wrapped in try/catch (non-fatal — matches the existing "one bad candidate never fails the whole batch" convention), and dual-writes `websiteSections` via `enableWebsiteSection()` when reviews were found.
+- `businesses/[businessId]/actions.ts` — three changes: (1) fixed `updateBusinessListFieldAction`'s testimonials branch to fetch the business first and preserve existing `source: 'google'` rows (see "Overview" above); (2) new `importGoogleReviewsAction` (manual refresh, preserves `hidden` across a refresh by matching `googleReviewId`); (3) new `toggleGoogleReviewVisibilityAction`. Both new actions follow the existing `PhotoManagerState` convention — no redirect, return the updated `testimonials` array directly for the client to apply optimistically.
+- `businesses/[businessId]/GoogleReviewsPanel.tsx` (new, client) — Import/Refresh button plus one row per Google review (avatar, rating, snippet, relative time, hide/show toggle, including already-hidden ones). Wired into `SectionContentEditor.tsx`'s testimonials-only render path, alongside the existing manual `RepeatableListEditor` form (now filtered to `source: 'manual'` items).
+- `app/components/TestimonialAvatar.tsx` (new, shared) — real photo via `next/image` when present, otherwise a first-initial circle; deliberately outside `app/b/[slug]/template/` since both the admin panel and the public template use it, and the admin dashboard has no per-business `--site-*` theme (the component accepts `className`/`style` so callers theme the initials fallback rather than assuming `--site-*` exists).
+
+## Public template (`app/b/[slug]/template/`)
+
+- `TestimonialCard.tsx` (new, client) — avatar, author (linked to the reviewer's Google profile when present), star rating + "Posted on Google" caption for Google-sourced entries, quote clamped to 5 lines (`line-clamp-5`) with a "Read more"/"Read less" toggle that only renders when the text is actually measured as truncated (`scrollHeight` vs `clientHeight`, re-measured on resize) — not assumed from character count.
+- `TestimonialsMobileCarousel.tsx` (new, client, `md:hidden`) — one testimonial at a time, `framer-motion` `AnimatePresence` cross-fade, ~6s autoplay, tappable dot indicators.
+- `TestimonialsSection.tsx` (rewritten) — filters to non-hidden entries; desktop (`hidden md:grid`) renders every visible testimonial via `TestimonialCard`, no cap; mobile (`md:hidden`) renders `TestimonialsMobileCarousel`. `section-registry.tsx`'s wiring (`ctx.business.testimonials ?? []`) needed no change.
+
+## Supporting changes
+
+- `next.config.ts` — added `{ protocol: 'https', hostname: '*.googleusercontent.com' }` to `images.remotePatterns` for reviewer avatars.
+- `web/docs/deployment.md` — noted the new Place Details `reviews` field mask sits in the same higher-cost Places API SKU tier as `rating`/`userRatingCount`/`regularOpeningHours`.
+- `web/docs/architecture.md` — new "Google Reviews in Testimonials (Stage 12 follow-on)" subsection under "Google Places Discovery Boundary (Stage 12)".
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     574 passed  (npm test) — 11 new tests: lib/google-places/__tests__/reviews.test.ts (new,
+                         6 tests), 3 new getPlaceReviews tests in client.test.ts, 2 new
+                         enableWebsiteSection tests in lib/website-sections/__tests__/resolve.test.ts,
+                         plus 1 new + 1 updated test in availability.test.ts for hidden-filtering.
+                         All Google Places API calls mocked — no real network calls in the test suite.
+                         Four existing admin action test files needed a new
+                         vi.mock('@/lib/google-places/reviews', ...) — actions.ts now transitively
+                         imports it, and the real `server-only` package throws unconditionally when
+                         evaluated outside a Next.js `react-server` build (only the mocked/no-op form
+                         is safe under plain Vitest); the discover/actions.ts test suite already
+                         globally mocks `server-only` itself and needed no change, though it does
+                         exercise the real (env-var-missing) failure path for the reviews fetch,
+                         confirmed non-fatal — the business import itself still succeeds.
+Build:     next build succeeds — /admin/discover and /b/[slug] both still register correctly, no
+           new routes added.
+Manual:    Not yet exercised in a live browser session or against the real Google Places API — no
+           real googlePlaceId with actual Google reviews was available in this session. The
+           end-to-end verification steps below are documented but not yet run:
+           1. Real /admin/discover import against a business with real Google reviews — confirm
+              reviews populate and the Testimonials section auto-enables.
+           2. Business detail page: confirm GoogleReviewsPanel shows up to 5 reviews.
+           3. Hide one review, confirm it disappears from /b/[slug] but stays visible (marked
+              hidden) in admin; show it again, confirm it reappears.
+           4. Click "Import/Refresh" again, confirm hidden/shown state survives the refresh.
+           5. Add a manual testimonial and save — confirm existing Google reviews are NOT wiped
+              (the key regression test for the updateBusinessListFieldAction fix).
+           6. /b/[slug] desktop: all visible testimonials in a grid; Google ones show
+              avatar/rating/"Posted on Google"; manual ones show an initial-circle.
+           7. Mobile width: one-at-a-time carousel with dot indicators and autoplay.
+           8. A long review: "Read more" appears only when actually truncated; expand/collapse works.
+           9. Zero visible testimonials (none, or all hidden): section renders nothing.
+```
+
+## Files changed
+
+```
+web/domain/
+├── models/business.ts                                                        MODIFIED — extended
+│                                                                              BusinessTestimonial
+├── schemas/business.schema.ts                                                MODIFIED — matching
+│                                                                              schema + defaults
+└── schemas/google-places.schema.ts                                           MODIFIED — new review
+                                                                               response schemas
+
+web/lib/
+├── google-places/
+│   ├── client.ts                                                             MODIFIED — extracted
+│   │                                                                         requestPlacesApi(),
+│   │                                                                         added getPlaceReviews()
+│   ├── reviews.ts                                                            NEW — mapping + fetch
+│   └── __tests__/
+│       ├── client.test.ts                                                    MODIFIED — 3 new tests
+│       └── reviews.test.ts                                                   NEW — 6 tests
+└── website-sections/
+    ├── resolve.ts                                                            MODIFIED — new
+    │                                                                         enableWebsiteSection()
+    ├── availability.ts                                                       MODIFIED — hidden filter
+    └── __tests__/
+        ├── resolve.test.ts                                                  MODIFIED — 2 new tests
+        └── availability.test.ts                                             MODIFIED — 1 new test
+
+web/app/
+├── components/TestimonialAvatar.tsx                                          NEW — shared avatar
+├── admin/(dashboard)/
+│   ├── discover/actions.ts                                                   MODIFIED — automatic
+│   │                                                                         reviews import
+│   └── businesses/[businessId]/
+│       ├── actions.ts                                                       MODIFIED — testimonials
+│       │                                                                    fix + 2 new actions
+│       ├── GoogleReviewsPanel.tsx                                           NEW
+│       ├── SectionContentEditor.tsx                                        MODIFIED — wired panel in
+│       └── __tests__/
+│           ├── actions.test.ts                                             MODIFIED — new mock
+│           ├── business-details-actions.test.ts                            MODIFIED — new mock
+│           ├── photos-actions.test.ts                                      MODIFIED — new mock
+│           └── website-sections-actions.test.ts                            MODIFIED — new mock
+└── b/[slug]/template/
+    ├── TestimonialCard.tsx                                                  NEW
+    ├── TestimonialsMobileCarousel.tsx                                       NEW
+    └── TestimonialsSection.tsx                                              MODIFIED — rewritten
+
+web/next.config.ts                                                           MODIFIED — googleusercontent
+                                                                               remotePattern
+web/docs/architecture.md                                                     MODIFIED
+web/docs/deployment.md                                                       MODIFIED
+```
+
+---
+
+## Bug fix, found during first live test: "Failed to save imported reviews"
+
+**Date:** 2026-07-23 (same day, immediately after the above)
+
+Clicking "Import Google Reviews" against a real business consistently failed with the generic `importGoogleReviewsAction` error message. Root cause: `BusinessTestimonial.quote`'s Zod bound (`domain/schemas/business.schema.ts`) was `max(500)` — sized for short, hand-typed manual testimonials — but real Google reviews routinely run well past that (Google allows review text up to ~4096 characters). `updateBusiness()` calls `BusinessSchema.parse(merged)` before writing; a real review's `quote` exceeding 500 chars threw a `ZodError` there, caught by `importGoogleReviewsAction`'s outer `catch`, which only ever surfaced the generic "Failed to save imported reviews" message — the real cause was visible only in the server log (`console.error`), not reachable from the browser network tab, which is why the reported 200 response (a normal server-action response carrying the error *state*, not an HTTP failure) gave no clue.
+
+**Fix:**
+- `domain/schemas/business.schema.ts` — `quote` bound raised `max(500)` → `max(4000)`. The public card already clamps/truncates *display* via `line-clamp-5` + "Read more" (see above), so the stored value only ever needed a generous ceiling, not a display-sized one. Manual testimonials are unaffected — the admin form's own `maxLength: 500` UI hint and `updateBusinessListFieldAction`'s `.slice(0, 500)` truncation are untouched, this only widens what's *allowed*, not what the manual path writes.
+- `lib/google-places/reviews.ts` — `mapGoogleReviewToTestimonial()` now defensively truncates `author`/`quote`/`publishTimeDescription` to the same bounds the schema enforces, mirroring the existing `.slice()` pattern `updateBusinessListFieldAction` already uses for manual entries — untrusted external content should degrade by truncation, not by throwing deep inside a later `BusinessSchema.parse()` call.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     574 passed  (npm test) — unchanged; the one exact-match test in reviews.test.ts uses
+                         short strings well under the new bound, still passes byte-for-byte.
+Manual:    Confirmed fixed against the real bug report — a real Google review exceeding 500
+           characters now imports successfully instead of throwing at the BusinessSchema.parse()
+           step inside updateBusiness().
+```
+
+## Files changed
+
+```
+web/domain/schemas/business.schema.ts   MODIFIED — testimonials.quote max(500) → max(4000)
+web/lib/google-places/reviews.ts        MODIFIED — defensive truncation to match schema bounds
+```
+
+---
+
+## Two direct UI follow-ups: desktop grid width, manual star ratings
+
+**Date:** 2026-07-23 (same day, direct user feedback after seeing the live result)
+
+1. **Desktop grid was 3×2 instead of one row.** `TestimonialsSection.tsx`'s grid was still the original fixed `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` from before this feature — never revisited when the "all visible on desktop" requirement was implemented, so 5 testimonials wrapped into two rows (3 + 2) instead of one. Fixed with a dynamic column count: `Math.min(visible.length, 5)`, mapped through a literal `DESKTOP_GRID_COLUMNS` lookup (`lg:grid-cols-1` … `lg:grid-cols-5`) rather than a template-interpolated class string — Tailwind's compiler only generates utilities it can find as literal text in source, so `` `lg:grid-cols-${n}` `` would have silently produced no CSS for whichever value wasn't already used elsewhere in the codebase. A business with fewer than 5 testimonials now gets exactly that many equal-width columns (no sparse empty grid cells); more than 5 (Google's 5 plus manual additions) wraps to a second row of the same width.
+2. **Manual testimonials had no star rating**, so they looked structurally different from Google-sourced cards (which show a star row) even though `TestimonialCard.tsx` already renders stars for *any* testimonial with a `rating` set, Google or manual. Added a "Rating" `<select>` (1–5 stars, or "No rating") to the manual testimonials admin form: `RepeatableListEditor.tsx` gained a `type: 'select'` field variant (additive — every other list editor using this shared component, faq/process/services/etc., is unaffected, since `type` is optional and defaults to the existing text/textarea behavior); `SectionContentEditor.tsx`'s testimonials config wires it in; `updateBusinessListFieldAction`'s testimonials branch parses and validates the submitted value (integer 1–5, else omitted). A manually-rated testimonial now renders with the same star row as a Google review, but — correctly — without the "Posted on Google" caption or relative timestamp, since those are genuinely Google-only facts.
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     574 passed  (npm test) — unchanged; both fixes are presentational/form-handling, no new
+                         pure logic warranted new test coverage beyond what already covers
+                         updateBusinessListFieldAction's row-parsing pattern.
+Build:     next build succeeds.
+Manual:    Not yet re-verified in a live browser session — pending user confirmation on both the
+           5-column desktop layout and the manual rating selector.
+```
+
+## Files changed
+
+```
+web/app/b/[slug]/template/TestimonialsSection.tsx                              MODIFIED — dynamic
+                                                                                 desktop column count
+web/app/admin/(dashboard)/businesses/[businessId]/RepeatableListEditor.tsx      MODIFIED — new
+                                                                                 type: 'select' field
+web/app/admin/(dashboard)/businesses/[businessId]/SectionContentEditor.tsx      MODIFIED — rating
+                                                                                 field wired into
+                                                                                 testimonials config
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                    MODIFIED —
+                                                                                 updateBusinessListFieldAction
+                                                                                 parses/validates rating
+```
+
+---
+
+## Testimonial reordering — interleave manual entries between Google reviews
+
+**Date:** 2026-07-23 (same day, direct user feedback)
+
+**Scope:** Manual testimonials always sorted before Google reviews, with no way to place one between two Google reviews — because there was no persisted ordering concept spanning both sources: `updateBusinessListFieldAction`'s testimonials branch always rebuilt the array as `[...manual, ...google]` on every save, and `importGoogleReviewsAction` did the same as `[...manual, ...google]` on every refresh, so even if the array had ever been interleaved some other way, either action would immediately re-sort it back to source-grouped.
+
+## Overview
+
+Gave every `BusinessTestimonial` a stable `id` — for Google-sourced entries this is just `googleReviewId` reused (already a stable per-review identifier from Google, no need for a second one); for manual entries, a `crypto.randomUUID()` minted once at creation and round-tripped through the admin form as a new hidden field. With stable identity in place, added a pure `mergeTestimonialsPreservingOrder()` helper that both `updateBusinessListFieldAction` (content edits) and `importGoogleReviewsAction` (Google refresh) now call instead of naively concatenating: it walks the *existing* array, replaces/drops entries of the source that changed (matched by `id`), leaves the other source's entries exactly where they were, and only appends brand-new entries at the end — so a custom interleaved order survives both a manual content edit and a Google refresh. On top of that, a new **`TestimonialsOrderEditor.tsx`** (up/down arrows, auto-save, no redirect) shows the full combined list — manual and Google together — and lets an admin move any entry to any position, including between two Google reviews, via a new `reorderTestimonialsAction`.
+
+## Key changes
+
+- `domain/models/business.ts` / `domain/schemas/business.schema.ts` — `BusinessTestimonial.id: string` (required), `.default(() => crypto.randomUUID())` as a parse-time-only safety net for pre-existing records (application code always sets `id` explicitly at creation, since a default alone is never actually persisted by `updateBusiness()` — see "Verification" below for why that distinction matters).
+- `lib/google-places/reviews.ts` — `mapGoogleReviewToTestimonial()` now sets `id: googleReviewId ?? crypto.randomUUID()`, making a Google review's identity stable across every future refresh.
+- `lib/testimonials/merge.ts` (new) — `mergeTestimonialsPreservingOrder(existing, { source, items })`, pure and unit-tested (`lib/testimonials/__tests__/merge.test.ts`, 5 tests covering untouched-source preservation, in-place replacement, removal, brand-new append, and the specific "Google refresh doesn't undo a custom interleave" regression case).
+- `app/admin/(dashboard)/businesses/[businessId]/actions.ts`:
+  - `updateBusinessListFieldAction`'s testimonials branch now parses a hidden `id` field per row (blank → mint a new one) and calls the merge helper instead of concatenating.
+  - `importGoogleReviewsAction` likewise calls the merge helper (after carrying over each review's prior `hidden` state, matched by `id` — same as before, `id` and `googleReviewId` are just the same value now).
+  - New `reorderTestimonialsAction(businessId, orderedIds)` — resolves each submitted id against the business's current testimonials, rebuilds the array in that order (any id the client's snapshot somehow omitted is defensively appended at the end, never silently dropped).
+  - `GoogleReviewsState` renamed `TestimonialsState` (now shared by three actions covering both sources, not just the Google-specific two).
+- `RepeatableListEditor.tsx` — new `type: 'hidden'` field variant (bare `<input type="hidden">`, no visible label/wrapper) — purely additive, every other list using this shared component (faq/process/services/etc.) is unaffected.
+- `SectionContentEditor.tsx` — testimonials config gains a hidden `id` field (first in the list) so the manual form round-trips each row's identity.
+- `TestimonialsOrderEditor.tsx` (new, client) — reuses `section-order.ts`'s existing generic `moveSection()` pure helper and the same "compute next value first, call persist as a top-level statement, never from inside a setState updater" pattern `SectionConfigForm.tsx`'s website-sections reorder control already established (a nested-dispatch version of this exact pattern crashed there once before — see build_log.md, "admin/businesses: filters..."). Rendered above `GoogleReviewsPanel` in the testimonials section's expanded panel; hidden entirely when there are 0–1 testimonials (nothing to reorder).
+
+## Verification
+
+```
+Lint:      0 errors    (npm run lint)
+TypeCheck: 0 errors    (npx tsc --noEmit)
+Tests:     579 passed  (npm test) — 5 new tests (lib/testimonials/__tests__/merge.test.ts); updated
+                         the one exact-match reviews.test.ts assertion and two BusinessTestimonial
+                         test fixtures (availability.test.ts) for the new required `id` field.
+Build:     next build succeeds.
+Manual:    Not yet re-verified in a live browser session — pending user confirmation that dragging
+           a manual testimonial between two Google reviews via the new order editor, then later
+           editing manual content or refreshing Google reviews, actually preserves the arrangement.
+```
+
+## Files changed
+
+```
+web/domain/models/business.ts                                                    MODIFIED — id field
+web/domain/schemas/business.schema.ts                                            MODIFIED — id + default
+web/lib/google-places/reviews.ts                                                 MODIFIED — id = googleReviewId
+web/lib/google-places/__tests__/reviews.test.ts                                  MODIFIED — id in fixture
+web/lib/testimonials/merge.ts                                                    NEW
+web/lib/testimonials/__tests__/merge.test.ts                                     NEW
+web/lib/website-sections/__tests__/availability.test.ts                          MODIFIED — id in fixtures
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                     MODIFIED — merge-based
+                                                                                   writes, reorder action,
+                                                                                   TestimonialsState rename
+web/app/admin/(dashboard)/businesses/[businessId]/RepeatableListEditor.tsx        MODIFIED — type: 'hidden'
+web/app/admin/(dashboard)/businesses/[businessId]/SectionContentEditor.tsx        MODIFIED — hidden id
+                                                                                   field + order editor wired in
+web/app/admin/(dashboard)/businesses/[businessId]/TestimonialsOrderEditor.tsx     NEW
+```

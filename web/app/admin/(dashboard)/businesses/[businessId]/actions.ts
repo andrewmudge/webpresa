@@ -1,7 +1,7 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
-import type { Business } from '@/domain/models/business';
+import type { Business, BusinessTestimonial } from '@/domain/models/business';
 import type { HeroStyle, PreviewContact, PreviewContent, PreviewCta, PreviewCtaConfig, PreviewSocialLink, PreviewTheme } from '@/domain/models/site-preview';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { PreviewContentSchema, PreviewThemeSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
@@ -26,6 +26,9 @@ import { WebsiteSectionsConfigSchema } from '@/domain/schemas/website-sections.s
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
 import { recommendWebsiteSections } from '@/lib/website-sections/recommend';
 import { hasResolvableCta } from '@/lib/website-sections/availability';
+import { enableWebsiteSection } from '@/lib/website-sections/resolve';
+import { fetchAndMapGoogleReviews } from '@/lib/google-places/reviews';
+import { mergeTestimonialsPreservingOrder } from '@/lib/testimonials/merge';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
@@ -1247,8 +1250,38 @@ export async function updateBusinessListFieldAction(
   try {
     let update: Partial<Business>;
     if (field === 'testimonials') {
-      const rows = parseIndexedList(formData, 'testimonials', ['author', 'quote']).filter((r) => r.author && r.quote);
-      update = { testimonials: rows.map((r) => ({ author: r.author.slice(0, 100), quote: r.quote.slice(0, 500) })) };
+      // This form only ever submits manually-entered rows — Google-sourced
+      // testimonials (source: 'google') have no inputs in it at all (see
+      // GoogleReviewsPanel). `updateBusiness`'s merge is shallow at the top
+      // level, so writing `testimonials` here replaces the WHOLE array; the
+      // business must be fetched first so existing Google reviews (and the
+      // overall interleaved order — see TestimonialsOrderEditor.tsx) are
+      // preserved rather than silently wiped out or reset by every save.
+      const business = await getBusinessById(businessId);
+      if (!business) return { message: 'Business not found' };
+      const rows = parseIndexedList(formData, 'testimonials', ['id', 'author', 'quote', 'rating']).filter(
+        (r) => r.author && r.quote,
+      );
+      const manualTestimonials = rows.map((r) => {
+        const ratingNum = Number(r.rating);
+        const rating = r.rating && Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 5 ? ratingNum : undefined;
+        return {
+          // A blank id (the hidden field's default for a row added this
+          // submission) means "brand new" — mint a real one now, the same
+          // moment every other manual testimonial gets its id.
+          id: r.id || crypto.randomUUID(),
+          author: r.author.slice(0, 100),
+          quote: r.quote.slice(0, 500),
+          source: 'manual' as const,
+          ...(rating !== undefined ? { rating } : {}),
+        };
+      });
+      update = {
+        testimonials: mergeTestimonialsPreservingOrder(business.testimonials ?? [], {
+          source: 'manual',
+          items: manualTestimonials,
+        }),
+      };
     } else if (field === 'faqItems') {
       const rows = parseIndexedList(formData, 'faq', ['question', 'answer']).filter((r) => r.question && r.answer);
       update = { faqItems: rows.map((r) => ({ question: r.question.slice(0, 200), answer: r.answer.slice(0, 1000) })) };
@@ -1264,6 +1297,149 @@ export async function updateBusinessListFieldAction(
   }
 
   redirect(`/admin/businesses/${businessId}?expandedSection=${BUSINESS_LIST_FIELD_TO_SECTION[field]}`);
+}
+
+// ---------------------------------------------------------------------------
+// Testimonials — Google Reviews (Stage 12 follow-on) and reordering
+// GoogleReviewsPanel.tsx / TestimonialsOrderEditor.tsx
+//
+// None of these redirect, matching the PhotoManager convention above: each
+// is dispatched imperatively via useActionState so the client can apply the
+// returned `testimonials` array optimistically without a full page reload.
+// ---------------------------------------------------------------------------
+
+export type TestimonialsState = { message?: string; testimonials?: BusinessTestimonial[] } | undefined;
+
+/**
+ * Manual "Import/Refresh Google Reviews" — the automatic fetch only runs
+ * once, at Google Places import time (see discover/actions.ts), so this is
+ * the only path for a business imported before this feature shipped, or for
+ * picking up new reviews Google has accumulated since the last fetch.
+ *
+ * Preserves each review's `hidden` state across a refresh (matched by
+ * `googleReviewId`, which doubles as `id` for Google-sourced testimonials —
+ * see lib/google-places/reviews.ts) — otherwise every refresh would
+ * silently un-hide anything an admin had previously hidden. Also preserves
+ * the overall interleaved order via `mergeTestimonialsPreservingOrder` —
+ * without it, a refresh would reset any custom ordering an admin set up via
+ * TestimonialsOrderEditor back to "all Google reviews together."
+ */
+export async function importGoogleReviewsAction(
+  businessId: string,
+  // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _prevState: TestimonialsState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _formData: FormData,
+): Promise<TestimonialsState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { message: 'Business not found' };
+  if (!business.googlePlaceId) {
+    return { message: 'This business has no Google Place ID — import it via Discover first.' };
+  }
+
+  let fresh: BusinessTestimonial[];
+  try {
+    fresh = await fetchAndMapGoogleReviews(business.googlePlaceId);
+  } catch (err) {
+    console.error('Failed to import Google reviews:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to fetch Google reviews. Please try again.' };
+  }
+
+  const existing = business.testimonials ?? [];
+  const priorHiddenById = new Map(existing.filter((t) => t.source === 'google').map((t) => [t.id, t.hidden ?? false]));
+  const googleTestimonials = fresh.map((t) => ({ ...t, hidden: priorHiddenById.get(t.id) ?? false }));
+
+  const testimonials = mergeTestimonialsPreservingOrder(existing, { source: 'google', items: googleTestimonials });
+
+  try {
+    await updateBusiness(businessId, {
+      testimonials,
+      ...(googleTestimonials.length > 0 ? { websiteSections: enableWebsiteSection(business, 'testimonials') } : {}),
+    });
+  } catch (err) {
+    console.error('Failed to save imported Google reviews:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save imported reviews. Please try again.' };
+  }
+
+  return { testimonials };
+}
+
+const ToggleGoogleReviewSchema = z.object({ googleReviewId: z.string().min(1) });
+
+/** Hides or shows one Google-sourced review without touching its content. */
+export async function toggleGoogleReviewVisibilityAction(
+  businessId: string,
+  _prevState: TestimonialsState,
+  formData: FormData,
+): Promise<TestimonialsState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = ToggleGoogleReviewSchema.safeParse({ googleReviewId: formData.get('googleReviewId') });
+  if (!parsed.success) return { message: 'Missing review to toggle.' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { message: 'Business not found' };
+
+  const testimonials = (business.testimonials ?? []).map((t) =>
+    t.source === 'google' && t.googleReviewId === parsed.data.googleReviewId ? { ...t, hidden: !t.hidden } : t,
+  );
+
+  try {
+    await updateBusiness(businessId, { testimonials });
+  } catch (err) {
+    console.error('Failed to toggle Google review visibility:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to update review visibility. Please try again.' };
+  }
+
+  return { testimonials };
+}
+
+const ReorderTestimonialsSchema = z.object({ order: z.array(z.string().min(1)).min(1) });
+
+/**
+ * Reorders the FULL testimonials list — manual and Google-sourced entries
+ * interleaved freely, e.g. inserting a manual testimonial between two
+ * Google reviews — driven by TestimonialsOrderEditor.tsx's up/down arrows.
+ * Content and hidden-state are untouched; only array position changes.
+ */
+export async function reorderTestimonialsAction(
+  businessId: string,
+  _prevState: TestimonialsState,
+  formData: FormData,
+): Promise<TestimonialsState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = ReorderTestimonialsSchema.safeParse({ order: formData.getAll('order') });
+  if (!parsed.success) return { message: 'Missing new order.' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { message: 'Business not found' };
+
+  const existing = business.testimonials ?? [];
+  const byId = new Map(existing.map((t) => [t.id, t]));
+  const reordered = parsed.data.order
+    .map((id) => byId.get(id))
+    .filter((t): t is BusinessTestimonial => t !== undefined);
+  // Defensive: never silently drop a testimonial the client's submitted
+  // order somehow omitted (e.g. a stale snapshot) — append it at the end.
+  const includedIds = new Set(reordered.map((t) => t.id));
+  const missing = existing.filter((t) => !includedIds.has(t.id));
+  const testimonials = [...reordered, ...missing];
+
+  try {
+    await updateBusiness(businessId, { testimonials });
+  } catch (err) {
+    console.error('Failed to reorder testimonials:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save new order. Please try again.' };
+  }
+
+  return { testimonials };
 }
 
 // ---------------------------------------------------------------------------

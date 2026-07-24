@@ -7,6 +7,12 @@ interface FieldSpec {
   label: string;
   multiline?: boolean;
   maxLength?: number;
+  /** Renders a `<select>` instead of a text input/textarea, or a bare
+   *  `<input type="hidden">` with no visible label/wrapper at all — used to
+   *  round-trip an item's stable identity (e.g. testimonials' `id`) through
+   *  a save without the admin ever seeing or editing it. */
+  type?: 'select' | 'hidden';
+  options?: { value: string; label: string }[];
 }
 
 interface Item {
@@ -72,28 +78,52 @@ export function RepeatableListEditor({
       {items.map((item, position) => (
         <div key={item.id} className="rounded-lg border border-gray-200 p-3 flex gap-3">
           <div className="flex-1 space-y-2">
-            {fields.map((field) => (
-              <div key={field.key}>
-                <label className="block text-xs font-medium text-gray-500 mb-1">{field.label}</label>
-                {field.multiline ? (
-                  <textarea
-                    name={`${name}.${position}.${field.key}`}
-                    defaultValue={item.values[field.key] ?? ''}
-                    maxLength={field.maxLength}
-                    rows={2}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
-                  />
-                ) : (
+            {fields.map((field) => {
+              if (field.type === 'hidden') {
+                return (
                   <input
-                    type="text"
+                    key={field.key}
+                    type="hidden"
                     name={`${name}.${position}.${field.key}`}
                     defaultValue={item.values[field.key] ?? ''}
-                    maxLength={field.maxLength}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
                   />
-                )}
-              </div>
-            ))}
+                );
+              }
+              return (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{field.label}</label>
+                  {field.type === 'select' ? (
+                    <select
+                      name={`${name}.${position}.${field.key}`}
+                      defaultValue={item.values[field.key] ?? ''}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+                    >
+                      {(field.options ?? []).map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.multiline ? (
+                    <textarea
+                      name={`${name}.${position}.${field.key}`}
+                      defaultValue={item.values[field.key] ?? ''}
+                      maxLength={field.maxLength}
+                      rows={2}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      name={`${name}.${position}.${field.key}`}
+                      defaultValue={item.values[field.key] ?? ''}
+                      maxLength={field.maxLength}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
           <div className="flex flex-col gap-1 shrink-0">
             <button

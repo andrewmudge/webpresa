@@ -66,6 +66,10 @@ vi.mock('@/lib/theme/select-theme', () => ({
   resolveBusinessThemeForSeed: vi.fn(),
 }));
 
+vi.mock('@/lib/google-places/reviews', () => ({
+  fetchAndMapGoogleReviews: vi.fn(),
+}));
+
 vi.mock('@/lib/auth/session', () => ({
   getSession: mockGetSession,
 }));

@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
     unoptimized: true,
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
+      // Google reviewer avatars (authorAttribution.photoUri) — a directly
+      // hotlinkable Google CDN URL, not a Google Place Photo. See
+      // lib/google-places/reviews.ts.
+      { protocol: 'https', hostname: '*.googleusercontent.com' },
     ],
   },
 };

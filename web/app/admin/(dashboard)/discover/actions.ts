@@ -5,12 +5,14 @@ import type { Business } from '@/domain/models/business';
 import type { GooglePlaceSearchResult } from '@/domain/models/google-places';
 import { GooglePlaceSearchResultSchema } from '@/domain/schemas/google-places.schema';
 import { createBusiness } from '@/domain/factories/business.factory';
-import { putBusiness, resolveUniqueSlug } from '@/lib/db/businesses';
+import { putBusiness, updateBusiness, resolveUniqueSlug } from '@/lib/db/businesses';
 import { getSession } from '@/lib/auth/session';
 import { searchGooglePlaces } from '@/lib/google-places/search';
 import { GooglePlacesApiError } from '@/lib/google-places/client';
 import { findDuplicateSignalsForBatch } from '@/lib/google-places/duplicates';
 import { isIndustry } from '@/lib/google-places/industry-map';
+import { fetchAndMapGoogleReviews } from '@/lib/google-places/reviews';
+import { enableWebsiteSection } from '@/lib/website-sections/resolve';
 
 // ---------------------------------------------------------------------------
 // Search — manual, admin-initiated only. Never runs Firecrawl, Playwright,
@@ -213,6 +215,28 @@ export async function importSelectedPlacesAction(
 
       await putBusiness(record);
       state.imported += 1;
+
+      // Automatic Google reviews import (Stage 12 follow-on) — best-effort,
+      // never allowed to fail the business import itself. A fetch failure
+      // here just means the business ends up with no testimonials yet; an
+      // admin can retry from the business detail page's "Import/Refresh
+      // Google Reviews" action.
+      if (record.googlePlaceId) {
+        try {
+          const googleTestimonials = await fetchAndMapGoogleReviews(record.googlePlaceId);
+          if (googleTestimonials.length > 0) {
+            await updateBusiness(record.businessId, {
+              testimonials: googleTestimonials,
+              websiteSections: enableWebsiteSection(record, 'testimonials'),
+            });
+          }
+        } catch (reviewErr) {
+          console.error('[google-places] reviews import failed', {
+            placeId: record.googlePlaceId,
+            message: reviewErr instanceof Error ? reviewErr.message : String(reviewErr),
+          });
+        }
+      }
     } catch (err) {
       state.failed += 1;
       state.failures.push({ name: result.name, reason: 'Could not save business' });

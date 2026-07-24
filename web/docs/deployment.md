@@ -265,7 +265,7 @@ Webpresa's Places API calls run entirely server-side (Next.js Server Actions / R
 ### Quota limits and budget alerts
 
 - Set a daily request quota on the Places API (New) console page sized for manual, admin-driven searches — Stage 12 has no automated batch mode, so the limit should be low.
-- Configure a Google Cloud Billing budget alert (a modest monthly threshold) that notifies before real spend becomes significant. Places API (New) bills per request, and `rating`/`userRatingCount`/`regularOpeningHours` sit in a higher-cost tier than basic identity/location fields — see `implementation.md`, Stage 12, "Economical field-mask requirements."
+- Configure a Google Cloud Billing budget alert (a modest monthly threshold) that notifies before real spend becomes significant. Places API (New) bills per request, and `rating`/`userRatingCount`/`regularOpeningHours` sit in a higher-cost tier than basic identity/location fields — see `implementation.md`, Stage 12, "Economical field-mask requirements." The Stage 12 follow-on Place Details `reviews` field mask (`lib/google-places/client.ts`'s `getPlaceReviews()`, used to populate individual Google reviews into the Testimonials section) sits in that same higher-cost SKU tier — factor one Details call per Google Places import into the same budget alert.
 - No Google Places Photos API access, quota, or S3 storage permission is required for Stage 12. Stage 12 does not download or store Google Places photos (see `implementation.md` and `architecture.md`) — do not enable that capability or grant any photo-storage IAM permission as part of this stage's setup.
 
 ### Secret name, JSON shape, and environment variable

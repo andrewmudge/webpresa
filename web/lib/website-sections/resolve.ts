@@ -6,8 +6,9 @@ import {
   REQUIRED_SECTION_TYPES,
   SECTION_CONFIG_VERSION,
 } from '@/domain/constants/website-sections';
-import { WebsiteSectionConfigSchema } from '@/domain/schemas/website-sections.schema';
+import { WebsiteSectionConfigSchema, WebsiteSectionsConfigSchema } from '@/domain/schemas/website-sections.schema';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
+import type { Business } from '@/domain/models/business';
 
 /**
  * Lenient, render-safe resolution of a business's stored section
@@ -112,4 +113,25 @@ export function resolveSectionWarnings(
   return sections
     .filter((s) => s.enabled && !(REQUIRED_SECTION_TYPES as readonly string[]).includes(s.component) && !availability[s.component])
     .map((s) => s.component);
+}
+
+/**
+ * Forces one section on in a business's resolved configuration, overriding
+ * even an explicitly-stored `enabled: false` — `resolveStoredOrDefaultSections`
+ * on its own only ever backfills a section that was never stored at all, so
+ * it can't be relied on to turn a previously-disabled section back on.
+ *
+ * Used as a "dual-write on population" step (matching the existing theme/
+ * photo/CTA precedent — see architecture.md) whenever real Google reviews
+ * get attached to a business: the Testimonials section should "just show up"
+ * rather than requiring a separate manual admin toggle.
+ */
+export function enableWebsiteSection(
+  business: Pick<Business, 'websiteSections'>,
+  sectionType: WebsiteSectionType,
+): WebsiteSectionsConfig {
+  const sections = resolveStoredOrDefaultSections(business.websiteSections).map((s) =>
+    s.component === sectionType ? { ...s, enabled: true } : s,
+  );
+  return WebsiteSectionsConfigSchema.parse({ sectionConfigVersion: SECTION_CONFIG_VERSION, sections });
 }

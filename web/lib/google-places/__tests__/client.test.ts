@@ -14,7 +14,7 @@ vi.mock('@/lib/secrets', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { searchPlacesText, GooglePlacesApiError } from '../client';
+import { searchPlacesText, getPlaceReviews, GooglePlacesApiError } from '../client';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -98,6 +98,47 @@ describe('searchPlacesText', () => {
 
     await expect(searchPlacesText('x')).rejects.toMatchObject({ category: 'unknown' });
 
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('getPlaceReviews', () => {
+  it('sends a GET request to the Place Details endpoint with a reviews-only field mask', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        reviews: [{ name: 'places/place_1/reviews/review_1', rating: 5, text: { text: 'Great!' } }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const reviews = await getPlaceReviews('place_1');
+
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].rating).toBe(5);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://places.googleapis.com/v1/places/place_1');
+    expect(init.method).toBe('GET');
+    expect(init.headers['X-Goog-Api-Key']).toBe('test-key');
+    expect(init.headers['X-Goog-FieldMask']).toMatch(/^reviews\./);
+    expect(init.headers['X-Goog-FieldMask']).not.toMatch(/photo/i);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns an empty array when the place has no reviews', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    await expect(getPlaceReviews('place_1')).resolves.toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('categorizes a non-2xx response the same way searchPlacesText does', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: { status: 'PERMISSION_DENIED' } }) }),
+    );
+    await expect(getPlaceReviews('place_1')).rejects.toMatchObject({ category: 'permission_denied' });
     vi.unstubAllGlobals();
   });
 });

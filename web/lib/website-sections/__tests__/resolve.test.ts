@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveStoredOrDefaultSections, resolveRenderableSections, resolveSectionWarnings } from '../resolve';
+import { resolveStoredOrDefaultSections, resolveRenderableSections, resolveSectionWarnings, enableWebsiteSection } from '../resolve';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
 import { WEBSITE_SECTION_TYPES, SECTION_CONFIG_VERSION } from '@/domain/constants/website-sections';
 import type { WebsiteSectionsConfig, WebsiteSectionConfig } from '@/domain/models/website-sections';
@@ -144,5 +144,29 @@ describe('resolveSectionWarnings', () => {
     );
     const warnings = resolveSectionWarnings(sections, noneAvailable());
     expect(warnings).not.toContain('gallery');
+  });
+});
+
+describe('enableWebsiteSection', () => {
+  it('forces a section on even when explicitly stored as disabled', () => {
+    const sections = createDefaultWebsiteSectionsConfig().sections.map((s) =>
+      s.component === 'testimonials' ? { ...s, enabled: false } : s,
+    );
+    const stored: WebsiteSectionsConfig = { sectionConfigVersion: SECTION_CONFIG_VERSION, sections };
+
+    const result = enableWebsiteSection({ websiteSections: stored }, 'testimonials');
+
+    expect(result.sections.find((s) => s.component === 'testimonials')?.enabled).toBe(true);
+  });
+
+  it('leaves every other section untouched', () => {
+    const result = enableWebsiteSection({ websiteSections: undefined }, 'testimonials');
+    const defaults = createDefaultWebsiteSectionsConfig().sections;
+
+    for (const type of WEBSITE_SECTION_TYPES) {
+      if (type === 'testimonials') continue;
+      const expected = defaults.find((s) => s.component === type)?.enabled;
+      expect(result.sections.find((s) => s.component === type)?.enabled).toBe(expected);
+    }
   });
 });

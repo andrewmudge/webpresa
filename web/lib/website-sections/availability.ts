@@ -9,10 +9,13 @@ import type { WebsiteSectionType } from '@/domain/constants/website-sections';
  * instead (see `resolveSectionWarnings` in `resolve.ts`).
  *
  * Adapted to the current data model:
- * - `reviews` reads `Business.googleReviewCount`, reserved ahead of Stage 12
- *   (Google Places) — always `false` today since nothing populates it yet.
- * - `testimonials` / `faqItems` / `processSteps` are manually-verified
- *   Business fields with no admin entry UI yet — always `false` today.
+ * - `reviews` reads `Business.googleReviewCount`, populated by the Stage 12
+ *   Google Places import flow (aggregate rating/count only).
+ * - `testimonials` reads `Business.testimonials`, populated by admin manual
+ *   entry and/or the Stage 12 follow-on Google Places reviews import —
+ *   excludes admin-hidden Google reviews, so a business whose only
+ *   testimonials are all hidden correctly reports itself unavailable.
+ * - `faqItems` / `processSteps` are manually-verified Business fields.
  * - `gallery` reuses the existing `Business.photoUrls` upload, so it's
  *   genuinely available whenever a business has uploaded at least one photo.
  * - `serviceAreas` reads the generated preview's `content.serviceAreas`
@@ -43,7 +46,7 @@ export function computeSectionAvailability({
     whyChooseUs: (content?.differentiators?.length ?? 0) >= 1,
     about: (content?.aboutText.trim().length ?? 0) > 0,
     reviews: (business.googleReviewCount ?? 0) >= 1,
-    testimonials: (business.testimonials?.length ?? 0) >= 1,
+    testimonials: (business.testimonials?.filter((t) => !t.hidden).length ?? 0) >= 1,
     serviceAreas: (content?.serviceAreas?.length ?? 0) >= 1,
     process: (business.processSteps?.length ?? 0) >= 1,
     faq: (business.faqItems?.length ?? 0) >= 1,

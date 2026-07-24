@@ -91,11 +91,22 @@ describe('computeSectionAvailability', () => {
 
   it('testimonials is available only when at least one testimonial exists', () => {
     const withTestimonials = computeSectionAvailability({
-      business: business({ testimonials: [{ author: 'Jane D.', quote: 'Great work!' }] }),
+      business: business({ testimonials: [{ id: 't1', author: 'Jane D.', quote: 'Great work!', source: 'manual' }] }),
       content: undefined,
       hasCta: false,
     });
     expect(withTestimonials.testimonials).toBe(true);
+  });
+
+  it('testimonials is unavailable when every testimonial is hidden', () => {
+    const allHidden = computeSectionAvailability({
+      business: business({
+        testimonials: [{ id: 't2', author: 'Google User', quote: 'Great work!', source: 'google', hidden: true }],
+      }),
+      content: undefined,
+      hasCta: false,
+    });
+    expect(allHidden.testimonials).toBe(false);
   });
 
   it('faq is available only when at least one FAQ item exists', () => {

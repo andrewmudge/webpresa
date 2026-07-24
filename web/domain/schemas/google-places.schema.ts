@@ -59,6 +59,35 @@ export const GooglePlacesTextSearchResponseSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Raw Google Place Details (New) "reviews" response validation
+//
+// A separate call from Text Search above — `getPlaceReviews()` in
+// `lib/google-places/client.ts` — requesting only the `reviews` field mask.
+// Google caps this at 5 reviews per place; non-configurable, no pagination.
+// ---------------------------------------------------------------------------
+
+const GoogleAuthorAttributionSchema = z.object({
+  displayName: z.string().optional(),
+  uri: z.string().optional(),
+  photoUri: z.string().optional(),
+});
+
+export const GooglePlaceReviewSchema = z.object({
+  name: z.string().optional(),
+  rating: z.number().optional(),
+  text: LocalizedTextSchema.optional(),
+  originalText: LocalizedTextSchema.optional(),
+  authorAttribution: GoogleAuthorAttributionSchema.optional(),
+  relativePublishTimeDescription: z.string().optional(),
+  publishTime: z.string().optional(),
+});
+export type GooglePlaceReview = z.infer<typeof GooglePlaceReviewSchema>;
+
+export const GooglePlaceDetailsReviewsResponseSchema = z.object({
+  reviews: z.array(GooglePlaceReviewSchema).optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Transient search-result round-trip validation
 //
 // The review UI carries each result back to the import Server Action as a

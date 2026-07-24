@@ -13,13 +13,46 @@ import type { PreviewCtaConfig } from './site-preview';
 // read from (see `lib/website-sections/`). `googleRating`/`googleReviewCount`
 // are the natural next fields once Stage 12 (Google Places) exists, mirroring
 // how `googlePlaceId`/`googleMapsUrl` were reserved ahead of that stage.
-// `testimonials`/`faqItems`/`processSteps` are manually verified content —
-// no code path may auto-generate entries for these.
+// `faqItems`/`processSteps` are manually verified content — no code path may
+// auto-generate entries for these. `testimonials` is the one deliberate
+// exception (Stage 12 follow-on, see `lib/google-places/reviews.ts`):
+// `source: 'google'` entries ARE auto-generated, from Google's own Place
+// Details reviews (capped at 5 per place by Google, never editable — only
+// hideable — to respect Google's API terms on not altering review content).
+// `source: 'manual'` entries remain fully admin-editable exactly as before.
 // ---------------------------------------------------------------------------
 
+export const TESTIMONIAL_SOURCES = ['manual', 'google'] as const;
+export type TestimonialSource = (typeof TESTIMONIAL_SOURCES)[number];
+
 export interface BusinessTestimonial {
+  /** Stable identity, independent of array position — the admin-facing
+   *  order editor and the Google-refresh merge both key off this rather
+   *  than position, since content edits/refreshes rebuild the array.
+   *  For `source: 'google'` this always equals `googleReviewId` (Google's
+   *  own stable id already is one — no need for a second, separate value).
+   *  For `source: 'manual'` it's a `crypto.randomUUID()` assigned once at
+   *  creation and round-tripped through the admin form as a hidden field. */
+  id: string;
   author: string;
   quote: string;
+  source: TestimonialSource;
+  /** Admin can hide a Google-sourced review from the public site without deleting it. */
+  hidden?: boolean;
+  /** 1–5 star rating. Always present for Google reviews; optionally
+   *  admin-settable for manual testimonials too (a "Rating" dropdown in the
+   *  admin form) so a manual card can render the same star row a Google
+   *  card does. */
+  rating?: number;
+  /** Google reviewer's avatar (`authorAttribution.photoUri`) — a hotlinkable Google
+   *  CDN URL, not a Google Place Photo. Google only. */
+  authorPhotoUrl?: string;
+  /** Google reviewer's own Maps/profile URL (`authorAttribution.uri`). Google only. */
+  authorProfileUrl?: string;
+  /** Google's review resource name (`review.name`) — also used as `id` (see above). Google only. */
+  googleReviewId?: string;
+  /** Google's relative time string, e.g. "2 months ago". Google only. */
+  publishTimeDescription?: string;
 }
 
 export interface BusinessFaqItem {

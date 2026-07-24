@@ -7,6 +7,7 @@ import {
   BUSINESS_SOURCES,
   ENRICHMENT_STATUSES,
   MANUAL_APPROVAL_REASONS,
+  TESTIMONIAL_SOURCES,
 } from '@/domain/models/business';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
@@ -77,7 +78,31 @@ export const BusinessSchema = z.object({
   googleRating: z.number().min(0).max(5).optional(),
   googleReviewCount: z.number().int().min(0).optional(),
   testimonials: z
-    .array(z.object({ author: z.string().min(1).max(100), quote: z.string().min(1).max(500) }))
+    .array(
+      z.object({
+        // Safety-net default for records written before this field existed
+        // — application code always sets `id` explicitly at creation (see
+        // domain/models/business.ts), since this default's freshly-generated
+        // value is only ever used for parse-time validation, never actually
+        // persisted by itself (relying on it alone would make `id` reshuffle
+        // on every read for any record that never went through app code).
+        id: z.string().default(() => crypto.randomUUID()),
+        author: z.string().min(1).max(100),
+        // 500 was sized for short, hand-typed manual testimonials. Real
+        // Google reviews run much longer (Google allows up to ~4096 chars)
+        // — the public card already clamps/truncates display via
+        // line-clamp-5 + "Read more", so the stored value just needs a
+        // generous ceiling, not a display-sized one.
+        quote: z.string().min(1).max(4000),
+        source: z.enum(TESTIMONIAL_SOURCES).default('manual'),
+        hidden: z.boolean().default(false),
+        rating: z.number().min(1).max(5).optional(),
+        authorPhotoUrl: z.string().url().optional(),
+        authorProfileUrl: z.string().url().optional(),
+        googleReviewId: z.string().optional(),
+        publishTimeDescription: z.string().max(50).optional(),
+      }),
+    )
     .max(20)
     .optional(),
   faqItems: z
