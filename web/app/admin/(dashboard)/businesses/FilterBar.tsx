@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import { INDUSTRIES } from '@/domain/constants/industries';
+import { QUALIFICATION_RESULTS } from '@/domain/models/website-assessment';
+import { QUALIFICATION_LABELS } from '@/lib/scoring/labels';
 
 export interface BusinessFilterValues {
   status?: string;
@@ -10,6 +12,7 @@ export interface BusinessFilterValues {
   state?: string;
   createdFrom?: string;
   createdTo?: string;
+  qualification?: string;
 }
 
 const selectClass =
@@ -23,12 +26,15 @@ function FilterSelect({
   options,
   allLabel,
   defaultValue,
+  formatLabel = (opt) => opt.replace(/_/g, ' '),
 }: {
   label: string;
   name: string;
   options: readonly string[];
   allLabel: string;
   defaultValue?: string;
+  /** Defaults to the raw option with underscores replaced — pass a lookup for nicer casing (e.g. qualification's "Manual Review", matching the badge shown elsewhere). */
+  formatLabel?: (opt: string) => string;
 }) {
   return (
     <div>
@@ -39,7 +45,7 @@ function FilterSelect({
         <option value="">{allLabel}</option>
         {options.map((opt) => (
           <option key={opt} value={opt}>
-            {opt.replace(/_/g, ' ')}
+            {formatLabel(opt)}
           </option>
         ))}
       </select>
@@ -87,10 +93,18 @@ function FilterInput({
 export function FilterBar({ values, hasActiveFilters }: { values: BusinessFilterValues; hasActiveFilters: boolean }) {
   return (
     <form method="GET" className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <FilterSelect label="Status" name="status" options={BUSINESS_STATUSES} allLabel="All statuses" defaultValue={values.status} />
         <FilterSelect label="Industry" name="industry" options={INDUSTRIES} allLabel="All industries" defaultValue={values.industry} />
         <FilterSelect label="Source" name="source" options={BUSINESS_SOURCES} allLabel="All sources" defaultValue={values.source} />
+        <FilterSelect
+          label="Qualification"
+          name="qualification"
+          options={QUALIFICATION_RESULTS}
+          allLabel="All qualifications"
+          defaultValue={values.qualification}
+          formatLabel={(opt) => QUALIFICATION_LABELS[opt as (typeof QUALIFICATION_RESULTS)[number]]}
+        />
         <FilterInput label="City" name="city" placeholder="Austin" defaultValue={values.city} />
         <FilterInput label="State" name="state" placeholder="TX" defaultValue={values.state} />
         <FilterInput label="Created from" name="createdFrom" type="date" defaultValue={values.createdFrom} />

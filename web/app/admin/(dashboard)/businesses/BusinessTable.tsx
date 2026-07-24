@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
+import { QUALIFICATION_LABELS, QUALIFICATION_TONE } from '@/lib/scoring/labels';
 import { DeleteBusinessRowButton } from './DeleteBusinessRowButton';
 
 /**
@@ -51,6 +52,8 @@ export function BusinessTable({ items }: { items: Business[] }) {
               <th className="px-4 py-3 font-medium text-gray-600">Status</th>
               <th className="px-4 py-3 font-medium text-gray-600">Source</th>
               <th className="px-4 py-3 font-medium text-gray-600">Created</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Score</th>
+              <th className="px-4 py-3 font-medium text-gray-600">Qualification</th>
               <th className="px-4 py-3 font-medium text-gray-600 text-right">Actions</th>
             </tr>
           </thead>
@@ -85,10 +88,40 @@ function BusinessRow({ business: b }: { business: Business }) {
       </td>
       <td className="px-4 py-3 text-gray-600">{b.source}</td>
       <td className="px-4 py-3 text-gray-400 text-xs">{new Date(b.createdAt).toLocaleDateString()}</td>
+      <td className="px-4 py-3">
+        <ScoreCell business={b} />
+      </td>
+      <td className="px-4 py-3">
+        <QualificationCell business={b} />
+      </td>
       <td className="px-4 py-3 text-right">
         <DeleteBusinessRowButton businessId={b.businessId} businessName={b.name} />
       </td>
     </tr>
+  );
+}
+
+/** Admin override always wins for display, matching `ScoringSection.tsx`'s "authoritative for prioritization" treatment — the original AI value is never lost, just not shown here when an override exists. */
+function ScoreCell({ business: b }: { business: Business }) {
+  const score = b.adminReviewedScore ?? b.websiteQualityScore;
+  if (score === undefined) return <span className="text-gray-300">—</span>;
+  return (
+    <span className="text-gray-900" title={b.adminReviewedScore !== undefined ? 'Admin override' : undefined}>
+      {score}
+    </span>
+  );
+}
+
+function QualificationCell({ business: b }: { business: Business }) {
+  const qualification = b.adminReviewedQualification ?? b.qualification;
+  if (!qualification) return <span className="text-gray-300">—</span>;
+  return (
+    <span
+      className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${QUALIFICATION_TONE[qualification]}`}
+      title={b.adminReviewedQualification ? 'Admin override' : undefined}
+    >
+      {QUALIFICATION_LABELS[qualification]}
+    </span>
   );
 }
 

@@ -339,6 +339,22 @@ describe('matchesBusinessFilters', () => {
     expect(matchesBusinessFilters(createdToday, { createdTo: '2026-07-16' })).toBe(false);
     expect(matchesBusinessFilters(createdToday, { createdFrom: '2026-07-18' })).toBe(false);
   });
+
+  it('matches on qualification (Stage 15)', () => {
+    const qualified = { ...business, qualification: 'qualified' as const };
+    expect(matchesBusinessFilters(qualified, { qualification: 'qualified' })).toBe(true);
+    expect(matchesBusinessFilters(qualified, { qualification: 'reject' })).toBe(false);
+  });
+
+  it('rejects a qualification filter when the business has never been scored', () => {
+    expect(matchesBusinessFilters(business, { qualification: 'qualified' })).toBe(false);
+  });
+
+  it('matches qualification against the admin-override value, not the original AI value, when an override is set', () => {
+    const overridden = { ...business, qualification: 'reject' as const, adminReviewedQualification: 'qualified' as const };
+    expect(matchesBusinessFilters(overridden, { qualification: 'qualified' })).toBe(true);
+    expect(matchesBusinessFilters(overridden, { qualification: 'reject' })).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

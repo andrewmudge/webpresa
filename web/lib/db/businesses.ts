@@ -34,6 +34,8 @@ export interface ListBusinessesOptions {
   createdFrom?: string;
   /** Inclusive upper bound on createdAt, as a YYYY-MM-DD date string. */
   createdTo?: string;
+  /** Filter by qualification (Stage 15) — matches the effective value (`adminReviewedQualification` when set, else `qualification`). If omitted, all qualifications are returned. */
+  qualification?: string;
 }
 
 export interface ListBusinessesResult {
@@ -67,7 +69,7 @@ function decodeCursor(cursor: string): Record<string, unknown> | undefined {
 
 type BusinessFilters = Pick<
   ListBusinessesOptions,
-  'status' | 'industry' | 'source' | 'city' | 'state' | 'createdFrom' | 'createdTo'
+  'status' | 'industry' | 'source' | 'city' | 'state' | 'createdFrom' | 'createdTo' | 'qualification'
 >;
 
 function hasAnyFilter(filters: BusinessFilters): boolean {
@@ -80,7 +82,11 @@ function hasAnyFilter(filters: BusinessFilters): boolean {
  * inputs); status/industry/source are exact matches (dropdown filters);
  * createdFrom/createdTo compare against the date-only (YYYY-MM-DD) prefix
  * of `createdAt` so the "to" boundary includes the whole day, not just
- * midnight.
+ * midnight. `qualification` matches the effective value — the Stage 15
+ * admin override when set, else the AI-produced value — the same
+ * override-wins precedence `BusinessTable.tsx`'s `QualificationCell` already
+ * displays, so filtering by "Qualified" surfaces exactly what the list
+ * shows as qualified.
  */
 export function matchesBusinessFilters(business: Business, filters: BusinessFilters): boolean {
   if (filters.status && business.status !== filters.status) return false;
@@ -95,6 +101,9 @@ export function matchesBusinessFilters(business: Business, filters: BusinessFilt
   const createdDate = business.createdAt.slice(0, 10);
   if (filters.createdFrom && createdDate < filters.createdFrom) return false;
   if (filters.createdTo && createdDate > filters.createdTo) return false;
+  if (filters.qualification && (business.adminReviewedQualification ?? business.qualification) !== filters.qualification) {
+    return false;
+  }
   return true;
 }
 

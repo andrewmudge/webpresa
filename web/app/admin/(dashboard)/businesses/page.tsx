@@ -12,6 +12,7 @@ interface SearchParams {
   state?: string;
   createdFrom?: string;
   createdTo?: string;
+  qualification?: string;
 }
 
 interface Props {
@@ -32,15 +33,15 @@ function buildQueryString(filters: SearchParams, cursor?: string): string {
 }
 
 export default async function BusinessListPage({ searchParams }: Props) {
-  const { cursor, status, industry, source, city, state, createdFrom, createdTo } = await searchParams;
-  const filters: SearchParams = { status, industry, source, city, state, createdFrom, createdTo };
+  const { cursor, status, industry, source, city, state, createdFrom, createdTo, qualification } = await searchParams;
+  const filters: SearchParams = { status, industry, source, city, state, createdFrom, createdTo, qualification };
   const hasActiveFilters = Object.values(filters).some(Boolean);
 
   let result: Awaited<ReturnType<typeof listBusinesses>>;
   let loadError: string | undefined;
 
   try {
-    result = await listBusinesses({ limit: 50, cursor, status, industry, source, city, state, createdFrom, createdTo });
+    result = await listBusinesses({ limit: 50, cursor, status, industry, source, city, state, createdFrom, createdTo, qualification });
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load businesses';
     result = { items: [], nextCursor: undefined };

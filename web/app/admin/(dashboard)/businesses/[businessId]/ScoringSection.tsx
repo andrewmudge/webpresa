@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
 import type { ScanEvent } from '@/domain/models/scan-event';
 import { ASSESSMENT_CATEGORIES, QUALIFICATION_RESULTS, type AssessmentCategory } from '@/domain/models/website-assessment';
+import { QUALIFICATION_LABELS, QUALIFICATION_TONE } from '@/lib/scoring/labels';
 import { scoreWebsiteAction, overrideScoreAction, clearScoreOverrideAction } from './scoring-actions';
 
 /**
@@ -23,18 +24,6 @@ const CATEGORY_LABELS: Record<AssessmentCategory, string> = {
   contentQuality: 'Content Quality',
   accessibility: 'Accessibility',
   overallUserExperience: 'Overall User Experience',
-};
-
-const QUALIFICATION_LABELS: Record<string, string> = {
-  qualified: 'Qualified',
-  manual_review: 'Manual Review',
-  reject: 'Reject',
-};
-
-const QUALIFICATION_TONE: Record<string, string> = {
-  qualified: 'bg-green-50 text-green-700 border-green-200',
-  manual_review: 'bg-amber-50 text-amber-700 border-amber-200',
-  reject: 'bg-red-50 text-red-700 border-red-200',
 };
 
 const PRIORITY_LABELS: Record<string, string> = { high: 'High', medium: 'Medium', low: 'Low' };
