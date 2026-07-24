@@ -34,3 +34,19 @@ const DEFAULT_MODEL = 'gpt-4o-mini';
 export function getOpenAiModel(): string {
   return process.env.OPENAI_MODEL || DEFAULT_MODEL;
 }
+
+// ---------------------------------------------------------------------------
+// Scoring model — deliberately separate from OPENAI_MODEL/DEFAULT_MODEL
+// above. Stage 15 (AI Prospect Qualification & Website Analysis) output
+// drives real sales-prioritization decisions, so it defaults to a stronger
+// model than the Stage 11 content-generation path rather than sharing its
+// cost-optimized default. Configurable via OPENAI_SCORING_MODEL for the same
+// reason OPENAI_MODEL is configurable — never hardcode a model choice a
+// deployment can't override.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SCORING_MODEL = 'gpt-5.5';
+
+export function getOpenAiScoringModel(): string {
+  return process.env.OPENAI_SCORING_MODEL || DEFAULT_SCORING_MODEL;
+}

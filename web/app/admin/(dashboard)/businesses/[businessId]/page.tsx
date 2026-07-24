@@ -25,6 +25,7 @@ import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
 import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
+import { ScoringSection } from './ScoringSection';
 import { ScanImageReview } from './ScanImageReview';
 import { FoundContactInfo } from './FoundContactInfo';
 import { getLatestSnapshotForBusiness } from '@/lib/firecrawl/snapshot';
@@ -49,6 +50,8 @@ interface Props {
     expandedSection?: string;
     enrichmentResult?: string;
     screenshotResult?: string;
+    scoringResult?: string;
+    scoreOverride?: string;
     photoApproval?: string;
     contactApproval?: string;
   }>;
@@ -56,7 +59,15 @@ interface Props {
 
 export default async function BusinessDetailPage({ params, searchParams }: Props) {
   const { businessId } = await params;
-  const { expandedSection: expandedSectionRaw, enrichmentResult, screenshotResult, photoApproval, contactApproval } = await searchParams;
+  const {
+    expandedSection: expandedSectionRaw,
+    enrichmentResult,
+    screenshotResult,
+    scoringResult,
+    scoreOverride,
+    photoApproval,
+    contactApproval,
+  } = await searchParams;
   const initialExpandedSection = (WEBSITE_SECTION_TYPES as readonly string[]).includes(expandedSectionRaw ?? '')
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
@@ -207,6 +218,11 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       {/* Playwright screenshots (Stage 14) — existing-site and generated-preview captures, independent of each other and of Firecrawl enrichment above. */}
       <div className="mb-6">
         <ScreenshotsSection business={business} scans={scans} resultQuery={screenshotResult} />
+      </div>
+
+      {/* AI website assessment (Stage 15) — scores the existing_site scan; requires a completed Firecrawl enrichment above. */}
+      <div className="mb-6">
+        <ScoringSection business={business} scans={scans} resultQuery={scoringResult} overrideQuery={scoreOverride} />
       </div>
 
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}

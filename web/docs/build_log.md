@@ -4995,3 +4995,94 @@ web/app/admin/(dashboard)/businesses/[businessId]/SectionContentEditor.tsx      
                                                                                    field + order editor wired in
 web/app/admin/(dashboard)/businesses/[businessId]/TestimonialsOrderEditor.tsx     NEW
 ```
+
+# Stage 15 — AI Prospect Qualification & Website Analysis
+
+## Scope
+
+Full implementation per the revised Stage 15 section of `implementation.md` (rewritten this same session — see that file's Stage 15 for the full spec this build follows, including the "scope note" restricting scoring to the `existing_site` `ScanEvent` and the two deliberately-deferred pieces: outreach-channel recommendation and AI writes to `WebsiteSectionsConfig`). Depends on Stages 10, 12, 13, and 14, all already implemented. Scores a business's existing website using deterministic metrics computed by the app plus one OpenAI structured-output call (text + the Stage 14 screenshots as vision input), producing category scores, strengths/weaknesses, missing opportunities, an executive summary, confidence, lead priority, and a qualification recommendation — then applies deterministic overrides on top of the AI's own qualification. Per explicit user instruction, the scoring call uses a separate, stronger model default (`gpt-5.5`, configurable via `OPENAI_SCORING_MODEL`) than Stage 11's cost-optimized `OPENAI_MODEL`, since this output drives real sales-prioritization decisions.
+
+## Domain model
+
+- `domain/models/website-assessment.ts` (new) + `domain/schemas/website-assessment.schema.ts` (new) — `WebsiteAssessment` (the validated AI output: 12 category scores/explanations/suggested improvements, overall score, confidence, lead priority, qualification, strengths, weaknesses, missing opportunities, executive summary, top problems) and `WebsiteDeterministicMetrics` (the non-AI grounding metrics). Mirrors the `WebsiteEnrichmentSnapshot` precedent from Stage 13.
+- `domain/models/scan-event.ts` / `.schema.ts` — `SCAN_PROVIDERS` gained `'openai'`, `SCAN_OPERATIONS` gained `'score'`, `SCAN_FAILURE_CATEGORIES` gained `invalid_ai_schema_output`/`ai_request_failed`/`ai_timeout`. `ScanEvent` gained `deterministicMetrics?`, `assessment?`, `aiResponseArtifactKey?` (S3 key for the raw, unvalidated OpenAI response — audit-only, never read back into the app), `aiMetadata?` (model/promptVersion — no `temperature`, see "Post-implementation fix" below). `ScanScores` (the old Stage-15-reserved placeholder) is now documented as superseded by `assessment`, left in place unused — same treatment `ScanStorageKeys` got from `captureResults` ahead of Stage 14.
+- `domain/models/business.ts` / `.schema.ts` — new qualification-disposition fields mirroring the `enrichmentStatus` pattern from Stage 13: `qualification?`, `leadPriority?`, `websiteQualityScore?` (all AI-produced, never admin-edited directly), plus `adminReviewedQualification?`/`adminReviewedScore?` (the override — stored separately so the original AI assessment is always recoverable, per the acceptance criteria).
+
+## Deterministic metrics and qualification overrides
+
+- `lib/scoring/deterministic-metrics.ts` (new) — pure function computing the Stage 15 "Deterministic metrics" list from already-loaded `Business`/`ScanEvent`/`WebsiteEnrichmentSnapshot` records, no I/O of its own. Two fields are explicitly documented as heuristics rather than first-class signals, since no such signal exists yet: `firecrawlExtractionConfidence` (Firecrawl reports no confidence value — counts how many higher-signal snapshot fields came back populated) and `hoursDetected`/`contactFormDetected` (regex/keyword matching over crawled text — `Business` never persists structured hours, see Stage 12's "review context only" note).
+- `lib/scoring/qualification-rules.ts` (new) — `applyQualificationOverrides()`, a pure function implementing 2 of the 6 overrides listed in the original Stage 15 spec: "no website → qualified" and "website unavailable → manual review" (keyed off the business's most recent Firecrawl failure category). The other four ("closed business", "national chain", "government organization", "invalid address") are deliberately NOT enforced — no field on `Business` persists any of those signals today (Google Places' `businessStatus` is fetched live during discovery but explicitly never persisted, per Stage 12; there is no chain/government classification anywhere in the domain model). Documented inline as a real gap, not silently dropped — the AI can still down-rank/explain those cases in `assessment.weaknesses`/`executiveSummary`, just without a code-enforced override, until one of those signals is actually captured somewhere.
+
+## AI scoring call
+
+- `lib/ai/client.ts` — added `getOpenAiScoringModel()` (default `gpt-5.5`, env override `OPENAI_SCORING_MODEL`), deliberately separate from `getOpenAiModel()`/`OPENAI_MODEL` (Stage 11's cost-optimized default) for the reason above.
+- `lib/ai/score-website.ts` (new) — `scoreWebsite()`, mirroring `generate-preview.ts`'s shape: one `chat.completions.parse` + `zodResponseFormat` structured-output call, re-validated app-side against `WebsiteAssessmentSchema` afterward as defense in depth (same pattern as `PreviewContentSchema.parse()`). Unlike Stage 11's generation call, this one is multimodal — desktop/mobile screenshot signed URLs (when available) are sent as `image_url` content parts alongside the text prompt built from crawl content + deterministic metrics. The prompt explicitly instructs the model to base every judgment only on the supplied evidence and never invent business facts, same guardrail spirit as Stage 11's `GUARDRAILS` list.
+
+## Orchestration
+
+- `lib/scoring/score-business.ts` (new) — `scoreBusinessWebsite()`, mirroring `lib/firecrawl/enrich-business.ts`'s "small named steps, one ScanEvent per attempt" shape. Requires a completed Firecrawl scan to exist before running (Stage 15 evaluates evidence Stages 12–14 already gathered; it never crawls a website itself) — a missing/in-progress Firecrawl scan returns `not_eligible`. Two shortcuts skip the AI call entirely and just apply the qualification override directly: no website on file (`'completed'`, qualification forced to `'qualified'`) and a Firecrawl scan that failed as unreachable/blocked/invalid (`'manual_approval_required'`, qualification forced to `'manual_review'`). The success path stores the full `assessment` + `deterministicMetrics` on the `ScanEvent`, the raw unvalidated OpenAI response as an S3 artifact (`scans/{businessId}/{scanId}/ai-response.json`, following the `rawArtifactKey`/`extractedArtifactKey` pattern), and only the qualification-disposition rollup (`qualification`/`leadPriority`/`websiteQualityScore`) onto `Business` — never anything AI-discovered about the business itself, same "Business is canonical" boundary Stage 13 established. Failure classification (`classifyAiError`) maps a Zod validation failure to `invalid_ai_schema_output`, a timeout-shaped error to `ai_timeout`, and anything else OpenAI-side to `ai_request_failed`.
+- Active-scan conflict detection is scoped to `provider: 'openai', operation: 'score'` only, so an in-progress Firecrawl or Playwright scan never blocks a scoring attempt (matches Stage 14's per-target scoping, not Stage 13's business-wide guard).
+
+## Admin UI
+
+- `app/admin/(dashboard)/businesses/[businessId]/scoring-actions.ts` (new) — `scoreWebsiteAction` (redirect + query-param result banner, same shape as `enrichWebsiteAction`), `overrideScoreAction`/`clearScoreOverrideAction` (admin override form handlers). `clearScoreOverrideAction` uses `putBusiness` with the two override fields omitted rather than `updateBusiness`, since `updateBusiness` builds its DynamoDB `UpdateExpression` directly from whatever values it's given and is documented as unsafe to call with an explicit `undefined` — omitting a key from a full `putBusiness` write is this codebase's established way to actually clear an optional field (same reasoning `resetWebsiteSectionsAction` follows elsewhere).
+- `app/admin/(dashboard)/businesses/[businessId]/ScoringSection.tsx` (new) — mirrors `EnrichmentSection`'s plain-server-component shape: qualification/priority/score summary (with admin override shown alongside when set), latest-scan link, and — once a scored `ScanEvent` exists — executive summary, top problems, all 12 category score bars, strengths/weaknesses, missing opportunities, plus the override form itself. Wired into `page.tsx` directly below `ScreenshotsSection`, matching the natural Stage 13 → 14 → 15 reading order already established there.
+- `EnrichmentSection.tsx`'s `FAILURE_CATEGORY_LABELS` (a `Record<ScanFailureCategory, string>` covering every category regardless of provider, per its own doc comment) extended with labels for the three new Stage 15 failure categories — required by TypeScript since the type is exhaustive.
+
+## Post-implementation fix — `temperature` unsupported by the scoring model (found via live testing)
+
+First real "Score Website" click against the live OpenAI API failed every time: `400 Unsupported value: 'temperature' does not support 0.3 with this model. Only the default (1) value is supported.` `gpt-5.5` (the `DEFAULT_SCORING_MODEL` in `lib/ai/client.ts`) is a reasoning-class model — like the `o1`/`o3`/`gpt-5` families, it only accepts the API's default `temperature` (1) and rejects any explicit override, unlike `gpt-4o-mini` (Stage 11's generation model), which accepts the full 0–2 range. This was never caught by unit tests since the OpenAI client is mocked in every test — only a real API call surfaces a provider-side parameter rejection like this.
+
+Fixed by removing `temperature` from the scoring pipeline entirely rather than special-casing a value per model family:
+- `lib/ai/score-website.ts` — no longer sends `temperature` in the `chat.completions.parse` call; `SCORING_TEMPERATURE` constant removed; a comment explains why and flags that a future `OPENAI_SCORING_MODEL` swap to a non-reasoning model would silently lose temperature control under this approach (acceptable for now — revisit only if that actually happens).
+- `ScoredWebsite.metadata`, `ScanEvent.aiMetadata` (model + schema), and `lib/scoring/score-business.ts`'s persistence all dropped the `temperature` field — storing a value the app no longer controls or requests would be misleading.
+- `implementation.md`'s Stage 15 "Persistence" list and this file's own "Domain model" section above updated to match.
+- Test mocks in `lib/scoring/__tests__/score-business.test.ts` updated (mocked `scoreWebsite` metadata no longer includes `temperature`).
+
+## Verification
+
+```
+web/  Lint:      0 errors, 0 warnings (npm run lint)
+web/  TypeCheck: 0 errors (npx tsc --noEmit)
+web/  Tests:     617 passed (npx vitest run) — 38 new tests across
+                 lib/scoring/__tests__/deterministic-metrics.test.ts (12),
+                 lib/scoring/__tests__/qualification-rules.test.ts (6),
+                 lib/ai/__tests__/score-website.test.ts (5),
+                 lib/scoring/__tests__/score-business.test.ts (15)
+web/  Build:     next build succeeds
+Manual: Not yet exercised against the real OpenAI API or a live admin session —
+        pending user confirmation. No infra changes in this stage (no new AWS
+        resources; scoring runs as a Next.js Server Action calling OpenAI and
+        S3/DynamoDB directly, same execution model as Stage 13).
+```
+
+## Files changed
+
+```
+web/domain/models/website-assessment.ts                                          NEW
+web/domain/schemas/website-assessment.schema.ts                                  NEW
+web/domain/models/scan-event.ts                                                  MODIFIED — new provider/
+                                                                                     operation/failure categories,
+                                                                                     new fields
+web/domain/schemas/scan-event.schema.ts                                          MODIFIED — matching validation
+web/domain/models/business.ts                                                    MODIFIED — qualification
+                                                                                     disposition fields
+web/domain/schemas/business.schema.ts                                            MODIFIED — matching validation
+web/lib/ai/client.ts                                                             MODIFIED — getOpenAiScoringModel()
+web/lib/ai/score-website.ts                                                      NEW
+web/lib/scoring/deterministic-metrics.ts                                         NEW
+web/lib/scoring/qualification-rules.ts                                           NEW
+web/lib/scoring/score-business.ts                                                NEW
+web/app/admin/(dashboard)/businesses/[businessId]/scoring-actions.ts             NEW
+web/app/admin/(dashboard)/businesses/[businessId]/ScoringSection.tsx             NEW
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                       MODIFIED — wired in
+                                                                                     ScoringSection
+web/app/admin/(dashboard)/businesses/[businessId]/EnrichmentSection.tsx          MODIFIED — 3 new failure labels
+web/lib/ai/__tests__/score-website.test.ts                                       NEW
+web/lib/scoring/__tests__/deterministic-metrics.test.ts                          NEW
+web/lib/scoring/__tests__/qualification-rules.test.ts                           NEW
+web/lib/scoring/__tests__/score-business.test.ts                                 NEW
+web/docs/implementation.md                                                       MODIFIED — Stage 15 rewritten,
+                                                                                     Stage 14 status corrected
+                                                                                     (earlier this session)
+```

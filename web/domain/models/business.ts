@@ -4,6 +4,7 @@ import type { ThemeName } from '@/domain/constants/themes';
 import type { Address, MutableTimestampedRecord } from './common';
 import type { WebsiteSectionsConfig } from './website-sections';
 import type { PreviewCtaConfig } from './site-preview';
+import type { LeadPriority, QualificationResult } from './website-assessment';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -304,4 +305,35 @@ export interface Business extends MutableTimestampedRecord {
   manualApprovalReason?: ManualApprovalReason;
   /** Admin-visible explanation — see `lib/firecrawl/enrich-business.ts` for the exact required copy. */
   manualApprovalNote?: string;
+
+  // -------------------------------------------------------------------------
+  // AI prospect qualification disposition (Stage 15)
+  //
+  // A business-level, durable summary of the latest completed AI website
+  // assessment — the counterpart to `ScanEvent.assessment` (the full,
+  // scan-scoped detail), following the same "disposition on Business, full
+  // record on ScanEvent" split `enrichmentStatus` established. Set by
+  // `lib/scoring/score-business.ts` after each scoring attempt.
+  //
+  // `qualification`/`websiteQualityScore` are always the AI's own values —
+  // never overwritten by an admin override (see `adminReviewed*` below).
+  // `qualification` already reflects the deterministic overrides in
+  // `lib/scoring/qualification-rules.ts` (e.g. "no website" always resolves
+  // to `'qualified'`), so it is not always identical to the raw AI
+  // recommendation stored in `ScanEvent.assessment.qualification`.
+  // -------------------------------------------------------------------------
+
+  qualification?: QualificationResult;
+  leadPriority?: LeadPriority;
+  /** Rollup of the latest assessment's `overallScore` — for admin list/filter views. Never admin-editable directly; see `adminReviewedScore`. */
+  websiteQualityScore?: number;
+  /**
+   * Admin override — stored separately from `qualification`/
+   * `websiteQualityScore` so the original AI assessment always remains
+   * recoverable (Stage 15 acceptance criterion). When either is set, the
+   * admin UI treats it as authoritative for prioritization; the AI-produced
+   * fields above are left untouched.
+   */
+  adminReviewedQualification?: QualificationResult;
+  adminReviewedScore?: number;
 }

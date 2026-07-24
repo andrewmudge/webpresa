@@ -9,6 +9,7 @@ import {
   MANUAL_APPROVAL_REASONS,
   TESTIMONIAL_SOURCES,
 } from '@/domain/models/business';
+import { QUALIFICATION_RESULTS, LEAD_PRIORITIES } from '@/domain/models/website-assessment';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 import { PreviewCtaConfigSchema } from './site-preview.schema';
@@ -117,6 +118,11 @@ export const BusinessSchema = z.object({
   enrichmentStatus: z.enum(ENRICHMENT_STATUSES).optional(),
   manualApprovalReason: z.enum(MANUAL_APPROVAL_REASONS).optional(),
   manualApprovalNote: z.string().max(500).optional(),
+  qualification: z.enum(QUALIFICATION_RESULTS).optional(),
+  leadPriority: z.enum(LEAD_PRIORITIES).optional(),
+  websiteQualityScore: ScoreSchema.optional(),
+  adminReviewedQualification: z.enum(QUALIFICATION_RESULTS).optional(),
+  adminReviewedScore: ScoreSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

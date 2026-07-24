@@ -1,5 +1,6 @@
 import type { MutableTimestampedRecord } from './common';
 import type { ScanImageAsset } from './scan-image';
+import type { WebsiteAssessment, WebsiteDeterministicMetrics } from './website-assessment';
 
 // ---------------------------------------------------------------------------
 // Status, provider, operation, and failure-category enums
@@ -22,12 +23,13 @@ export const SCAN_STATUSES = [
 ] as const;
 export type ScanStatus = (typeof SCAN_STATUSES)[number];
 
-// 'playwright' (Stage 14 — screenshot capture) added alongside 'firecrawl'.
-export const SCAN_PROVIDERS = ['firecrawl', 'playwright'] as const;
+// 'playwright' (Stage 14 — screenshot capture) and 'openai' (Stage 15 — AI
+// scoring) added alongside 'firecrawl'.
+export const SCAN_PROVIDERS = ['firecrawl', 'playwright', 'openai'] as const;
 export type ScanProvider = (typeof SCAN_PROVIDERS)[number];
 
-// 'screenshot' (Stage 14) added alongside 'scrape'.
-export const SCAN_OPERATIONS = ['scrape', 'screenshot'] as const;
+// 'screenshot' (Stage 14) and 'score' (Stage 15) added alongside 'scrape'.
+export const SCAN_OPERATIONS = ['scrape', 'screenshot', 'score'] as const;
 export type ScanOperation = (typeof SCAN_OPERATIONS)[number];
 
 /**
@@ -35,7 +37,9 @@ export type ScanOperation = (typeof SCAN_OPERATIONS)[number];
  * copy and automatic-retry eligibility — see
  * `lib/firecrawl/retry.ts`'s `isRetryableFailureCategory`. The six
  * `browser_launch_failed`…`upload_failed` categories are Stage 14
- * (Playwright) specific; everything above them is Stage 13 (Firecrawl).
+ * (Playwright) specific; the three `invalid_ai_schema_output`…`ai_timeout`
+ * categories are Stage 15 (AI scoring) specific; everything above them is
+ * Stage 13 (Firecrawl).
  */
 export const SCAN_FAILURE_CATEGORIES = [
   'missing_website',
@@ -57,6 +61,9 @@ export const SCAN_FAILURE_CATEGORIES = [
   'blocked_by_bot_protection',
   'screenshot_failed',
   'upload_failed',
+  'invalid_ai_schema_output',
+  'ai_request_failed',
+  'ai_timeout',
   'unknown',
 ] as const;
 export type ScanFailureCategory = (typeof SCAN_FAILURE_CATEGORIES)[number];
@@ -73,8 +80,12 @@ export type ScanTargetType = (typeof SCAN_TARGET_TYPES)[number];
 // ---------------------------------------------------------------------------
 
 /**
- * Quality scores produced by a scan run, each on a 0–100 scale.
- * Reserved for Stage 15 (AI Website Scoring) — Stage 13 never writes these.
+ * Quality scores produced by a scan run, each on a 0–100 scale. An early,
+ * generic placeholder reserved ahead of Stage 15 — superseded by the much
+ * richer `WebsiteAssessment` shape (`ScanEvent.assessment` below), which
+ * Stage 15 actually writes. Left in place, unused, for backward
+ * compatibility with the reservation, mirroring how `ScanStorageKeys` was
+ * superseded by `captureResults` ahead of Stage 14.
  */
 export interface ScanScores {
   overall?: number;
@@ -185,6 +196,14 @@ export interface ScanEvent extends MutableTimestampedRecord {
   /** Stage 14 (Playwright) only — per-viewport capture outcome. */
   captureResults?: ScanCaptureResults;
   scores?: ScanScores;
+  /** Stage 15 (AI scoring) only — deterministic, non-AI grounding metrics fed into the prompt. */
+  deterministicMetrics?: WebsiteDeterministicMetrics;
+  /** Stage 15 (AI scoring) only — the validated AI assessment. Absent when scoring used the no-website shortcut (see `lib/scoring/score-business.ts`). */
+  assessment?: WebsiteAssessment;
+  /** Stage 15 (AI scoring) only — S3 key for the raw, unvalidated OpenAI response — `scans/{businessId}/{scanId}/ai-response.json`. Never read back into the app; preserved for audit only. */
+  aiResponseArtifactKey?: string;
+  /** Stage 15 (AI scoring) only — model/prompt metadata for the attempt that produced `assessment`. No `temperature` — the scoring model is reasoning-class and only supports its default value. */
+  aiMetadata?: { model: string; promptVersion: string };
   /** ISO 8601 timestamp — set when the scan transitions to `running`. */
   startedAt?: string;
   /** ISO 8601 timestamp — set when the scan reaches a terminal status. */

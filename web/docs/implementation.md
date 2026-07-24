@@ -1328,7 +1328,7 @@ Implemented after the initial build, in response to real usage — see `architec
 
 ## Status
 
-**Implemented 2026-07-22 — code-complete, not yet deployed.** Application and infrastructure code written and locally verified against every requirement below (domain model, Server Actions/admin UI, Lambda package, CDK constructs/stacks) — `cdk synth`/`cdk diff` run against the real dev account (additive-only diff, IAM reviewed by hand), the Lambda package's own typecheck/tests pass, and a real local Docker build with manual runtime smoke tests (handler load, Chromium launch + real screenshot, capture-token mint) all succeed. **No `cdk deploy` and no container-image push have been performed** — see `build_log.md`, "Stage 14 — Playwright Screenshots", "Deployment status" for the exact remaining steps, all pending explicit approval per this project's deployment gate. See `architecture.md`, "Playwright Screenshots (Stage 14)" for the full implementation record.
+**Implemented 2026-07-22, deployed to dev 2026-07-23.** Application and infrastructure code written and locally verified against every requirement below (domain model, Server Actions/admin UI, Lambda package, CDK constructs/stacks) — `cdk synth`/`cdk diff` run against the real dev account (additive-only diff, IAM reviewed by hand), the Lambda package's own typecheck/tests pass, and a real local Docker build with manual runtime smoke tests (handler load, Chromium launch + real screenshot, capture-token mint) all succeed. `WebpresaDevDataStack`, `WebpresaDevScreenshotRepositoryStack`, and `WebpresaDevScreenshotStack` are deployed, and a real end-to-end `existing_site` capture against the live Lambda has been verified (queued → running → completed, both viewport PNGs confirmed in S3). `generated_preview`'s live round-trip and the Vercel-side env vars (`SCREENSHOT_LAMBDA_FUNCTION_NAME`, etc.) are still outstanding — see `build_log.md`, "Stage 14 — CDK stack-ordering fix, pre-deploy testing, and dev deployment" for the exact remaining steps. See `architecture.md`, "Playwright Screenshots (Stage 14)" for the full implementation record.
 
 ## Objective
 
@@ -1603,93 +1603,154 @@ Preserves the manual-workflow philosophy Stages 12 and 13 already established: b
 
 ---
 
-# Stage 15 — AI Website Scoring
+# Stage 15 — AI Prospect Qualification & Website Analysis
 
 ## Objective
 
-Generate a structured, reviewable quality assessment of a business’s existing website.
+Generate a structured, reviewable assessment of a business's existing website that determines its quality, identifies improvement opportunities, and prioritizes it as a sales prospect. The score is an internal prioritization tool, not an objective fact — outreach execution (which channel, in what order) remains Stage 21/22's concern, not this stage's.
 
 ## Dependencies
 
-Stages 10, 13, and 14.
+Stages 10, 12, 13, and 14.
+
+## Scope note: this stage scores the existing site, not the generated preview
+
+Stage 14 introduced two independent capture targets, each its own `ScanEvent` (`targetType: 'existing_site' | 'generated_preview'`). Stage 15 scores only the **`existing_site`** `ScanEvent` for a business — Stage 16's suggested workflow (`Capture Screenshots → Score Website → Qualification Decision → Generate Preview`) runs scoring *before* a preview exists, so there is nothing to score on the `generated_preview` side at this point in the funnel.
 
 ## Major deliverables
 
-- Scoring prompt
-- Structured scoring schema
-- Category scores
-- Explanations
-- Overall score
-- Top problems
-- Recommended action
-- Admin override
+- AI analysis prompt (`chat.completions.parse` + `zodResponseFormat`, following the pattern in `web/lib/ai/`)
+- Structured response schema, re-validated app-side after the API's own schema enforcement (same defense-in-depth pattern as `generatePreviewContent`)
+- Deterministic website metrics (computed by the application, not the model)
+- AI category scores, explanations, and suggested improvements
+- Overall website quality score and confidence level
+- Lead priority
 - Qualification result
+- Website strengths, weaknesses, and missing opportunities
+- Executive summary and top problems
+- Admin override (score and qualification)
+- Preserved original AI response
 
-## Scoring categories
+## Deterministic metrics
+
+Computed by the application and included in the AI prompt as grounding context — not model output. Collect:
+
+- Website exists
+- HTTPS enabled
+- Crawl succeeded (from the Stage 13 `ScanEvent`)
+- Desktop screenshot captured / mobile screenshot captured (from the Stage 14 `existing_site` `ScanEvent`)
+- Firecrawl extraction confidence
+- Google Places data available
+- Business category, website URL, city, state
+- Phone detected, email detected, contact form detected
+- Google rating, Google review count
+- Social profiles detected, hours detected, services detected
+- Hero image available
+
+## AI scoring categories
+
+Evaluate each category from 0–100. Each category returns a score, an explanation, and a suggested improvement.
 
 - Mobile friendliness
-- Design quality
+- Visual design
+- Branding
+- Professionalism
 - Trust
 - Calls to action
+- Lead generation
 - Local SEO
-- Branding
 - Service clarity
-- Professionalism
+- Content quality
+- Accessibility
+- Overall user experience
 
-## Implementation requirements
+## AI input
 
-Scoring input should include:
+- Firecrawl crawl content and page metadata (from the Stage 13 `ScanEvent`)
+- Desktop and mobile screenshots (from the Stage 14 `existing_site` `ScanEvent.captureResults`)
+- Google Places business data
+- Deterministic website metrics (above)
+- Business category, city, existing website URL
 
-- crawl content
-- page metadata
-- desktop screenshot
-- mobile screenshot
-- business category
-- city
-- existing URL
+## AI output
 
-Store:
+Strict schema, returned in one structured-output call:
 
-- AI category scores
-- category reasons
-- AI overall score
-- admin-reviewed score when provided
-- top problems
-- recommended action
-- prompt and model metadata
+- Overall website score (0–100) and confidence (High / Medium / Low)
+- Lead priority (High / Medium / Low)
+- Qualification (Qualified / Manual Review / Reject)
+- Category scores: for every category, `score`, `explanation`, `suggested improvement`
+- Website strengths — the strongest aspects of the current site
+- Website weaknesses — the biggest issues affecting trust, conversions, usability, or professionalism
+- Missing opportunities — e.g. FAQ, testimonials, gallery, team section, contact form, online booking, service areas, certifications, trust badges, reviews. This is advisory context for the admin and for the existing deterministic `recommendWebsiteSections()` flow (`web/lib/website-sections/recommend.ts`) — the AI does not write to `WebsiteSectionsConfig` directly. Per the existing invariant ("AI must never directly control React components — this catalog is the only bridge"), the deterministic recommender remains the sole writer of section configuration.
+- Executive summary, top problems, highest-impact improvements, and a short rationale for why this business is (or isn't) a good prospect
 
-Treat the score as an internal prioritization tool, not an objective fact.
+Outreach channel selection and campaign ordering (postcard / email / phone, and in what order) are explicitly **not** part of this stage's output — see "Deferred work."
 
-Initial qualification logic may include:
+## Qualification rules
 
-- no website → qualified
-- weak score → qualified
-- strong score → manual review
-- closed business → reject
-- invalid address → manual review
-- national chain → reject
+The AI provides a recommendation; application rules may override it. Initial deterministic overrides:
 
-Do not trigger postcard mailing solely from an AI score.
+- No website → Qualified
+- Closed business → Reject
+- National chain → Reject
+- Government organization → Reject
+- Website unavailable → Manual Review
+- Invalid address → Manual Review
+
+Do not trigger postcard mailing, or any other outreach action, solely from an AI score.
+
+## No automatic chaining
+
+Preserves the manual-workflow philosophy established in Stages 12–14: Stage 15 is never automatically triggered by Stage 14 completing. Scoring remains an explicit admin action until Stage 23 (EventBridge Controlled Automation) exists and is deliberately turned on.
+
+## Persistence
+
+Following the Stage 13/14 precedent of keeping scan-scoped derived data on `ScanEvent` and only durable, admin-facing summary state on `Business`:
+
+**On `ScanEvent`** (the full assessment, scan-scoped):
+- Deterministic metrics
+- Category scores, explanations, and suggested improvements
+- Strengths, weaknesses, missing opportunities
+- Executive summary, top problems
+- Overall score, confidence
+- Prompt version, model, timestamp (no temperature — the scoring model is reasoning-class and only supports its API default value)
+
+**On `Business`** (durable summary, mirrors the `enrichmentStatus`/`manualApprovalReason` pattern from Stage 13):
+- Qualification result
+- Lead priority
+- Overall score (rollup, for admin list/filter views)
+- Admin-reviewed score and qualification, when provided — stored separately from the AI-generated values; admin overrides must never overwrite the original AI assessment
+
+**Raw AI response:** stored as an S3 artifact (an `aiResponseArtifactKey` on `ScanEvent`, following the `rawArtifactKey`/`extractedArtifactKey` pattern from Stage 13) rather than inline in the DynamoDB item, to avoid item-size bloat from a 12-category structured response.
+
+**New failure categories** (extending `SCAN_FAILURE_CATEGORIES`, following the pattern of Stage 13/14 each adding their own): `invalid_ai_schema_output`, `ai_request_failed`, `ai_timeout`.
 
 ## Acceptance criteria
 
-- A completed scan can be scored.
-- Output validates against a strict schema.
-- Scores and reasons are persisted.
-- Invalid AI output is rejected.
-- Admin can override the overall score and qualification.
-- The original AI score remains preserved.
-- The business and ScanEvent reflect the completed scoring state.
+- A completed `existing_site` scan can be scored.
+- AI output validates against a strict schema; invalid output is rejected and recorded under one of the new scoring failure categories, not silently discarded.
+- Deterministic metrics are computed and included in the prompt.
+- Category scores, explanations, and suggested improvements are generated and persisted.
+- Confidence, lead priority, and qualification are returned and persisted.
+- Missing-opportunities output is advisory only — no code path allows AI output to write `WebsiteSectionsConfig` directly.
+- No outreach-channel or campaign-ordering data is produced by this stage.
+- Admin can override the overall score and qualification on `Business`.
+- The original AI assessment (including the raw response artifact) remains preserved after an admin override.
+- The `Business` and `ScanEvent` reflect the completed scoring state.
 - Test cases produce understandable and reasonably consistent assessments.
 
 ## Deferred work
 
 - Calibration dataset
 - Human-review analytics
-- Industry-specific weighting
-- Deterministic non-AI metrics
-- Score-change tracking
-- Automatic outreach decisions
+- Industry-specific scoring weights
+- Score-change / historical tracking
+- Continuous rescoring
+- Outreach channel recommendation and campaign ordering (postcard / email / phone) — Stage 21 (QR and Campaign Tracking) and Stage 22 (Lob Postcard Integration)'s concern; those stages consume this stage's lead priority and qualification as an input, not the other way around
+- AI-driven writes to `WebsiteSectionsConfig` — the existing deterministic `recommendWebsiteSections()` remains the sole writer; this stage's missing-opportunities output is advisory only
+- Automatic campaign execution
+- Automatic template generation from recommendations
 
 ---
 

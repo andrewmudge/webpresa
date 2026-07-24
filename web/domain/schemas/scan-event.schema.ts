@@ -8,6 +8,7 @@ import {
 } from '@/domain/models/scan-event';
 import { IsoTimestampSchema, ScoreSchema } from './common.schema';
 import { ScanImageAssetSchema } from './scan-image.schema';
+import { WebsiteDeterministicMetricsSchema, WebsiteAssessmentSchema } from './website-assessment.schema';
 
 const ScanScoresSchema = z.object({
   overall: ScoreSchema.optional(),
@@ -66,6 +67,15 @@ export const ScanEventSchema = z.object({
     .optional(),
   captureResults: ScanCaptureResultsSchema.optional(),
   scores: ScanScoresSchema.optional(),
+  deterministicMetrics: WebsiteDeterministicMetricsSchema.optional(),
+  assessment: WebsiteAssessmentSchema.optional(),
+  aiResponseArtifactKey: z.string().max(500).optional(),
+  aiMetadata: z
+    .object({
+      model: z.string().min(1).max(100),
+      promptVersion: z.string().min(1).max(50),
+    })
+    .optional(),
   startedAt: IsoTimestampSchema.optional(),
   completedAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,

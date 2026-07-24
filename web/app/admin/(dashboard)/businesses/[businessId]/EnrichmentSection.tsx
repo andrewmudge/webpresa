@@ -63,6 +63,9 @@ const FAILURE_CATEGORY_LABELS: Record<ScanFailureCategory, string> = {
   blocked_by_bot_protection: 'Blocked by bot protection',
   screenshot_failed: 'Screenshot capture failed',
   upload_failed: 'Failed to upload screenshot',
+  invalid_ai_schema_output: 'AI returned invalid output',
+  ai_request_failed: 'AI scoring request failed',
+  ai_timeout: 'AI scoring request timed out',
   unknown: 'Unknown error',
 };
 
