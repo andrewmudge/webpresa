@@ -4583,3 +4583,106 @@ Live:              aws lambda get-function confirms ReservedConcurrentExecutions
 infra/lib/constructs/webpresa-screenshot-lambda.ts   MODIFIED — reservedConcurrentExecutions: 5 restored
 infra/test/screenshot-stack.test.ts                  MODIFIED — two tests merged back into one
 ```
+
+---
+
+## Vercel Deployment Protection bypass (2026-07-23, later the same day) — found via the first real browser-based test
+
+## Scope
+
+`webpresa-vercel-dev`'s IAM extension and both Vercel env vars (`SCREENSHOT_LAMBDA_FUNCTION_NAME`, `CAPTURE_TOKEN_SECRET_NAME`) were now in place, so the user tested `generated_preview` capture for the first time from the real admin UI — the actual end-to-end scenario, not a script-driven direct Lambda invoke. It failed: the captured screenshot showed Vercel's own login page, not the app.
+
+## Diagnosis
+
+Vercel's **Deployment Protection** (Vercel Authentication) sits in front of the *entire* non-production (`dev` git-branch) deployment at the edge — every request, authenticated or not, gets redirected to Vercel's login page unless it carries a valid session or bypass credential. This intercepts *before* any Next.js request handler runs, meaning the Lambda's server-side Playwright navigation to `/b/[slug]` never reaches the app at all — the capture-token cookie logic (which solves the separate, app-level "render an unpublished draft without an admin session" problem) never gets a chance to run. This is a platform-level gate Stage 14's design never anticipated; nothing in `implementation.md`'s original Stage 14 spec considered it, since all prior testing either ran against a local RIE emulator (no Vercel involved) or invoked the Lambda directly without exercising a real navigation to the deployed app.
+
+Presented two options to the user: disable Deployment Protection entirely (simpler, no code change, but makes the whole `dev` deployment publicly reachable by anyone) vs. Vercel's own "Protection Bypass for Automation" (keeps `dev` protected from everyone else; a purpose-built mechanism — Vercel's own docs use Playwright as the primary example). User chose the bypass secret. Verified the exact mechanism against Vercel's live documentation before implementing (not assumed from training knowledge) — header `x-vercel-protection-bypass: <secret>`, optional companion `x-vercel-set-bypass-cookie: 'true'` for follow-up/subresource requests within the same context.
+
+## Fix
+
+1. **`infra/lib/stacks/data-stack.ts`** — new `WebpresaSecret`, `VercelProtectionBypassSecret` (`webpresa-{env}-vercel-protection-bypass`, `{ bypassSecret }`), modeled exactly on the existing capture-token secret; exposed as `vercelProtectionBypassSecret` for the screenshot stack to cross-reference.
+2. **`infra/lib/constructs/webpresa-screenshot-lambda.ts`** — new required prop `vercelProtectionBypassSecret`; new env var `VERCEL_PROTECTION_BYPASS_SECRET_NAME`; new `grantRead()` IAM grant (GetSecretValue only) — CDK merged this into the same IAM statement as the existing capture-token grant (a `Resource` array, not two separate statements) rather than a brand-new statement, confirmed via the real `cdk diff` output.
+3. **`infra/lib/stacks/screenshot-stack.ts`**, **`infra/bin/webpresa.ts`** — threaded the new secret prop through, same pattern as `captureTokenSecret`.
+4. **`infra/lambda/screenshot-capture/src/browser.ts`** — `newContext()` gained an optional `vercelBypassSecret` param; when present, passed as `extraHTTPHeaders: { 'x-vercel-protection-bypass': ..., 'x-vercel-set-bypass-cookie': 'true' }` on the Playwright browser context (applies to the main navigation and every subresource request the context makes, not just the top-level HTML). `captureViewport()`'s params gained the matching optional field.
+5. **`infra/lambda/screenshot-capture/src/handler.ts`** — in the `generated_preview` branch, after minting the capture token, also fetches `{ bypassSecret }` from the new secret and passes it through to `captureViewport()`. `existing_site` is unaffected — the header is meaningless there (real external business websites, never Webpresa's own deployment).
+6. **Deliberately not granted to `webpresa-vercel-dev`.** Unlike the capture-token secret (which the Next.js app reads to *verify* tokens the Lambda mints), the Vercel bypass secret has no application-side reader at all — only the Lambda ever presents it, to Vercel's own edge. Adding it to the broader Vercel-identity policy would have been an unnecessary over-grant against this project's established least-privilege discipline; caught before making the change, not after.
+
+## Deployment
+
+1. User generated the bypass secret in Vercel's dashboard (Settings → Deployment Protection → Protection Bypass for Automation) and provided it directly.
+2. `infra`/Lambda-package typecheck clean, 83/83 and 21/21 tests pass (new/updated assertions: secret count 6→7, CloudFormation outputs 16→17, a merged-statement IAM assertion, env var presence, `handler.test.ts`'s `mockGetSecretJson` mock extended to also resolve `bypassSecret`).
+3. `cdk diff`/`cdk deploy WebpresaDevDataStack` — additive only (one new secret + outputs). One transient `cdk diff` failure ("Unable to resolve AWS account to use") on the first attempt, not reproduced on immediate retry — treated as an `npx`/CDK-cache flake, not a real issue (an untouched stack diffed successfully in between, isolating it to a transient condition rather than the new code).
+4. Real value populated via `aws secretsmanager put-secret-value`.
+5. `cdk diff`/`cdk deploy WebpresaDevScreenshotStack` — additive only (new env var + IAM grant, no image/digest involved).
+6. Image rebuilt/pushed (`browser.ts`/`handler.ts` changed) and the running Lambda force-updated via `aws lambda update-function-code` — the same `:latest`-tag gap established earlier today (CDK's template references the literal tag, not a resolved digest, so `cdk deploy` alone never detects a content-only image change).
+
+## Verification
+
+```
+infra/                            TypeCheck: 0 errors
+infra/                            Tests:     83 passed (7 secrets, 17 outputs, merged IAM
+                                   statement assertion, new env var assertion)
+infra/lambda/screenshot-capture/  TypeCheck: 0 errors
+infra/lambda/screenshot-capture/  Tests:     21 passed
+cdk diff (both stacks):           additive only, reviewed before each deploy — account
+                                   539898341083, us-east-1
+Live:                             pending the user's retest from the real admin UI — the
+                                   scenario that surfaced this bug in the first place
+```
+
+## Files changed
+
+```
+infra/lib/stacks/data-stack.ts                        MODIFIED — new VercelProtectionBypassSecret
+infra/lib/constructs/webpresa-screenshot-lambda.ts     MODIFIED — new prop/env var/IAM grant
+infra/lib/stacks/screenshot-stack.ts                   MODIFIED — threaded new secret prop
+infra/bin/webpresa.ts                                  MODIFIED — passes dataStack.vercelProtectionBypassSecret
+infra/lambda/screenshot-capture/src/browser.ts         MODIFIED — x-vercel-protection-bypass header
+infra/lambda/screenshot-capture/src/handler.ts         MODIFIED — fetches + threads the bypass secret
+infra/test/data-stack.test.ts                          MODIFIED — 7 secrets, 17 outputs
+infra/test/screenshot-stack.test.ts                    MODIFIED — new secret wired into test stack,
+                                                        merged-IAM-statement assertion, env var assertion
+infra/lambda/screenshot-capture/src/__tests__/handler.test.ts  MODIFIED — bypassSecret in mock + assertion
+web/docs/implementation.md                             MODIFIED — new "Platform-level access" subsection
+```
+
+---
+
+## Admin UI polish: live status, self-dismissing banner, new-tab view links (2026-07-23, later the same day)
+
+## Scope
+
+After the Vercel bypass fix above, the user's next real admin-UI test surfaced three UX gaps in `ScreenshotsSection.tsx`, all stemming from the same root cause: this section is a plain Server Component rendering data fetched once at request time, with no mechanism to reflect the Lambda's out-of-band result (written straight to DynamoDB, no client-visible push) without a manual page reload.
+
+1. After clicking Capture, the card stays on "Capturing…" indefinitely — never updates to show the finished result or the view links, even once the Lambda has actually completed.
+2. The `?screenshotResult=queued` flash banner ("Screenshot capture started") never disappears — it only ever describes the *start* of a capture (the redirect fires immediately, before the Lambda runs — see `lib/screenshots/capture.ts`), so once shown it reads as a stuck/stale status forever.
+3. Clicking a desktop/mobile view link navigated the current admin tab away to the signed S3 URL, losing the business detail page.
+
+## Fix
+
+Two new small Client Components, following this directory's existing pattern of narrowly-scoped `'use client'` files (`GenerateWebsiteButton.tsx`, `DeleteBusinessButton.tsx`, etc.) rather than converting the whole section client-side:
+
+- **`ScreenshotAutoRefresh.tsx`** (new) — renders nothing; while `active` (any scan `queued`/`running`), polls `router.refresh()` every 3s, which re-runs the Server Component tree and picks up the Lambda's terminal write. Stops automatically once the next refresh's props report no active scan.
+- **`ScreenshotResultBanner.tsx`** (new) — same copy/tone map as before, now self-dismissing: hides itself and strips `screenshotResult` from the URL (preserving any other query params) 5 seconds after mount, so a manual reload doesn't resurrect it.
+- **`ScreenshotsSection.tsx`** — renders `<ScreenshotAutoRefresh active={hasActiveScan} />` (computed once, across both target cards) and swaps the old inline `ResultBanner` for `<ScreenshotResultBanner>`; the old `RESULT_BANNER_COPY`/`ResultBanner` were deleted from this file (moved into the new client component, their only remaining caller).
+- **`ViewportLinks`** — added `target="_blank"` to the view-link `<form>`. Regular HTML form behavior: the POST (and the Server Action's subsequent redirect to the signed S3 URL) opens in a new tab, no client JS needed.
+
+## Verification
+
+```
+web/  Lint:      0 errors (npm run lint)
+web/  TypeCheck: 0 errors (npx tsc --noEmit)
+web/  Tests:     562 passed (npm test) — unaffected, no test coverage previously existed
+                  for this admin section's client-side behavior
+web/  Build:     next build succeeds
+```
+
+Not yet pushed/deployed — these are local, uncommitted changes pending the user's decision on when to push `dev`.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotAutoRefresh.tsx   NEW
+web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotResultBanner.tsx  NEW
+web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx      MODIFIED
+```

@@ -208,7 +208,7 @@ No account IDs are hard-coded. The CDK app resolves `CDK_DEFAULT_ACCOUNT` and `C
 
 | Stack | Deployed | Description |
 |---|---|---|
-| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket + 6 Secrets Manager secrets (incl. Stage 14's capture-token, real signing key populated), dev settings |
+| `WebpresaDevDataStack` | ✅ us-east-1 | Four DynamoDB tables + assets S3 bucket + 7 Secrets Manager secrets (incl. Stage 14's capture-token and Vercel protection-bypass secrets, real values populated), dev settings |
 | `WebpresaProdDataStack` | ❌ not deployed | Same tables, bucket, and secrets, prod settings |
 | `WebpresaDevScreenshotRepositoryStack` | ✅ us-east-1 | Stage 14 — ECR repo only (`webpresa-dev-screenshot-capture`), deployed first so the Lambda stack can reference it — see `build_log.md`, "Stage 14", "Deployment status" |
 | `WebpresaDevScreenshotStack` | ✅ us-east-1 | Stage 14 — container-image Lambda + DLQ, depends on `WebpresaDevDataStack` and `WebpresaDevScreenshotRepositoryStack`; image pushed, deployed, and live-tested (real `existing_site` capture succeeded end to end); `webpresa-vercel-dev` IAM extended (Lambda invoke + capture-token secret read) — see `build_log.md`, "Stage 14", for the five real bugs fixed getting here and what's still pending (Vercel env vars only) |
@@ -318,7 +318,7 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 
 ## Secrets Manager
 
-**Implemented in Stage 10; extended in Stage 14.** Six secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
+**Implemented in Stage 10; extended in Stage 14.** Seven secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
 
 | Secret name | JSON shape | Owner (stage) |
 |---|---|---|
@@ -328,6 +328,7 @@ The `webpresa-vercel-dev` IAM user's inline policy (see `deployment.md`) grants 
 | `webpresa-{env}-stripe` | `{ secretKey, webhookSecret }` | Stage 18 — subscriptions |
 | `webpresa-{env}-lob` | `{ apiKey }` | Stage 22 — postcard integration |
 | `webpresa-{env}-capture-token` | `{ signingKey }` | Stage 14 — Playwright preview capture token. Not a third-party credential like the other five — an internally-generated HMAC key, read (never minted) by this app, minted (never read-only-verified) by the screenshot Lambda. |
+| `webpresa-{env}-vercel-protection-bypass` | `{ bypassSecret }` | Stage 14 — Vercel "Protection Bypass for Automation" secret, generated in Vercel's dashboard (not by this platform). Read-only by the screenshot Lambda's own execution role; the Next.js app has no code path that touches it at all — see "Playwright Screenshots (Stage 14)" below, "Platform-level access". |
 
 ### Application-side access
 
@@ -556,6 +557,10 @@ For each of the two fixed viewports (desktop `1440×1000`, mobile `390×844`), `
 ### Draft preview visibility — Lambda-minted capture-token cookie
 
 A `generated_preview` capture of an unpublished draft needs to render `/b/[slug]` without an admin session. The Lambda mints a short-lived, single-purpose JWT (`purpose: 'preview_capture'`, `previewId`, `scanId`, 5-minute expiry) immediately before navigating — never the Server Action, which would risk the token expiring before a delayed/redelivered invocation and would also break the identifiers-only payload contract. The token is delivered as an HTTP-only, `Secure`, `SameSite=Strict` cookie (`__Host-webpresa_capture`), never a URL query parameter (which would leak into request logs, browser history, and referrer headers). `app/b/[slug]/page.tsx`'s `resolvePreview()` checks this cookie as an alternate to an admin session — via `web/lib/capture-token.ts`'s `verifyCaptureToken()` (signature + every claim, not just the signature) plus a live lookup confirming `scanId` still names an actual `queued`/`running` `generated_preview` `ScanEvent` for that exact `previewId`. A new dedicated secret, `webpresa-{env}-capture-token` (`{ signingKey }`), backs the HMAC key — read-only by this Next.js app, mint-only by the Lambda.
+
+### Platform-level access: Vercel Deployment Protection bypass
+
+Discovered live, distinct from the app-level cookie above: Vercel's own Deployment Protection sits in front of the *entire* non-production deployment at the edge, before Next.js or the capture-token cookie logic ever runs — an unauthenticated `generated_preview` navigation was redirected to Vercel's own login page instead of reaching `/b/[slug]` at all. The capture-token cookie can't solve this; it's a platform-level gate, not an app-level one. Fixed with Vercel's own "Protection Bypass for Automation": `browser.ts`'s `newContext()` sends the `x-vercel-protection-bypass` header (plus `x-vercel-set-bypass-cookie: true`) on `generated_preview` navigations only, using a value from the new `webpresa-{env}-vercel-protection-bypass` secret (`{ bypassSecret }`, generated in Vercel's dashboard — not by this platform). Read-only by the Lambda's execution role only; the Next.js app never touches this value.
 
 ### Relocated SSRF guard
 

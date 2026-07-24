@@ -3,13 +3,19 @@ import type { ScanEvent, ScanFailureCategory, ViewportCaptureResult } from '@/do
 import { isStaleScan } from '@/lib/screenshots/capture';
 import { viewRawArtifactAction } from '../../scans/[scanId]/actions';
 import { captureExistingSiteAction, captureGeneratedPreviewAction, markStaleScanFailedAction } from './screenshot-actions';
+import { ScreenshotAutoRefresh } from './ScreenshotAutoRefresh';
+import { ScreenshotResultBanner } from './ScreenshotResultBanner';
 
 /**
  * Stage 14 (Playwright Screenshots) admin card. Mirrors `EnrichmentSection`'s
  * shape (plain server component, redirect + query-param result banner — see
  * `screenshot-actions.ts`) but renders two independent targets side by side,
  * since a business has two separate, independently-triggerable captures
- * (see `implementation.md`, Stage 14, "Screenshot targets").
+ * (see `implementation.md`, Stage 14, "Screenshot targets"). Two small client
+ * components handle the two things a pure server render can't: polling for
+ * the Lambda's out-of-band result (`ScreenshotAutoRefresh`) and dismissing
+ * the transient "started" banner once it's no longer accurate
+ * (`ScreenshotResultBanner`).
  */
 
 const PLAYWRIGHT_FAILURE_LABELS: Partial<Record<ScanFailureCategory, string>> = {
@@ -36,12 +42,14 @@ export function ScreenshotsSection({ business, scans, resultQuery }: Props) {
   const playwrightScans = scans.filter((s) => s.provider === 'playwright');
   const existingSiteScans = playwrightScans.filter((s) => s.targetType === 'existing_site');
   const previewScans = playwrightScans.filter((s) => s.targetType === 'generated_preview');
+  const hasActiveScan = [...existingSiteScans, ...previewScans].some((s) => s.status === 'queued' || s.status === 'running');
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+      <ScreenshotAutoRefresh active={hasActiveScan} />
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Screenshots</h3>
 
-      {resultQuery && <ResultBanner result={resultQuery} />}
+      {resultQuery && <ScreenshotResultBanner result={resultQuery} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <TargetCard
@@ -151,7 +159,7 @@ function ViewportLinks({
     <div className="flex items-center gap-3">
       {entries.map(([viewport, result]) =>
         result?.status === 'completed' && result.storageKey ? (
-          <form key={viewport} action={viewRawArtifactAction.bind(null, result.storageKey)}>
+          <form key={viewport} action={viewRawArtifactAction.bind(null, result.storageKey)} target="_blank">
             <button type="submit" className="text-(--color-brand) hover:underline text-sm capitalize">
               {viewport} ↗
             </button>
@@ -182,24 +190,4 @@ function statusLabel(status: ScanEvent['status']): string {
     case 'manual_approval_required':
       return 'Manual approval required';
   }
-}
-
-const RESULT_BANNER_COPY: Record<string, { tone: 'success' | 'warning' | 'error'; text: string }> = {
-  queued: { tone: 'success', text: 'Screenshot capture started.' },
-  conflict: { tone: 'warning', text: 'A capture for this target is already queued or running.' },
-  not_eligible: { tone: 'warning', text: 'This target is not eligible for capture right now.' },
-  failed: { tone: 'error', text: 'Failed to start the screenshot capture.' },
-  marked_failed: { tone: 'success', text: 'Scan marked as failed. You can start a fresh capture now.' },
-};
-
-function ResultBanner({ result }: { result: string }) {
-  const copy = RESULT_BANNER_COPY[result];
-  if (!copy) return null;
-  const toneClass =
-    copy.tone === 'success'
-      ? 'border-green-200 bg-green-50 text-green-800'
-      : copy.tone === 'warning'
-        ? 'border-amber-200 bg-amber-50 text-amber-800'
-        : 'border-red-200 bg-red-50 text-red-800';
-  return <div className={`rounded-lg border px-4 py-3 text-sm ${toneClass}`}>{copy.text}</div>;
 }
