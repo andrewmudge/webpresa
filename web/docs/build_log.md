@@ -4686,3 +4686,41 @@ web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotAutoRefresh.tsx   NE
 web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotResultBanner.tsx  NEW
 web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx      MODIFIED
 ```
+
+---
+
+## Two more real bugs, found after pushing to dev: new-tab links didn't, hero CTA missing its icon (2026-07-23, later the same day)
+
+## Bug 1: `target="_blank"` didn't open the view links in a new tab
+
+After the above deployed, `target="_blank"` on the view-link `<form>` had no effect. Root cause: Next.js Server Actions are dispatched by React's client-side runtime (via the `action` prop's special handling), not a genuine browser form submission — the browser never actually POSTs and follows a redirect itself, so the HTML `target` attribute (a native browser form/link behavior) has nothing to act on. This wasn't caught by the earlier build/lint/typecheck/test pass because none of those exercise real browser form-submission semantics.
+
+**Fix:** added a real GET route, `app/admin/(dashboard)/scans/view-artifact/route.ts` (new — `/admin/scans/view-artifact?key=...`), replicating `viewRawArtifactAction`'s exact auth check (`getSession()`) and validation (`key` must start with `scans/`) before redirecting to the same short-lived signed URL. `ScreenshotsSection.tsx`'s `ViewportLinks` now renders a genuine `<a href="..." target="_blank" rel="noopener noreferrer">` instead of a Server-Action form — a real anchor tag has no such limitation. `viewRawArtifactAction` itself is untouched and still used as-is by `scans/[scanId]/page.tsx`'s two other call sites (raw/extracted crawl artifacts), which weren't reported as broken and weren't in scope here.
+
+## Bug 2: hero "Call Now" button missing its phone icon
+
+Found via `Explore` agent investigation, then verified by direct read before fixing. `app/b/[slug]/template/GeneratedHero.tsx` has two near-identical hero-content renderers for different hero layouts: `HeroTextContent` (used by `SplitHeroSection`) and `HeroOverlayContent` (used by `FullBleedHeroSection`'s `heroStyle: 'image'` layout, and the legacy gradient/pattern/solid fallback). Both render a primary + secondary `CtaButton`, and both correctly render `<CtaIcon type={secondary.type} .../>` for the secondary button — but only `HeroTextContent` included the matching `<CtaIcon type={primary.type} .../>` for the *primary* button (which is the "Call Now" button, `type: 'phone'`, for nearly every business). `HeroOverlayContent` rendered `{primary.label}` alone, silently dropping the icon — any business whose hero renders via the full-bleed-image or legacy fallback path (not the split layout) got a phone-icon-less Call Now button. `CtaIcon` itself (`cta.tsx`) was never the problem — it's a correct hand-written `switch` on `CtaActionType`, not a missing lucide-react icon or similar.
+
+**Fix:** added the missing `<CtaIcon type={primary.type} className="w-5 h-5 mr-2" />` to `HeroOverlayContent`'s primary `CtaButton`, matching `HeroTextContent`'s existing pattern exactly (same className, same position before the label).
+
+## Verification
+
+```
+web/  Lint:      0 errors (npm run lint)
+web/  TypeCheck: 0 errors (npx tsc --noEmit)
+web/  Tests:     562 passed (npm test)
+web/  Build:     next build succeeds — new route /admin/scans/view-artifact confirmed
+                  in the route list
+```
+
+Not yet pushed — pending the user's decision on when to push `dev` again.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/scans/view-artifact/route.ts             NEW
+web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx  MODIFIED — real <a> link
+                                                                     instead of Server-Action form
+web/app/b/[slug]/template/GeneratedHero.tsx                        MODIFIED — HeroOverlayContent's
+                                                                     primary CtaButton gained its icon
+```

@@ -1,7 +1,6 @@
 import type { Business } from '@/domain/models/business';
 import type { ScanEvent, ScanFailureCategory, ViewportCaptureResult } from '@/domain/models/scan-event';
 import { isStaleScan } from '@/lib/screenshots/capture';
-import { viewRawArtifactAction } from '../../scans/[scanId]/actions';
 import { captureExistingSiteAction, captureGeneratedPreviewAction, markStaleScanFailedAction } from './screenshot-actions';
 import { ScreenshotAutoRefresh } from './ScreenshotAutoRefresh';
 import { ScreenshotResultBanner } from './ScreenshotResultBanner';
@@ -159,11 +158,15 @@ function ViewportLinks({
     <div className="flex items-center gap-3">
       {entries.map(([viewport, result]) =>
         result?.status === 'completed' && result.storageKey ? (
-          <form key={viewport} action={viewRawArtifactAction.bind(null, result.storageKey)} target="_blank">
-            <button type="submit" className="text-(--color-brand) hover:underline text-sm capitalize">
-              {viewport} ↗
-            </button>
-          </form>
+          <a
+            key={viewport}
+            href={`/admin/scans/view-artifact?key=${encodeURIComponent(result.storageKey)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-(--color-brand) hover:underline text-sm capitalize"
+          >
+            {viewport} ↗
+          </a>
         ) : (
           <span key={viewport} className="text-xs text-gray-300 capitalize">
             {viewport}: {result?.status === 'failed' ? failureLabel(result.failureCategory ?? 'unknown') : 'unavailable'}

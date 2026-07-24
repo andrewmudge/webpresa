@@ -331,6 +331,7 @@ function HeroOverlayContent({ headline, subheadline, serviceArea, primary, secon
               className="inline-flex items-center justify-center rounded-xl px-7 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-[1.02] hover:shadow-xl"
               style={{ backgroundColor: V.accent }}
             >
+              <CtaIcon type={primary.type} className="w-5 h-5 mr-2" />
               {primary.label}
             </CtaButton>
           )}
