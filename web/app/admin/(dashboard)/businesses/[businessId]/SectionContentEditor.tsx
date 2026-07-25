@@ -206,7 +206,14 @@ interface Props {
   redirectTo: string;
 }
 
+// `reviews` maps to the same `testimonials` field as the `testimonials` row
+// itself — the public ReviewsSection now renders testimonials directly
+// underneath the rating summary (see app/b/[slug]/template/
+// ReviewsSection.tsx), so its row here reuses the exact same editor
+// (manual testimonials form, TestimonialsOrderEditor, GoogleReviewsPanel).
+// `testimonials` keeps its own entry too until that section is removed.
 const BUSINESS_LIST_SECTIONS: Partial<Record<WebsiteSectionType, BusinessListField>> = {
+  reviews: 'testimonials',
   testimonials: 'testimonials',
   faq: 'faqItems',
   process: 'processSteps',
@@ -216,7 +223,7 @@ export function SectionContentEditor({ section, business, preview, redirectTo }:
   const listField = BUSINESS_LIST_SECTIONS[section];
 
   if (listField) {
-    return <BusinessListEditor businessId={business.businessId} field={listField} business={business} />;
+    return <BusinessListEditor businessId={business.businessId} field={listField} section={section} business={business} />;
   }
 
   if (!preview) {
@@ -426,13 +433,18 @@ function ContentForm({
 function BusinessListEditor({
   businessId,
   field,
+  section,
   business,
 }: {
   businessId: string;
   field: BusinessListField;
+  /** Which row this editor is rendering under — `reviews` and `testimonials`
+   *  both use `field="testimonials"`, so this is what tells the save action
+   *  which row to re-expand on redirect (see `updateBusinessListFieldAction`). */
+  section: WebsiteSectionType;
   business: Business;
 }) {
-  const [state, formAction] = useActionState(updateBusinessListFieldAction.bind(null, businessId, field), undefined);
+  const [state, formAction] = useActionState(updateBusinessListFieldAction.bind(null, businessId, field, section), undefined);
 
   const config: Record<
     BusinessListField,

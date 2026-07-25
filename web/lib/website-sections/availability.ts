@@ -45,7 +45,12 @@ export function computeSectionAvailability({
       : (business.photoUrls?.length ?? 0) >= 1,
     whyChooseUs: (content?.differentiators?.length ?? 0) >= 1,
     about: (content?.aboutText.trim().length ?? 0) > 0,
-    reviews: (business.googleReviewCount ?? 0) >= 1,
+    // Available whenever there's a Google rating to show OR at least one
+    // visible testimonial — ReviewsSection now renders both underneath one
+    // "Reviews" heading (see app/b/[slug]/template/ReviewsSection.tsx).
+    // `testimonials` keeps its own independent check for now, pending that
+    // section's removal once the merge is confirmed.
+    reviews: (business.googleReviewCount ?? 0) >= 1 || (business.testimonials?.filter((t) => !t.hidden).length ?? 0) >= 1,
     testimonials: (business.testimonials?.filter((t) => !t.hidden).length ?? 0) >= 1,
     serviceAreas: (content?.serviceAreas?.length ?? 0) >= 1,
     process: (business.processSteps?.length ?? 0) >= 1,

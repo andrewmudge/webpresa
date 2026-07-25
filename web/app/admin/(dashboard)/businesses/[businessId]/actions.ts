@@ -1177,20 +1177,23 @@ export async function updateSectionContentAction(
 const BUSINESS_LIST_FIELDS = ['testimonials', 'faqItems', 'processSteps'] as const;
 export type BusinessListField = (typeof BUSINESS_LIST_FIELDS)[number];
 
-const BUSINESS_LIST_FIELD_TO_SECTION: Record<BusinessListField, WebsiteSectionType> = {
-  testimonials: 'testimonials',
-  faqItems: 'faq',
-  processSteps: 'process',
-};
-
 /**
  * Edits one of the durable, manually-curated Business list fields
  * (testimonials/FAQ/process steps) — persists across regenerations, like
  * `theme`/photo-slot overrides. Never touches any preview record.
+ *
+ * `section` is which Website Sections row the caller rendered this editor
+ * under, not necessarily the same as `field` — both the `reviews` and
+ * `testimonials` rows currently use `field: 'testimonials'` (see
+ * `BUSINESS_LIST_SECTIONS` in SectionContentEditor.tsx), so it's passed
+ * explicitly rather than derived from a static field→section map, ensuring
+ * the post-save redirect re-expands whichever row the admin was actually
+ * editing.
  */
 export async function updateBusinessListFieldAction(
   businessId: string,
   field: BusinessListField,
+  section: WebsiteSectionType,
   _prevState: SectionContentFormState,
   formData: FormData,
 ): Promise<SectionContentFormState> {
@@ -1247,7 +1250,7 @@ export async function updateBusinessListFieldAction(
     return { message: 'Failed to save changes. Please try again.' };
   }
 
-  redirect(`/admin/businesses/${businessId}?expandedSection=${BUSINESS_LIST_FIELD_TO_SECTION[field]}`);
+  redirect(`/admin/businesses/${businessId}?expandedSection=${section}`);
 }
 
 // ---------------------------------------------------------------------------

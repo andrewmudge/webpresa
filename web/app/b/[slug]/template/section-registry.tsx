@@ -112,7 +112,12 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
     />
   ),
   reviews: (ctx) => (
-    <ReviewsSection businessName={ctx.businessName} rating={ctx.business.googleRating} reviewCount={ctx.business.googleReviewCount} />
+    <ReviewsSection
+      businessName={ctx.businessName}
+      rating={ctx.business.googleRating}
+      reviewCount={ctx.business.googleReviewCount}
+      testimonials={ctx.business.testimonials}
+    />
   ),
   testimonials: (ctx) => <TestimonialsSection testimonials={ctx.business.testimonials ?? []} />,
   serviceAreas: (ctx) => (

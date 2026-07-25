@@ -149,8 +149,8 @@ const VIEWPORT_ASPECT: Record<'desktop' | 'mobile', string> = {
   mobile: 'aspect-[390/844]',
 };
 const VIEWPORT_WIDTH: Record<'desktop' | 'mobile', string> = {
-  desktop: 'w-36',
-  mobile: 'w-16',
+  desktop: 'w-56',
+  mobile: 'w-24',
 };
 
 function ViewportThumbnails({

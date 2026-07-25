@@ -77,16 +77,35 @@ describe('computeSectionAvailability', () => {
     expect(withPhotos.gallery).toBe(true);
   });
 
-  it('reviews is available only when googleReviewCount is at least 1', () => {
+  it('reviews is available when googleReviewCount is at least 1 or a visible testimonial exists', () => {
     const none = computeSectionAvailability({ business: business(), content: undefined, hasCta: false });
     expect(none.reviews).toBe(false);
 
-    const withReviews = computeSectionAvailability({
+    const withGoogleRating = computeSectionAvailability({
       business: business({ googleReviewCount: 12, googleRating: 4.8 }),
       content: undefined,
       hasCta: false,
     });
-    expect(withReviews.reviews).toBe(true);
+    expect(withGoogleRating.reviews).toBe(true);
+
+    // ReviewsSection now renders testimonials underneath the rating summary
+    // (see app/b/[slug]/template/ReviewsSection.tsx), so it must also be
+    // available for a business with testimonials but no Google rating.
+    const withTestimonialsOnly = computeSectionAvailability({
+      business: business({ testimonials: [{ id: 't1', author: 'Jane D.', quote: 'Great work!', source: 'manual' }] }),
+      content: undefined,
+      hasCta: false,
+    });
+    expect(withTestimonialsOnly.reviews).toBe(true);
+
+    const hiddenTestimonialOnly = computeSectionAvailability({
+      business: business({
+        testimonials: [{ id: 't2', author: 'Google User', quote: 'Great work!', source: 'google', hidden: true }],
+      }),
+      content: undefined,
+      hasCta: false,
+    });
+    expect(hiddenTestimonialOnly.reviews).toBe(false);
   });
 
   it('testimonials is available only when at least one testimonial exists', () => {

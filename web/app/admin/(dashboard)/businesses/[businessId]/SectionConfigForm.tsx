@@ -19,15 +19,21 @@ const REORDER_STEP = 10;
 
 /**
  * Sections with no per-preview content editor at all — no expand chevron
- * shown for these. `socialLinks` joins `reviews` here for the same reason:
- * an admin should never be able to hand-type a link mid-preview and have it
- * look like a verified official profile. Social links are still
- * admin-editable, but only durably, at the `Business` level (the "Social
- * Links" field on the Business Details card) — the same distinction
- * `theme`/`cta` already draw between "a business-level decision" and
- * "freely typed into one preview's content."
+ * shown for these. `socialLinks`: an admin should never be able to hand-type
+ * a link mid-preview and have it look like a verified official profile —
+ * social links are still admin-editable, but only durably, at the `Business`
+ * level (the "Social Links" field on the Business Details card) — the same
+ * distinction `theme`/`cta` already draw between "a business-level decision"
+ * and "freely typed into one preview's content."
+ *
+ * `reviews` now DOES have an editor — the public `ReviewsSection` renders
+ * both the Google rating summary and the business's testimonials underneath
+ * it (see app/b/[slug]/template/ReviewsSection.tsx), so its row here shares
+ * the same testimonial-management editor `testimonials` already had (see
+ * `BUSINESS_LIST_SECTIONS` in SectionContentEditor.tsx). `testimonials`
+ * temporarily keeps its own editor too, pending that section's removal.
  */
-const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'reviews', 'socialLinks']);
+const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'socialLinks']);
 
 function SubmitButton({
   label,

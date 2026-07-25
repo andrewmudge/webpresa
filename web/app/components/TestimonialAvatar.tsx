@@ -31,7 +31,11 @@ export function TestimonialAvatar({ name, photoUrl, size = 'md', className, styl
   if (photoUrl) {
     return (
       <div className={`relative ${dimension} rounded-full overflow-hidden flex-shrink-0`}>
-        <Image src={photoUrl} alt={name} fill sizes="48px" className="object-cover" />
+        {/* Google's photo CDN (lh3.googleusercontent.com) commonly rejects
+            requests carrying a Referer header from an unrecognized origin —
+            most visibly on localhost during development, where it 404s and
+            shows as a broken image. Stripping the referrer avoids that. */}
+        <Image src={photoUrl} alt={name} fill sizes="48px" className="object-cover" referrerPolicy="no-referrer" />
       </div>
     );
   }
