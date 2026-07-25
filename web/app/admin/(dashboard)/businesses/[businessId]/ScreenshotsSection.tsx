@@ -112,7 +112,7 @@ function TargetCard({
           </div>
 
           {latestScan && (latestScan.status === 'completed' || latestScan.status === 'partial') && (
-            <ViewportLinks scanId={latestScan.scanId} results={latestScan.captureResults} />
+            <ViewportThumbnails scanId={latestScan.scanId} results={latestScan.captureResults} />
           )}
 
           {stale && activeScan && (
@@ -141,7 +141,19 @@ function TargetCard({
   );
 }
 
-function ViewportLinks({
+// Matches the real capture dimensions (infra/lambda/screenshot-capture/src/
+// browser.ts's VIEWPORTS) so a shrunk-down thumbnail keeps the same aspect
+// ratio as the full screenshot rather than stretching/cropping it.
+const VIEWPORT_ASPECT: Record<'desktop' | 'mobile', string> = {
+  desktop: 'aspect-[1440/1000]',
+  mobile: 'aspect-[390/844]',
+};
+const VIEWPORT_WIDTH: Record<'desktop' | 'mobile', string> = {
+  desktop: 'w-36',
+  mobile: 'w-16',
+};
+
+function ViewportThumbnails({
   scanId,
   results,
 }: {
@@ -155,25 +167,44 @@ function ViewportLinks({
   ];
 
   return (
-    <div className="flex items-center gap-3">
-      {entries.map(([viewport, result]) =>
-        result?.status === 'completed' && result.storageKey ? (
-          <a
-            key={viewport}
-            href={`/admin/scans/view-artifact?key=${encodeURIComponent(result.storageKey)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-(--color-brand) hover:underline text-sm capitalize"
-          >
-            {viewport} ↗
-          </a>
-        ) : (
-          <span key={viewport} className="text-xs text-gray-300 capitalize">
-            {viewport}: {result?.status === 'failed' ? failureLabel(result.failureCategory ?? 'unknown') : 'unavailable'}
-          </span>
-        ),
-      )}
-      <span className="text-[10px] text-gray-300">· scan {scanId.slice(-8)}</span>
+    <div className="space-y-1.5">
+      <div className="flex items-end gap-3">
+        {entries.map(([viewport, result]) => {
+          const sizeClasses = `${VIEWPORT_WIDTH[viewport]} ${VIEWPORT_ASPECT[viewport]}`;
+          if (result?.status === 'completed' && result.storageKey) {
+            const href = `/admin/scans/view-artifact?key=${encodeURIComponent(result.storageKey)}`;
+            return (
+              <a
+                key={viewport}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open full-size ${viewport} screenshot`}
+                className="block group"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={href}
+                  alt={`${viewport} screenshot`}
+                  className={`${sizeClasses} rounded-md border border-gray-200 object-cover group-hover:opacity-75 transition-opacity`}
+                />
+                <div className="mt-1 text-[10px] text-gray-400 capitalize text-center">{viewport}</div>
+              </a>
+            );
+          }
+          return (
+            <div key={viewport} className={`${sizeClasses} flex flex-col items-center justify-center`}>
+              <div className="w-full h-full rounded-md border border-dashed border-gray-200 flex items-center justify-center px-1">
+                <span className="text-[9px] text-gray-300 text-center leading-tight">
+                  {result?.status === 'failed' ? failureLabel(result.failureCategory ?? 'unknown') : 'Unavailable'}
+                </span>
+              </div>
+              <div className="mt-1 text-[10px] text-gray-400 capitalize text-center">{viewport}</div>
+            </div>
+          );
+        })}
+      </div>
+      <span className="text-[10px] text-gray-300">scan {scanId.slice(-8)}</span>
     </div>
   );
 }

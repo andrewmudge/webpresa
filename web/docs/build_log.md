@@ -5372,3 +5372,32 @@ web/lib/firecrawl/__tests__/enrich-business.test.ts                             
 web/lib/scoring/__tests__/qualification-rules.test.ts                           MODIFIED — 1 new test
 web/lib/scoring/__tests__/score-business.test.ts                                MODIFIED — 1 new test
 ```
+
+# Screenshot thumbnails on the business detail page (2026-07-24)
+
+## Problem
+
+Direct admin feedback: the "Screenshots" card (Stage 14) only ever showed text links ("desktop ↗" / "mobile ↗") for the existing-site and generated-preview captures — an admin had to click through to a new tab to see either image, one at a time, making a quick desktop/mobile visual comparison tedious.
+
+## Fix
+
+`app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx`'s `ViewportLinks` (renamed `ViewportThumbnails`) now renders each completed viewport as an actual `<img>` thumbnail — shrunk down but at the real capture aspect ratio (`aspect-[1440/1000]` desktop, `aspect-[390/844]` mobile, matching `infra/lambda/screenshot-capture/src/browser.ts`'s `VIEWPORTS`) — instead of a bare link. Each thumbnail is still wrapped in the same `<a target="_blank">` to `/admin/scans/view-artifact?key=...` (the existing signed-URL redirect route, unchanged) for a full-size look; the `<img src>` points at the same URL, so the browser follows the redirect itself with no new route or server-side signing code needed. Follows `ScanImageApprovalGrid.tsx`'s existing precedent for a plain `<img>` (with its required `eslint-disable-next-line @next/next/no-img-element`) against a proxy/redirect URL rather than `next/image`, since the URL is a private, per-request signed redirect rather than a static/known-domain asset.
+
+Presentation-only — no new data, route, or server-side signing logic; both target cards (Existing Website, Generated Preview) get the same treatment.
+
+## Verification
+
+```
+web/    Lint:      0 errors, 0 warnings (npm run lint)
+web/    TypeCheck: 0 errors (npx tsc --noEmit)
+web/    Tests:     703 passed (npm test) — no test file exists for this component; unaffected
+web/    Build:     next build succeeds
+Manual: Not yet viewed in a live browser session against the real dev deployment.
+```
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx        MODIFIED — thumbnails
+                                                                                     instead of text links
+```
