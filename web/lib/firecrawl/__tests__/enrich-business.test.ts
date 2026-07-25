@@ -310,6 +310,56 @@ describe('enrichBusinessWebsite — URL validation', () => {
   });
 });
 
+describe('enrichBusinessWebsite — target site error response', () => {
+  it('fails as website_error_response when the target site returns a 403, even with block-page content', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness());
+    mockScrapeWebsite.mockResolvedValueOnce({
+      markdown: 'Access Denied — you do not have permission to access this resource.',
+      links: [],
+      images: [],
+      json: {},
+      metadata: { statusCode: 403, title: 'Access Denied', url: 'https://acmeplumbing.example.com/' },
+    });
+
+    const outcome = await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    expect(outcome.status).toBe('failed');
+    const finalScanWrite = mockPutScanEvent.mock.calls.at(-1)?.[0] as ScanEvent;
+    expect(finalScanWrite.failureCategory).toBe('website_error_response');
+    expect(finalScanWrite.httpStatus).toBe(403);
+    // Never proceeds to normalize/generate a preview from a block page.
+    expect(mockNormalizeFirecrawlResponse).not.toHaveBeenCalled();
+    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
+  });
+
+  it('fails as website_error_response for a 5xx target-site status too', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness());
+    mockScrapeWebsite.mockResolvedValueOnce({
+      markdown: 'Service Unavailable',
+      links: [],
+      images: [],
+      json: {},
+      metadata: { statusCode: 503 },
+    });
+
+    const outcome = await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    expect(outcome.status).toBe('failed');
+    const finalScanWrite = mockPutScanEvent.mock.calls.at(-1)?.[0] as ScanEvent;
+    expect(finalScanWrite.failureCategory).toBe('website_error_response');
+    expect(finalScanWrite.httpStatus).toBe(503);
+  });
+
+  it('does not treat a normal 200 response as an error', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness());
+    // Uses the default beforeEach mock (statusCode: 200).
+
+    const outcome = await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    expect(outcome.status).toBe('completed');
+  });
+});
+
 describe('enrichBusinessWebsite — artifact storage', () => {
   it('stores raw and extracted artifacts under the correct scan path', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness());

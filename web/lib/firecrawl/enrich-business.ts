@@ -143,11 +143,27 @@ async function runAttempt(business: Business, queuedScan: ScanEvent, sourceUrl: 
     return finishFailed(business, scan, category, message);
   }
 
+  // Firecrawl's own call to api.firecrawl.dev can succeed (`success: true`,
+  // some markdown/title present — often a bot-block or challenge page) even
+  // when the *target site* itself rejected the request. Check the target
+  // site's reported status before the emptiness check below, since a block
+  // page can easily carry a non-empty title/body that would otherwise pass
+  // it and get scored as if it were the real site.
+  const httpStatus = data.metadata?.statusCode;
+  if (httpStatus !== undefined && httpStatus >= 400) {
+    scan = await saveScan({ ...scan, httpStatus });
+    return finishFailed(
+      business,
+      scan,
+      'website_error_response',
+      `The website returned an error response (HTTP ${httpStatus}) instead of real page content.`,
+    );
+  }
+
   if (!data.markdown?.trim() && !data.metadata?.title) {
     return finishFailed(business, scan, 'empty_content', 'Firecrawl returned no usable page content.');
   }
 
-  const httpStatus = data.metadata?.statusCode;
   let finalUrl: string | undefined;
   const rawFinalUrl = data.metadata?.url ?? data.metadata?.sourceURL;
   if (rawFinalUrl) {

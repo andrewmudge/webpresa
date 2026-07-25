@@ -51,6 +51,13 @@ describe('applyQualificationOverrides — website unavailable', () => {
     );
   });
 
+  it('forces manual_review when the target site returned an error response (e.g. a 403 block page)', () => {
+    const business = makeBusiness({ websiteUrl: 'https://acmeplumbing.example.com' });
+    expect(
+      applyQualificationOverrides({ business, aiQualification: 'qualified', firecrawlFailureCategory: 'website_error_response' }),
+    ).toBe('manual_review');
+  });
+
   it('does not override for an unrelated failure category', () => {
     const business = makeBusiness({ websiteUrl: 'https://acmeplumbing.example.com' });
     expect(

@@ -5317,3 +5317,58 @@ web/app/admin/(dashboard)/scans/page.tsx                                        
 web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                       MODIFIED — Scans HistoryCard
                                                                                      label includes scan type
 ```
+
+# Stage 15 fix — blocked/error existing-site responses were scored as real content (2026-07-24)
+
+## Problem
+
+Direct admin report: a business whose existing website actually returns HTTP 403 (blocked the crawler) was scored 74 / Medium / Qualified — a confident, positive assessment — instead of being flagged for manual review. The admin's own manual check confirmed the real site is good and this business should *not* be pursued, making the "Qualified" result actively wrong for postcard-targeting purposes.
+
+Root cause: Firecrawl's own API call to `api.firecrawl.dev` succeeds (`success: true`) even when the *target site* it fetched on our behalf returned an error status — the error surfaces only inside `data.metadata.statusCode`, often alongside some markdown/title text from a bot-block or challenge page. `enrich-business.ts`'s only content check (`!data.markdown?.trim() && !data.metadata?.title`) treats any non-empty response as success, so the Firecrawl `ScanEvent` was marked `completed` with `httpStatus: 403` recorded but never acted on. Because `scoreBusinessWebsite()`'s existing "website unavailable" shortcut (`handleWebsiteUnavailable` in `lib/scoring/score-business.ts`) only triggers when the Firecrawl scan's `status === 'failed'` with a qualifying `failureCategory`, a "completed-but-actually-blocked" scan skipped that shortcut entirely and went to a real OpenAI scoring call — fed thin/garbage block-page content, with no signal anywhere in the prompt that the source was an error response. `WebsiteDeterministicMetrics` doesn't carry an HTTP-status field, and the prompt's `formatMetrics()` never mentions it.
+
+## Fix
+
+Root-cause fix only, scoped per direct admin confirmation — this app scores each business via a single stateless OpenAI call with no training set, fine-tuning, or few-shot memory, so there is no literal way to feed a past example back into future scoring; the closest real, systemic fix is closing the detection gap so this exact failure mode can't recur.
+
+- `domain/models/scan-event.ts` — new `ScanFailureCategory` value `website_error_response`, distinct from `website_unreachable` (Firecrawl's own fetch failing outright): this one means Firecrawl's fetch succeeded but the target site itself returned a 4xx/5xx status.
+- `lib/firecrawl/enrich-business.ts`'s `runAttempt()` — checks `data.metadata?.statusCode >= 400` **before** the existing empty-content check, so a block/challenge page with real-looking text no longer slips through as "completed." Fails the scan as `website_error_response` with the actual status recorded on `ScanEvent.httpStatus`.
+- `lib/scoring/score-business.ts`'s `WEBSITE_UNAVAILABLE_FAILURE_CATEGORIES` and `lib/scoring/qualification-rules.ts`'s `WEBSITE_UNAVAILABLE_CATEGORIES` — both extended to include the new category, so it now routes through the exact same no-AI-call `manual_review` shortcut already used for `website_unreachable`/`blocked_url`/`invalid_url`. No changes needed to the shortcut logic itself, the prompt, or `runScoringAttempt()`.
+- `lib/workflow/failure-mapping.ts` and `EnrichmentSection.tsx`'s `FAILURE_CATEGORY_LABELS` — both are total `Record<ScanFailureCategory, …>` maps, so TypeScript required (and got) an entry for the new category: mapped to workflow category `'validation'` (non-retryable, matching `blocked_url`'s precedent — a block is a persistent condition, not a transient network hiccup) and labeled "Website returned an error (blocked or unavailable)" for the admin UI.
+- Deliberately **not** added to `lib/firecrawl/retry.ts`'s `RETRYABLE_CATEGORIES` — same reasoning, a 403 block won't resolve itself on an inline retry.
+
+Immediate fix for the specific business the admin reported: the existing "Admin Override" on the Scoring card (`adminReviewedQualification` → `reject`) already lets the qualification be corrected today, independent of this code change — see `ScoringSection.tsx`'s `OverrideForm`.
+
+## Verification
+
+```
+web/    Lint:      0 errors, 0 warnings (npm run lint)
+web/    TypeCheck: 0 errors (npx tsc --noEmit)
+web/    Tests:     703 passed (npm test) — 5 new: 3 in
+                   lib/firecrawl/__tests__/enrich-business.test.ts (403, 5xx, and 200-is-unaffected cases),
+                   1 in lib/scoring/__tests__/qualification-rules.test.ts,
+                   1 in lib/scoring/__tests__/score-business.test.ts
+web/    Build:     next build succeeds
+Manual: Not yet re-run against the real reported business (biz_8f9fb88d-3db9-4a55-a91a-4bfbbdf729a0) —
+        re-running "Enrich Website" then "Score Website" on it would confirm the fix live.
+```
+
+## Files changed
+
+```
+web/domain/models/scan-event.ts                                                  MODIFIED — new
+                                                                                     website_error_response
+                                                                                     failure category
+web/lib/firecrawl/enrich-business.ts                                             MODIFIED — detects target-site
+                                                                                     4xx/5xx before the
+                                                                                     empty-content check
+web/lib/scoring/score-business.ts                                                MODIFIED — shortcut set
+                                                                                     extended
+web/lib/scoring/qualification-rules.ts                                           MODIFIED — shortcut set
+                                                                                     extended
+web/lib/workflow/failure-mapping.ts                                              MODIFIED — new category
+                                                                                     mapped to 'validation'
+web/app/admin/(dashboard)/businesses/[businessId]/EnrichmentSection.tsx          MODIFIED — new category label
+web/lib/firecrawl/__tests__/enrich-business.test.ts                              MODIFIED — 3 new tests
+web/lib/scoring/__tests__/qualification-rules.test.ts                           MODIFIED — 1 new test
+web/lib/scoring/__tests__/score-business.test.ts                                MODIFIED — 1 new test
+```

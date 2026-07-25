@@ -24,6 +24,7 @@ import type { QualificationResult } from '@/domain/models/website-assessment';
 
 const WEBSITE_UNAVAILABLE_CATEGORIES: ReadonlySet<ScanFailureCategory> = new Set([
   'website_unreachable',
+  'website_error_response',
   'blocked_url',
   'invalid_url',
 ]);

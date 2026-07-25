@@ -157,6 +157,17 @@ describe('scoreBusinessWebsite — Firecrawl eligibility gate', () => {
     expect(mockUpdateBusiness).toHaveBeenCalledWith('biz_00000000-0000-0000-0000-000000000001', { qualification: 'manual_review' });
   });
 
+  it('flags manual review (no AI call) when the target site returned an error response (e.g. a 403 block page)', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness());
+    mockListScansForBusiness.mockResolvedValue([makeFirecrawlScan({ status: 'failed', failureCategory: 'website_error_response' })]);
+
+    const outcome = await scoreBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    expect(outcome.status).toBe('manual_approval_required');
+    expect(mockScoreWebsite).not.toHaveBeenCalled();
+    expect(mockUpdateBusiness).toHaveBeenCalledWith('biz_00000000-0000-0000-0000-000000000001', { qualification: 'manual_review' });
+  });
+
   it('is not eligible (not auto-manual-reviewed) for an unrelated Firecrawl failure', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness());
     mockListScansForBusiness.mockResolvedValue([makeFirecrawlScan({ status: 'failed', failureCategory: 'empty_content' })]);

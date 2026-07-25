@@ -52,6 +52,7 @@ const FAILURE_CATEGORY_LABELS: Record<ScanFailureCategory, string> = {
   firecrawl_timeout: 'Firecrawl request timed out',
   firecrawl_provider_error: 'Firecrawl provider error',
   website_unreachable: 'Website unreachable',
+  website_error_response: 'Website returned an error (blocked or unavailable)',
   empty_content: 'No content found on page',
   normalization_failed: 'Could not process page content',
   artifact_storage_failed: 'Failed to save scan data',

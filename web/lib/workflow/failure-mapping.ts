@@ -2,7 +2,7 @@ import type { ScanFailureCategory } from '@/domain/models/scan-event';
 import type { ScanWorkflowFailureCategory } from '@/domain/models/scan-execution';
 
 /**
- * Rolls up the 22-value, provider-specific `ScanFailureCategory` (the source
+ * Rolls up the 23-value, provider-specific `ScanFailureCategory` (the source
  * of truth for what actually went wrong, recorded on the underlying
  * `ScanEvent`) into the coarser `ScanWorkflowFailureCategory` used to drive
  * Step Functions retry/catch branching. See implementation.md, Stage 16,
@@ -23,6 +23,7 @@ const FAILURE_CATEGORY_MAP: Record<ScanFailureCategory, ScanWorkflowFailureCateg
   firecrawl_timeout: 'provider_timeout',
   firecrawl_provider_error: 'provider_error',
   website_unreachable: 'network',
+  website_error_response: 'validation',
   empty_content: 'validation',
   normalization_failed: 'internal',
   artifact_storage_failed: 'artifact_persistence',

@@ -49,7 +49,8 @@ export const SCAN_FAILURE_CATEGORIES = [
   'firecrawl_rate_limit',
   'firecrawl_timeout',
   'firecrawl_provider_error',
-  'website_unreachable',
+  'website_unreachable', // Firecrawl's own fetch of the target site failed outright (network/DNS/timeout).
+  'website_error_response', // Firecrawl's fetch succeeded, but the target site itself returned a 4xx/5xx status (e.g. a 403 block page) — some page content may still be present, but it isn't the real site.
   'empty_content',
   'normalization_failed',
   'artifact_storage_failed',

@@ -35,6 +35,7 @@ export const SCORING_CONFLICT_MESSAGE = 'A scoring attempt for this business is 
 
 const WEBSITE_UNAVAILABLE_FAILURE_CATEGORIES: ReadonlySet<ScanFailureCategory> = new Set([
   'website_unreachable',
+  'website_error_response',
   'blocked_url',
   'invalid_url',
 ]);

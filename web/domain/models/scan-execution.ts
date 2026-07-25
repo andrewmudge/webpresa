@@ -41,7 +41,7 @@ export type ScanWorkflowStep = (typeof SCAN_WORKFLOW_STEPS)[number];
 
 /**
  * Coarse, workflow-level rollup — mapped from the underlying `ScanEvent`'s
- * 22-value `ScanFailureCategory` (see `lib/workflow/failure-mapping.ts`), not
+ * 23-value `ScanFailureCategory` (see `lib/workflow/failure-mapping.ts`), not
  * an independent taxonomy. `ScanFailureCategory` stays the source of truth
  * for what actually went wrong; this is just enough detail to drive
  * Step Functions retry/catch branching.
