@@ -5,6 +5,7 @@ import type { Address, MutableTimestampedRecord } from './common';
 import type { WebsiteSectionsConfig } from './website-sections';
 import type { PreviewCtaConfig } from './site-preview';
 import type { LeadPriority, QualificationResult } from './website-assessment';
+import type { ScanWorkflowStatus } from './scan-execution';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -336,4 +337,21 @@ export interface Business extends MutableTimestampedRecord {
    */
   adminReviewedQualification?: QualificationResult;
   adminReviewedScore?: number;
+
+  // -------------------------------------------------------------------------
+  // Scan workflow rollup (Stage 16)
+  //
+  // A denormalized pointer to this business's most recent Step Functions
+  // execution — distinct from `enrichmentStatus` (Stage 13-specific, about
+  // Firecrawl enrichment only). The full execution history lives on
+  // `ScanExecution`; these three fields exist purely so the admin business
+  // list/detail views don't need a second query to show workflow state.
+  // Only ever updated through a conditional transition (see
+  // `lib/db/scan-executions.ts`) so an older or duplicate execution can't
+  // overwrite a newer result.
+  // -------------------------------------------------------------------------
+
+  latestScanExecutionId?: string;
+  scanExecutionStatus?: ScanWorkflowStatus;
+  scanExecutionUpdatedAt?: string;
 }

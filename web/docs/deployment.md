@@ -86,6 +86,7 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `BUSINESSES_TABLE_NAME` | CloudFormation export `webpresa-dev-businesses-name` | See "How outputs reach the application" |
 | `SITE_PREVIEWS_TABLE_NAME` | CloudFormation export `webpresa-dev-site-previews-name` | |
 | `SCAN_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-events-name` | |
+| `SCAN_EXECUTIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-executions-name` | Stage 16 — not yet deployed |
 | `POSTCARDS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcards-name` | |
 | `ASSETS_BUCKET_NAME` | CloudFormation export `webpresa-dev-assets-name` | S3 assets bucket (Stage 9) |
 | `OPENAI_SECRET_NAME` | Deterministic name — `webpresa-dev-openai` | Secrets Manager (Stage 10) |
@@ -95,6 +96,8 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `LOB_SECRET_NAME` | Deterministic name — `webpresa-dev-lob` | Secrets Manager (Stage 10) |
 | `CAPTURE_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-capture-token` | Secrets Manager (Stage 14) — deployed, real signing key populated, added to Vercel |
 | `SCREENSHOT_LAMBDA_FUNCTION_NAME` | CloudFormation export `webpresa-dev-screenshot-capture-name` | Stage 14 — deployed (`webpresa-dev-screenshot-capture`), added to Vercel |
+| `INTERNAL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-internal-api` | Secrets Manager (Stage 16) — not yet deployed |
+| `SCAN_WORKFLOW_STATE_MACHINE_ARN` | CloudFormation export `webpresa-dev-scan-workflow-arn` | Stage 16 — not yet deployed |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
@@ -128,80 +131,11 @@ Vercel has no IAM role concept, so a dedicated **IAM user** (`webpresa-vercel-de
 
 Create a least-privilege IAM user once and store its keys in Vercel. Do not use root credentials or the personal `webpresa` SSO user.
 
-### Create the IAM user (AWS Console or CLI)
+### Create the IAM user (one-time, manual — not CDK)
 
 ```bash
 # Create user (no console access)
 aws iam create-user --user-name webpresa-vercel-dev --profile webpresa
-
-# Attach an inline policy scoped to the four dev tables
-aws iam put-user-policy \
-  --user-name webpresa-vercel-dev \
-  --policy-name webpresa-dev-dynamodb \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:Query",
-        "dynamodb:Scan"
-      ],
-      "Resource": [
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-businesses",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-businesses/index/*",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-site-previews",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-site-previews/index/*",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-scan-events",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-scan-events/index/*",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-postcards",
-        "arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-postcards/index/*"
-      ]
-    }]
-  }' --profile webpresa
-
-# Attach an inline policy scoped to the assets bucket (Stage 9)
-aws iam put-user-policy \
-  --user-name webpresa-vercel-dev \
-  --policy-name webpresa-dev-s3-assets \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::webpresa-dev-assets",
-        "arn:aws:s3:::webpresa-dev-assets/*"
-      ]
-    }]
-  }' --profile webpresa
-
-# Attach an inline policy scoped to the 5 Stage 10 secrets
-aws iam put-user-policy \
-  --user-name webpresa-vercel-dev \
-  --policy-name webpresa-dev-secrets \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": ["secretsmanager:GetSecretValue"],
-      "Resource": [
-        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-openai-*",
-        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-firecrawl-*",
-        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-google-places-*",
-        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-stripe-*",
-        "arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-lob-*"
-      ]
-    }]
-  }' --profile webpresa
 
 # Generate access keys
 aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa
@@ -209,7 +143,20 @@ aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa
 
 The `create-access-key` response contains `AccessKeyId` and `SecretAccessKey`. Add both to Vercel immediately and do not store them anywhere else.
 
-> Future Lambda execution roles (Stage 13 crawler, Stage 14 screenshot capture, Stage 22 postcard service) should NOT reuse the broad `webpresa-dev-s3-assets` or `webpresa-dev-secrets` policies — each should get its own prefix/secret-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only, or `secretsmanager:GetSecretValue` on just its one secret) once those roles are created.
+The user and its access keys are deliberately **not** managed by CDK — a long-lived secret access key should never flow through a CloudFormation template or output. CDK only attaches permission policies to this already-existing user (see below).
+
+### Permissions — CDK-managed (`infra/lib/stacks/vercel-access-stack.ts`)
+
+**Migrated 2026-07-24** from five hand-run `aws iam put-user-policy` inline policies to two CDK-managed policies, after a `put-user-policy` call while adding Stage 16's grants failed with `LimitExceeded: Maximum policy size of 2048 bytes exceeded for user` — a hard, non-adjustable AWS limit on the *aggregate* size of all inline policies on one user (confirmed via `aws service-quotas list-service-quotas`, unlike the Lambda concurrency limit hit in Stage 14 — there is no quota to request an increase for here). A customer-managed policy allows 6,144 characters *each*, and a user can have up to 10 attached, so this isn't a limit this project will realistically hit again.
+
+`WebpresaVercelAccessStack` imports the existing user by name (`iam.User.fromUserName`) and attaches two managed policies:
+
+- `webpresa-{env}-vercel-data-access` — DynamoDB (all 5 tables + their indexes, including `scan-executions` — a gap the migration also closed, since Stage 16's internal API routes needed it and nothing had granted it yet), S3 (assets bucket), Secrets Manager (all 8 secrets).
+- `webpresa-{env}-vercel-compute-invoke` — `lambda:InvokeFunction` on the screenshot Lambda (Stage 14), `states:StartExecution` on the scan workflow state machine (Stage 16).
+
+**To grant a new permission** (e.g. Stage 18 Stripe webhooks, Stage 22 Lob): add a `PolicyStatement` to the relevant `iam.ManagedPolicy` in `vercel-access-stack.ts`, then `cdk diff WebpresaDevVercelAccessStack` → review → `cdk deploy WebpresaDevVercelAccessStack`, same gate as every other resource in this repo. No more hand-run CLI commands to keep in sync with this document.
+
+> Future Lambda execution roles (Stage 22 postcard service) should still get their own prefix/secret-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only, or `secretsmanager:GetSecretValue` on just its one secret) rather than reusing the Vercel app's broader data-access policy — this note carries forward from before the migration and still applies to any *new* execution role, just not to the Vercel user's own permissions anymore.
 
 ## Populating a real secret value (Stage 10)
 
@@ -277,7 +224,7 @@ Already provisioned in Stage 10 — no new secret is created for Stage 12:
 | Secret name | `webpresa-{env}-google-places` (dev: `webpresa-dev-google-places`) |
 | JSON shape | `{ "apiKey": "..." }` |
 | Environment variable (the secret's *name*, never the key value) | `GOOGLE_PLACES_SECRET_NAME` — already set to `webpresa-dev-google-places` in `.env.local.example` and in the environment-variable table above |
-| IAM | Already granted via the `webpresa-dev-secrets` inline policy on `webpresa-vercel-dev` (see "AWS credentials for Vercel" above) |
+| IAM | Already granted via the `webpresa-dev-vercel-data-access` managed policy on `webpresa-vercel-dev` (see "AWS credentials for Vercel" above) |
 
 Populate the real API key with the same pattern used for every other secret — see "Populating a real secret value" above.
 
@@ -481,6 +428,52 @@ Unlike every other stage in this app (plain Vercel Server Actions — pushing to
 
 ---
 
+## Stage 16 — Step Functions Scan Workflow deployment guidance
+
+**Deployed to dev 2026-07-24.** Added one new table (`scan-executions`), one new secret (`internal-api`, real shared secret populated), and one new stack (`WebpresaDevScanWorkflowStack` — Step Functions Standard state machine + EventBridge Connection, no Lambda, no ECR repo, no container image to build/push — simpler to deploy than Stage 14 for exactly that reason). `webpresa-vercel-dev`'s permissions were extended the same day as part of a larger migration — see "Extending `webpresa-vercel-dev`" below, which now points at a CDK-managed stack rather than the raw CLI commands originally drafted here. Vercel environment variables not yet set (see below).
+
+### Deploy sequence (first time)
+
+```bash
+# 1. Data stack — adds the scan-executions table and the internal-api secret. Review first:
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
+npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Populate the real shared secret (generated locally, not obtained from a third party —
+#    same pattern as capture-token in Stage 14):
+openssl rand -base64 48 | tr -d '\n' > /tmp/internal-api-secret.txt
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-internal-api \
+  --secret-string "{\"sharedSecret\":\"$(cat /tmp/internal-api-secret.txt)\"}" \
+  --profile webpresa
+rm /tmp/internal-api-secret.txt
+
+# 3. Scan workflow stack — state machine + EventBridge Connection. Requires
+#    WEBPRESA_APP_BASE_URL set to the real deployed app URL (same variable Stage 14 already
+#    requires — see "Required environment variables" below):
+WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk diff WebpresaDevScanWorkflowStack --profile webpresa
+WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScanWorkflowStack --profile webpresa
+```
+
+### Extending `webpresa-vercel-dev`
+
+This IAM user needs `states:StartExecution` on the scan workflow's ARN and `secretsmanager:GetSecretValue` on the `internal-api` secret before the Next.js admin trigger (`runScanWorkflowAction`) can start an execution. Attempting to add these as two more hand-run `aws iam put-user-policy` inline-policy calls — the approach originally drafted here — hit a hard, non-adjustable 2048-byte aggregate inline-policy-size limit for the user. Both grants now come from `WebpresaVercelAccessStack` (`infra/lib/stacks/vercel-access-stack.ts`) instead — see "AWS credentials for Vercel" above for the full migration record. Deploying that stack (`cdk deploy WebpresaDevVercelAccessStack`) is what actually grants these two permissions; no manual CLI policy edit is needed.
+
+### Vercel environment variables
+
+Add `INTERNAL_API_SECRET_NAME` (`webpresa-dev-internal-api`), `SCAN_EXECUTIONS_TABLE_NAME` (`webpresa-dev-scan-executions`), and `SCAN_WORKFLOW_STATE_MACHINE_ARN` (the `StateMachineArn` CloudFormation output from step 3 above) to Vercel's environment variables.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `SCAN_WORKFLOW_STATE_MACHINE_ARN` unset or wrong | `StartExecutionCommand` throws synchronously in `startScanWorkflow`; the `ScanExecution` is marked `failed` immediately rather than left `queued` forever |
+| `webpresa-vercel-dev` missing `states:StartExecution` | Same as above — an `AccessDeniedException` from the `StartExecutionCommand` call itself, caught the same way |
+| `internal-api` secret missing/wrong on either side | Every `HttpInvoke` task gets a `401` from `verifyInternalRequest()`, retries three times, then routes to `RecordFailure` — the whole execution ends `failed` quickly rather than silently hanging |
+| A business has no website | Never calls Firecrawl — the same `crawl` route serves the no-website branch too (see `enrichBusinessWebsite`'s existing `handleMissingWebsite` path), just reached via a different state name in execution history |
+
+---
+
 ## Deployment order
 
 Infrastructure must be deployed before application code that depends on it.
@@ -488,16 +481,23 @@ Infrastructure must be deployed before application code that depends on it.
 ```
 1. CDK bootstrap (once per account/region)
 2. WebpresaDevDataStack                 ← DynamoDB tables, S3 bucket, secrets (incl. Stage 14's
-                                            capture-token, deployed, real signing key populated)
-3. Create webpresa-vercel-dev IAM user and add keys to Vercel
+                                            capture-token and Stage 16's internal-api, deployed,
+                                            real values populated)
+3. Create webpresa-vercel-dev IAM user and add keys to Vercel (manual, one-time — see "AWS
+                                            credentials for Vercel" above)
 4. WebpresaDevScreenshotRepositoryStack ← Stage 14 — ECR repo (deployed)
 5. Build/push the screenshot-capture image (scripts/build-and-push-screenshot-lambda.sh) (done)
 6. WebpresaDevScreenshotStack           ← Stage 14 — container-image Lambda, DLQ (depends on #2, #4;
                                             deployed — see "Stage 14" above)
-7. Extend webpresa-vercel-dev with Lambda invoke + capture-token secret access (see "Stage 14"
-                                            above) — not yet done
-8. (future) Auth stack   ← Cognito (when multi-user admin is needed)
-9. Web application       ← Vercel deployment (automatic on push)
+7. WebpresaDevScanWorkflowStack         ← Stage 16 — Step Functions state machine + EventBridge
+                                            Connection (depends on #2's internal-api secret) —
+                                            deployed, see "Stage 16" above
+8. WebpresaDevVercelAccessStack         ← every webpresa-vercel-dev permission (data access +
+                                            compute invoke), depends on #2, #6, #7 — replaces the
+                                            old manual `aws iam put-user-policy` steps entirely,
+                                            see "AWS credentials for Vercel" above
+9. (future) Auth stack   ← Cognito (when multi-user admin is needed)
+10. Web application      ← Vercel deployment (automatic on push)
 ```
 
 The web application reads table names from environment variables (set in Vercel). If the tables do not exist when the application deploys, DynamoDB calls will fail at runtime.

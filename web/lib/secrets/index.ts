@@ -7,6 +7,7 @@ import {
   SECRET_STRIPE,
   SECRET_LOB,
   SECRET_CAPTURE_TOKEN,
+  SECRET_INTERNAL_API,
 } from './client';
 
 /**
@@ -43,6 +44,11 @@ export interface CaptureTokenSecret {
   signingKey: string;
 }
 
+/** Stage 16 — shared secret; also sourced by the EventBridge Connection that authenticates Step Functions' HttpInvoke calls into `/api/internal/scan/*`. */
+export interface InternalApiSecret {
+  sharedSecret: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -65,4 +71,8 @@ export async function getLobSecret(): Promise<LobSecret> {
 
 export async function getCaptureTokenSecret(): Promise<CaptureTokenSecret> {
   return (await getSecretJson(SECRET_CAPTURE_TOKEN())) as unknown as CaptureTokenSecret;
+}
+
+export async function getInternalApiSecret(): Promise<InternalApiSecret> {
+  return (await getSecretJson(SECRET_INTERNAL_API())) as unknown as InternalApiSecret;
 }

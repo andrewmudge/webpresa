@@ -2,6 +2,7 @@ export * from './common.schema';
 export * from './business.schema';
 export * from './site-preview.schema';
 export * from './scan-event.schema';
+export * from './scan-execution.schema';
 export * from './scan-image.schema';
 export * from './website-enrichment.schema';
 export * from './postcard.schema';

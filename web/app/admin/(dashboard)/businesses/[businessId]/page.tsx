@@ -4,6 +4,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
+import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
 import {
   // createSeedPreviewAction, — unused now that "Create test preview" is disabled (see Preview actions card below)
   updatePreviewCtaAction,
@@ -23,6 +24,7 @@ import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
+import { WorkflowSection } from './WorkflowSection';
 import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
 import { ScoringSection } from './ScoringSection';
@@ -48,6 +50,7 @@ interface Props {
   params: Promise<{ businessId: string }>;
   searchParams: Promise<{
     expandedSection?: string;
+    workflowResult?: string;
     enrichmentResult?: string;
     screenshotResult?: string;
     scoringResult?: string;
@@ -61,6 +64,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
   const { businessId } = await params;
   const {
     expandedSection: expandedSectionRaw,
+    workflowResult,
     enrichmentResult,
     screenshotResult,
     scoringResult,
@@ -72,11 +76,12 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
 
-  const [business, previews, scans, postcards] = await Promise.all([
+  const [business, previews, scans, postcards, scanExecutions] = await Promise.all([
     getBusinessById(businessId),
     listPreviewsForBusiness(businessId).catch(() => []),
     listScansForBusiness(businessId).catch(() => []),
     listPostcardsForBusiness(businessId).catch(() => []),
+    listScanExecutionsForBusiness(businessId).catch(() => []),
   ]);
 
   if (!business) notFound();
@@ -208,6 +213,11 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
             date: p.createdAt,
           }))}
         />
+      </div>
+
+      {/* Scan workflow (Stage 16) — orchestrates enrichment, screenshots, and scoring below in one Step Functions execution. */}
+      <div className="mb-6">
+        <WorkflowSection business={business} executions={scanExecutions} resultQuery={workflowResult} />
       </div>
 
       {/* Firecrawl website enrichment (Stage 13) — moved up front: for a newly-imported business this is usually the first thing an admin does. */}

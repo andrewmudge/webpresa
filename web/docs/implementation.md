@@ -1615,7 +1615,7 @@ Stages 10, 12, 13, and 14.
 
 ## Scope note: this stage scores the existing site, not the generated preview
 
-Stage 14 introduced two independent capture targets, each its own `ScanEvent` (`targetType: 'existing_site' | 'generated_preview'`). Stage 15 scores only the **`existing_site`** `ScanEvent` for a business — Stage 16's suggested workflow (`Capture Screenshots → Score Website → Qualification Decision → Generate Preview`) runs scoring *before* a preview exists, so there is nothing to score on the `generated_preview` side at this point in the funnel.
+Stage 14 introduced two independent capture targets, each its own `ScanEvent` (`targetType: 'existing_site' | 'generated_preview'`). Stage 15 scores only the **`existing_site`** `ScanEvent` for a business — a business's existing website is the only thing being evaluated as a sales prospect, so there is nothing meaningful to score on the `generated_preview` side. This holds regardless of when a preview happens to exist: `enrichBusinessWebsite` (Stage 13) already generates and persists a preview unconditionally as part of crawling, so by the time Stage 15 runs a preview is typically already present — Stage 15 simply has no reason to score it.
 
 ## Major deliverables
 
@@ -1754,94 +1754,374 @@ Following the Stage 13/14 precedent of keeping scan-scoped derived data on `Scan
 
 ---
 
-# Stage 16 — Step Functions Scan Workflow
+# Stage 16 — Step Functions Scan and Preview Workflow
+
+## Status
+
+Planned.
 
 ## Objective
 
-Connect independently working scan, screenshot, scoring, and preview-generation operations into a durable orchestrated workflow.
+Connect the independently working Google Places import, Firecrawl enrichment, Playwright screenshot capture, AI website scoring, and prospect qualification operations (Stages 11–15) into a durable, observable, idempotent Step Functions workflow.
+
+The workflow must support businesses with:
+
+- an existing website,
+- no website,
+- an inaccessible or partially scannable website,
+- sufficient evidence for automatic qualification,
+- insufficient or conflicting evidence requiring manual review.
+
+Postcard creation and mailing (Stage 22, not yet built) remain outside this workflow.
 
 ## Dependencies
 
 Stages 11 and 13–15.
 
+- Stage 11 provides `generatePreviewContent` (`web/lib/ai/generate-preview.ts`) — called directly by this workflow only on the no-website branch (see "No-website path").
+- Stage 12 provides discovered/imported `Business` records. It creates no `ScanEvent`s and is not otherwise invoked by this workflow.
+- Stage 13 provides `enrichBusinessWebsite` (`web/lib/firecrawl/enrich-business.ts`) — crawl, normalize, image ingestion, **and** preview generation/persistence, already combined into one existing operation.
+- Stage 14 provides `captureExistingSiteScreenshot`/`captureGeneratedPreviewScreenshot` (`web/lib/screenshots/capture.ts`).
+- Stage 15 provides `scoreBusinessWebsite`/`applyQualificationOverrides` (`web/lib/scoring/score-business.ts`, `web/lib/scoring/qualification-rules.ts`) — normalized scores, qualification, lead priority.
+
+## Architecture decision
+
+Use an AWS Step Functions **Standard Workflow**. Preferred over an Express Workflow because this process can run longer than a short synchronous request, calls multiple external providers, requires durable execution history and observable retries, may pause logically at manual-review boundaries, and must preserve execution records for admin troubleshooting.
+
+**Task Lambdas call back into the app, they do not reimplement its logic.** Only `screenshot-capture` (`infra/lambda/screenshot-capture/`) exists as a standalone AWS Lambda today — Firecrawl enrichment and AI scoring are Next.js Server Actions/lib code running on Vercel (`web/lib/firecrawl/`, `web/lib/scoring/`), already covered by their own test suites. Rather than porting or duplicating that logic into new Lambda bundles, Stage 16's task Lambdas invoke it through internal, authenticated API routes in the Next.js app. This extends the AWS→Vercel call pattern Stage 14 already established (the screenshot Lambda already reaches the Vercel-hosted preview using a `vercel-protection-bypass` secret from Secrets Manager) rather than inventing a second one.
+
 ## Major deliverables
 
-- Step Functions state machine
-- Small task-specific Lambda functions
-- Retry policies
-- Catch and failure paths
-- Execution references
+- Step Functions Standard state machine
+- Task-specific Lambda functions that call existing app logic via internal API routes
+- A new `ScanExecution` record and `scan-executions` DynamoDB table
+- Per-state timeout and retry policies
+- Normalized catch and failure paths
 - Manual admin trigger
 - Workflow status display
+- Rerun support
+- Preview-screenshot capture on the qualified path
+
+## Reused vs. new — what Stage 16 actually builds
+
+Most of the individual work is already implemented. Stage 16's job is orchestration, a small number of genuinely new steps, and a new execution record — not reimplementing Stages 11/13/14/15.
+
+| Workflow task | Wraps existing function | New code |
+|---|---|---|
+| `loadBusiness` | `getBusinessById` (`web/lib/db/businesses.ts`) | thin wrapper |
+| `crawlWebsite` | `enrichBusinessWebsite` (`web/lib/firecrawl/enrich-business.ts`) — already crawls, normalizes, ingests images, **and** generates + persists a `SitePreview`, all in one operation | none |
+| `captureSourceScreenshots` | `captureExistingSiteScreenshot` (`web/lib/screenshots/capture.ts`) | none |
+| `scoreWebsite` / `qualifyProspect` | `scoreBusinessWebsite` (`web/lib/scoring/score-business.ts`) — already applies `applyQualificationOverrides` and updates `Business.qualification`/`leadPriority`/`websiteQualityScore` internally | none; may be one Step Functions task rather than two — a doc-only Step Functions modeling choice |
+| `capturePreviewScreenshots` | `captureGeneratedPreviewScreenshot` (`web/lib/screenshots/capture.ts`) | none |
+| `recordNoWebsiteSignals` | — | new: sets `Business.enrichmentStatus`/`manualApprovalReason` (reusing the exact `'manual_approval_required'`/`'missing_website'` values `handleMissingWebsite` already uses) plus the new `ScanExecution` signal fields below |
+| `generatePreview` (no-website branch only) | `generatePreviewContent` + `createSitePreview`/`putSitePreview` | new orchestration — neither Stage 13's no-website path nor Stage 15's no-website shortcut generates a preview today; this is a new caller of already-working Stage 11 building blocks |
+| `initializeScanExecution` / `finalizeScanExecution` / `recordScanFailure` / `queueManualReview` | — | new — these operate on the new `ScanExecution` record, not on `Business` or `ScanEvent` |
+
+Do not create a single `processEverything` Lambda.
+
+## Workflow ownership: `ScanExecution`
+
+`ScanEvent` (`web/domain/models/scan-event.ts`) is already a **per-operation** record — exactly one per Firecrawl scrape, one per Playwright screenshot, one per AI score, immutable once terminal, with retries always creating a new `ScanEvent` linked via `retryOfScanId`. A single Stage 16 run spans several of these (one crawl, one or two screenshot captures, one score), so the workflow needs its own record rather than overloading `ScanEvent` with a second, incompatible meaning.
+
+**`ScanExecution`** is that new record — the primary execution record for one Step Functions run, referencing the `ScanEvent`s (and the `SitePreview`) it produces rather than replacing them. New `scan-executions` DynamoDB table, following the existing `WebpresaTable` construct (`infra/lib/constructs/webpresa-table.ts`) and the `business-id-index` (`createdAt` sort key) convention already used by `scan-events`/`site-previews`.
+
+Keep the Step Functions execution input small — identifiers, not full provider responses:
+
+```ts
+type ScanWorkflowInput = {
+  businessId: string;
+  scanExecutionId: string;
+  requestedBy: string;
+  triggerSource: 'admin_manual';
+  forceRescan?: boolean;
+};
+```
+
+`ScanExecution` itself:
+
+```ts
+type ScanWorkflowStatus =
+  | 'queued'
+  | 'running'
+  | 'manual_review'
+  | 'qualified'
+  | 'reject'
+  | 'preview_ready'
+  | 'failed';
+
+type ScanWorkflowStep =
+  | 'initializing'
+  | 'loading_business'
+  | 'validating'
+  | 'recording_no_website'
+  | 'crawling'
+  | 'capturing_source_screenshots'
+  | 'scoring'
+  | 'qualifying'
+  | 'generating_preview'
+  | 'capturing_preview_screenshots'
+  | 'queueing_manual_review'
+  | 'finalizing';
+
+type ScanWorkflowFailure = {
+  step: ScanWorkflowStep;
+  /** Rolled up from the underlying ScanEvent's ScanFailureCategory (scan-event.ts) via a small mapping function — not an independent taxonomy. */
+  category:
+    | 'validation'
+    | 'not_found'
+    | 'rate_limit'
+    | 'provider_timeout'
+    | 'provider_error'
+    | 'network'
+    | 'schema_validation'
+    | 'artifact_persistence'
+    | 'conditional_conflict'
+    | 'internal';
+  safeMessage: string;
+  provider?: 'firecrawl' | 'playwright' | 'openai' | 'internal';
+  occurredAt: string;
+  attemptCount: number;
+  retryEligible: boolean;
+};
+
+interface ScanExecution {
+  scanExecutionId: string; // scanexec_<uuid>
+  businessId: string;
+  executionArn?: string;
+  executionName?: string;
+  status: ScanWorkflowStatus;
+  currentStep?: ScanWorkflowStep;
+  triggerSource: 'admin_manual';
+  requestedBy: string;
+
+  // References to the per-operation records this execution produced —
+  // never a copy of their content.
+  crawlScanId?: string;              // ScanEvent: provider 'firecrawl', operation 'scrape'
+  sourceScreenshotScanId?: string;    // ScanEvent: provider 'playwright', targetType 'existing_site'
+  scoreScanId?: string;               // ScanEvent: provider 'openai', operation 'score'
+  previewScreenshotScanId?: string;   // ScanEvent: provider 'playwright', targetType 'generated_preview'
+  previewId?: string;                // SitePreview produced by crawlScanId, or by the no-website branch
+
+  qualification?: QualificationResult; // reuse website-assessment.ts, not a redefined type
+  leadPriority?: LeadPriority;
+  manualReviewReason?: string;
+
+  attemptNumber: number;
+  parentScanExecutionId?: string;
+  rerunReason?: string;
+  failure?: ScanWorkflowFailure;
+
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+```
+
+Reuse `QualificationResult` (`'qualified' | 'manual_review' | 'reject'`) and `LeadPriority` from `web/domain/models/website-assessment.ts` directly rather than defining a parallel type.
 
 ## Suggested workflow
 
 ```text
+Initialize Scan Execution
+  ↓
 Load Business
   ↓
+Validate Scan Eligibility
+  ↓
 Website exists?
-  ├─ No → Mark No Website → Generate Preview
-  └─ Yes → Crawl Website
-              ↓
-           Capture Screenshots
-              ↓
-           Score Website
-              ↓
-           Qualification Decision
-              ├─ Manual Review
-              └─ Generate Preview
-                       ↓
-                    Save Preview
-                       ↓
-                    Manual Approval
+  ├─ No
+  │    ↓
+  │  Record No-Website Signals
+  │    ↓
+  │  Score & Qualify (Stage 15's existing no-website shortcut — auto "qualified", no OpenAI call)
+  │    ↓
+  │  Qualified? → Generate Preview (new orchestration) → Capture Preview Screenshots
+  │
+  └─ Yes
+       ↓
+     Crawl Website  (crawl + normalize + image ingest + generate + persist preview — one existing operation)
+       ↓
+     Capture Source-Site Screenshots
+       ↓
+     Score Website & Qualify Prospect
+
+Qualification Result
+  ├─ manual_review → Queue for Manual Review (a preview may already exist from Crawl Website)
+  ├─ reject        → Finalize (a preview may already exist from Crawl Website; not surfaced for outreach)
+  └─ qualified     → Capture Preview Screenshots → Mark Preview Ready for Review → Finalize
 ```
 
-## Implementation requirements
+This intentionally differs from earlier drafts of this stage: preview generation is **not** gated behind qualification on the has-website path, because `enrichBusinessWebsite` already produces a preview unconditionally as a side effect of crawling — before scoring even runs. The qualification decision instead controls whether the workflow proceeds to preview-screenshot capture and "ready for review," and (once Stage 21/22 exist) postcard eligibility — it does not decide whether a preview exists.
 
-Use small functions such as:
+Note: Stage 15's own "Scope note" (above, `## Scope note: this stage scores the existing site, not the generated preview`) currently states that scoring runs "before a preview exists." That statement no longer matches `enrichBusinessWebsite`'s actual behavior — a preview is already created during crawl, before Stage 15 ever runs. Worth a follow-up correction to that note; left untouched here since it's outside this rewrite's scope.
 
+## Qualification behavior
+
+### Qualified
+
+- Has-website path: a preview already exists (created during Crawl Website). Capture preview screenshots, then mark it ready for review.
+- No-website path: generate and save a preview (see "Reused vs. new"), then capture preview screenshots.
+
+Preview screenshot capture is separate from source-site screenshot capture and never triggers postcard mailing.
+
+### Manual review
+
+Do not automatically continue into postcard creation or mailing. Two distinct existing "needs a human" signals both roll up into this one workflow status, each keeping its own structured reason rather than being collapsed into a single generic one:
+
+- Stage 13's enrichment disposition — `Business.enrichmentStatus`/`manualApprovalReason` (`'missing_website' | 'no_usable_images' | 'insufficient_content' | 'other'`) — about content/image availability.
+- Stage 15's qualification — `Business.qualification === 'manual_review'`, driven by `applyQualificationOverrides` for a Firecrawl failure in `{website_unreachable, blocked_url, invalid_url}`, or low AI confidence — about prospect quality.
+
+A manual-review outcome may coexist with an already-generated preview (has-website path) or no preview at all (no-website path, when not qualified).
+
+Only route on reasons the current pipeline actually produces: missing website, no usable images, a crawl/screenshot failure, AI schema-validation failure after its bounded retry, or low AI confidence. `web/lib/scoring/qualification-rules.ts` explicitly documents that "closed business," "national chain," "government organization," and "invalid address" overrides are **not implemented** — no such signal exists on `Business` today. Do not have Stage 16 assume these reasons are available; treat them as a possible future Stage 15 extension.
+
+### Reject
+
+Complete the workflow successfully without further action. A `reject` result is not a failed workflow, and — unlike the draft assumption — does not imply no preview exists: on the has-website path a preview may already have been created by Crawl Website. Store the qualification evidence (already persisted via `ScanEvent.assessment` and `Business.qualification`/`websiteQualityScore`) so the decision can be reviewed and rescanned later.
+
+## No-website path
+
+A missing `Business.websiteUrl` is a valid business condition, not an exception — this already matches `enrichBusinessWebsite`'s existing `handleMissingWebsite` behavior (skip Firecrawl, terminal `ScanEvent` with `failureCategory: 'missing_website'`).
+
+For a business without a website, the workflow:
+
+- skips Firecrawl (Stage 13's existing no-website path already does this),
+- skips source-site screenshot capture (there is no source site),
+- records explicit no-website signals (reusing `enrichmentStatus: 'manual_approval_required'`/`manualApprovalReason: 'missing_website'`, the same values `handleMissingWebsite` already sets),
+- runs Stage 15's existing no-website qualification shortcut (auto-`'qualified'`, no OpenAI call — see `scoreBusinessWebsite`),
+- generates a preview when qualified, via the new `generatePreview` orchestration described above,
+- captures preview screenshots once one exists,
+- still requires manual review when Stage 13 also flagged `'no_usable_images'`, even though qualification itself passed.
+
+Reuse the existing `ScanFailureCategory` distinctions (`scan-event.ts`) rather than introducing a new parallel status enum for source-website availability — `missing_website` (no website) is already distinct from `website_unreachable`/`blocked_url`/`invalid_url` (a website exists but couldn't be scanned).
+
+## Task-specific functions
+
+Use small task-specific Lambdas or direct AWS service integrations, per the "Reused vs. new" table above:
+
+- `initializeScanExecution`
 - `loadBusiness`
+- `validateScanEligibility`
+- `recordNoWebsiteSignals`
 - `crawlWebsite`
-- `captureScreenshots`
-- `scoreWebsite`
-- `generatePreview`
-- `savePreview`
-- `markScanFailed`
+- `captureSourceScreenshots`
+- `scoreWebsite` / `qualifyProspect`
+- `generatePreview` (no-website branch only)
+- `capturePreviewScreenshots`
+- `queueManualReview`
+- `finalizeScanExecution`
+- `recordScanFailure`
 
-Do not create a single `processEverything` function.
+Do not create a single `processEverything` Lambda. A task Lambda may normalize a provider response and persist its own result, but it should not silently execute several unrelated workflow stages.
 
-Record failures with:
+## Business record updates
 
-- failed step
-- error category
-- safe error message
-- timestamp
-- attempt count
-- execution reference
-- retry eligibility
+`Business` already carries the durable, admin-facing rollups Stage 16 needs — do not reinvent them:
 
-Retry temporary errors such as rate limits, timeouts, and provider 5xx responses. Do not repeatedly retry invalid input, missing records, authentication errors, or invalid schemas.
+- `currentPreviewId`, `qualification`, `leadPriority`, `websiteQualityScore`, `adminReviewedQualification`, `adminReviewedScore` (Stage 15)
+- `enrichmentStatus`, `manualApprovalReason`, `manualApprovalNote` (Stage 13)
 
-Keep postcard mailing outside the automatic path.
+Add only what's genuinely new — a workflow-level rollup distinct from the Stage-13-specific `enrichmentStatus`:
+
+- `latestScanExecutionId?: string`
+- `scanExecutionStatus?: ScanWorkflowStatus`
+- `scanExecutionUpdatedAt?: string`
+
+These fields must only be updated through conditional transitions (matching `updateBusiness`'s existing merge-against-freshly-fetched-record behavior) so an older or duplicate execution cannot overwrite newer results. The complete execution history remains on `ScanExecution` and the individual `ScanEvent`s.
+
+## Idempotency and duplicate execution protection
+
+Duplicate admin triggers must not corrupt business, scan, or preview state — the same conditional-update discipline Stage 13/14 already established for `ScanEvent` transitions applies here:
+
+1. Create a `ScanExecution` in `queued` before starting the state machine.
+2. Prevent a second active execution from claiming the same business (mirrors `hasActiveScan` in `enrich-business.ts`, which already blocks a concurrent Firecrawl attempt).
+3. Start the Step Functions execution with a deterministic or collision-resistant execution name; persist the returned execution ARN/name on `ScanExecution`.
+4. Each state that writes data must be idempotent — conditional DynamoDB expressions, expected current-status checks, and compare-before-update on `Business`, exactly as Stage 13/14 already do.
+
+Do not rely on Lambda reserved concurrency as the primary duplicate-execution safeguard — Stage 14 already established this precedent (`MaximumRetryAttempts: 0` + DLQ instead of relying on concurrency limits). Reserved concurrency may still be configured later as an operational limit, but correctness comes from conditional transitions.
+
+## Rerun behavior
+
+An admin must be able to rerun a failed, rejected, or manual-review scan without mutating the historical execution — mirroring `retryEnrichmentScan`'s existing pattern of always creating a new `ScanEvent` rather than flipping a terminal one back to `running`.
+
+A rerun creates a new `ScanExecution` with a new `scanExecutionId`, a new Step Functions execution, an incremented `attemptNumber` or `parentScanExecutionId` reference, and an optional `rerunReason`. Do not reset a completed historical `ScanExecution` back to `queued`.
+
+`forceRescan` may bypass freshness checks but must not bypass input validation, idempotency controls, or execution ownership.
+
+## Retry policies
+
+Configure retries per task, not through one global rule — following the bounded-inline-retry pattern already implemented in `scrapeWithBoundedRetry` (`enrich-business.ts`) and `isRetryableFailureCategory`/`computeAutomaticRetryDelayMs` (`web/lib/firecrawl/retry.ts`).
+
+Retry temporary failures: provider rate limits, timeouts, network interruptions, Firecrawl/Playwright/OpenAI 5xx or infrastructure failures, transient AWS SDK failures. Use exponential backoff with bounded attempts and jitter where supported.
+
+Do not repeatedly retry: missing business records, invalid workflow input, missing required identifiers, malformed stored records, invalid application schemas, conditional ownership conflicts, unsupported website URLs. AI schema-validation failures may receive one bounded corrective retry (matching Stage 15's own bounded-retry behavior); after that, route to manual review or failure by category.
+
+Each task must define its own timeout so a provider call cannot leave a Lambda or workflow state running indefinitely.
+
+## Failure and partial-success handling
+
+Not every missing artifact should fail the whole workflow.
+
+**Fatal:** business record missing, invalid workflow input, execution ownership lost, persistent artifact-storage failure, invalid internal record schema, preview persistence failure, unrecoverable internal exception.
+
+**Recoverable/reviewable, after retries are exhausted:** Firecrawl fails but source screenshots are available; screenshots fail but crawl content is available; the source site blocks automation; the AI cannot confidently qualify the prospect. Persist partial results and route to manual review when useful evidence still exists — never claim a source was analyzed when a required signal was actually unavailable.
+
+Record failures with: failed step, normalized error category (mapped from the underlying `ScanEvent.failureCategory`), safe error message, provider when applicable, timestamp, attempt count, execution reference, retry eligibility, whether partial artifacts were retained, whether manual review is possible. Never store secrets, credentials, or raw provider responses in the failure message — detailed diagnostics belong in CloudWatch logs, not the admin-facing record.
+
+## Execution references
+
+Persist the Step Functions execution ARN/name on `ScanExecution`. The admin interface should link workflow records to the business, the `ScanExecution`, the generated preview when present, the current status/step, and the safe failure summary when present. Do not make the AWS console the only way to determine what happened.
+
+## Admin trigger
+
+Add a manual admin action (`Run full scan` / `Rescan` / `Retry as new scan`). The server-side trigger must: authorize the admin, validate the business, create the `ScanExecution`, claim execution ownership, start the Step Functions execution, persist the execution reference, and return the new `scanExecutionId`. The browser must not call Step Functions directly. Provide clear feedback for: an active scan already exists, a duplicate request was ignored, a new scan started, the business is not eligible, or Step Functions could not be started.
+
+## Workflow status display
+
+Show queued/running/current step/qualified/reject/manual review required/preview ready/failed, plus (when available) started/completed time, attempt number, latest safe error, source/screenshot/preview-screenshot availability, qualification reason, lead priority, and a rerun action. Distinguish a workflow failure from a valid `reject` qualification in the UI.
+
+## Preview screenshot requirement
+
+Source screenshots (Stage 14, captured from the prospect's existing site) and preview screenshots (captured after a preview is saved) serve different purposes — visual scoring/evidence for the former, admin review/before-after/future postcard creative for the latter. A business without an existing website has no source screenshot but can still have preview screenshots. Preview screenshot capture never triggers postcard mailing.
+
+## Observability
+
+Emit structured logs/metrics for: workflows started/completed/failed, workflows routed to manual review, workflows rejected, previews generated, crawl/screenshot/scoring/qualification failures, duplicate-trigger prevention, average workflow duration. Include `businessId`, `scanExecutionId`, the Step Functions execution name, and workflow step. Never log full crawl content, provider credentials, or secrets.
+
+## Infrastructure requirements
+
+Define the state machine, Lambda integrations, IAM permissions, log groups, and environment configuration through CDK, following the existing `WebpresaTable`/`WebpresaBucket`/`WebpresaSecret` construct pattern (`infra/lib/constructs/`). Grant each task only the permissions it requires — the Stage 16 state machine must not have permission to send postcards.
 
 ## Acceptance criteria
 
-- An admin can manually start the full workflow.
-- Each major step is visible in execution history.
-- Temporary failures retry according to policy.
-- Permanent failures terminate safely.
-- Failure details are recorded against the business or scan.
-- A successful workflow produces a reviewable preview.
-- Duplicate manual triggers do not corrupt state.
-- Postcards are not sent automatically.
+- An admin can manually start a complete scan workflow.
+- A new `ScanExecution` is created for each execution, and the Step Functions execution reference is stored on it.
+- Each major operation is visible as an individual workflow state.
+- Businesses with no website skip crawl and source-screenshot states without failing.
+- Existing websites are crawled and visually captured.
+- Temporary failures retry per bounded, state-specific policy; permanent failures terminate safely with normalized failure details recorded.
+- Recoverable provider failures can route to manual review when sufficient partial evidence exists.
+- Qualification produces an explicit `qualified`, `manual_review`, or `reject` outcome (reusing `QualificationResult`).
+- A `reject` outcome completes the workflow without necessarily implying no preview exists.
+- Qualified businesses have a persisted, reviewable preview with separate preview screenshots — including no-website businesses that had none to begin with.
+- Manual-review outcomes appear in the admin review queue.
+- Duplicate manual triggers do not corrupt state or overwrite newer results.
+- Completed scan executions remain immutable; reruns create new `ScanExecution`s rather than resetting completed ones.
+- Large provider artifacts stay on the existing `ScanEvent`/S3 artifact keys, referenced (not duplicated) by `ScanExecution`.
+- No postcard is created or sent automatically.
+- The workflow does not depend on Lambda reserved concurrency for correctness.
 
 ## Deferred work
 
-- EventBridge scheduling
-- Batch execution
-- Human approval callback tasks
-- Cost-aware branching
-- Multi-page scanning
+- EventBridge scheduled discovery or scanning
+- Batch workflow execution / Distributed Map processing
+- Human approval callback task tokens and automatic continuation after human approval
+- Cost-aware provider branching
+- Multi-page crawling and scoring
+- Automatic postcard creation and mailing
+- Workflow cancellation from the admin interface
+- Automatic stale-scan refresh
+- Extending qualification overrides to "closed business," "national chain," "government organization," and "invalid address" signals (Stage 15's concern, not this stage's)
 
 ---
 

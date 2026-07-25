@@ -58,6 +58,10 @@ vi.mock('@/lib/ai/generate-preview', () => ({
   generatePreviewContent: vi.fn(),
 }));
 
+vi.mock('@/lib/ai/generate-and-save-preview', () => ({
+  generateAndSaveWebsite: vi.fn(),
+}));
+
 vi.mock('@/lib/theme/select-theme', () => ({
   resolveBusinessThemeForSeed: vi.fn(),
 }));

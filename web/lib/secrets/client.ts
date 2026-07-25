@@ -62,6 +62,10 @@ export const SECRET_LOB = () => getSecretName('LOB_SECRET_NAME');
 // (a separate deployable — see infra/lambda/screenshot-capture/), which
 // mints tokens with the same secret; this app only ever verifies.
 export const SECRET_CAPTURE_TOKEN = () => getSecretName('CAPTURE_TOKEN_SECRET_NAME');
+// Stage 16 — shared secret authenticating Step Functions' HttpInvoke calls
+// (via an EventBridge Connection) into this app's `/api/internal/scan/*`
+// routes. See `lib/internal-auth.ts`.
+export const SECRET_INTERNAL_API = () => getSecretName('INTERNAL_API_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval

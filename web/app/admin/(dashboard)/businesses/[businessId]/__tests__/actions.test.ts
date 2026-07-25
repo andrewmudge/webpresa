@@ -21,7 +21,7 @@ const {
   mockDeleteBusinessById,
   mockUpdateBusiness,
   mockGetSession,
-  mockGeneratePreviewContent,
+  mockGenerateAndSaveWebsite,
 } = vi.hoisted(() => ({
   mockGetSitePreviewById: vi.fn(),
   mockPutSitePreview: vi.fn(),
@@ -35,11 +35,15 @@ const {
   mockDeleteBusinessById: vi.fn(),
   mockUpdateBusiness: vi.fn(),
   mockGetSession: vi.fn(),
-  mockGeneratePreviewContent: vi.fn(),
+  mockGenerateAndSaveWebsite: vi.fn(),
 }));
 
-vi.mock('@/lib/ai/generate-preview', () => ({
-  generatePreviewContent: mockGeneratePreviewContent,
+// The detailed generation pipeline (cap check, theme/CTA seeding, version
+// increment) is tested directly against `generateAndSaveWebsite` in
+// `lib/ai/__tests__/generate-and-save-preview.test.ts` — this file only
+// tests that `generateWebsiteAction` delegates to it and maps the outcome.
+vi.mock('@/lib/ai/generate-and-save-preview', () => ({
+  generateAndSaveWebsite: mockGenerateAndSaveWebsite,
 }));
 
 vi.mock('@/lib/theme/select-theme', () => ({
@@ -156,19 +160,6 @@ const EXISTING_BUSINESS: Business = {
   updatedAt: new Date().toISOString(),
 };
 
-const GENERATED = {
-  content: {
-    hero: { headline: 'Reliable Plumbing', subheadline: 'Fast, honest service.', ctaText: 'Call Now' },
-    services: [{ name: 'Drain Cleaning', description: 'Fast drain service.' }],
-    tagline: 'Trusted local plumbing.',
-    aboutText: 'We are Acme Plumbing.',
-    contact: { phone: '512-555-0100' },
-    cta: { primary: { type: 'phone' as const, label: 'Call Now' } },
-  },
-  theme: { themeName: 'classicBlue' as const, fontFamily: 'sans-serif', heroStyle: 'solid' as const },
-  metadata: { model: 'gpt-4o-mini', promptVersion: '2026-07-13', generatedAt: new Date().toISOString(), durationMs: 500 },
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetSession.mockResolvedValue({ sub: 'admin', expiresAt: new Date().toISOString() });
@@ -176,131 +167,53 @@ beforeEach(() => {
   mockPutSitePreview.mockResolvedValue(undefined);
   mockGetBusinessById.mockResolvedValue(EXISTING_BUSINESS);
   mockListPreviewsForBusiness.mockResolvedValue([]);
-  mockGeneratePreviewContent.mockResolvedValue(GENERATED);
+  mockGenerateAndSaveWebsite.mockResolvedValue({ status: 'completed', previewId: EXISTING_PREVIEW.previewId });
   mockUpdateBusiness.mockResolvedValue(EXISTING_BUSINESS);
 });
 
 // ---------------------------------------------------------------------------
-// generateWebsiteAction
+// generateWebsiteAction — the detailed generation pipeline (cap check,
+// theme/CTA seeding, version increment) is tested directly against
+// `generateAndSaveWebsite` in `lib/ai/__tests__/generate-and-save-preview.test.ts`.
+// These tests cover only this thin Server Action wrapper.
 // ---------------------------------------------------------------------------
 
-describe('generateWebsiteAction — success flow', () => {
-  it('creates a draft SitePreview with generationMetadata and redirects', async () => {
+describe('generateWebsiteAction', () => {
+  it('delegates to generateAndSaveWebsite and redirects on success', async () => {
     await expect(
       generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
     ).rejects.toThrow(`REDIRECT:/admin/businesses/${EXISTING_BUSINESS.businessId}`);
 
-    expect(mockPutSitePreview).toHaveBeenCalledOnce();
-    const saved = mockPutSitePreview.mock.calls[0][0];
-    expect(saved.status).toBe('draft');
-    expect(saved.generationMetadata).toEqual(GENERATED.metadata);
-    expect(saved.content.hero.headline).toBe('Reliable Plumbing');
+    expect(mockGenerateAndSaveWebsite).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId);
   });
 
-  it('persists the resolved theme onto the business when it has none stored yet', async () => {
-    await expect(
-      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
-    ).rejects.toThrow('REDIRECT:');
-
-    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, { theme: 'classicBlue' });
-  });
-
-  it('persists the generated CTA onto the business when it has none stored yet', async () => {
-    await expect(
-      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
-    ).rejects.toThrow('REDIRECT:');
-
-    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, { cta: GENERATED.content.cta });
-  });
-
-  it('does not overwrite a business theme or CTA that are already stored', async () => {
-    mockGetBusinessById.mockResolvedValue({
-      ...EXISTING_BUSINESS,
-      theme: 'green',
-      cta: { primary: { type: 'phone' as const, label: 'Existing CTA' } },
+  it('returns the outcome message without redirecting when generation is not eligible', async () => {
+    mockGenerateAndSaveWebsite.mockResolvedValueOnce({
+      status: 'not_eligible',
+      message: 'Add at least one service under "Services offered" before generating a website.',
     });
-
-    await expect(
-      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
-    ).rejects.toThrow('REDIRECT:');
-
-    expect(mockUpdateBusiness).not.toHaveBeenCalled();
-  });
-
-  it('increments the version from the highest existing preview', async () => {
-    mockListPreviewsForBusiness.mockResolvedValueOnce([
-      { ...EXISTING_PREVIEW, version: 1 },
-      { ...EXISTING_PREVIEW, version: 3 },
-    ]);
-
-    await expect(
-      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
-    ).rejects.toThrow('REDIRECT:');
-
-    const saved = mockPutSitePreview.mock.calls[0][0];
-    expect(saved.version).toBe(4);
-  });
-});
-
-describe('generateWebsiteAction — validation', () => {
-  it('rejects when the business has no services listed', async () => {
-    mockGetBusinessById.mockResolvedValueOnce({ ...EXISTING_BUSINESS, servicesOffered: undefined });
 
     const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
 
     expect(result?.message).toMatch(/at least one service/i);
-    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
-    expect(mockPutSitePreview).not.toHaveBeenCalled();
   });
 
-  it('enforces the AI generation cap', async () => {
-    mockListPreviewsForBusiness.mockResolvedValueOnce(
-      Array.from({ length: 10 }, () => ({ ...EXISTING_PREVIEW, generationMetadata: GENERATED.metadata })),
-    );
-
-    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
-
-    expect(result?.message).toMatch(/limit/i);
-    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
-  });
-
-  it('does not count seed previews (no generationMetadata) toward the cap', async () => {
-    mockListPreviewsForBusiness.mockResolvedValueOnce([
-      { ...EXISTING_PREVIEW },
-      { ...EXISTING_PREVIEW },
-      { ...EXISTING_PREVIEW },
-    ]);
-
-    await expect(
-      generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData()),
-    ).rejects.toThrow('REDIRECT:');
-
-    expect(mockGeneratePreviewContent).toHaveBeenCalledOnce();
-  });
-});
-
-describe('generateWebsiteAction — auth and error handling', () => {
-  it('returns Unauthorized when session is missing', async () => {
-    mockGetSession.mockResolvedValueOnce(null);
-    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
-    expect(result?.message).toBe('Unauthorized');
-    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
-  });
-
-  it('returns a not-found message when the business does not exist', async () => {
-    mockGetBusinessById.mockResolvedValueOnce(null);
-    const result = await generateWebsiteAction('biz_notfound', undefined, new FormData());
-    expect(result?.message).toBe('Business not found');
-  });
-
-  it('returns a safe generic message when generation throws, without leaking the raw error', async () => {
-    mockGeneratePreviewContent.mockRejectedValueOnce(new Error('OpenAI rate limit exceeded: sk-abc123'));
+  it('returns a safe generic message without redirecting when generation fails', async () => {
+    mockGenerateAndSaveWebsite.mockResolvedValueOnce({
+      status: 'failed',
+      message: 'Failed to generate website. Please try again.',
+    });
 
     const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
 
     expect(result?.message).toBe('Failed to generate website. Please try again.');
-    expect(result?.message).not.toContain('sk-abc123');
-    expect(mockPutSitePreview).not.toHaveBeenCalled();
+  });
+
+  it('returns Unauthorized when session is missing, without calling generateAndSaveWebsite', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+    expect(result?.message).toBe('Unauthorized');
+    expect(mockGenerateAndSaveWebsite).not.toHaveBeenCalled();
   });
 });
 

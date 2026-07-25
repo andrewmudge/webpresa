@@ -10,6 +10,7 @@ import {
   TESTIMONIAL_SOURCES,
 } from '@/domain/models/business';
 import { QUALIFICATION_RESULTS, LEAD_PRIORITIES } from '@/domain/models/website-assessment';
+import { SCAN_WORKFLOW_STATUSES } from '@/domain/models/scan-execution';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 import { PreviewCtaConfigSchema } from './site-preview.schema';
@@ -123,6 +124,9 @@ export const BusinessSchema = z.object({
   websiteQualityScore: ScoreSchema.optional(),
   adminReviewedQualification: z.enum(QUALIFICATION_RESULTS).optional(),
   adminReviewedScore: ScoreSchema.optional(),
+  latestScanExecutionId: z.string().optional(),
+  scanExecutionStatus: z.enum(SCAN_WORKFLOW_STATUSES).optional(),
+  scanExecutionUpdatedAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

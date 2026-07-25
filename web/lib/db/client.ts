@@ -63,3 +63,4 @@ export const TABLE_BUSINESSES = () => getTableName('BUSINESSES_TABLE_NAME');
 export const TABLE_SITE_PREVIEWS = () => getTableName('SITE_PREVIEWS_TABLE_NAME');
 export const TABLE_SCAN_EVENTS = () => getTableName('SCAN_EVENTS_TABLE_NAME');
 export const TABLE_POSTCARDS = () => getTableName('POSTCARDS_TABLE_NAME');
+export const TABLE_SCAN_EXECUTIONS = () => getTableName('SCAN_EXECUTIONS_TABLE_NAME');

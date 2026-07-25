@@ -5086,3 +5086,197 @@ web/docs/implementation.md                                                      
                                                                                      Stage 14 status corrected
                                                                                      (earlier this session)
 ```
+
+# Stage 16 — Step Functions Scan and Preview Workflow
+
+## Scope
+
+Full implementation per the rewritten Stage 16 section of `implementation.md` (rewritten earlier this same session — see that file for the full spec, including the reconciliation against the actual Stage 11/13/14/15 code that motivated the rewrite). Connects the independently working Google Places import, Firecrawl enrichment, Playwright screenshots, and AI scoring operations into one durable, idempotent Step Functions Standard workflow, triggered manually by an admin. Postcard creation/mailing (Stage 22, unbuilt) stays outside this workflow.
+
+Two research findings changed the shape of this implementation from the doc's first draft:
+
+1. **No Lambda anywhere in this stack.** AWS Step Functions' `HttpInvoke` task type (backed by an EventBridge Connection for auth) can call an HTTPS endpoint directly — since every workflow task's job is "call an existing, already-tested Next.js function via an internal API route," the whole state machine calls straight into `/api/internal/scan/*` with zero new Lambda functions. This was confirmed against the real `aws-cdk-lib@2.262.0` already in `infra/package.json` before committing to the design.
+2. **`ScanEvent` is per-operation, not per-workflow-run.** A new `ScanExecution` record (new DynamoDB table, new domain model/factory/db module) represents one Step Functions execution, referencing the several `ScanEvent`s (and the `SitePreview`) it produces rather than overloading `ScanEvent`'s existing meaning.
+
+## Domain model
+
+- `domain/models/scan-execution.ts` (new) + `domain/schemas/scan-execution.schema.ts` (new) — `ScanExecution` (`scanexec_<uuid>`), `ScanWorkflowStatus` (`queued|running|manual_review|qualified|reject|preview_ready|failed`), `ScanWorkflowStep`, and `ScanWorkflowFailure` (a coarse category rolled up from `ScanFailureCategory` via `lib/workflow/failure-mapping.ts`, not a second independent taxonomy). References prior/produced records by ID only (`crawlScanId`, `sourceScreenshotScanId`, `scoreScanId`, `previewScreenshotScanId`, `previewId`, `parentScanExecutionId`) — never a copy of their content.
+- `domain/models/business.ts` / `.schema.ts` — three new denormalized rollup fields: `latestScanExecutionId?`, `scanExecutionStatus?`, `scanExecutionUpdatedAt?`. Deliberately distinct from `enrichmentStatus` (Stage-13-specific). `Business.qualification`/`leadPriority`/`websiteQualityScore`/`currentPreviewId` (Stage 15/11 fields) are reused as-is, not duplicated.
+- `lib/db/scan-executions.ts` (new) — `getScanExecutionById`/`listScanExecutionsForBusiness`/`putScanExecution` follow the existing `scan-events.ts` shape exactly, plus one new function: `claimScanExecutionStatus()`, an atomic conditional `UpdateCommand` (`ConditionExpression` on current status, returns `false` rather than throwing on a lost race). Neither `putScanEvent` nor `updateBusiness` is atomic in this codebase (confirmed by reading both) — this is the first conditional-transition primitive on the Next.js side; the closest precedent is the screenshot Lambda's own `conditionalUpdateStatus` (`infra/lambda/screenshot-capture/src/aws.ts`), which lives in Lambda-land for a different reason (guarding Lambda's at-least-once delivery). `ScanExecution`'s claim exists to guard Step Functions Standard's own at-least-once task execution semantics.
+
+## Reused vs. new — code-reuse audit
+
+Every internal API route wraps an existing, already-tested function; nothing in `web/lib/firecrawl`, `web/lib/scoring`, or `web/lib/screenshots` was modified beyond what's noted below.
+
+- `crawl` route → `enrichBusinessWebsite` (Stage 13) unchanged — its existing no-website branch (`handleMissingWebsite`) already returns `manual_approval_required` without calling Firecrawl, so the same route serves both the `CrawlWebsite` and `RecordNoWebsiteSignals` states in the state machine (two state *names* for observability, one underlying call).
+- `score` route → `scoreBusinessWebsite` (Stage 15) unchanged — its existing no-website and website-unavailable shortcuts already self-branch correctly regardless of what the crawl step did; the route just adds a `getBusinessById` read-back so the response carries `qualification`/`leadPriority`/`websiteQualityScore` (not part of `ScoringOutcome` itself).
+- `capture-screenshot` route → `captureExistingSiteScreenshot`/`captureGeneratedPreviewScreenshot` (Stage 14) unchanged, selected by a `target` request field.
+- `scan-status` route (new, thin) → `getScanEventById` — lets the state machine poll for the fire-and-forget screenshot Lambda's eventual result without touching that already-deployed Lambda at all.
+- `generate-preview` route → **required one small, behavior-preserving extraction**: `businesses/[businessId]/actions.ts`'s private `runWebsiteGeneration()` (the admin "Generate Website" button's pipeline — cap check, OpenAI call, persist, theme/CTA seeding) was pulled out into `lib/ai/generate-and-save-preview.ts`'s `generateAndSaveWebsite()`, since Stage 16's no-website branch needed to call the identical logic from a new context (an API route, not a bound Server Action) — neither Stage 13's no-website path nor Stage 15's no-website shortcut generates a preview today, so this is the only place that does for a business with no website to crawl. `runWebsiteGeneration` is now a two-line wrapper preserving its existing `GenerateWebsiteState` return shape; `MAX_AI_GENERATIONS` moved with it. Required updating four existing test files' `server-only` mock lists (`actions.test.ts`, `photos-actions.test.ts`, `business-details-actions.test.ts`, `website-sections-actions.test.ts` — each already had this exact pattern documented for `generate-preview.ts`, see `website-sections-actions.test.ts`'s comment) plus moving the detailed generation-pipeline tests into a new `lib/ai/__tests__/generate-and-save-preview.test.ts`, leaving `actions.test.ts` covering only the thin wrapper.
+- `update-execution` route (new, thin) → `claimScanExecutionStatus` — one generic endpoint reused by many distinct Step Functions states (Initialize, recording a crawl/score/screenshot reference mid-run, every Finalize/RecordFailure/QueueManualReview variant), parameterized by `expectedCurrentStatus`/`updates` in the request body.
+- `load-business` route (new, thin) → `getBusinessById` — confirms the business exists and reports whether it has a website, for the workflow's first real branch.
+
+## Internal API authentication
+
+No service-to-service auth convention existed in this repo to extend — confirmed by reading the screenshot Lambda's actual source: it talks to DynamoDB/S3 directly with its own IAM role and never makes an HTTP call into the Next.js app (its one cross-boundary HTTP-adjacent behavior, a headless-browser navigation with Vercel bypass headers, is a different mechanism for a different purpose). `lib/internal-auth.ts` (new) is the first one: `verifyInternalRequest()` does a `timingSafeEqual` comparison of a fixed request header (`x-webpresa-internal-secret`) against a new `internal-api` secret — the same secret is what the EventBridge Connection (see below) is configured to send, so there is nothing to keep in sync by hand between caller and verifier.
+
+## Infrastructure (CDK)
+
+- `infra/lib/stacks/data-stack.ts` — added the `scan-executions` DynamoDB table (5th table; PK `scanExecutionId`, GSIs `business-id-index`/`status-index`, same `WebpresaTable` construct as every other table) and the `internal-api` secret (8th secret, `WebpresaSecret` construct, `sharedSecret` key, empty placeholder — populated out-of-band like every other secret in this stack). Both exposed as new public stack fields (`scanExecutionsTable`, `internalApiSecret`).
+- `infra/lib/stacks/scan-workflow-stack.ts` (new) — the orchestration stack. An `events.Connection` (API_KEY auth, header/value sourced from the `internal-api` secret via `SecretValue.secretsManager(...)`) authenticates every `tasks.HttpInvoke` call the state machine makes. A `logs.LogGroup` (14-day retention, matching every other log group in this repo) captures full execution history (`LogLevel.ALL`, `includeExecutionData: true`). The state machine itself (`sfn.StateMachineType.STANDARD`) is built entirely from CDK's native `sfn`/`tasks` constructs (`HttpInvoke`, `Choice`, `Wait`, `Pass`, `Fail`, `Succeed`) — no hand-written ASL JSON. Screenshot completion (fire-and-forget from the app's perspective) is polled via a `Wait(15s) → HttpInvoke(scan-status) → Choice` loop bounded at 40 iterations (~10 minutes, matching Stage 14's existing staleness threshold) before proceeding regardless — `scoreBusinessWebsite` already tolerates a missing/failed screenshot scan gracefully, so a stuck screenshot never blocks the whole workflow. Holds no DynamoDB/S3/other-secret IAM permissions at all — every task is an outbound HTTPS call through the one Connection, so the "must not have permission to send postcards" acceptance criterion holds trivially.
+- `infra/bin/webpresa.ts` — wired `WebpresaScanWorkflowStack` in as a 4th stack (after data + the two screenshot stacks), passing `internalApiSecret` and the same `appBaseUrl` the screenshot stack already uses.
+- `infra/package.json` — no new dependencies; `HttpInvoke`/`events.Connection` both ship inside the already-installed `aws-cdk-lib@2.262.0`.
+
+## Admin trigger
+
+- `web/lib/stepfunctions/client.ts` (new) — `getStepFunctionsClient()`/`getScanWorkflowStateMachineArn()`, same singleton-client shape as `lib/lambda/client.ts`. Requires a new `SCAN_WORKFLOW_STATE_MACHINE_ARN` Vercel env var populated from the new stack's `StateMachineArn` CfnOutput, mirroring `SCREENSHOT_LAMBDA_FUNCTION_NAME`'s existing pattern.
+- `web/lib/workflow/run-scan-workflow.ts` (new) — `startScanWorkflow()`/`rerunScanWorkflow()`: create a `queued` `ScanExecution`, call `StartExecutionCommand`, persist the returned `executionArn` back onto it (still `queued` — the workflow's own `InitializeScanExecution` state claims `queued → running`). A rerun always creates a brand-new `ScanExecution` (`parentScanExecutionId` + `attemptNumber + 1`), mirroring `retryEnrichmentScan`'s existing pattern for `ScanEvent` — never resets a completed one back to `queued`. One thing found only while writing the test for this: the "is the specific execution being rerun still active" check is unreachable dead code, since the broader "is *any* execution for this business active" guard (which the specific one is drawn from the same list of) always trips first — removed rather than left in as unreachable defensive code, and `not_eligible` dropped from `StartScanWorkflowOutcome`'s status union since nothing produces it anymore.
+- `app/admin/(dashboard)/businesses/[businessId]/workflow-actions.ts` (new) — `runScanWorkflowAction`/`rerunScanWorkflowAction`, same redirect + query-param shape as `enrichWebsiteAction`. The browser never calls Step Functions directly.
+- `app/admin/(dashboard)/businesses/[businessId]/WorkflowSection.tsx` (new), `WorkflowAutoRefresh.tsx` (new, verbatim copy of `ScreenshotAutoRefresh.tsx`'s polling pattern), `WorkflowResultBanner.tsx` (new, verbatim copy of `ScreenshotResultBanner.tsx`'s self-dismissing-banner pattern) — placed above `EnrichmentSection` on the business detail page as the new orchestration "front door." `lib/workflow/labels.ts` (new) mirrors `lib/scoring/labels.ts`'s "single source of truth" doc-commented precedent for status badge wording/tone.
+
+## Verification
+
+```
+web/    Lint:      0 errors, 0 warnings (npm run lint)
+web/    TypeCheck: 0 errors (npx tsc --noEmit)
+web/    Tests:     690 passed (npx vitest run) — 73 new/changed tests across
+                   domain/__tests__/stage16.test.ts (7),
+                   lib/db/__tests__/scan-executions.test.ts (10),
+                   lib/__tests__/internal-auth.test.ts (4),
+                   lib/workflow/__tests__/failure-mapping.test.ts (6),
+                   lib/workflow/__tests__/labels.test.ts (3),
+                   lib/workflow/__tests__/run-scan-workflow.test.ts (7),
+                   lib/ai/__tests__/generate-and-save-preview.test.ts (10, moved from actions.test.ts),
+                   app/api/internal/scan/*/__tests__/route.test.ts (7 routes, 26 tests total),
+                   app/admin/.../__tests__/workflow-actions.test.ts (5),
+                   app/admin/.../__tests__/actions.test.ts (simplified to thin-wrapper coverage only)
+web/    Build:     next build succeeds — all 7 new /api/internal/scan/* routes present in the route manifest
+infra/  TypeCheck: 0 errors (npx tsc --noEmit)
+infra/  Tests:     118 passed (npx vitest run) — 31 new in test/scan-workflow-stack.test.ts,
+                   data-stack.test.ts extended for the 5th table + 8th secret
+infra/  Synth:     `cdk synth` (no context/credentials) succeeds for all four stacks, including
+                   WebpresaDevScanWorkflowStack — confirms the full app wires together
+Manual: Not deployed or exercised against a real AWS account or admin session — pending user
+        confirmation. Per AGENTS.md, `cdk deploy` was not run; deploying requires showing account
+        ID, region, resources, stack name, and full `cdk diff` output for explicit approval first.
+```
+
+## Files changed
+
+```
+web/domain/models/scan-execution.ts                                              NEW
+web/domain/schemas/scan-execution.schema.ts                                      NEW
+web/domain/schemas/index.ts                                                      MODIFIED — export scan-execution.schema
+web/domain/factories/scan-execution.factory.ts                                   NEW
+web/domain/models/business.ts                                                    MODIFIED — 3 new rollup fields
+web/domain/schemas/business.schema.ts                                            MODIFIED — matching validation
+web/lib/db/scan-executions.ts                                                    NEW
+web/lib/db/client.ts                                                             MODIFIED — TABLE_SCAN_EXECUTIONS
+web/lib/secrets/client.ts                                                        MODIFIED — SECRET_INTERNAL_API
+web/lib/secrets/index.ts                                                         MODIFIED — getInternalApiSecret()
+web/lib/internal-auth.ts                                                         NEW
+web/lib/workflow/failure-mapping.ts                                              NEW
+web/lib/workflow/labels.ts                                                       NEW
+web/lib/workflow/run-scan-workflow.ts                                            NEW
+web/lib/stepfunctions/client.ts                                                  NEW
+web/lib/ai/generate-and-save-preview.ts                                          NEW — extracted from actions.ts
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                     MODIFIED — runWebsiteGeneration
+                                                                                     now a thin wrapper
+web/app/admin/(dashboard)/businesses/[businessId]/workflow-actions.ts            NEW
+web/app/admin/(dashboard)/businesses/[businessId]/WorkflowSection.tsx            NEW
+web/app/admin/(dashboard)/businesses/[businessId]/WorkflowAutoRefresh.tsx        NEW
+web/app/admin/(dashboard)/businesses/[businessId]/WorkflowResultBanner.tsx       NEW
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                       MODIFIED — wired in
+                                                                                     WorkflowSection
+web/app/api/internal/scan/update-execution/route.ts                             NEW
+web/app/api/internal/scan/load-business/route.ts                                NEW
+web/app/api/internal/scan/crawl/route.ts                                        NEW
+web/app/api/internal/scan/capture-screenshot/route.ts                           NEW
+web/app/api/internal/scan/scan-status/route.ts                                  NEW
+web/app/api/internal/scan/score/route.ts                                        NEW
+web/app/api/internal/scan/generate-preview/route.ts                             NEW
+web/package.json                                                                MODIFIED — @aws-sdk/client-sfn
+infra/lib/stacks/data-stack.ts                                                   MODIFIED — scan-executions table,
+                                                                                     internal-api secret
+infra/lib/stacks/scan-workflow-stack.ts                                         NEW
+infra/bin/webpresa.ts                                                           MODIFIED — wired in
+                                                                                     WebpresaScanWorkflowStack
+infra/test/data-stack.test.ts                                                    MODIFIED — 5-table/8-secret counts
+infra/test/scan-workflow-stack.test.ts                                          NEW
+web/lib/ai/__tests__/generate-and-save-preview.test.ts                          NEW — moved from actions.test.ts
+web/app/admin/.../__tests__/actions.test.ts                                     MODIFIED — simplified to
+                                                                                     thin-wrapper coverage
+web/app/admin/.../__tests__/{photos,business-details,website-sections}-actions.test.ts
+                                                                                  MODIFIED — added
+                                                                                     generate-and-save-preview mock
+web/domain/__tests__/stage16.test.ts                                            NEW
+web/lib/db/__tests__/scan-executions.test.ts                                    NEW
+web/lib/__tests__/internal-auth.test.ts                                         NEW
+web/lib/workflow/__tests__/{failure-mapping,labels,run-scan-workflow}.test.ts   NEW
+web/app/api/internal/scan/*/__tests__/route.test.ts                            NEW (7 files)
+web/app/admin/.../__tests__/workflow-actions.test.ts                           NEW
+web/docs/implementation.md                                                      MODIFIED — Stage 16 rewritten,
+                                                                                     Stage 15 scope note corrected
+                                                                                     (earlier this session)
+```
+
+# Stage 16 — dev deployment, and IAM migration to CDK-managed policies (2026-07-24)
+
+## Deployment
+
+`WebpresaDevDataStack` (adds the `scan-executions` table + `internal-api` secret) and `WebpresaDevScanWorkflowStack` (the Step Functions state machine + EventBridge Connection) deployed to dev, account `539898341083`, region `us-east-1`. Both diffs reviewed before deploy (purely additive — no changes/deletions to any existing resource) per `AGENTS.md`'s deployment gate. `appBaseUrl` set to the same real URL already baked into the deployed Stage 14 screenshot Lambda (`https://webpresa-git-dev-andrew-mudges-projects.vercel.app`, retrieved via `aws lambda get-function-configuration` rather than guessed). The `internal-api` secret's real shared-secret value was generated locally (`openssl rand -base64 48`) and populated via `aws secretsmanager put-secret-value`, same pattern as every other platform-internal secret.
+
+## Found and fixed: a real gap in the Stage 16 IAM story
+
+While granting `webpresa-vercel-dev` (the Vercel app's IAM identity) the two permissions Stage 16 actually needs — `states:StartExecution` on the new state machine and `secretsmanager:GetSecretValue` on the `internal-api` secret — a `put-user-policy` call failed: `LimitExceeded: Maximum policy size of 2048 bytes exceeded for user`. Confirmed via `aws service-quotas list-service-quotas --service-code iam` that this is a **hard, non-adjustable limit** on the aggregate size of all inline policies on one IAM user (unlike the Lambda concurrency quota hit in Stage 14, which *was* raisable) — usage was already at 1983/2048 bytes across the project's five hand-run inline policies before this session even started.
+
+This surfaced a second, independent gap while investigating: **`webpresa-vercel-dev` had never been granted access to the `scan-executions` table at all** — the existing `webpresa-dev-dynamodb` inline policy only covered the four tables that existed when it was written (businesses, site-previews, scan-events, postcards). Every one of Stage 16's new `/api/internal/scan/*` routes and the admin trigger action would have hit `AccessDeniedException` on every DynamoDB call against `ScanExecution` records had this gone live as-is.
+
+## Fix: migrated all `webpresa-vercel-dev` permissions to CDK-managed policies
+
+Rather than patch around the 2048-byte ceiling (which would only defer the same failure to the next stage that needs a new grant — Stage 18 Stripe, Stage 22 Lob), moved every permission this identity has off inline policies entirely:
+
+- `infra/lib/stacks/vercel-access-stack.ts` (new) — `WebpresaVercelAccessStack`. Imports the existing `webpresa-vercel-{env}` user by name (`iam.User.fromUserName`) — deliberately does **not** create or manage the user or its access keys, since a long-lived secret shouldn't flow through a CloudFormation template/output. Attaches two `iam.ManagedPolicy` resources: `webpresa-{env}-vercel-data-access` (DynamoDB — now correctly including `scan-executions` — S3 assets, all 8 secrets) and `webpresa-{env}-vercel-compute-invoke` (Lambda invoke + Step Functions StartExecution). A customer-managed policy allows 6,144 characters each (vs. 2,048 total across every inline policy combined), and a user can attach up to 10 — this isn't a limit the project will realistically hit again. Statements were transcribed exactly from the five live inline policies (fetched via `aws iam get-user-policy` before writing any code) plus the one addition (`scan-executions`) — a management-plane change, not a permissions change, aside from that one closed gap.
+- `infra/lib/stacks/data-stack.ts` — exposed `postcardsTable` and all 5 third-party secrets (`openAiSecret`, `firecrawlSecret`, `googlePlacesSecret`, `stripeSecret`, `lobSecret`) as public stack fields; previously only local constants, needed so the new stack can reference their ARNs via typed cross-stack props rather than reconstructed ARN strings.
+- `infra/bin/webpresa.ts` — wired in `WebpresaVercelAccessStack`, depending on `WebpresaDataStack`, `WebpresaScreenshotStack`, and `WebpresaScanWorkflowStack` (needs the screenshot Lambda's and state machine's ARNs).
+- `AWS::IAM::ManagedPolicy` does not support CloudFormation-level tagging at all (confirmed against `CfnManagedPolicyProps` — no `tags` field exists) — the new stack deliberately omits the `cdk.Tags.of(this)` call every other stack has, since it would silently apply to nothing.
+
+## Migration sequence (live account)
+
+1. `cdk deploy WebpresaDevVercelAccessStack` — creates both managed policies, attaches them alongside the 5 existing inline policies (no access lost mid-migration; overlapping grants are harmless).
+2. Verified via `aws iam list-attached-user-policies --user-name webpresa-vercel-dev`.
+3. Deleted the 5 legacy inline policies (`aws iam delete-user-policy`) — exactly one source of truth going forward.
+
+## Verification
+
+```
+infra/  TypeCheck: 0 errors (npx tsc --noEmit)
+infra/  Tests:     128 passed (npx vitest run) — 10 new in test/vercel-access-stack.test.ts
+infra/  Synth:     cdk synth succeeds for all five dev stacks together
+infra/  Diff:      cdk diff reviewed and shown to the user before every deploy in this session,
+                   per AGENTS.md's deployment gate
+Manual: WebpresaDevDataStack, WebpresaDevScanWorkflowStack, and WebpresaDevVercelAccessStack all
+        deployed and live in account 539898341083 / us-east-1. Vercel environment variables
+        (INTERNAL_API_SECRET_NAME, SCAN_EXECUTIONS_TABLE_NAME, SCAN_WORKFLOW_STATE_MACHINE_ARN)
+        still pending — outside CDK/AWS CLI reach, requires the Vercel dashboard.
+```
+
+## Files changed
+
+```
+infra/lib/stacks/vercel-access-stack.ts                                          NEW
+infra/lib/stacks/data-stack.ts                                                   MODIFIED — exposed
+                                                                                     postcardsTable + 5 secrets
+                                                                                     as public fields
+infra/bin/webpresa.ts                                                            MODIFIED — wired in
+                                                                                     WebpresaVercelAccessStack
+infra/test/vercel-access-stack.test.ts                                           NEW
+web/docs/deployment.md                                                          MODIFIED — "AWS credentials
+                                                                                     for Vercel" rewritten;
+                                                                                     Stage 14/16 IAM sections
+                                                                                     updated; deployment order
+                                                                                     updated
+web/docs/architecture.md                                                        MODIFIED — status line, stacks
+                                                                                     table, S3/Secrets Manager
+                                                                                     IAM notes updated
+```

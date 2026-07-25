@@ -6,7 +6,7 @@ import type { HeroStyle, PreviewContact, PreviewContent, PreviewCta, PreviewCtaC
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { PreviewContentSchema, PreviewThemeSchema, isHttpsUrl } from '@/domain/schemas/site-preview.schema';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
-import { generatePreviewContent } from '@/lib/ai/generate-preview';
+import { generateAndSaveWebsite } from '@/lib/ai/generate-and-save-preview';
 import { resolveBusinessThemeForSeed } from '@/lib/theme/select-theme';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
 import { buildDefaultCta } from './cta-defaults';
@@ -866,71 +866,22 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
 // Manual AI website generation (Stage 11)
 // ---------------------------------------------------------------------------
 
-/**
- * Soft cap on real OpenAI generations per business — the free seed action
- * above is unaffected. Not exported: every export of a `'use server'` file
- * must be an async Server Action (see cta-defaults.ts for the same
- * constraint) — `page.tsx` duplicates this literal, kept in sync by comment.
- */
-const MAX_AI_GENERATIONS = 10;
-
 export type GenerateWebsiteState = { message?: string } | undefined;
 
 /**
- * The actual OpenAI generation call, shared by `generateWebsiteAction` (the
- * business detail page's "Generate Website" button) and
- * `finishOnboardingAction` (the wizard's final step, which saves section
- * config and generates the first draft in one click) — extracted so neither
- * caller duplicates the cap check, theme/CTA seeding, or error handling.
- * Never redirects; callers decide what happens after.
+ * Thin wrapper around `generateAndSaveWebsite` (`lib/ai/generate-and-save-preview.ts`)
+ * preserving this file's existing `GenerateWebsiteState` shape, shared by
+ * `generateWebsiteAction` (the business detail page's "Generate Website"
+ * button) and `finishOnboardingAction` (the wizard's final step). The actual
+ * cap check, OpenAI call, and theme/CTA seeding now live in the shared lib
+ * function — extracted so Stage 16's no-website workflow branch
+ * (`/api/internal/scan/generate-preview`) can call the identical,
+ * already-tested logic rather than duplicating it. Never redirects; callers
+ * decide what happens after.
  */
 async function runWebsiteGeneration(businessId: string): Promise<GenerateWebsiteState> {
-  const business = await getBusinessById(businessId);
-  if (!business) return { message: 'Business not found' };
-
-  if (!business.servicesOffered?.trim()) {
-    return { message: 'Add at least one service under "Services offered" before generating a website.' };
-  }
-
-  const existing = await listPreviewsForBusiness(businessId);
-  const priorGenerations = existing.filter((p) => p.generationMetadata).length;
-  if (priorGenerations >= MAX_AI_GENERATIONS) {
-    return { message: `This business has reached the limit of ${MAX_AI_GENERATIONS} AI-generated websites.` };
-  }
-  const previousVersion = existing.length > 0 ? Math.max(...existing.map((p) => p.version)) : 0;
-
-  try {
-    const { content, theme, metadata } = await generatePreviewContent(business);
-
-    const preview = createSitePreview({
-      businessId: business.businessId,
-      slug: business.slug,
-      templateId: 'local-business-v1',
-      content,
-      theme,
-      generationMetadata: metadata,
-      previousVersion,
-    });
-
-    // Status stays the factory default ('draft') — generated websites always
-    // require admin review before publication, never auto-published.
-    await putSitePreview(preview);
-
-    // Brand Theme System Step 3 — persist the resolved theme so every future
-    // regeneration reuses it instead of re-deriving it.
-    if (!business.theme && theme.themeName) {
-      await updateBusiness(business.businessId, { theme: theme.themeName });
-    }
-    // Same durability rule for CTA — see the `Business.cta` doc comment.
-    if (!business.cta) {
-      await updateBusiness(business.businessId, { cta: content.cta });
-    }
-  } catch (err) {
-    console.error('Failed to generate website:', err instanceof Error ? err.message : err);
-    return { message: 'Failed to generate website. Please try again.' };
-  }
-
-  return undefined;
+  const result = await generateAndSaveWebsite(businessId);
+  return result.status === 'completed' ? undefined : { message: result.message };
 }
 
 export async function generateWebsiteAction(
