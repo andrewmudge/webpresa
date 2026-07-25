@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
+import { getScanTypeLabel } from '@/lib/scans/scan-type';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
@@ -198,7 +199,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           viewAllHref={`/admin/scans?businessId=${businessId}`}
           items={scans.slice(0, 3).map((s) => ({
             id: s.scanId,
-            label: s.status,
+            label: `${getScanTypeLabel(s)} · ${s.status}`,
             date: s.createdAt,
             href: `/admin/scans/${s.scanId}`,
           }))}

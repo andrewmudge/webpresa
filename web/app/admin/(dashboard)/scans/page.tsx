@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { listAllScans } from '@/lib/db/scan-events';
 import { getBusinessById } from '@/lib/db/businesses';
 import type { ScanEvent, ScanStatus } from '@/domain/models/scan-event';
+import { ScanTypeBadge } from './ScanTypeBadge';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,8 +95,8 @@ export default async function ScansPage({ searchParams }: Props) {
             </>
           ) : (
             <>
-              {rows.length} business{rows.length === 1 ? '' : 'es'} with a Firecrawl website-enrichment attempt.
-              Click a business to see its full scan history.
+              {rows.length} business{rows.length === 1 ? '' : 'es'} with at least one scan. Click a business to see
+              its full scan history.
             </>
           )}
         </p>
@@ -119,6 +120,7 @@ export default async function ScansPage({ searchParams }: Props) {
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
                 <th className="px-4 py-3 font-medium text-gray-600">Business</th>
+                <th className="px-4 py-3 font-medium text-gray-600">Type</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Status</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Source URL</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Images</th>
@@ -150,6 +152,9 @@ export default async function ScansPage({ searchParams }: Props) {
                       {!filterBusinessId && scanCount > 1 && (
                         <span className="ml-1.5 text-xs text-gray-400">· {scanCount} scans</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <ScanTypeBadge scan={scan} />
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={scan.status} />

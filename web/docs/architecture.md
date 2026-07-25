@@ -67,6 +67,7 @@ Protected internal dashboard for operating Webpresa manually. Built in Stage 7; 
 - **Enrich Website** action (Stage 13) — "Website Enrichment" card (`EnrichmentSection.tsx`) on the business detail page; scrapes the business's own website with Firecrawl and generates a new draft `SitePreview` version reusing the same OpenAI pipeline as "Generate Website," enriched with normalized website content. Disabled while a scan is already queued/running; offers a "Retry" action for eligible failed scans. See "Firecrawl Website Enrichment" below.
 - Preview history, scan history, and postcard history on the business detail page
 - Placeholder pages for `/admin/previews`, `/admin/scans`, `/admin/postcards`
+- **Scan-type visibility (2026-07-24):** `/admin/scans` and the business detail page's "Scans" `HistoryCard` previously showed only a scan's `status` — nothing said what it actually did (Firecrawl enrichment, Playwright screenshot, or OpenAI scoring) without opening the individual scan detail page. `lib/scans/scan-type.ts`'s `getScanTypeLabel()`/`getScanTypeColorClass()` derive a human label ("Website Enrichment" / "AI Scoring" / "Screenshot — Existing Site" / "Screenshot — Generated Preview") from `ScanEvent.provider`/`operation`/`targetType`; a new `ScanTypeBadge` renders it as a "Type" column on `/admin/scans`, and the `HistoryCard` scan labels now read `{type} · {status}` instead of bare status.
 
 **Credentials setup:**
 ```bash

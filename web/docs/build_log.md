@@ -5280,3 +5280,40 @@ web/docs/architecture.md                                                        
                                                                                      table, S3/Secrets Manager
                                                                                      IAM notes updated
 ```
+
+# Admin scan-type visibility (2026-07-24)
+
+## Problem
+
+Direct admin feedback: `/admin/scans` (and the "Scans" `HistoryCard` on a business detail page) showed only a scan's `status`, source URL, image counts, attempt, and timestamps — nothing said *what a scan actually did* (Firecrawl website enrichment, Playwright screenshot, or OpenAI AI scoring). That information (`ScanEvent.provider`/`operation`/`targetType`) only appeared on the individual scan detail page's subtitle, forcing a click into every row to tell them apart. The unfiltered view's caption was also stale, still describing scans as "Firecrawl website-enrichment attempts" from before Stage 14/15 added Playwright and OpenAI scans.
+
+## Fix
+
+- `web/lib/scans/scan-type.ts` (new) — pure functions `getScanTypeLabel()`/`getScanTypeColorClass()` deriving a human label ("Website Enrichment" / "AI Scoring" / "Screenshot — Existing Site" / "Screenshot — Generated Preview") and a Tailwind color class from `provider`+`operation`(+`targetType` for Playwright), with a generic `` `${provider} · ${operation}` `` fallback for any future/unrecognized pair — same classify-function pattern as `lib/social-links.ts`.
+- `web/app/admin/(dashboard)/scans/ScanTypeBadge.tsx` (new) — small badge component wrapping the above, exported for reuse outside the `scans/` route group.
+- `web/app/admin/(dashboard)/scans/page.tsx` — new "Type" column (both the grouped one-row-per-business view and the filtered per-business view share the same table), plus the stale "Firecrawl website-enrichment attempt" caption reworded to be provider-agnostic.
+- `web/app/admin/(dashboard)/businesses/[businessId]/page.tsx` — the "Scans" `HistoryCard`'s per-row label changed from bare `s.status` to `` `${getScanTypeLabel(s)} · ${s.status}` ``, so the same information is visible without navigating past the card into the scan detail page.
+
+Presentation-only — no change to `ScanEvent`, its schema, or any repository/query function; every field used already existed on the record.
+
+## Verification
+
+```
+web/    Lint:      0 errors, 0 warnings (npm run lint)
+web/    TypeCheck: 0 errors (npx tsc --noEmit)
+web/    Tests:     698 passed (npm test) — 8 new in lib/scans/__tests__/scan-type.test.ts
+web/    Build:     next build succeeds
+Manual: Not yet exercised in a live browser session against the real dev deployment.
+```
+
+## Files changed
+
+```
+web/lib/scans/scan-type.ts                                                       NEW
+web/lib/scans/__tests__/scan-type.test.ts                                        NEW
+web/app/admin/(dashboard)/scans/ScanTypeBadge.tsx                                NEW
+web/app/admin/(dashboard)/scans/page.tsx                                         MODIFIED — Type column,
+                                                                                     stale caption fixed
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                       MODIFIED — Scans HistoryCard
+                                                                                     label includes scan type
+```
