@@ -206,15 +206,14 @@ interface Props {
   redirectTo: string;
 }
 
-// `reviews` maps to the same `testimonials` field as the `testimonials` row
-// itself — the public ReviewsSection now renders testimonials directly
-// underneath the rating summary (see app/b/[slug]/template/
-// ReviewsSection.tsx), so its row here reuses the exact same editor
-// (manual testimonials form, TestimonialsOrderEditor, GoogleReviewsPanel).
-// `testimonials` keeps its own entry too until that section is removed.
+// `reviews` uses the `testimonials` Business field — the public
+// ReviewsSection renders testimonials directly underneath the rating
+// summary (see app/b/[slug]/template/ReviewsSection.tsx), so its row here
+// gets the same editor (manual testimonials form, TestimonialsOrderEditor,
+// GoogleReviewsPanel) the now-removed standalone `testimonials` section
+// used to have.
 const BUSINESS_LIST_SECTIONS: Partial<Record<WebsiteSectionType, BusinessListField>> = {
   reviews: 'testimonials',
-  testimonials: 'testimonials',
   faq: 'faqItems',
   process: 'processSteps',
 };
@@ -438,9 +437,10 @@ function BusinessListEditor({
 }: {
   businessId: string;
   field: BusinessListField;
-  /** Which row this editor is rendering under — `reviews` and `testimonials`
-   *  both use `field="testimonials"`, so this is what tells the save action
-   *  which row to re-expand on redirect (see `updateBusinessListFieldAction`). */
+  /** Which row this editor is rendering under — distinct from `field`
+   *  (`reviews` uses `field="testimonials"`), so this is what tells the save
+   *  action which row to re-expand on redirect (see
+   *  `updateBusinessListFieldAction`). */
   section: WebsiteSectionType;
   business: Business;
 }) {

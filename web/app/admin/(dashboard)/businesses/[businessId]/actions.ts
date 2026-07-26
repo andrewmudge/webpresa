@@ -1183,12 +1183,11 @@ export type BusinessListField = (typeof BUSINESS_LIST_FIELDS)[number];
  * `theme`/photo-slot overrides. Never touches any preview record.
  *
  * `section` is which Website Sections row the caller rendered this editor
- * under, not necessarily the same as `field` — both the `reviews` and
- * `testimonials` rows currently use `field: 'testimonials'` (see
- * `BUSINESS_LIST_SECTIONS` in SectionContentEditor.tsx), so it's passed
- * explicitly rather than derived from a static field→section map, ensuring
- * the post-save redirect re-expands whichever row the admin was actually
- * editing.
+ * under — not necessarily the same identifier as `field` (the `reviews` row
+ * uses `field: 'testimonials'`, see `BUSINESS_LIST_SECTIONS` in
+ * SectionContentEditor.tsx), so it's passed explicitly rather than derived
+ * from a static field→section map, ensuring the post-save redirect
+ * re-expands whichever row the admin was actually editing.
  */
 export async function updateBusinessListFieldAction(
   businessId: string,
@@ -1312,7 +1311,10 @@ export async function importGoogleReviewsAction(
   try {
     await updateBusiness(businessId, {
       testimonials,
-      ...(googleTestimonials.length > 0 ? { websiteSections: enableWebsiteSection(business, 'testimonials') } : {}),
+      // ReviewsSection renders testimonials underneath the rating summary
+      // (see app/b/[slug]/template/ReviewsSection.tsx) — there is no
+      // separate `testimonials` section to enable.
+      ...(googleTestimonials.length > 0 ? { websiteSections: enableWebsiteSection(business, 'reviews') } : {}),
     });
   } catch (err) {
     console.error('Failed to save imported Google reviews:', err instanceof Error ? err.message : err);

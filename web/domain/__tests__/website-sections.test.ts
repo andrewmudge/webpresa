@@ -52,7 +52,7 @@ describe('createDefaultWebsiteSectionsConfig', () => {
   it('disables newly-introduced sections with no data source yet', () => {
     const config = createDefaultWebsiteSectionsConfig();
     const enabled = new Set(config.sections.filter((s) => s.enabled).map((s) => s.component));
-    for (const type of ['reviews', 'testimonials', 'gallery', 'faq', 'process']) {
+    for (const type of ['reviews', 'gallery', 'faq', 'process']) {
       expect(enabled.has(type as WebsiteSectionConfig['component'])).toBe(false);
     }
   });

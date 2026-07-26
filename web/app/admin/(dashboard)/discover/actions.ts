@@ -227,7 +227,10 @@ export async function importSelectedPlacesAction(
           if (googleTestimonials.length > 0) {
             await updateBusiness(record.businessId, {
               testimonials: googleTestimonials,
-              websiteSections: enableWebsiteSection(record, 'testimonials'),
+              // ReviewsSection renders testimonials underneath the rating
+              // summary (see app/b/[slug]/template/ReviewsSection.tsx) —
+              // there is no separate `testimonials` section to enable.
+              websiteSections: enableWebsiteSection(record, 'reviews'),
             });
           }
         } catch (reviewErr) {

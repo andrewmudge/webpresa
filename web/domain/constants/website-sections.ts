@@ -21,7 +21,6 @@ export const WEBSITE_SECTION_TYPES = [
   'whyChooseUs',
   'about',
   'reviews',
-  'testimonials',
   'serviceAreas',
   'gallery',
   'process',
@@ -88,8 +87,12 @@ export const WEBSITE_SECTION_CATALOG: Record<WebsiteSectionType, WebsiteSectionC
   services: { label: 'Services', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 40 },
   whyChooseUs: { label: 'Why Choose Us', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 50 },
   about: { label: 'About', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 60 },
+  // Also renders the business's testimonials (Google reviews and/or manual
+  // entries) directly underneath the rating summary — see
+  // app/b/[slug]/template/ReviewsSection.tsx. The standalone `testimonials`
+  // section type that used to own that content was removed once this merge
+  // was confirmed; see build_log.md.
   reviews: { label: 'Reviews', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 70 },
-  testimonials: { label: 'Testimonials', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 80 },
   serviceAreas: { label: 'Service Areas', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 90 },
   gallery: { label: 'Gallery', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 100 },
   process: { label: 'Process / How It Works', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 110 },

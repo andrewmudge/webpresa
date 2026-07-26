@@ -150,21 +150,21 @@ describe('resolveSectionWarnings', () => {
 describe('enableWebsiteSection', () => {
   it('forces a section on even when explicitly stored as disabled', () => {
     const sections = createDefaultWebsiteSectionsConfig().sections.map((s) =>
-      s.component === 'testimonials' ? { ...s, enabled: false } : s,
+      s.component === 'reviews' ? { ...s, enabled: false } : s,
     );
     const stored: WebsiteSectionsConfig = { sectionConfigVersion: SECTION_CONFIG_VERSION, sections };
 
-    const result = enableWebsiteSection({ websiteSections: stored }, 'testimonials');
+    const result = enableWebsiteSection({ websiteSections: stored }, 'reviews');
 
-    expect(result.sections.find((s) => s.component === 'testimonials')?.enabled).toBe(true);
+    expect(result.sections.find((s) => s.component === 'reviews')?.enabled).toBe(true);
   });
 
   it('leaves every other section untouched', () => {
-    const result = enableWebsiteSection({ websiteSections: undefined }, 'testimonials');
+    const result = enableWebsiteSection({ websiteSections: undefined }, 'reviews');
     const defaults = createDefaultWebsiteSectionsConfig().sections;
 
     for (const type of WEBSITE_SECTION_TYPES) {
-      if (type === 'testimonials') continue;
+      if (type === 'reviews') continue;
       const expected = defaults.find((s) => s.component === type)?.enabled;
       expect(result.sections.find((s) => s.component === type)?.enabled).toBe(expected);
     }

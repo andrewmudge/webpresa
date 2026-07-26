@@ -34,6 +34,7 @@ import {
   updateBusiness,
 } from '@/lib/db/businesses';
 import { createBusiness } from '@/domain/factories/business.factory';
+import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,6 +78,30 @@ describe('getBusinessById', () => {
   it('throws if DynamoDB returns an invalid record', async () => {
     mockSend.mockResolvedValueOnce({ Item: { businessId: 'bad' } }); // missing required fields
     await expect(getBusinessById('bad')).rejects.toThrow();
+  });
+
+  it('tolerates a stored websiteSections entry referencing a removed section type', async () => {
+    // Simulates a business saved before the standalone `testimonials`
+    // section was removed (merged into `reviews` — see build_log.md).
+    // Without read-time tolerance, BusinessSchema's strict
+    // z.enum(WEBSITE_SECTION_TYPES) would reject the whole record.
+    const b = makeBusiness();
+    const legacySections = createDefaultWebsiteSectionsConfig();
+    const withStaleEntry = {
+      ...b,
+      websiteSections: {
+        ...legacySections,
+        sections: [...legacySections.sections, { component: 'testimonials', enabled: true, order: 80, variant: 'default' }],
+      },
+    };
+    mockSend.mockResolvedValueOnce({ Item: withStaleEntry });
+
+    const result = await getBusinessById(b.businessId);
+
+    expect(result).not.toBeNull();
+    // The stray entry is dropped rather than surviving into the parsed
+    // record — back down to exactly the known catalog's section count.
+    expect(result?.websiteSections?.sections).toHaveLength(legacySections.sections.length);
   });
 });
 

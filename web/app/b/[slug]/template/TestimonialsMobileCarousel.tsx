@@ -15,7 +15,7 @@ const AUTOPLAY_INTERVAL_MS = 6000;
 /**
  * Mobile-only, one-at-a-time rotating testimonial carousel — autoplay plus
  * tappable dot indicators. Desktop renders the full grid instead (see
- * `TestimonialsSection.tsx`); this component is only ever mounted at `md:`
+ * `ReviewsSection.tsx`); this component is only ever mounted at `md:`
  * and below.
  */
 export function TestimonialsMobileCarousel({ testimonials }: Props) {

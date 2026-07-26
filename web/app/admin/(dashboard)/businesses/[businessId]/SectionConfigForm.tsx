@@ -26,12 +26,12 @@ const REORDER_STEP = 10;
  * distinction `theme`/`cta` already draw between "a business-level decision"
  * and "freely typed into one preview's content."
  *
- * `reviews` now DOES have an editor — the public `ReviewsSection` renders
- * both the Google rating summary and the business's testimonials underneath
- * it (see app/b/[slug]/template/ReviewsSection.tsx), so its row here shares
- * the same testimonial-management editor `testimonials` already had (see
- * `BUSINESS_LIST_SECTIONS` in SectionContentEditor.tsx). `testimonials`
- * temporarily keeps its own editor too, pending that section's removal.
+ * `reviews` has an editor — the public `ReviewsSection` renders both the
+ * Google rating summary and the business's testimonials underneath it (see
+ * app/b/[slug]/template/ReviewsSection.tsx), so its row here uses the
+ * testimonial-management editor (see `BUSINESS_LIST_SECTIONS` in
+ * SectionContentEditor.tsx) that the standalone `testimonials` section used
+ * to have before it was merged into `reviews` and removed; see build_log.md.
  */
 const NO_EDITOR_SECTIONS = new Set<WebsiteSectionType>(['header', 'footer', 'trustStrip', 'socialLinks']);
 

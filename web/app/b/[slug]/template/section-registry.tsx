@@ -12,7 +12,6 @@ import { GallerySection } from './GallerySection';
 import { WhyChooseUs } from './WhyChooseUs';
 import { AboutSection } from './AboutSection';
 import { ReviewsSection } from './ReviewsSection';
-import { TestimonialsSection } from './TestimonialsSection';
 import { ServiceAreaSection } from './ServiceAreaSection';
 import { ProcessSection } from './ProcessSection';
 import { FaqSection } from './FaqSection';
@@ -119,7 +118,6 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
       testimonials={ctx.business.testimonials}
     />
   ),
-  testimonials: (ctx) => <TestimonialsSection testimonials={ctx.business.testimonials ?? []} />,
   serviceAreas: (ctx) => (
     <ServiceAreaSection
       serviceAreas={ctx.content.serviceAreas ?? []}

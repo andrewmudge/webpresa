@@ -10,7 +10,55 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import type { Business } from '@/domain/models/business';
 import { BusinessSchema } from '@/domain/schemas/business.schema';
+import { WEBSITE_SECTION_TYPES } from '@/domain/constants/website-sections';
 import { getDynamoDBClient, TABLE_BUSINESSES } from './client';
+
+// ---------------------------------------------------------------------------
+// Read-time tolerance for removed section types
+// ---------------------------------------------------------------------------
+
+const KNOWN_SECTION_TYPES = new Set<string>(WEBSITE_SECTION_TYPES);
+
+interface RawWebsiteSections {
+  sections?: unknown[];
+  [key: string]: unknown;
+}
+
+interface RawBusinessItem {
+  websiteSections?: RawWebsiteSections;
+  [key: string]: unknown;
+}
+
+/**
+ * Parses a raw DynamoDB item into a validated `Business`, tolerating a
+ * `websiteSections.sections` entry whose `component` no longer exists in
+ * the current catalog — e.g. the former `testimonials` section, merged into
+ * `reviews` (see build_log.md). `BusinessSchema`'s `websiteSections` field
+ * is intentionally strict (`z.enum(WEBSITE_SECTION_TYPES)`) so a *new* save
+ * can never persist an unsupported component — but applied unmodified to a
+ * *read*, that same strictness would reject the entire business record over
+ * one stale entry. This mirrors `resolveStoredOrDefaultSections`'s
+ * render-time leniency (`lib/website-sections/resolve.ts`) one layer
+ * earlier, so a legacy record never even fails to load. Write paths
+ * (`putBusiness`/`updateBusiness`) intentionally keep calling
+ * `BusinessSchema.parse()` directly — full strictness for anything actually
+ * being persisted going forward.
+ */
+function parseBusinessItem(raw: unknown): Business {
+  const item = raw as RawBusinessItem;
+  const sections = item?.websiteSections?.sections;
+  if (!Array.isArray(sections)) return BusinessSchema.parse(raw);
+
+  const cleanedSections = sections.filter(
+    (s) => typeof s === 'object' && s !== null && KNOWN_SECTION_TYPES.has((s as { component?: unknown }).component as string),
+  );
+  if (cleanedSections.length === sections.length) return BusinessSchema.parse(raw);
+
+  return BusinessSchema.parse({
+    ...item,
+    websiteSections: { ...item.websiteSections, sections: cleanedSections },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -142,7 +190,7 @@ export async function listBusinesses(
       ...(cursor ? { ExclusiveStartKey: decodeCursor(cursor) } : {}),
     };
     const result = await client.send(new ScanCommand(params));
-    const items = (result.Items ?? []).map((item) => BusinessSchema.parse(item));
+    const items = (result.Items ?? []).map((item) => parseBusinessItem(item));
     return {
       items,
       nextCursor: result.LastEvaluatedKey ? encodeCursor(result.LastEvaluatedKey) : undefined,
@@ -163,7 +211,7 @@ export async function listBusinesses(
       }),
     );
     for (const raw of result.Items ?? []) {
-      const business = BusinessSchema.parse(raw);
+      const business = parseBusinessItem(raw);
       if (matchesBusinessFilters(business, filters)) items.push(business);
     }
     exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
@@ -192,7 +240,7 @@ export async function getBusinessById(businessId: string): Promise<Business | nu
     }),
   );
   if (!result.Item) return null;
-  return BusinessSchema.parse(result.Item);
+  return parseBusinessItem(result.Item);
 }
 
 /**
@@ -211,7 +259,7 @@ export async function getBusinessBySlug(slug: string): Promise<Business | null> 
   );
   const items = result.Items ?? [];
   if (items.length === 0) return null;
-  return BusinessSchema.parse(items[0]);
+  return parseBusinessItem(items[0]);
 }
 
 /**
@@ -232,7 +280,7 @@ export async function getBusinessByGooglePlaceId(googlePlaceId: string): Promise
   );
   const items = result.Items ?? [];
   if (items.length === 0) return null;
-  return BusinessSchema.parse(items[0]);
+  return parseBusinessItem(items[0]);
 }
 
 /**
@@ -259,7 +307,7 @@ export async function listAllBusinesses(): Promise<Business[]> {
       }),
     );
     for (const item of result.Items ?? []) {
-      items.push(BusinessSchema.parse(item));
+      items.push(parseBusinessItem(item));
     }
     exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
     pages += 1;

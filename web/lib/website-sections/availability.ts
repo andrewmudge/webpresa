@@ -9,12 +9,15 @@ import type { WebsiteSectionType } from '@/domain/constants/website-sections';
  * instead (see `resolveSectionWarnings` in `resolve.ts`).
  *
  * Adapted to the current data model:
- * - `reviews` reads `Business.googleReviewCount`, populated by the Stage 12
- *   Google Places import flow (aggregate rating/count only).
- * - `testimonials` reads `Business.testimonials`, populated by admin manual
- *   entry and/or the Stage 12 follow-on Google Places reviews import —
- *   excludes admin-hidden Google reviews, so a business whose only
- *   testimonials are all hidden correctly reports itself unavailable.
+ * - `reviews` is available whenever there's a Google rating/review count
+ *   (`Business.googleReviewCount`, populated by the Stage 12 Google Places
+ *   import flow) OR at least one visible testimonial
+ *   (`Business.testimonials`, populated by admin manual entry and/or the
+ *   Stage 12 follow-on Google Places reviews import — excludes admin-hidden
+ *   Google reviews) — `ReviewsSection` renders both underneath one heading
+ *   (see app/b/[slug]/template/ReviewsSection.tsx). The standalone
+ *   `testimonials` section this used to be split across was removed once
+ *   that merge was confirmed; see build_log.md.
  * - `faqItems` / `processSteps` are manually-verified Business fields.
  * - `gallery` reuses the existing `Business.photoUrls` upload, so it's
  *   genuinely available whenever a business has uploaded at least one photo.
@@ -45,13 +48,7 @@ export function computeSectionAvailability({
       : (business.photoUrls?.length ?? 0) >= 1,
     whyChooseUs: (content?.differentiators?.length ?? 0) >= 1,
     about: (content?.aboutText.trim().length ?? 0) > 0,
-    // Available whenever there's a Google rating to show OR at least one
-    // visible testimonial — ReviewsSection now renders both underneath one
-    // "Reviews" heading (see app/b/[slug]/template/ReviewsSection.tsx).
-    // `testimonials` keeps its own independent check for now, pending that
-    // section's removal once the merge is confirmed.
     reviews: (business.googleReviewCount ?? 0) >= 1 || (business.testimonials?.filter((t) => !t.hidden).length ?? 0) >= 1,
-    testimonials: (business.testimonials?.filter((t) => !t.hidden).length ?? 0) >= 1,
     serviceAreas: (content?.serviceAreas?.length ?? 0) >= 1,
     process: (business.processSteps?.length ?? 0) >= 1,
     faq: (business.faqItems?.length ?? 0) >= 1,

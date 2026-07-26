@@ -5401,3 +5401,100 @@ Manual: Not yet viewed in a live browser session against the real dev deployment
 web/app/admin/(dashboard)/businesses/[businessId]/ScreenshotsSection.tsx        MODIFIED — thumbnails
                                                                                      instead of text links
 ```
+
+# Reviews/Testimonials merge (2026-07-25 – 2026-07-26)
+
+## Problem
+
+Direct admin feedback: the public template's aggregate "Reviews" section (Google rating summary only) and the separate "Testimonials" section (individual review/testimonial cards) were redundant — an admin wanted the actual testimonials to appear directly underneath the rating summary as one "Reviews" section, not as two separately-toggleable blocks lower on the page.
+
+## Step 1 — merge testimonials into ReviewsSection (public template)
+
+`app/b/[slug]/template/ReviewsSection.tsx` — the rating summary block (stars + "X average rating from Y reviews on Google — Business") is unchanged. Directly underneath, it now renders the business's testimonials (`Business.testimonials`, manual and/or Google-sourced) reusing `TestimonialCard`/`TestimonialsMobileCarousel` unchanged (desktop grid, mobile auto-rotating carousel — identical to what the standalone Testimonials section rendered). `section-registry.tsx`'s `reviews` entry now passes `ctx.business.testimonials` through.
+
+Visibility widened from "rating only" to "rating OR at least one visible testimonial," so a business with testimonials but no Google rating on file still shows them — this required widening `lib/website-sections/availability.ts`'s `reviews` check the same way (`googleReviewCount >= 1 || visible testimonial exists`), since that check gates whether the section renders at all (`resolveRenderableSections`), independent of the component's own internal logic.
+
+Deliberately left untouched in this step, per direct instruction to review before removing: the standalone `testimonials` section (component, catalog entry, registry mapping) kept rendering wherever already enabled — meaning a business with both enabled temporarily showed testimonials twice (once under the new merged Reviews, once in the old standalone section) until the admin confirmed the new placement looked right.
+
+## Bug fix — Google reviewer avatars broken on localhost
+
+`app/components/TestimonialAvatar.tsx`'s `next/image` now sets `referrerPolicy="no-referrer"`. Google's photo CDN (`lh3.googleusercontent.com`) was rejecting reviewer-avatar image requests that carried a `Referer: http://localhost:3000` header — visible only in local dev (a real deployed domain's referrer wasn't rejected the same way), showing as a broken-image icon on every reviewer avatar.
+
+## Step 2 — move the admin inline content editor onto the Reviews row
+
+The business detail page's "Website Sections" card lets an admin expand a row to edit that section's content. "Reviews" previously had no editor at all (`SectionConfigForm.tsx`'s `NO_EDITOR_SECTIONS`); "Testimonials" had the full testimonial-management editor (manual entries form, `TestimonialsOrderEditor`, `GoogleReviewsPanel`).
+
+- `SectionConfigForm.tsx` — removed `'reviews'` from `NO_EDITOR_SECTIONS`, so its row now gets an expand chevron.
+- `SectionContentEditor.tsx` — `BUSINESS_LIST_SECTIONS` gained `reviews: 'testimonials'` (mapping the `reviews` row to the same `Business.testimonials` field the `testimonials` row already used), so expanding "Reviews" shows the identical editor.
+- `actions.ts`'s `updateBusinessListFieldAction` previously redirected back to re-expand a hardcoded section derived from a static `field → section` map — wrong once two different rows (`reviews` and `testimonials`) could both drive the same `field`. Changed to take the actual `section` explicitly from the caller, so saving from either row's editor re-expands that same row rather than jumping to the other one.
+- "Testimonials" kept its own working editor too in this step, same "don't remove yet" instruction as Step 1.
+
+## Step 3 — remove the standalone `testimonials` section
+
+Once the admin confirmed the merged Reviews section looked right, the standalone section (now fully redundant) was removed:
+
+- `domain/constants/website-sections.ts` — `'testimonials'` removed from `WEBSITE_SECTION_TYPES` and its `WEBSITE_SECTION_CATALOG` entry deleted.
+- `lib/website-sections/availability.ts` — the now-orphaned `testimonials` key removed from `computeSectionAvailability`'s returned record (TypeScript forces this — the Record's key type shrank with the enum).
+- `app/b/[slug]/template/section-registry.tsx` — `testimonials` registry entry and `TestimonialsSection` import removed; `TestimonialsSection.tsx` deleted outright (its logic already lives in `ReviewsSection.tsx` — nothing else imported it). `TestimonialCard.tsx`/`TestimonialsMobileCarousel.tsx` are unaffected — `ReviewsSection.tsx` still uses both directly.
+- `SectionContentEditor.tsx` / `SectionConfigForm.tsx` — the now-dead `testimonials: 'testimonials'` entry removed from `BUSINESS_LIST_SECTIONS`; doc comments updated to describe the final (not transitional) state.
+- Two `enableWebsiteSection(business, 'testimonials')` dual-write call sites — `app/admin/(dashboard)/discover/actions.ts` (Google Places import auto-enable) and `businesses/[businessId]/actions.ts` (the "Import/Refresh Google Reviews" action) — switched to `enableWebsiteSection(business, 'reviews')`, since there's no longer a separate section to enable.
+
+### Backward compatibility — legacy stored `testimonials` entries
+
+Removing a value from `z.enum(WEBSITE_SECTION_TYPES)` is not just a type-level change: `BusinessSchema`'s `websiteSections` field uses that same strict schema for both the write path (correctly rejects a new save referencing an unsupported component) and the **read** path (`BusinessSchema.parse()`, called on every DynamoDB read in `lib/db/businesses.ts`) — a business already carrying a `component: 'testimonials'` entry in its stored `websiteSections.sections` (any business the auto-enable dual-write had already touched, e.g. via Google Places import) would fail to parse *at all* once the enum shrank, throwing on every read and 500ing its detail page. `lib/website-sections/resolve.ts`'s existing render-time leniency (`resolveStoredOrDefaultSections`, documented as "must never throw") doesn't help here — it never runs on a record that failed to parse one layer earlier.
+
+Fixed with a new `parseBusinessItem()` in `lib/db/businesses.ts`, wrapping all 6 read call sites (`getBusinessById`, `getBusinessBySlug`, `getBusinessByGooglePlaceId`, `listBusinesses` (both branches), `listAllBusinesses`): strips any `websiteSections.sections` entry whose `component` isn't in the current `WEBSITE_SECTION_TYPES` before handing the item to `BusinessSchema.parse()`, so a legacy record loads cleanly with the stale entry silently dropped — mirroring `resolveStoredOrDefaultSections`'s own leniency one layer earlier. The 2 write call sites (`putBusiness`/`updateBusiness`) intentionally keep calling `BusinessSchema.parse()` directly, unmodified — anything persisted going forward stays fully strict.
+
+## Verification
+
+```
+web/    Lint:      0 errors, 0 warnings (npm run lint)
+web/    TypeCheck: 0 errors (npx tsc --noEmit)
+web/    Tests:     702 passed (npm test) — net -1 from the prior count: 2 obsolete
+                   `testimonials`-availability tests removed (superseded by the widened
+                   `reviews` test), 1 new test added (lib/db/__tests__/businesses.test.ts —
+                   legacy websiteSections tolerance)
+web/    Build:     next build succeeds
+Manual: Confirmed live in a dev browser session (screenshot review) after Step 1 — rating
+        summary unchanged, testimonials rendering underneath, matching the target layout.
+        Steps 2–3 (inline editor move, final removal) not yet re-verified in a live browser
+        session against the real dev deployment.
+```
+
+## Files changed
+
+```
+app/b/[slug]/template/ReviewsSection.tsx                                         MODIFIED — renders
+                                                                                     testimonials underneath
+                                                                                     the rating summary
+app/b/[slug]/template/section-registry.tsx                                       MODIFIED — reviews passes
+                                                                                     testimonials; testimonials
+                                                                                     entry removed
+app/b/[slug]/template/TestimonialsSection.tsx                                    DELETED
+app/b/[slug]/template/TestimonialsMobileCarousel.tsx                             MODIFIED — doc comment only
+app/components/TestimonialAvatar.tsx                                             MODIFIED — referrerPolicy fix
+lib/website-sections/availability.ts                                             MODIFIED — reviews widened,
+                                                                                     testimonials key removed
+domain/constants/website-sections.ts                                             MODIFIED — testimonials
+                                                                                     removed from catalog/type
+lib/db/businesses.ts                                                             MODIFIED — parseBusinessItem()
+                                                                                     read-time tolerance
+app/admin/(dashboard)/businesses/[businessId]/SectionConfigForm.tsx              MODIFIED — reviews row
+                                                                                     gets an editor
+app/admin/(dashboard)/businesses/[businessId]/SectionContentEditor.tsx          MODIFIED — reviews→testimonials
+                                                                                     field mapping
+app/admin/(dashboard)/businesses/[businessId]/actions.ts                        MODIFIED — explicit section
+                                                                                     param; enableWebsiteSection
+                                                                                     target switched to reviews
+app/admin/(dashboard)/discover/actions.ts                                       MODIFIED — enableWebsiteSection
+                                                                                     target switched to reviews
+lib/website-sections/__tests__/availability.test.ts                             MODIFIED — merged/removed tests
+lib/website-sections/__tests__/resolve.test.ts                                  MODIFIED — testimonials→reviews
+lib/website-sections/__tests__/recommend.test.ts                                MODIFIED — removed stale entry
+domain/__tests__/website-sections.test.ts                                       MODIFIED — removed stale entry
+lib/db/__tests__/businesses.test.ts                                             MODIFIED — new legacy-tolerance
+                                                                                     test
+web/docs/architecture.md                                                        MODIFIED — new "Reviews/
+                                                                                     Testimonials merge" section,
+                                                                                     stale references corrected
+```

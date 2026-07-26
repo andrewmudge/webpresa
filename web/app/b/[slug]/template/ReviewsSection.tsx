@@ -13,9 +13,7 @@ interface Props {
 // Tailwind's compiler only generates classes it can find as literal strings
 // in source — a template-interpolated `lg:grid-cols-${n}` would silently
 // produce no CSS. Listing all 5 possible values here (matching Google's own
-// 5-review cap) keeps the dynamic column count safe to generate. Mirrors
-// TestimonialsSection.tsx's own copy of this map, pending that section's
-// removal once the merge below is confirmed.
+// 5-review cap) keeps the dynamic column count safe to generate.
 const DESKTOP_GRID_COLUMNS: Record<number, string> = {
   1: 'lg:grid-cols-1',
   2: 'lg:grid-cols-2',
@@ -38,14 +36,15 @@ function Star({ filled }: { filled: boolean }) {
   );
 }
 
-// Renders the verified Google rating/review-count summary (unchanged from
-// before — see Business.googleRating/googleReviewCount, populated by Stage
-// 12; never fabricates a rating or review count) plus, directly underneath,
-// the business's actual testimonials — manually entered or imported from
-// Google reviews (Business.testimonials, same source TestimonialsSection
-// previously rendered on its own). Visible if either the rating or at least
+// Renders the verified Google rating/review-count summary (see
+// Business.googleRating/googleReviewCount, populated by Stage 12; never
+// fabricates a rating or review count) plus, directly underneath, the
+// business's actual testimonials — manually entered or imported from Google
+// reviews (Business.testimonials). Visible if either the rating or at least
 // one testimonial is present, so a business with testimonials but no Google
-// rating on file still shows them.
+// rating on file still shows them. The standalone `testimonials` section
+// this content used to render through on its own was removed once this
+// merge was confirmed live — see build_log.md.
 export function ReviewsSection({ businessName, rating, reviewCount, testimonials = [] }: Props) {
   const visibleTestimonials = testimonials.filter((t) => !t.hidden);
   const hasRating = !!rating && !!reviewCount && reviewCount >= 1;

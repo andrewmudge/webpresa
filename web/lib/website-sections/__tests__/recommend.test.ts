@@ -25,7 +25,7 @@ describe('recommendWebsiteSections', () => {
   it('recommends every optional section disabled for a minimal business with no data', () => {
     const config = recommendWebsiteSections({ business: business(), content: undefined, hasCta: false });
     const enabled = enabledSet(config);
-    for (const optional of ['reviews', 'testimonials', 'gallery', 'faq', 'process', 'whyChooseUs', 'serviceAreas', 'about', 'ctaBanner']) {
+    for (const optional of ['reviews', 'gallery', 'faq', 'process', 'whyChooseUs', 'serviceAreas', 'about', 'ctaBanner']) {
       expect(enabled.has(optional)).toBe(false);
     }
     // Trust strip's indicators are generic/always-safe, so it's still recommended.
