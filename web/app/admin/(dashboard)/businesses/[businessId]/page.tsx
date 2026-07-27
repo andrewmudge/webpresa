@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
+import { listAllStockImages } from '@/lib/db/stock-images';
 import { getScanTypeLabel } from '@/lib/scans/scan-type';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
@@ -102,6 +103,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
   const resolvedSections = resolveStoredOrDefaultSections(business.websiteSections);
 
   const heroPhotoWarnings = await describeHeroDimensionWarningsForPhotos(business.photoUrls ?? []);
+  const stockImages = (await listAllStockImages()).filter((img) => img.status === 'active');
   const hasPendingScanImageReview = scans.some((s) => s.images?.some((i) => i.url && !i.promotedPhotoUrl));
   const latestSnapshot = await getLatestSnapshotForBusiness(scans);
   const hasPendingContactReview = !!(
@@ -286,6 +288,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           defaults={business}
           submitLabel="Save Photos"
           heroPhotoWarnings={heroPhotoWarnings}
+          stockImages={stockImages}
         />
         {photoApproval && <PhotoApprovalBanner result={photoApproval} />}
         <ScanImageReview businessId={businessId} scans={scans} redirectTo={detailPageUrl} />

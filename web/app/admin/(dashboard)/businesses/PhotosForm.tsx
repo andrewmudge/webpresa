@@ -1,6 +1,7 @@
 'use client';
 import { useActionState, useState } from 'react';
 import type { Business } from '@/domain/models/business';
+import type { StockImage } from '@/domain/models/stock-image';
 import { PhotoPickerField, SubmitButton } from './FormFields';
 import { PhotoManager } from './PhotoManager';
 import type { BusinessFormState } from './actions';
@@ -24,6 +25,8 @@ interface PhotosFormProps {
    * selection, without waiting for a save/reload.
    */
   heroPhotoWarnings?: Record<string, string | null>;
+  /** Every active stock image — pre-filtered to `status: 'active'` by the caller. Powers the "Explore our stock photos" picker on every slot except the logo. */
+  stockImages: StockImage[];
 }
 
 /**
@@ -43,6 +46,7 @@ export function PhotosForm({
   defaults,
   submitLabel = 'Save',
   heroPhotoWarnings,
+  stockImages,
 }: PhotosFormProps) {
   const [state, formAction] = useActionState<BusinessFormState, FormData>(action, undefined);
   const errors = state?.errors ?? {};
@@ -123,6 +127,7 @@ export function PhotosForm({
                   hint="For a full-width background, use a photo within 100px of 1920×1080 or 1600×900px. Other sizes will display alongside your text instead."
                   onChange={setSelectedHeroPhotoUrl}
                   uploadFieldName="heroPhotoFile"
+                  stockPhotos={{ images: stockImages, initialKind: 'hero', initialVariant: 'desktop', defaultIndustry: defaults?.industry }}
                 />
                 {heroPhotoWarning && (
                   <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -139,6 +144,7 @@ export function PhotosForm({
                 errors={errors.heroPhotoUrlMobile}
                 hint='Optional — a separate photo shown only on mobile, blended left-to-right so your headline stays legible. "Auto" reuses the desktop hero photo on mobile when no dedicated mobile photo is chosen; "No photo" always falls back to the theme illustration on mobile.'
                 uploadFieldName="heroPhotoFileMobile"
+                stockPhotos={{ images: stockImages, initialKind: 'hero', initialVariant: 'mobile', defaultIndustry: defaults?.industry }}
               />
               <PhotoPickerField
                 key={`about-${defaults?.aboutPhotoUrl ?? 'auto'}`}
@@ -148,6 +154,7 @@ export function PhotosForm({
                 defaultValue={defaults?.aboutPhotoUrl}
                 errors={errors.aboutPhotoUrl}
                 uploadFieldName="aboutPhotoFile"
+                stockPhotos={{ images: stockImages, initialKind: 'general', defaultIndustry: defaults?.industry }}
               />
               <PhotoPickerField
                 key={`whyChooseUs-${defaults?.whyChooseUsPhotoUrl ?? 'auto'}`}
@@ -157,6 +164,7 @@ export function PhotosForm({
                 defaultValue={defaults?.whyChooseUsPhotoUrl}
                 errors={errors.whyChooseUsPhotoUrl}
                 uploadFieldName="whyChooseUsPhotoFile"
+                stockPhotos={{ images: stockImages, initialKind: 'general', defaultIndustry: defaults?.industry }}
               />
               <PhotoPickerField
                 key={`services-${defaults?.servicesPhotoUrl ?? 'auto'}`}
@@ -166,6 +174,7 @@ export function PhotosForm({
                 defaultValue={defaults?.servicesPhotoUrl}
                 errors={errors.servicesPhotoUrl}
                 uploadFieldName="servicesPhotoFile"
+                stockPhotos={{ images: stockImages, initialKind: 'general', defaultIndustry: defaults?.industry }}
               />
             </div>
           </section>

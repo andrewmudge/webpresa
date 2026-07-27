@@ -6080,3 +6080,118 @@ infra/lib/stacks/stock-images-stack.ts                                          
                                                                                      no resource change
 web/docs/build_log.md                                                          MODIFIED — this entry
 ```
+
+# Stock photo picker — hand-pick a stock photo for a specific business (Part 2) (2026-07-27, same day)
+
+## Problem
+
+Part 1 gave the auto hero-pick fallback chain (`lib/image/resolve-hero-image.ts`)
+access to the curated stock gallery, but only as an automatic per-industry
+default — an admin had no way to browse the gallery and hand-pick a
+specific stock photo for one business's Desktop hero, Mobile hero, About
+Us, Why Choose Us, or Featured service card slot.
+
+## Solution
+
+Extended the existing per-slot `PhotoPickerField` (business Photos card)
+with an "Explore our stock photos" option alongside the existing "upload
+your own" file input, on 5 of its 6 slots (all except Business logo — a
+stock photo can't be a business's own logo). Opens a modal pre-filtered to
+the right kind/variant for that slot (Hero+Desktop, Hero+Mobile, or
+General) and the business's own industry, but every filter stays fully
+changeable so any slot can browse the whole gallery.
+
+Key finding confirmed during planning and borne out during implementation:
+this required **zero server-action, schema, or persistence changes**.
+`PhotoPickerField`'s existing `choose(value)` already treats any string as
+a valid pick (it's what handles clicking one of the business's own
+uploaded-photo thumbnails); `updatePhotosAction`'s `UpdatePhotosSchema`
+parses every slot as a plain `z.string().optional()`, and the only
+validation is `BusinessSchema`'s `PhotoSlotOverrideSchema`
+(`UrlOrPathSchema` — any `https://...` URL — union `'none'`), which a
+stock image's CloudFront URL already satisfies. The entire feature is one
+new self-contained client component plus prop-threading through four
+existing files.
+
+- `app/admin/(dashboard)/businesses/StockPhotoPickerModal.tsx` (new) — the
+  trigger button + modal. Copies `StockImagesPanel.tsx`'s exact 3-level
+  filter (industry → hero/general → desktop/mobile-if-hero) and card visual
+  style, but cards are plain click-to-select buttons (a new local
+  `SelectableStockImageCard`, not a reuse of the admin gallery's
+  action-button-laden card). Overlay/close pattern copied from
+  `DeleteBusinessRowButton.tsx` (click-outside-to-close), plus an added
+  Escape-key handler and explicit close button since this modal is much
+  larger (a full photo grid, not a small confirm dialog). No focus-trap
+  library added — matches this repo's existing no-dependency convention for
+  its other plain-div dialogs.
+- `FormFields.tsx`'s `PhotoPickerField` gained one optional prop,
+  `stockPhotos?: { images, initialKind, initialVariant?, defaultIndustry? }`
+  — renders the modal wired to the field's own `choose` function when
+  present. Passing `onSelect={choose}` directly means a stock pick
+  triggers the exact same `onChange` callback a thumbnail click already
+  does, so `PhotosForm.tsx`'s live hero-dimension-warning box updates
+  correctly for a stock-picked desktop hero with no extra wiring.
+- `PhotosForm.tsx` gained a `stockImages: StockImage[]` prop, wired into 5
+  of its 6 `PhotoPickerField` calls (not the logo).
+- Both Server Component call sites
+  (`businesses/[businessId]/page.tsx`,
+  `businesses/[businessId]/onboarding/photos/page.tsx`) now also fetch
+  `(await listAllStockImages()).filter((img) => img.status === 'active')`
+  and pass it down — filtering at the fetch site (not inside the new
+  component) keeps the component's contract simple and matches this
+  repo's convention of never passing raw unfiltered DB reads into client
+  components.
+
+## Local dev environment gap found and fixed
+
+Manually verifying against the real dev business data (via a minted admin
+session JWT + `curl`, since no browser-automation tooling — no
+`chromium-cli`, no installable Playwright — is available in this sandbox)
+surfaced a real gap: `STOCK_IMAGES_BUCKET_NAME`/`STOCK_IMAGES_CDN_DOMAIN`/
+`STOCK_IMAGES_TABLE_NAME` were added to Vercel's environment variables when
+Part 1 deployed, but never to local `web/.env.local` — any local
+`npm run dev` session would 500 on any page calling `listAllStockImages()`
+with `STOCK_IMAGES_TABLE_NAME environment variable is not set`. Added all
+three (matching the real deployed values) to `.env.local`.
+
+## Verification
+
+```
+npm run lint         — passes
+npx tsc --noEmit     — passes
+npm test             — 64 files, 718 tests passed (unchanged — no
+                         server-side logic touched)
+npm run build        — succeeds
+```
+
+Manual: started the real dev server against the real dev DynamoDB/S3 (via
+a minted admin session JWT, since sign-in requires the plaintext password
+this session doesn't have), fetched several real business detail pages via
+`curl`. Confirmed: pages render 200 with no server errors; the new picker
+button appears exactly 5 times per business that has uploaded photos (one
+per intended slot: Desktop hero, Mobile hero, About Us, Why Choose Us,
+Featured service card), and zero times for the Business logo slot;
+businesses with no uploaded photos correctly show no Photo Assignment
+section at all (pre-existing behavior, unrelated to this change).
+**Not verified**: the actual in-browser modal interaction (opening,
+changing filters, clicking a photo, confirming the save round-trip and
+`/b/[slug]` rendering) — no headless-browser tooling was available in this
+sandbox to drive it. This should be spot-checked in a real browser before
+considering the feature fully confirmed.
+
+## Files changed
+
+```
+app/admin/(dashboard)/businesses/StockPhotoPickerModal.tsx              NEW
+app/admin/(dashboard)/businesses/FormFields.tsx                         MODIFIED — stockPhotos prop
+                                                                            on PhotoPickerField
+app/admin/(dashboard)/businesses/PhotosForm.tsx                         MODIFIED — stockImages prop,
+                                                                            wired into 5 slots
+app/admin/(dashboard)/businesses/[businessId]/page.tsx                  MODIFIED — fetch + pass
+                                                                            stockImages
+app/admin/(dashboard)/businesses/[businessId]/onboarding/photos/page.tsx MODIFIED — same
+.env.local                                                              MODIFIED — added
+                                                                            STOCK_IMAGES_* vars
+                                                                            (local dev only)
+web/docs/build_log.md                                                   MODIFIED — this entry
+```

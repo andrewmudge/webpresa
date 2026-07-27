@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBusinessById } from '@/lib/db/businesses';
+import { listAllStockImages } from '@/lib/db/stock-images';
 import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
 import { PhotosForm } from '../../../PhotosForm';
 import { updatePhotosAction, addBusinessPhotosAction, deleteBusinessPhotoAction, updateBusinessLogoAction } from '../../actions';
@@ -29,6 +30,7 @@ export default async function OnboardingPhotosPage({ params }: Props) {
   const submitLabel = hasPhotos ? 'Continue →' : 'Upload Photos';
 
   const heroPhotoWarnings = await describeHeroDimensionWarningsForPhotos(business.photoUrls ?? []);
+  const stockImages = (await listAllStockImages()).filter((img) => img.status === 'active');
 
   return (
     <div className="p-8 max-w-3xl">
@@ -63,6 +65,7 @@ export default async function OnboardingPhotosPage({ params }: Props) {
           defaults={business}
           submitLabel={submitLabel}
           heroPhotoWarnings={heroPhotoWarnings}
+          stockImages={stockImages}
         />
       </div>
     </div>

@@ -4,6 +4,9 @@ import { useFormStatus } from 'react-dom';
 import Image from 'next/image';
 import { ChevronDown } from 'lucide-react';
 import { THEME_OPTIONS } from '@/lib/themes';
+import type { Industry } from '@/domain/constants/industries';
+import type { StockImage, StockImageKind, StockHeroVariant } from '@/domain/models/stock-image';
+import { StockPhotoPickerModal } from './StockPhotoPickerModal';
 
 // ---------------------------------------------------------------------------
 // Shared field helpers — used by BusinessDetailsForm, PhotosForm, and any
@@ -301,6 +304,20 @@ interface PhotoPickerFieldProps {
    * buttons have selected (see `updatePhotosAction`).
    */
   uploadFieldName?: string;
+  /**
+   * When provided, renders an "Explore our stock photos" button opening a
+   * filterable gallery modal (`StockPhotoPickerModal`) for this slot,
+   * pre-scoped to `initialKind`/`initialVariant`/`defaultIndustry` but fully
+   * browsable. A picked stock photo flows through the exact same `choose()`
+   * path as clicking one of this business's own uploaded-photo thumbnails —
+   * no separate wiring, no server-side awareness of where the URL came from.
+   */
+  stockPhotos?: {
+    images: StockImage[];
+    initialKind: StockImageKind;
+    initialVariant?: StockHeroVariant;
+    defaultIndustry?: Industry;
+  };
 }
 
 /**
@@ -319,6 +336,7 @@ export function PhotoPickerField({
   hint,
   onChange,
   uploadFieldName,
+  stockPhotos,
 }: PhotoPickerFieldProps) {
   const [selected, setSelected] = useState(defaultValue ?? '');
 
@@ -377,6 +395,17 @@ export function PhotoPickerField({
             type="file"
             accept="image/*"
             className="block w-full text-xs text-gray-600 file:mr-2 file:rounded-md file:border-0 file:bg-gray-100 file:px-2 file:py-1 file:text-xs file:font-medium hover:file:bg-gray-200"
+          />
+        </div>
+      )}
+      {stockPhotos && (
+        <div className="mt-2">
+          <StockPhotoPickerModal
+            images={stockPhotos.images}
+            initialKind={stockPhotos.initialKind}
+            initialVariant={stockPhotos.initialVariant}
+            defaultIndustry={stockPhotos.defaultIndustry}
+            onSelect={choose}
           />
         </div>
       )}
