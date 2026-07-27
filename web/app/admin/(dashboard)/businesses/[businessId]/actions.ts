@@ -34,7 +34,8 @@ import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
 import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl, fileExtension } from '@/lib/s3/business-assets';
-import { deleteAsset } from '@/lib/s3/assets';
+import { deleteAsset, putAsset } from '@/lib/s3/assets';
+import { cropToDimensions, STOCK_DESKTOP_HERO_DIMENSIONS, STOCK_MOBILE_HERO_DIMENSIONS } from '@/lib/image/crop-hero-photo';
 import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
 import { classifySocialPlatform } from '@/lib/social-links';
 import type { BusinessFormState } from '../actions';
@@ -406,6 +407,11 @@ export async function updatePhotosAction(
     // plus the five per-slot direct-upload inputs, which only ever grow
     // photoUrls, never replace it.
     let photoUrls = existing.photoUrls ?? [];
+    // Tracks the auto-crop paired with a fresh desktop hero upload this
+    // save (see the `heroPhotoUrl` branch below) — carried over from the
+    // existing record when this save doesn't touch the hero slot at all.
+    let heroPhotoUrlMobileAuto = existing.heroPhotoUrlMobileAuto;
+    let croppedNewHeroThisSave = false;
 
     const slotOverrides: Partial<Record<keyof typeof SLOT_UPLOAD_FIELDS, string>> = {};
     for (const [slotKey, fieldName] of Object.entries(SLOT_UPLOAD_FIELDS) as [
@@ -417,6 +423,34 @@ export async function updatePhotosAction(
         if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
           return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in the Photos card first.` };
         }
+
+        if (slotKey === 'heroPhotoUrl') {
+          // Desktop hero uploads are auto-cropped to the exact full-bleed
+          // dimensions (server-side center-crop, no interactive crop UI in
+          // Phase 1 — see build_log.md), with a paired mobile crop
+          // generated alongside it for the automatic mobile hero fallback
+          // (see lib/image/resolve-hero-image.ts). The mobile crop is an
+          // internal artifact — never added to photoUrls or shown in the
+          // Photo Assignment picker grid.
+          const source = Buffer.from(await file.arrayBuffer());
+          const [desktopBuffer, mobileBuffer] = await Promise.all([
+            cropToDimensions(source, STOCK_DESKTOP_HERO_DIMENSIONS),
+            cropToDimensions(source, STOCK_MOBILE_HERO_DIMENSIONS),
+          ]);
+          const desktopKey = `businesses/${businessId}/assets/photos/${crypto.randomUUID()}.jpg`;
+          const mobileKey = `businesses/${businessId}/assets/photos/${crypto.randomUUID()}.jpg`;
+          await Promise.all([
+            putAsset(desktopKey, desktopBuffer, 'image/jpeg'),
+            putAsset(mobileKey, mobileBuffer, 'image/jpeg'),
+          ]);
+          const desktopUrl = `/api/assets/${desktopKey}`;
+          photoUrls = [...photoUrls, desktopUrl];
+          slotOverrides[slotKey] = desktopUrl;
+          heroPhotoUrlMobileAuto = `/api/assets/${mobileKey}`;
+          croppedNewHeroThisSave = true;
+          continue;
+        }
+
         const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
         photoUrls = [...photoUrls, url];
         slotOverrides[slotKey] = url;
@@ -429,10 +463,20 @@ export async function updatePhotosAction(
     const whyChooseUsPhotoUrl = slotOverrides.whyChooseUsPhotoUrl ?? data.whyChooseUsPhotoUrl;
     const servicesPhotoUrl = slotOverrides.servicesPhotoUrl ?? data.servicesPhotoUrl;
 
+    // A desktop hero selection change that ISN'T this save's own fresh crop
+    // (e.g. picking a different uploaded photo, "No photo", or reverting to
+    // Auto) invalidates whatever auto mobile crop was paired with the
+    // previous hero — never let a stale pairing survive a change nobody
+    // asked for.
+    if (!croppedNewHeroThisSave && heroPhotoUrl !== existing.heroPhotoUrl) {
+      heroPhotoUrlMobileAuto = undefined;
+    }
+
     await putBusiness({
       ...existing,
       heroPhotoUrl,
       heroPhotoUrlMobile,
+      heroPhotoUrlMobileAuto,
       aboutPhotoUrl,
       whyChooseUsPhotoUrl,
       servicesPhotoUrl,

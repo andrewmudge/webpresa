@@ -2,13 +2,13 @@ import 'server-only';
 import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import type { Business } from '@/domain/models/business';
-import type { GenerationMetadata, HeroStyle, PreviewContent, PreviewSocialLink, PreviewTheme } from '@/domain/models/site-preview';
+import type { GenerationMetadata, PreviewContent, PreviewSocialLink, PreviewTheme } from '@/domain/models/site-preview';
 import type { WebsiteEnrichmentSnapshot } from '@/domain/models/website-enrichment';
 import type { ScanImageAsset } from '@/domain/models/scan-image';
 import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
 import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]/cta-defaults';
 import { resolveBusinessTheme } from '@/lib/theme/select-theme';
-import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
+import { resolveHeroImages } from '@/lib/image/resolve-hero-image';
 import { buildGenerationContext, type GenerationContext } from '@/lib/firecrawl/generation-context';
 import { classifySocialPlatform } from '@/lib/social-links';
 import { getOpenAiClient, getOpenAiModel } from './client';
@@ -245,27 +245,30 @@ export async function generatePreviewContent(
     secondary: output.secondaryCtaLabel,
   });
 
-  // --- Hero/about/services: uploaded photos always win over placeholders.
-  // Each slot prefers a distinct photo so more of what was uploaded actually
+  // --- About/services: uploaded photos always win over placeholders. Each
+  // slot prefers a distinct photo so more of what was uploaded actually
   // gets used, falling back to reusing an earlier one when fewer exist.
   // An admin override (see Business model) takes priority over the
   // automatic pick; overriding to 'none' forces that slot's non-photo
   // fallback even when photos exist. Scan-accepted images (Stage 13) are a
   // final, lowest-priority fallback tier — admin-uploaded photos always win
   // over anything discovered on the business's own website. Never sourced
-  // from Google Places (Stage 12 never downloads photos at all). ---
+  // from Google Places (Stage 12 never downloads photos at all). The hero
+  // slot has its own separate tier chain — see resolveHeroImages below. ---
   const acceptedScanImages = (options.enrichment?.scanImages ?? []).filter(
     (img): img is typeof img & { url: string } => img.status === 'accepted' && !!img.url,
   );
   const scanHeroImageUrl = acceptedScanImages.find((img) => img.role === 'hero')?.url ?? acceptedScanImages[0]?.url;
   const otherScanImageUrls = acceptedScanImages.filter((img) => img.url !== scanHeroImageUrl).map((img) => img.url);
 
-  const heroImageUrl = resolvePhotoSlot(business.heroPhotoUrl, business.photoUrls?.[0], scanHeroImageUrl);
-  // Manual only — no auto-fallback args. Unlike the desktop hero slot, an
-  // unset mobile hero photo should never silently pick an arbitrary uploaded
-  // photo nobody chose for that crop; it falls back to the theme
-  // illustration instead (see GeneratedHero.tsx).
-  const heroImageUrlMobile = resolvePhotoSlot(business.heroPhotoUrlMobile);
+  // Hero/mobile-hero resolution has its own dedicated tier chain — see
+  // lib/image/resolve-hero-image.ts — distinct from the resolvePhotoSlot
+  // upload-order fallback the other slots below still use. Notably, an
+  // automatically-picked uploaded photo is no longer part of the hero's
+  // auto-chain (a Firecrawl dimension-matched image or curated stock photo
+  // now takes that place); uploaded photos remain hero-selectable only via
+  // an explicit admin override.
+  const { heroImageUrl, heroImageUrlMobile, heroStyle } = await resolveHeroImages({ business, acceptedScanImages });
   const aboutImageUrl = resolvePhotoSlot(
     business.whyChooseUsPhotoUrl,
     business.photoUrls?.[1],
@@ -312,18 +315,6 @@ export async function generatePreviewContent(
     seo: { title: output.seoTitle, description: output.seoDescription },
     cta,
   };
-
-  // Never AI-chosen: a resolved hero photo always wins over the theme-
-  // matched illustration fallback. Whether it renders full-bleed or in the
-  // split layout depends on its actual pixel dimensions — see
-  // lib/image/hero-dimensions.ts, shared with the admin-facing warning in
-  // PhotosForm so the two can never disagree.
-  const heroDimensionCheck = heroImageUrl ? await checkHeroPhotoDimensions(heroImageUrl) : null;
-  const heroStyle: HeroStyle = !heroImageUrl
-    ? 'illustration'
-    : heroDimensionCheck?.isFullBleedEligible
-      ? 'image'
-      : 'imageSplit';
 
   const theme: PreviewTheme = {
     themeName,

@@ -21,6 +21,15 @@ const nextConfig: NextConfig = {
       // hotlinkable Google CDN URL, not a Google Place Photo. See
       // lib/google-places/reviews.ts.
       { protocol: 'https', hostname: '*.googleusercontent.com' },
+      // Stock image repository CDN (Phase 1 curated hero-photo fallback) —
+      // required even with `unoptimized: true` above: next/image still
+      // validates remote hostnames for absolute URLs, only same-origin/
+      // relative URLs (e.g. `/api/assets/...`) skip that check. See
+      // lib/s3/stock-images.ts / infra/lib/stacks/stock-images-stack.ts.
+      {
+        protocol: 'https',
+        hostname: process.env.STOCK_IMAGES_CDN_DOMAIN ?? '*.cloudfront.net',
+      },
     ],
   },
 };

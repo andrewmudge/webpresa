@@ -5498,3 +5498,309 @@ web/docs/architecture.md                                                        
                                                                                      Testimonials merge" section,
                                                                                      stale references corrected
 ```
+
+# CTA Banner moved between Reviews and Service Areas (2026-07-27)
+
+## Problem
+
+The CTA Banner section's default position was near the bottom of the page
+(after FAQ), but it should appear right after Reviews and before Service
+Areas for new/unconfigured businesses.
+
+## Fix
+
+Changed `ctaBanner`'s `defaultOrder` in `WEBSITE_SECTION_CATALOG` from `130`
+to `80`, using the existing gap in the numbering scheme between `reviews`
+(`70`) and `serviceAreas` (`90`). No other catalog entries needed
+renumbering. Existing businesses with a stored `websiteSections` config keep
+their current saved order — this only affects the default used for new or
+never-customized businesses.
+
+## Verification
+
+```
+npm run lint        — passes
+npx tsc --noEmit    — passes
+npm test            — 63 files, 702 tests passed
+npm run build       — succeeds
+```
+
+## Files changed
+
+```
+domain/constants/website-sections.ts   MODIFIED — ctaBanner defaultOrder
+                                           130 → 80
+web/docs/build_log.md                  MODIFIED — this entry
+```
+
+# Larger business logo in the generated site nav bar (2026-07-27)
+
+## Problem
+
+The business logo in the generated site's nav bar (`GeneratedSiteHeader`)
+rendered too small — h-8 (32px) on mobile, h-9 (36px) on desktop — relative
+to the available space in the 64px-tall nav bar.
+
+## Fix
+
+Changed the logo `<Image>`'s className in `GeneratedSiteHeader.tsx` from
+`h-8 sm:h-9 w-auto object-contain` to `h-10 sm:h-12 w-auto object-contain`,
+raising rendered height to 40px on mobile and 48px on desktop (sm: and up).
+The nav bar's own height (`h-16`, 64px, fixed at all breakpoints) was left
+unchanged — the larger logo still fits with comfortable padding. `w-auto
+object-contain` were kept as-is so width keeps scaling with each logo's
+natural aspect ratio without cropping. This is the only nav bar component
+for generated business sites, shared by the live public site and the
+admin's own preview, so one edit covers both.
+
+## Verification
+
+```
+npm run lint        — passes
+npx tsc --noEmit    — passes
+npm test            — 63 files, 702 tests passed
+npm run build       — succeeds
+```
+
+## Files changed
+
+```
+app/b/[slug]/template/GeneratedSiteHeader.tsx   MODIFIED — logo className
+                                                    h-8 sm:h-9 → h-10 sm:h-12
+web/docs/build_log.md                           MODIFIED — this entry
+```
+
+# Stock image repository — curated hero-photo fallback (Phase 1) (2026-07-27)
+
+## Problem
+
+The automatic hero-image pick for a generated preview had only three tiers:
+admin override → first uploaded business photo → any Firecrawl-discovered
+image (regardless of dimensions) → theme illustration fallback. Too many
+previews with no admin-uploaded photo and no usable scraped image fell all
+the way to the generic illustration. There was also no first-party stock
+photography — a past decision (`industry-icons.tsx`) had explicitly rejected
+generic per-industry stock photos due to licensing/duplication concerns, but
+that concern doesn't apply to a Webpresa-curated library used as an
+intentional professional fallback tier.
+
+## New hero auto-pick chain
+
+1. Explicit admin override (`Business.heroPhotoUrl`, including `'none'`) —
+   unchanged, highest priority. A custom hero upload through this slot is
+   now auto-cropped server-side to the exact full-bleed dimensions
+   (1920×1080), with a paired mobile crop (1080×1350) generated alongside it
+   (`Business.heroPhotoUrlMobileAuto` — internal, never admin-set directly).
+2. **New**: a Firecrawl-discovered `role: 'hero'` image whose already-stored
+   dimensions are within 100px of 1920×1080 (16:9) — reuses
+   `HERO_FULL_BLEED_DIMENSIONS`/`HERO_DIMENSION_TOLERANCE_PX` from
+   `lib/image/hero-dimensions.ts`, checked directly against the stored
+   width/height (no re-fetch).
+3. **New**: a curated stock hero image matched to `Business.industry`
+   (required field, so this only misses when no active stock set exists yet
+   for that industry).
+4. **New**: mobile hero gets an automatic fallback for the first time
+   (previously manual-only), pairing with whichever tier supplied the
+   desktop image — never an independent industry lookup. A Firecrawl-tier
+   hero has no known mobile companion, so mobile still falls through to the
+   illustration in that case unless manually overridden.
+5. Theme illustration fallback — unchanged, final catch-all.
+
+The old "first uploaded business photo" auto-fallback tier is removed from
+the hero chain entirely — uploaded photos remain selectable for the hero
+slot only via explicit admin override, never as an automatic default. The
+about/services/aboutSection slots' own upload-order fallback chains are
+unchanged.
+
+## New infrastructure — public stock-image CDN
+
+This project had zero CDN anywhere — all images, even business photos, are
+served through a private S3 bucket behind a server-side proxy route
+(`/api/assets/[...key]`). Stock photography is different: non-sensitive and
+deliberately reused across many businesses, so it's served through a new,
+dedicated public-via-CloudFront bucket instead (first CloudFront
+distribution in the project):
+
+- `infra/lib/stacks/stock-images-stack.ts` (`WebpresaStockImagesStack`) — a
+  `WebpresaBucket` (`webpresa-{env}-stock-images`, stays fully private/
+  `BLOCK_ALL` — unchanged from every other bucket) behind a CloudFront
+  `Distribution` using `S3BucketOrigin.withOriginAccessControl()` (CDK
+  auto-manages the OAC + bucket policy, no manual policy JSON). Also owns
+  the new `stock-image-metadata` DynamoDB table (`stockImageId` PK;
+  `industry-kind-index` GSI — PK `industryKind` computed as
+  `"{industry|'general'}#{kind}"`, SK `createdAt`, doubling as the Phase 2
+  browse/filter query; `status-index` GSI, same pre-production caveat as
+  every other table). Named distinctly from the bucket — both constructs
+  derive their `CfnOutput` export names from their own short name, so
+  reusing `stock-images` for the table too produced a duplicate
+  CloudFormation export, caught via `cdk synth` before any deploy attempt.
+- `infra/lib/stacks/vercel-access-stack.ts` — new `stockImagesBucket` prop
+  and a `S3StockImages` statement on `dataAccessPolicy`: `PutObject`/
+  `DeleteObject`/`ListBucket` only, deliberately **no** `GetObject` — reads
+  happen publicly via CloudFront, never through the app's IAM identity.
+- `infra/bin/webpresa.ts` — new stack instantiated after
+  `WebpresaScanWorkflowStack`, before `WebpresaVercelAccessStack` (no
+  dependency on any earlier stack).
+- Every object gets a fresh, never-reused key (`hero-sets/{industry}/{setId}/...`)
+  with an immutable `Cache-Control` header set at upload time
+  (`lib/s3/stock-images.ts`) — "replacing" a stock image is always a new
+  upload + new record + archiving the old one, never an overwrite, so this
+  feature never needs a CloudFront cache invalidation.
+- Not deployed — `cdk synth`/`cdk diff` only, per `AGENTS.md`.
+
+## Domain model, DB, and image processing
+
+- `domain/models/stock-image.ts` / `domain/schemas/stock-image.schema.ts` /
+  `domain/factories/stock-image.factory.ts` — new `StockImage` record
+  (`stock_<uuid>`), `kind: 'hero' | 'general'` (a hero set is always a
+  desktop+mobile pair; `'general'` is a single image, unused by any
+  auto-pick tier today — exists so Phase 2's full browsable library has a
+  broader pool without a future schema change), `industry` (optional —
+  absent means the general/uncategorized pool), `status: 'active' |
+  'archived'`, `isDefault` (action-enforced, not schema-enforced, same
+  pattern as `MAX_BUSINESS_PHOTOS`).
+- `lib/db/stock-images.ts` — repository following the existing
+  `lib/db/*` conventions; `getDefaultStockHeroSet(industry)` prefers the
+  active `isDefault` set, else the most-recently-uploaded active set.
+- `lib/s3/stock-images.ts` — upload/delete helpers targeting the new bucket,
+  returning CloudFront URLs; `uploadStockHeroSet` crops a source image into
+  the desktop+mobile pair via `lib/image/crop-hero-photo.ts` (`sharp`,
+  center-crop, re-encoded as JPEG — no interactive crop UI in Phase 1).
+- `lib/image/resolve-hero-image.ts` — the new `resolveHeroImages()` tier
+  chain described above, called from `lib/ai/generate-preview.ts` in place
+  of the old inline `resolvePhotoSlot(heroPhotoUrl, photoUrls[0],
+  scanHeroImageUrl)` + dimension-check block. The `acceptedScanImages`/
+  `otherScanImageUrls` computation feeding the about/services/aboutSection
+  slots is untouched.
+- `next.config.ts` — added the stock-images CloudFront domain to
+  `images.remotePatterns` (required even with `unoptimized: true` — that
+  flag only skips Next/Image's optimization pipeline, not its remote
+  hostname validation for absolute URLs).
+
+## Admin UI
+
+- New route `/admin/stock-images` (`page.tsx` + `actions.ts` +
+  `StockImagesPanel.tsx`), following the existing top-level admin route
+  convention (`discover/`): upload form (industry picker from `INDUSTRIES`,
+  kind picker, file input), a simple industry filter over the full list,
+  and per-image Archive/Delete/Set-as-default actions. New "Stock Images"
+  entry in `AdminSidebar.tsx`'s `NAV_ITEMS`.
+- `businesses/[businessId]/actions.ts`'s `updatePhotosAction` — the existing
+  "Desktop hero image" direct-upload input (`heroPhotoFile`) now auto-crops
+  the uploaded image to the desktop hero dimensions and generates the
+  paired mobile auto-crop in the same save, instead of uploading the file
+  verbatim. `heroPhotoUrlMobileAuto` is cleared whenever the hero slot
+  changes to something other than that same-save crop (a different existing
+  photo, "No photo", or reverting to Auto), so a stale pairing can never
+  survive a change nobody asked for. The "pick an existing uploaded photo"
+  flow and its `imageSplit` dimension warning are untouched — only the
+  dedicated upload input gets auto-cropped.
+
+## Out of scope (Phase 2, data model already accommodates it)
+
+The full "Explore our stock photos or upload your own" browsable/filterable
+picker for admin + future client use, and any client-facing (business-owner)
+dashboard access, are not built in this stage. `industry-kind-index` and the
+`kind: 'general'` pool exist specifically so Phase 2 only needs new UI, not
+a schema change.
+
+## Verification
+
+```
+web:
+npm run lint         — passes
+npx tsc --noEmit     — passes
+npm test             — 64 files, 714 tests passed
+npm run build        — succeeds (new /admin/stock-images route present)
+
+infra:
+npm run build (tsc)  — passes
+npm test             — 6 files, 140 tests passed
+cdk synth (full app) — succeeds, all 6 stacks present
+```
+
+Not deployed — no `cdk deploy` was run, per `AGENTS.md`.
+
+## Files changed
+
+```
+domain/models/stock-image.ts                                                    NEW
+domain/schemas/stock-image.schema.ts                                            NEW
+domain/factories/stock-image.factory.ts                                         NEW
+domain/models/index.ts                                                          MODIFIED — export stock-image
+domain/schemas/index.ts                                                         MODIFIED — export stock-image.schema
+domain/factories/index.ts                                                       MODIFIED — export stock-image.factory
+domain/models/business.ts                                                       MODIFIED — heroPhotoUrlMobileAuto field
+domain/schemas/business.schema.ts                                              MODIFIED — heroPhotoUrlMobileAuto schema
+lib/db/client.ts                                                                MODIFIED — TABLE_STOCK_IMAGES
+lib/db/stock-images.ts                                                          NEW
+lib/s3/client.ts                                                                MODIFIED — stock-images bucket/CDN env helpers
+lib/s3/stock-images.ts                                                          NEW
+lib/image/crop-hero-photo.ts                                                    NEW
+lib/image/resolve-hero-image.ts                                                 NEW
+lib/image/__tests__/resolve-hero-image.test.ts                                 NEW
+lib/ai/generate-preview.ts                                                      MODIFIED — hero resolution delegated
+                                                                                     to resolveHeroImages
+lib/ai/__tests__/generate-preview.test.ts                                       MODIFIED — hero tests moved to
+                                                                                     resolve-hero-image.test.ts
+next.config.ts                                                                  MODIFIED — stock-images CDN
+                                                                                     remotePattern
+app/admin/(dashboard)/AdminSidebar.tsx                                          MODIFIED — Stock Images nav entry
+app/admin/(dashboard)/stock-images/page.tsx                                     NEW
+app/admin/(dashboard)/stock-images/actions.ts                                   NEW
+app/admin/(dashboard)/stock-images/StockImagesPanel.tsx                         NEW
+app/admin/(dashboard)/businesses/PhotosForm.tsx                                 MODIFIED — hero upload hint text
+app/admin/(dashboard)/businesses/[businessId]/actions.ts                        MODIFIED — hero upload auto-crop
+                                                                                     + heroPhotoUrlMobileAuto
+app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts        MODIFIED — mock crop-hero-photo/putAsset
+app/admin/(dashboard)/businesses/[businessId]/__tests__/business-details-actions.test.ts  MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts  MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/website-sections-actions.test.ts  MODIFIED — same
+infra/lib/stacks/stock-images-stack.ts                                          NEW
+infra/lib/stacks/vercel-access-stack.ts                                        MODIFIED — S3StockImages statement
+infra/bin/webpresa.ts                                                           MODIFIED — stack wiring
+infra/test/stock-images-stack.test.ts                                          NEW
+infra/test/vercel-access-stack.test.ts                                        MODIFIED — S3StockImages assertion
+web/docs/build_log.md                                                          MODIFIED — this entry
+```
+
+## Dev deployment (2026-07-27, same day)
+
+Deployed `WebpresaDevStockImagesStack` and `WebpresaDevVercelAccessStack` to account
+`539898341083` / `us-east-1` (profile `webpresa`), after showing account/region/
+resources/`cdk diff` and getting explicit approval, per `AGENTS.md`.
+
+A real bug was caught before this deploy: the bucket and the DynamoDB table
+originally shared the short name `stock-images`, so both `WebpresaBucket` and
+`WebpresaTable`'s `CfnOutput`s produced the identical export names
+`webpresa-dev-stock-images-name`/`-arn` — CloudFormation would have rejected
+the stack outright ("export already exists"). Confirmed via a real
+`cdk synth` + inspecting `Outputs` in the synthesized template before any
+deploy was attempted; fixed by renaming the table's short name to
+`stock-image-metadata` (`infra/lib/stacks/stock-images-stack.ts`), and added
+a regression test (`stock-images-stack.test.ts`, "never produces two
+CloudFormation exports with the same name") asserting every export name in
+the template is unique, so this class of bug fails fast in the test suite
+next time rather than only at deploy time.
+
+A second near-miss was caught during the pre-deploy `cdk diff`: run without
+`WEBPRESA_APP_BASE_URL` set, the diff showed unrelated changes to
+`WebpresaDevScreenshotStack` and `WebpresaDevScanWorkflowStack` — both would
+have had their real Vercel app URL silently replaced with the synth-only
+`https://REPLACE_WITH_DEV_APP_BASE_URL.invalid` placeholder had those stacks
+been redeployed, breaking the screenshot Lambda's preview-capture URLs and
+the scan workflow's `HttpInvoke` endpoints in production. Re-ran the diff
+with `WEBPRESA_APP_BASE_URL` set to the real deployed app URL
+(`https://webpresa-git-dev-andrew-mudges-projects.vercel.app`), confirming
+zero differences on those two stacks before deploying only the two stacks
+that actually needed to change.
+
+Outputs from the deploy:
+- `webpresa-dev-stock-images` (bucket)
+- `webpresa-dev-stock-image-metadata` (table)
+- `d3nlm6wbbq9owq.cloudfront.net` (CloudFront distribution domain)
+
+Still pending: adding `STOCK_IMAGES_BUCKET_NAME`, `STOCK_IMAGES_CDN_DOMAIN`,
+and `STOCK_IMAGES_TABLE_NAME` to Vercel's environment variables (manual, via
+the Vercel dashboard) — needed before the app itself can read/write the new
+bucket/table or resolve stock images by industry.

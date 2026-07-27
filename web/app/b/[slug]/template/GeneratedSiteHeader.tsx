@@ -35,7 +35,7 @@ export function GeneratedSiteHeader({ businessName, logoUrl, serviceAreas, servi
               alt={businessName}
               width={160}
               height={40}
-              className="h-8 sm:h-9 w-auto object-contain"
+              className="h-10 sm:h-12 w-auto object-contain"
               priority
             />
           ) : (

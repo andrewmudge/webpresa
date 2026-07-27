@@ -98,6 +98,9 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `SCREENSHOT_LAMBDA_FUNCTION_NAME` | CloudFormation export `webpresa-dev-screenshot-capture-name` | Stage 14 — deployed (`webpresa-dev-screenshot-capture`), added to Vercel |
 | `INTERNAL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-internal-api` | Secrets Manager (Stage 16) — not yet deployed |
 | `SCAN_WORKFLOW_STATE_MACHINE_ARN` | CloudFormation export `webpresa-dev-scan-workflow-arn` | Stage 16 — not yet deployed |
+| `STOCK_IMAGES_BUCKET_NAME` | CloudFormation export `webpresa-dev-stock-images-name` | Stock image repository (Phase 1) — not yet deployed |
+| `STOCK_IMAGES_CDN_DOMAIN` | CloudFormation export `webpresa-dev-stock-images-cdn-domain` | CloudFront domain fronting the stock-images bucket — not yet deployed. Also needs adding to `next.config.ts`'s `images.remotePatterns` at build time (falls back to `*.cloudfront.net` if unset) |
+| `STOCK_IMAGES_TABLE_NAME` | CloudFormation export `webpresa-dev-stock-image-metadata-name` | Stock image repository (Phase 1) — table deliberately named differently from the bucket to avoid a duplicate CloudFormation export name; not yet deployed |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |

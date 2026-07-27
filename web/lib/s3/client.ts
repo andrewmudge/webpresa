@@ -50,3 +50,24 @@ export function getAssetsBucketName(): string {
   }
   return name;
 }
+
+/**
+ * The dedicated stock-image bucket — public-via-CloudFront, distinct from
+ * the private `assets` bucket above. See `lib/s3/stock-images.ts`.
+ */
+export function getStockImagesBucketName(): string {
+  const name = process.env.STOCK_IMAGES_BUCKET_NAME;
+  if (!name) {
+    throw new Error('STOCK_IMAGES_BUCKET_NAME environment variable is not set');
+  }
+  return name;
+}
+
+/** The CloudFront distribution domain fronting the stock-images bucket, e.g. `d123abc.cloudfront.net`. */
+export function getStockImagesCdnDomain(): string {
+  const domain = process.env.STOCK_IMAGES_CDN_DOMAIN;
+  if (!domain) {
+    throw new Error('STOCK_IMAGES_CDN_DOMAIN environment variable is not set');
+  }
+  return domain;
+}

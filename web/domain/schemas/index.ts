@@ -8,3 +8,4 @@ export * from './website-enrichment.schema';
 export * from './postcard.schema';
 export * from './website-sections.schema';
 export * from './google-places.schema';
+export * from './stock-image.schema';

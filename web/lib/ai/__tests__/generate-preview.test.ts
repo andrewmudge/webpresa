@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockParse = vi.hoisted(() => vi.fn());
 const mockGetOpenAiClient = vi.hoisted(() => vi.fn());
 const mockResolveBusinessTheme = vi.hoisted(() => vi.fn());
-const mockCheckHeroPhotoDimensions = vi.hoisted(() => vi.fn());
+const mockResolveHeroImages = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/ai/client', () => ({
   getOpenAiClient: mockGetOpenAiClient,
@@ -18,8 +18,14 @@ vi.mock('@/lib/theme/select-theme', () => ({
   resolveBusinessTheme: mockResolveBusinessTheme,
 }));
 
-vi.mock('@/lib/image/hero-dimensions', () => ({
-  checkHeroPhotoDimensions: mockCheckHeroPhotoDimensions,
+// Hero/mobile-hero resolution is fully delegated to resolveHeroImages — its
+// own tier-chain logic (admin override, Firecrawl dimension match, stock
+// industry fallback, illustration) is covered in
+// lib/image/__tests__/resolve-hero-image.test.ts. Mocked here at the
+// boundary so this file only needs to verify generatePreviewContent wires
+// its result into `theme` correctly, and passes it the right inputs.
+vi.mock('@/lib/image/resolve-hero-image', () => ({
+  resolveHeroImages: mockResolveHeroImages,
 }));
 
 vi.mock('server-only', () => ({}));
@@ -66,7 +72,7 @@ beforeEach(() => {
     chat: { completions: { parse: mockParse } },
   });
   mockResolveBusinessTheme.mockResolvedValue('classicBlue');
-  mockCheckHeroPhotoDimensions.mockResolvedValue({ isFullBleedEligible: true, width: 1920, height: 1080 });
+  mockResolveHeroImages.mockResolvedValue({ heroImageUrl: undefined, heroImageUrlMobile: undefined, heroStyle: 'illustration' });
 });
 
 describe('generatePreviewContent — precondition', () => {
@@ -108,25 +114,38 @@ describe('generatePreviewContent — success', () => {
     expect(result.content.hero.ctaText).toBe('Book Online');
   });
 
-  it('uses the first uploaded photo as the hero image, setting heroStyle to image', async () => {
+  it('wires resolveHeroImages\' resolved desktop/mobile hero and style into theme', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
-    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+    mockResolveHeroImages.mockResolvedValueOnce({
+      heroImageUrl: '/api/assets/scans/biz_1/scan_1/images/img1.jpg',
+      heroImageUrlMobile: 'https://cdn.example.cloudfront.net/hero-sets/plumbing/set1/mobile.jpg',
+      heroStyle: 'image',
+    });
+    const business = makeBusiness();
 
     const result = await generatePreviewContent(business);
 
+    expect(result.theme.heroImageUrl).toBe('/api/assets/scans/biz_1/scan_1/images/img1.jpg');
+    expect(result.theme.heroImageUrlMobile).toBe('https://cdn.example.cloudfront.net/hero-sets/plumbing/set1/mobile.jpg');
     expect(result.theme.heroStyle).toBe('image');
-    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
   });
 
-  it('sets heroStyle to imageSplit when the hero photo is not hero-dimensioned', async () => {
+  it('passes the business and its accepted scan images through to resolveHeroImages, excluding review_required ones', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
-    mockCheckHeroPhotoDimensions.mockResolvedValueOnce({ isFullBleedEligible: false, width: 1200, height: 800 });
-    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+    const business = makeBusiness();
+    const scanImages = [
+      { imageId: 'img1', role: 'hero' as const, status: 'accepted' as const, url: '/api/assets/scans/biz_1/scan_1/images/img1.jpg', originalUrl: 'https://acme.com/hero.jpg' },
+      { imageId: 'img2', role: 'gallery' as const, status: 'review_required' as const, originalUrl: 'https://acme.com/other.jpg' },
+    ];
 
-    const result = await generatePreviewContent(business);
+    await generatePreviewContent(business, {
+      enrichment: { snapshot: { schemaVersion: '1', sourceUrl: 'https://acme.com/', services: [], serviceAreas: [], differentiators: [], faq: [], navigationLabels: [], callsToAction: [], contact: { phones: [], emails: [], addresses: [] }, socialLinks: [], links: [], imageReferences: [], extractedAt: new Date().toISOString() }, scanImages, scanId: 'scan_1' },
+    });
 
-    expect(result.theme.heroStyle).toBe('imageSplit');
-    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+    expect(mockResolveHeroImages).toHaveBeenCalledWith({
+      business,
+      acceptedScanImages: [expect.objectContaining({ imageId: 'img1', status: 'accepted' })],
+    });
   });
 
   it('reuses uploaded photos for the about/why-choose-us/services image slots, preferring later photos', async () => {
@@ -147,29 +166,28 @@ describe('generatePreviewContent — success', () => {
     expect(result.theme.aboutSectionImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/3.jpg');
   });
 
-  it('lets an admin override pin a specific photo to a slot, ignoring the automatic pick', async () => {
+  it('lets an admin override pin a specific photo to the about slot, ignoring the automatic pick', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({
       photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg', '/api/assets/businesses/biz_1/assets/photos/1.jpg'],
-      heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
+      whyChooseUsPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
     });
 
     const result = await generatePreviewContent(business);
 
-    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
+    expect(result.theme.aboutImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/1.jpg');
   });
 
-  it('lets an admin override force no photo for a slot via "none", even when photos exist', async () => {
+  it('lets an admin override force no photo for the about slot via "none", even when photos exist', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({
       photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'],
-      heroPhotoUrl: 'none',
+      whyChooseUsPhotoUrl: 'none',
     });
 
     const result = await generatePreviewContent(business);
 
-    expect(result.theme.heroImageUrl).toBeUndefined();
-    expect(result.theme.heroStyle).toBe('illustration');
+    expect(result.theme.aboutImageUrl).toBeUndefined();
   });
 
   it('falls back to reusing earlier photos for services/about when fewer than 3 were uploaded', async () => {
@@ -189,16 +207,6 @@ describe('generatePreviewContent — success', () => {
     const result = await generatePreviewContent(business);
 
     expect(result.theme.servicesImageUrl).toBeUndefined();
-  });
-
-  it('deterministically uses the illustration heroStyle when no photo was uploaded (never AI-chosen)', async () => {
-    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
-    const business = makeBusiness({ photoUrls: undefined });
-
-    const result = await generatePreviewContent(business);
-
-    expect(result.theme.heroStyle).toBe('illustration');
-    expect(result.theme.heroImageUrl).toBeUndefined();
   });
 
   it('includes generationMetadata with the resolved model name', async () => {
@@ -336,7 +344,7 @@ describe('generatePreviewContent — Stage 13 enrichment (optional third argumen
     ).rejects.toThrow(/at least one service/i);
   });
 
-  it('uses an accepted scan image as the hero fallback only when no business photo exists', async () => {
+  it('uses a second accepted scan image as an about-slot fallback when no business photo exists (the first is reserved as the designated hero candidate)', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: undefined });
     const scanImages = [
@@ -347,46 +355,24 @@ describe('generatePreviewContent — Stage 13 enrichment (optional third argumen
         url: '/api/assets/scans/biz_1/scan_1/images/img1.jpg',
         originalUrl: 'https://acme.com/hero.jpg',
       },
-    ];
-
-    const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
-
-    expect(result.theme.heroImageUrl).toBe('/api/assets/scans/biz_1/scan_1/images/img1.jpg');
-  });
-
-  it('prefers an uploaded business photo over a scan-derived image for the hero slot', async () => {
-    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
-    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
-    const scanImages = [
       {
-        imageId: 'img1',
-        role: 'hero' as const,
+        imageId: 'img2',
+        role: 'gallery' as const,
         status: 'accepted' as const,
-        url: '/api/assets/scans/biz_1/scan_1/images/img1.jpg',
-        originalUrl: 'https://acme.com/hero.jpg',
+        url: '/api/assets/scans/biz_1/scan_1/images/img2.jpg',
+        originalUrl: 'https://acme.com/other.jpg',
       },
-    ];
-
-    const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
-
-    expect(result.theme.heroImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
-  });
-
-  it('ignores a review_required (not accepted) scan image as a photo-slot fallback', async () => {
-    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
-    const business = makeBusiness({ photoUrls: undefined });
-    const scanImages = [
       {
-        imageId: 'img1',
-        role: 'hero' as const,
+        imageId: 'img3',
+        role: 'gallery' as const,
         status: 'review_required' as const,
-        originalUrl: 'https://acme.com/hero.jpg',
+        originalUrl: 'https://acme.com/unused.jpg',
       },
     ];
 
     const result = await generatePreviewContent(business, { enrichment: { snapshot, scanImages, scanId: 'scan_1' } });
 
-    expect(result.theme.heroImageUrl).toBeUndefined();
+    expect(result.theme.aboutImageUrl).toBe('/api/assets/scans/biz_1/scan_1/images/img2.jpg');
   });
 });
 

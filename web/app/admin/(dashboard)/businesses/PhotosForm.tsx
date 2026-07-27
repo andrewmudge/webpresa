@@ -120,7 +120,7 @@ export function PhotosForm({
                   photoUrls={photoUrls}
                   defaultValue={defaults?.heroPhotoUrl}
                   errors={errors.heroPhotoUrl}
-                  hint="For a full-width background, use a photo within 100px of 1920×1080 or 1600×900px. Other sizes will display alongside your text instead."
+                  hint="Uploading a new photo here auto-crops it to a full-width background (and generates a matching mobile crop). Picking an existing photo instead uses it as-is — for a full-width background then, it must be within 100px of 1920×1080 or 1600×900px, or it will display alongside your text instead."
                   onChange={setSelectedHeroPhotoUrl}
                   uploadFieldName="heroPhotoFile"
                 />

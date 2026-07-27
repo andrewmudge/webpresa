@@ -79,10 +79,17 @@ vi.mock('@/lib/s3/business-assets', () => ({
 
 vi.mock('@/lib/s3/assets', () => ({
   deleteAsset: mockDeleteAsset,
+  putAsset: vi.fn(),
 }));
 
 vi.mock('@/lib/image/hero-dimensions', () => ({
   checkHeroPhotoDimensions: vi.fn(),
+}));
+
+vi.mock('@/lib/image/crop-hero-photo', () => ({
+  cropToDimensions: vi.fn().mockResolvedValue(Buffer.from('cropped')),
+  STOCK_DESKTOP_HERO_DIMENSIONS: { width: 1920, height: 1080 },
+  STOCK_MOBILE_HERO_DIMENSIONS: { width: 1080, height: 1350 },
 }));
 
 vi.mock('@/lib/firecrawl/normalize', () => ({

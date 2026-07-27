@@ -10,6 +10,7 @@ import { signOut } from '@/lib/auth/actions';
 const NAV_ITEMS = [
   { href: '/admin/businesses', label: 'Businesses' },
   { href: '/admin/discover', label: 'Discover' },
+  { href: '/admin/stock-images', label: 'Stock Images' },
   { href: '/admin/previews', label: 'Previews' },
   { href: '/admin/scans', label: 'Scans' },
   { href: '/admin/postcards', label: 'Postcards' },

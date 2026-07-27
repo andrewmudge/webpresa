@@ -7,3 +7,4 @@ export * from './website-enrichment';
 export * from './postcard';
 export * from './website-sections';
 export * from './google-places';
+export * from './stock-image';
