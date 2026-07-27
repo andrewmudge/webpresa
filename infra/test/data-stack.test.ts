@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly four DynamoDB tables', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 4);
+  it('creates exactly five DynamoDB tables', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 5);
   });
 });
 
@@ -96,6 +96,15 @@ describe('partition keys', () => {
       ]),
     });
   });
+
+  it('ScanExecutions table has scanExecutionId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-executions',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'scanExecutionId', KeyType: 'HASH' },
+      ]),
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -142,6 +151,16 @@ describe('GSI names', () => {
         Match.objectLike({ IndexName: 'business-id-index' }),
         Match.objectLike({ IndexName: 'campaign-code-index' }),
         Match.objectLike({ IndexName: 'provider-postcard-id-index' }),
+        Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+
+  it('ScanExecutions table has business-id-index and status-index', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-executions',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'business-id-index' }),
         Match.objectLike({ IndexName: 'status-index' }),
       ]),
     });
@@ -201,6 +220,21 @@ describe('createdAt sort key on businessId indexes', () => {
     });
   });
 
+  it('ScanExecutions business-id-index has createdAt as sort key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-scan-executions',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'business-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'businessId', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' },
+          ]),
+        }),
+      ]),
+    });
+  });
+
   it('Businesses table does not have a business-id-index (no self-referencing GSI)', () => {
     const resources = dev.findResources('AWS::DynamoDB::Table', {
       Properties: { TableName: 'webpresa-dev-businesses' },
@@ -238,9 +272,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 16 outputs — 8 table outputs, 2 bucket outputs, 6 secret ARN outputs', () => {
+  it('creates 20 outputs — 10 table outputs, 2 bucket outputs, 8 secret ARN outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(16);
+    expect(Object.keys(outputs)).toHaveLength(20);
   });
 });
 
@@ -300,6 +334,9 @@ describe('prod config (in-memory only — not deployed)', () => {
     });
     prod.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'webpresa-prod-postcards',
+    });
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-scan-executions',
     });
   });
 
@@ -465,8 +502,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly six secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 6);
+  it('creates exactly eight secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 8);
   });
 
   const devSecretNames = [
@@ -476,6 +513,8 @@ describe('secrets', () => {
     'webpresa-dev-stripe',
     'webpresa-dev-lob',
     'webpresa-dev-capture-token',
+    'webpresa-dev-vercel-protection-bypass',
+    'webpresa-dev-internal-api',
   ];
 
   it.each(devSecretNames)('dev secret %s exists', (name) => {

@@ -47,9 +47,17 @@ export async function launchBrowser(): Promise<Browser> {
     // location — see Dockerfile for the full rationale. --no-sandbox and
     // --disable-dev-shm-usage are the standard, well-documented flags for
     // running Chromium inside a container with a small /dev/shm.
+    // --single-process/--no-zygote confirmed necessary the hard way — the
+    // real deployed Lambda's restricted process/PID namespace kept crashing
+    // Chromium's normal multi-process architecture (zygote + sandbox-host +
+    // renderer) immediately after launch, every time, even though a local
+    // Docker/RIE run (a much less restricted process environment) never
+    // reproduced it — the same class of "works locally, not on real Lambda"
+    // gap as the HOME=/tmp fix above. This is the standard workaround every
+    // serverless-Chromium project on Lambda uses (e.g. @sparticuz/chromium).
     return await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process', '--no-zygote'],
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to launch the browser.';
@@ -61,8 +69,22 @@ async function newContext(
   browser: Browser,
   viewport: ViewportName,
   captureToken?: { cookieDomain: string; token: string },
+  vercelBypassSecret?: string,
 ): Promise<BrowserContext> {
-  const context = await browser.newContext({ viewport: VIEWPORTS[viewport] });
+  const context = await browser.newContext({
+    viewport: VIEWPORTS[viewport],
+    // Vercel's Deployment Protection sits in front of the whole dev preview
+    // deployment at the edge, before any Next.js request handler runs —
+    // separate from (and in front of) the capture-token cookie below, which
+    // only solves app-level draft protection. This header (Vercel's own
+    // "Protection Bypass for Automation" mechanism) applies to every request
+    // this context makes — main navigation and subresources alike — so it's
+    // set at the context level rather than per-request. `generated_preview`
+    // only; irrelevant for `existing_site`'s real external business sites.
+    ...(vercelBypassSecret
+      ? { extraHTTPHeaders: { 'x-vercel-protection-bypass': vercelBypassSecret, 'x-vercel-set-bypass-cookie': 'true' } }
+      : {}),
+  });
   if (captureToken) {
     await context.addCookies([
       {
@@ -91,8 +113,9 @@ export async function captureViewport(params: {
   url: string;
   viewport: ViewportName;
   captureToken?: { cookieDomain: string; token: string };
+  vercelBypassSecret?: string;
 }): Promise<Buffer> {
-  const context = await newContext(params.browser, params.viewport, params.captureToken);
+  const context = await newContext(params.browser, params.viewport, params.captureToken, params.vercelBypassSecret);
   try {
     const page = await context.newPage();
 

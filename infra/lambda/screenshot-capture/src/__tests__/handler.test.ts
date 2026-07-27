@@ -65,6 +65,7 @@ function baseEnv() {
   process.env.SITE_PREVIEWS_TABLE_NAME = 'site-previews';
   process.env.ASSETS_BUCKET_NAME = 'assets';
   process.env.CAPTURE_TOKEN_SECRET_NAME = 'capture-token';
+  process.env.VERCEL_PROTECTION_BYPASS_SECRET_NAME = 'vercel-protection-bypass';
   process.env.WEBPRESA_APP_BASE_URL = 'https://app.example.com';
 }
 
@@ -182,7 +183,7 @@ describe('handler — generated_preview', () => {
       .mockResolvedValueOnce(scanEvent({ status: 'queued', targetType: 'generated_preview', previewId: PREVIEW_ID }))
       .mockResolvedValueOnce({ previewId: PREVIEW_ID, slug: 'acme-plumbing' });
     mockBuildPreviewUrl.mockReturnValue({ ok: true, url: 'https://app.example.com/b/acme-plumbing' });
-    mockGetSecretJson.mockResolvedValue({ signingKey: 'test-key' });
+    mockGetSecretJson.mockResolvedValue({ signingKey: 'test-key', bypassSecret: 'test-bypass' });
     mockMintCaptureToken.mockResolvedValue('signed.jwt.token');
 
     await handler({ businessId: BUSINESS_ID, scanId: SCAN_ID, targetType: 'generated_preview', previewId: PREVIEW_ID });
@@ -192,6 +193,7 @@ describe('handler — generated_preview', () => {
       expect.objectContaining({
         url: 'https://app.example.com/b/acme-plumbing',
         captureToken: { cookieDomain: 'app.example.com', token: 'signed.jwt.token' },
+        vercelBypassSecret: 'test-bypass',
       }),
     );
     const finalCall = mockConditionalUpdateStatus.mock.calls.at(-1)![0];

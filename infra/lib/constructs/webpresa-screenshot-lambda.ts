@@ -34,6 +34,13 @@ export interface WebpresaScreenshotLambdaProps {
   /** GetSecretValue access — signs the Stage 14 preview capture token. */
   readonly captureTokenSecret: secretsmanager.ISecret;
   /**
+   * GetSecretValue access — Vercel's "Protection Bypass for Automation"
+   * secret, sent as the `x-vercel-protection-bypass` header on
+   * `generated_preview` navigations so the Lambda can reach the protected
+   * dev preview deployment. See `browser.ts`'s `newContext()`.
+   */
+  readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
+  /**
    * Webpresa's public app origin, e.g. `https://app.webpresa.com` — the
    * Lambda has no other way to learn this, since `SitePreview` stores only
    * a slug, never an absolute URL (see implementation.md, Stage 14,
@@ -101,8 +108,21 @@ export class WebpresaScreenshotLambda extends Construct {
       code: lambda.DockerImageCode.fromEcr(props.repository, {
         tagOrDigest: props.imageTag ?? 'latest',
       }),
-      memorySize: 3072,
+      // 3008 MB, not a rounder number like 3072 — this AWS account's Lambda
+      // service quota caps container-image functions at the legacy 3008 MB
+      // ceiling (pre-2020 accounts don't all get the newer 10,240 MB limit
+      // automatically); confirmed by a failed `cdk deploy` with AWS's own
+      // "'MemorySize' value failed to satisfy constraint" error.
+      memorySize: 3008,
       timeout: cdk.Duration.seconds(180),
+      // implementation.md specs reservedConcurrentExecutions: 2-5 — also a
+      // backstop against the narrow duplicate-execution race described in
+      // "Idempotency and status transitions" (conditional transitions
+      // remain the primary guard either way). Initially omitted on first
+      // deploy because this AWS account's total Lambda concurrency quota
+      // was only 10 (the account minimum) and AWS requires >=10 unreserved
+      // concurrency to remain account-wide, leaving no room for any
+      // reservation; restored once the account's quota was raised to 1000.
       reservedConcurrentExecutions: 5,
       logGroup,
       environment: {
@@ -111,6 +131,7 @@ export class WebpresaScreenshotLambda extends Construct {
         SCAN_EVENTS_TABLE_NAME: props.scanEventsTable.tableName,
         ASSETS_BUCKET_NAME: props.assetsBucket.bucketName,
         CAPTURE_TOKEN_SECRET_NAME: props.captureTokenSecret.secretName,
+        VERCEL_PROTECTION_BYPASS_SECRET_NAME: props.vercelProtectionBypassSecret.secretName,
         WEBPRESA_APP_BASE_URL: props.appBaseUrl,
         // AWS_REGION is a Lambda-reserved env var — the runtime already
         // provides it; setting it explicitly here would fail CFN deploy.
@@ -158,5 +179,8 @@ export class WebpresaScreenshotLambda extends Construct {
 
     // Mints the preview capture token — GetSecretValue only.
     props.captureTokenSecret.grantRead(this.function);
+
+    // Vercel Protection Bypass for Automation secret — GetSecretValue only.
+    props.vercelProtectionBypassSecret.grantRead(this.function);
   }
 }

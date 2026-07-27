@@ -24,6 +24,16 @@ FROM mcr.microsoft.com/playwright:v1.49.0-noble AS base
 # alone.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# AWS Lambda's real (non-emulator) runtime filesystem is read-only except
+# /tmp. The base image's default HOME (/root, running as root) is fine for
+# local Docker/RIE testing — that container filesystem is fully writable —
+# but Chromium crashes immediately on launch in the real deployed Lambda
+# when it can't create its profile/cache dir there. This is exactly why
+# pre-deploy RIE smoke tests (see build_log.md, Stage 14) passed but the
+# first real invocation failed with "Target page, context or browser has
+# been closed" the instant a page/context was created.
+ENV HOME=/tmp
+
 # aws-lambda-ric has a native (C++) component compiled at install time —
 # needs cmake + a working toolchain, which the base Playwright image does
 # not include by default.

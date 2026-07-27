@@ -3,6 +3,9 @@ import * as cdk from 'aws-cdk-lib';
 import { WebpresaDataStack } from '../lib/stacks/data-stack';
 import { WebpresaScreenshotRepositoryStack } from '../lib/stacks/screenshot-repository-stack';
 import { WebpresaScreenshotStack } from '../lib/stacks/screenshot-stack';
+import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
+import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
+import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
 import { getEnvironmentConfig } from '../lib/config/environments';
 
 const app = new cdk.App();
@@ -49,7 +52,7 @@ const screenshotRepositoryStack = new WebpresaScreenshotRepositoryStack(app, `We
   description: `Webpresa ${label} screenshot-capture ECR repository — deployed before the Lambda that references it (Stage 14)`,
 });
 
-new WebpresaScreenshotStack(app, `Webpresa${label}ScreenshotStack`, {
+const screenshotStack = new WebpresaScreenshotStack(app, `Webpresa${label}ScreenshotStack`, {
   config,
   env,
   description: `Webpresa ${label} screenshot-capture compute layer — Playwright Lambda managed by CDK (Stage 14)`,
@@ -59,5 +62,52 @@ new WebpresaScreenshotStack(app, `Webpresa${label}ScreenshotStack`, {
   scanEventsTable: dataStack.scanEventsTable,
   assetsBucket: dataStack.assetsBucket,
   captureTokenSecret: dataStack.captureTokenSecret,
+  vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
   appBaseUrl,
+});
+
+const scanWorkflowStack = new WebpresaScanWorkflowStack(app, `Webpresa${label}ScanWorkflowStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} scan workflow orchestration — Step Functions state machine calling into the app's internal API routes, no Lambda (Stage 16)`,
+  internalApiSecret: dataStack.internalApiSecret,
+  vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
+  appBaseUrl,
+});
+
+// Stock image repository (Phase 1 curated hero-photo fallback) — public via
+// CloudFront, no dependency on any earlier stack.
+const stockImagesStack = new WebpresaStockImagesStack(app, `Webpresa${label}StockImagesStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} stock-image library — public-via-CloudFront S3 bucket for curated industry hero images`,
+});
+
+// Consolidates every permission the Vercel-hosted app's IAM identity needs
+// into CDK-managed policies (see vercel-access-stack.ts) — replaces five
+// hand-run `aws iam put-user-policy` inline policies that hit a hard,
+// non-adjustable 2048-byte aggregate size limit while adding Stage 16's
+// grants.
+new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} IAM permissions for the Vercel-hosted app`,
+  businessesTable: dataStack.businessesTable,
+  sitePreviewsTable: dataStack.sitePreviewsTable,
+  scanEventsTable: dataStack.scanEventsTable,
+  scanExecutionsTable: dataStack.scanExecutionsTable,
+  postcardsTable: dataStack.postcardsTable,
+  assetsBucket: dataStack.assetsBucket,
+  stockImagesBucket: stockImagesStack.bucket,
+  stockImagesTable: stockImagesStack.table,
+  openAiSecret: dataStack.openAiSecret,
+  firecrawlSecret: dataStack.firecrawlSecret,
+  googlePlacesSecret: dataStack.googlePlacesSecret,
+  stripeSecret: dataStack.stripeSecret,
+  lobSecret: dataStack.lobSecret,
+  captureTokenSecret: dataStack.captureTokenSecret,
+  vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
+  internalApiSecret: dataStack.internalApiSecret,
+  screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
+  scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
 });

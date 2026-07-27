@@ -32,6 +32,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     scanEventsTable: dataStack.scanEventsTable,
     assetsBucket: dataStack.assetsBucket,
     captureTokenSecret: dataStack.captureTokenSecret,
+    vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
     appBaseUrl: 'https://app.example-test.invalid',
   });
   return Template.fromStack(screenshotStack);
@@ -84,7 +85,7 @@ describe('Lambda packaging', () => {
 
   it('sets memory, timeout, and reserved concurrency per implementation.md', () => {
     dev.hasResourceProperties('AWS::Lambda::Function', {
-      MemorySize: 3072,
+      MemorySize: 3008,
       Timeout: 180,
       ReservedConcurrentExecutions: 5,
     });
@@ -99,6 +100,7 @@ describe('Lambda packaging', () => {
           SCAN_EVENTS_TABLE_NAME: Match.anyValue(),
           ASSETS_BUCKET_NAME: Match.anyValue(),
           CAPTURE_TOKEN_SECRET_NAME: Match.anyValue(),
+          VERCEL_PROTECTION_BYPASS_SECRET_NAME: Match.anyValue(),
           WEBPRESA_APP_BASE_URL: 'https://app.example-test.invalid',
         }),
       },
@@ -219,11 +221,12 @@ describe('IAM least privilege', () => {
     expect(s3Actions).not.toContain('s3:AbortMultipartUpload');
   });
 
-  it('grants secretsmanager:GetSecretValue on the capture-token secret', () => {
-    const secretsActions = getPolicyStatements(dev)
-      .flatMap(actionsOf)
-      .filter((a) => a.startsWith('secretsmanager:'));
-    expect(secretsActions).toContain('secretsmanager:GetSecretValue');
+  it('grants secretsmanager:GetSecretValue on both the capture-token secret and the Vercel protection-bypass secret', () => {
+    const secretsStatements = getPolicyStatements(dev).filter((s) => actionsOf(s).some((a) => a.startsWith('secretsmanager:')));
+    expect(secretsStatements).toHaveLength(2);
+    for (const statement of secretsStatements) {
+      expect(actionsOf(statement)).toContain('secretsmanager:GetSecretValue');
+    }
   });
 
   it('grants sqs:SendMessage on the dead-letter queue (auto-wired by the OnFailure destination)', () => {

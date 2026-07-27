@@ -15,6 +15,7 @@ export interface WebpresaScreenshotStackProps extends cdk.StackProps {
   readonly scanEventsTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly captureTokenSecret: secretsmanager.ISecret;
+  readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly appBaseUrl: string;
   /** Cross-stack reference from WebpresaScreenshotRepositoryStack, deployed separately and first — see that stack's doc comment. */
   readonly repository: ecr.IRepository;
@@ -63,6 +64,7 @@ export class WebpresaScreenshotStack extends cdk.Stack {
       scanEventsTable: props.scanEventsTable,
       assetsBucket: props.assetsBucket,
       captureTokenSecret: props.captureTokenSecret,
+      vercelProtectionBypassSecret: props.vercelProtectionBypassSecret,
       appBaseUrl: props.appBaseUrl,
     });
 

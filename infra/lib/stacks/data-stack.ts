@@ -57,8 +57,17 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly businessesTable: dynamodb.Table;
   public readonly sitePreviewsTable: dynamodb.Table;
   public readonly scanEventsTable: dynamodb.Table;
+  public readonly scanExecutionsTable: dynamodb.Table;
+  public readonly postcardsTable: dynamodb.Table;
   public readonly assetsBucket: s3.Bucket;
+  public readonly openAiSecret: secretsmanager.Secret;
+  public readonly firecrawlSecret: secretsmanager.Secret;
+  public readonly googlePlacesSecret: secretsmanager.Secret;
+  public readonly stripeSecret: secretsmanager.Secret;
+  public readonly lobSecret: secretsmanager.Secret;
   public readonly captureTokenSecret: secretsmanager.Secret;
+  public readonly vercelProtectionBypassSecret: secretsmanager.Secret;
+  public readonly internalApiSecret: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: WebpresaDataStackProps) {
     super(scope, id, props);
@@ -167,6 +176,35 @@ export class WebpresaDataStack extends cdk.Stack {
     this.scanEventsTable = scanEvents.table;
 
     // ───────────────────────────────────────────────────────────────────────
+    // ScanExecutions (Stage 16 — Step Functions Scan and Preview Workflow)
+    //   PK: scanExecutionId
+    //   GSIs: business-id-index (SK: createdAt — chronological history)
+    //         status-index ⚠
+    // One workflow-execution record per Step Functions run, referencing the
+    // several per-operation ScanEvents (and the SitePreview) it produces
+    // rather than replacing them — see implementation.md, Stage 16,
+    // "Workflow ownership".
+    // ───────────────────────────────────────────────────────────────────────
+    const scanExecutions = new WebpresaTable(this, 'ScanExecutions', {
+      config,
+      tableName: 'scan-executions',
+      partitionKey: { name: 'scanExecutionId', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'business-id-index',
+          partitionKey: { name: 'businessId', type: S },
+          sortKey: createdAtSortKey,
+        },
+        // ⚠ See pre-production note above regarding status GSIs.
+        {
+          indexName: 'status-index',
+          partitionKey: { name: 'status', type: S },
+        },
+      ],
+    });
+    this.scanExecutionsTable = scanExecutions.table;
+
+    // ───────────────────────────────────────────────────────────────────────
     // Postcards
     //   PK: postcardId
     //   GSIs: business-id-index (SK: createdAt — chronological history)
@@ -174,7 +212,7 @@ export class WebpresaDataStack extends cdk.Stack {
     //         provider-postcard-id-index (sparse — only set after submission)
     //         status-index ⚠
     // ───────────────────────────────────────────────────────────────────────
-    new WebpresaTable(this, 'Postcards', {
+    const postcards = new WebpresaTable(this, 'Postcards', {
       config,
       tableName: 'postcards',
       partitionKey: { name: 'postcardId', type: S },
@@ -201,6 +239,7 @@ export class WebpresaDataStack extends cdk.Stack {
         },
       ],
     });
+    this.postcardsTable = postcards.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Assets bucket — private object storage for scan artifacts, preview
@@ -222,40 +261,45 @@ export class WebpresaDataStack extends cdk.Stack {
     // 18 Stripe, 22 Lob) actually needs them. See architecture.md for the
     // documented JSON shape and owner of each secret.
     // ───────────────────────────────────────────────────────────────────────
-    new WebpresaSecret(this, 'OpenAiSecret', {
+    const openAi = new WebpresaSecret(this, 'OpenAiSecret', {
       config,
       secretName: 'openai',
       description: 'OpenAI API credentials (Stage 11 — AI preview generation)',
       jsonKeys: ['apiKey'],
     });
+    this.openAiSecret = openAi.secret;
 
-    new WebpresaSecret(this, 'FirecrawlSecret', {
+    const firecrawl = new WebpresaSecret(this, 'FirecrawlSecret', {
       config,
       secretName: 'firecrawl',
       description: 'Firecrawl API credentials (Stage 13 — website capture)',
       jsonKeys: ['apiKey'],
     });
+    this.firecrawlSecret = firecrawl.secret;
 
-    new WebpresaSecret(this, 'GooglePlacesSecret', {
+    const googlePlaces = new WebpresaSecret(this, 'GooglePlacesSecret', {
       config,
       secretName: 'google-places',
       description: 'Google Places API credentials (Stage 12 — business discovery)',
       jsonKeys: ['apiKey'],
     });
+    this.googlePlacesSecret = googlePlaces.secret;
 
-    new WebpresaSecret(this, 'StripeSecret', {
+    const stripe = new WebpresaSecret(this, 'StripeSecret', {
       config,
       secretName: 'stripe',
       description: 'Stripe API credentials (Stage 18 — subscriptions)',
       jsonKeys: ['secretKey', 'webhookSecret'],
     });
+    this.stripeSecret = stripe.secret;
 
-    new WebpresaSecret(this, 'LobSecret', {
+    const lob = new WebpresaSecret(this, 'LobSecret', {
       config,
       secretName: 'lob',
       description: 'Lob API credentials (Stage 22 — postcard integration)',
       jsonKeys: ['apiKey'],
     });
+    this.lobSecret = lob.secret;
 
     // Stage 14 — HMAC signing key for the screenshot Lambda's preview
     // capture token (see architecture.md, "Draft preview visibility"). Not
@@ -272,5 +316,37 @@ export class WebpresaDataStack extends cdk.Stack {
       jsonKeys: ['signingKey'],
     });
     this.captureTokenSecret = captureToken.secret;
+
+    // Stage 14 — Vercel "Protection Bypass for Automation" secret. Vercel's
+    // own Deployment Protection sits in front of the whole dev preview
+    // deployment at the edge, before any Next.js request handler runs — a
+    // platform-level gate distinct from (and in front of) the app-level
+    // capture-token cookie above. Discovered live: the screenshot Lambda's
+    // generated_preview navigation was hitting Vercel's login page instead
+    // of /b/[slug]. Sent as the `x-vercel-protection-bypass` HTTP header —
+    // see infra/lambda/screenshot-capture/src/browser.ts.
+    const vercelBypass = new WebpresaSecret(this, 'VercelProtectionBypassSecret', {
+      config,
+      secretName: 'vercel-protection-bypass',
+      description: 'Vercel Protection Bypass for Automation secret (Stage 14 — lets the screenshot Lambda reach protected preview deployments for generated_preview captures)',
+      jsonKeys: ['bypassSecret'],
+    });
+    this.vercelProtectionBypassSecret = vercelBypass.secret;
+
+    // Stage 16 — shared secret authenticating Step Functions' HttpInvoke
+    // calls (via an EventBridge Connection, API_KEY auth — see
+    // infra/lib/stacks/scan-workflow-stack.ts) into this app's
+    // `/api/internal/scan/*` routes. Not a third-party credential — held
+    // entirely within this platform, provisioned the same way as
+    // capture-token above: a random placeholder at creation, read by both
+    // this app (verify only, via lib/internal-auth.ts) and the Connection
+    // (which sources the same value to send as a request header).
+    const internalApi = new WebpresaSecret(this, 'InternalApiSecret', {
+      config,
+      secretName: 'internal-api',
+      description: 'Shared secret authenticating Step Functions HttpInvoke calls into /api/internal/scan/* (Stage 16 — scan workflow)',
+      jsonKeys: ['sharedSecret'],
+    });
+    this.internalApiSecret = internalApi.secret;
   }
 }

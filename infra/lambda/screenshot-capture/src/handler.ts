@@ -3,7 +3,7 @@ import { validateOutboundUrl } from './url-validation';
 import { buildPreviewUrl } from './same-origin';
 import { mintCaptureToken } from './capture-token';
 import { launchBrowser, captureViewport, ScreenshotCaptureError, VIEWPORTS, type ViewportName } from './browser';
-import type { BusinessRecord, CapturePayload, ScanCaptureResults, ScanEventRecord, ScanFailureCategory, SitePreviewRecord, ViewportCaptureResult } from './types';
+import type { BusinessRecord, CapturePayload, ScanCaptureResults, ScanEventRecord, ScanFailureCategory, SitePreviewRecord } from './types';
 
 /**
  * Stage 14 (Playwright Screenshots) Lambda entrypoint — owns the whole
@@ -89,6 +89,7 @@ export async function handler(event: CapturePayload): Promise<void> {
   // payload". ─────────────────────────────────────────────────────────
   let targetUrl: string;
   let captureToken: { cookieDomain: string; token: string } | undefined;
+  let vercelBypassSecret: string | undefined;
 
   if (event.targetType === 'existing_site') {
     const business = await getItem<BusinessRecord>(env('BUSINESSES_TABLE_NAME'), { businessId: event.businessId });
@@ -125,55 +126,50 @@ export async function handler(event: CapturePayload): Promise<void> {
     const { signingKey } = await getSecretJson(env('CAPTURE_TOKEN_SECRET_NAME'));
     const token = await mintCaptureToken({ previewId: event.previewId, scanId: event.scanId, signingKey });
     captureToken = { cookieDomain: new URL(appBaseUrl).hostname, token };
+
+    // Vercel Deployment Protection sits in front of the whole preview
+    // deployment at the edge, before the capture-token cookie above (or any
+    // Next.js code) ever runs — a separate, platform-level gate the capture
+    // token alone can't get past. See browser.ts's newContext() doc comment.
+    const { bypassSecret } = await getSecretJson(env('VERCEL_PROTECTION_BYPASS_SECRET_NAME'));
+    vercelBypassSecret = bypassSecret;
   }
 
   // ── Launch + capture. One failed viewport never aborts the other — see
-  // "Partial success handling". ───────────────────────────────────────
+  // "Partial success handling". A fresh browser is launched per viewport,
+  // not shared across both — confirmed the hard way against the real
+  // deployed Lambda that a single-process Chromium instance (required for
+  // launch to succeed at all inside Lambda's restricted process/PID
+  // namespace — see launchBrowser's doc comment) is unstable when a second
+  // BrowserContext is created after the first has closed: the first
+  // viewport captured fine, the second consistently crashed with
+  // "Target page, context or browser has been closed". One launch per
+  // viewport costs ~1-2s extra but stays comfortably inside the 180s
+  // timeout, and also makes a launch failure itself per-viewport rather
+  // than failing the whole scan outright, consistent with every other
+  // failure mode here. ───────────────────────────────────────────────
   const captureResults: ScanCaptureResults = {};
-  let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined;
 
-  try {
-    browser = await launchBrowser();
-  } catch (err) {
-    const category = err instanceof ScreenshotCaptureError ? err.category : 'browser_launch_failed';
-    const message = err instanceof Error ? err.message : 'Failed to launch the browser.';
-    const failedResult: ViewportCaptureResult = { status: 'failed', failureCategory: category, failureMessage: message };
-    await conditionalUpdateStatus({
-      tableName: scanEventsTable,
-      key: { scanId: event.scanId },
-      expectedCurrentStatus: 'running',
-      updates: {
-        status: 'failed',
-        failureCategory: category,
-        failureMessage: message,
-        captureResults: { desktop: failedResult, mobile: failedResult },
-        completedAt: nowIso(),
-        updatedAt: nowIso(),
-      },
-    });
-    return;
-  }
-
-  try {
-    for (const viewport of Object.keys(VIEWPORTS) as ViewportName[]) {
+  for (const viewport of Object.keys(VIEWPORTS) as ViewportName[]) {
+    let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined;
+    try {
+      browser = await launchBrowser();
+      const screenshot = await captureViewport({ browser, url: targetUrl, viewport, captureToken, vercelBypassSecret });
+      const storageKey = `scans/${event.businessId}/${event.scanId}/${targetFolder(event.targetType)}/${viewport}.png`;
       try {
-        const screenshot = await captureViewport({ browser, url: targetUrl, viewport, captureToken });
-        const storageKey = `scans/${event.businessId}/${event.scanId}/${targetFolder(event.targetType)}/${viewport}.png`;
-        try {
-          await putScreenshot(env('ASSETS_BUCKET_NAME'), storageKey, screenshot);
-          captureResults[viewport] = { status: 'completed', storageKey };
-        } catch (uploadErr) {
-          const message = uploadErr instanceof Error ? uploadErr.message : 'Failed to upload screenshot.';
-          captureResults[viewport] = { status: 'failed', failureCategory: 'upload_failed', failureMessage: message };
-        }
-      } catch (err) {
-        const category = err instanceof ScreenshotCaptureError ? err.category : 'unknown';
-        const message = err instanceof Error ? err.message : `Unknown error capturing the ${viewport} viewport.`;
-        captureResults[viewport] = { status: 'failed', failureCategory: category, failureMessage: message };
+        await putScreenshot(env('ASSETS_BUCKET_NAME'), storageKey, screenshot);
+        captureResults[viewport] = { status: 'completed', storageKey };
+      } catch (uploadErr) {
+        const message = uploadErr instanceof Error ? uploadErr.message : 'Failed to upload screenshot.';
+        captureResults[viewport] = { status: 'failed', failureCategory: 'upload_failed', failureMessage: message };
       }
+    } catch (err) {
+      const category = err instanceof ScreenshotCaptureError ? err.category : 'unknown';
+      const message = err instanceof Error ? err.message : `Unknown error capturing the ${viewport} viewport.`;
+      captureResults[viewport] = { status: 'failed', failureCategory: category, failureMessage: message };
+    } finally {
+      await browser?.close().catch(() => undefined);
     }
-  } finally {
-    await browser.close().catch(() => undefined);
   }
 
   const desktopOk = captureResults.desktop?.status === 'completed';
