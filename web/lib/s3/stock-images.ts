@@ -5,7 +5,6 @@ import type { Industry } from '@/domain/constants/industries';
 import type { StockImageVariant } from '@/domain/models/stock-image';
 import { getS3Client, getStockImagesBucketName, getStockImagesCdnDomain } from './client';
 import { fileExtension } from './business-assets';
-import { cropToDimensions, STOCK_DESKTOP_HERO_DIMENSIONS, STOCK_MOBILE_HERO_DIMENSIONS } from '@/lib/image/crop-hero-photo';
 
 /**
  * Object storage for the dedicated stock-images bucket — public via
@@ -50,61 +49,55 @@ export function stockImageCdnUrl(key: string): string {
 }
 
 /**
- * Crops a source upload into the desktop (1920x1080) + mobile (1080x1350)
- * hero pair and uploads both under a fresh `hero-sets/{industry}/{setId}/`
- * namespace. Used by both the admin Stock Images upload form (a `kind:
- * 'hero'` StockImage) and `updatePhotosAction`'s desktop-hero-upload
- * auto-crop (a business's own custom hero + its auto-paired mobile crop).
+ * Uploads one image file as-is — no crop, no resize — reading its actual
+ * pixel dimensions via `sharp`'s header-only metadata read. Every stock
+ * image upload in this module goes through this single helper so desktop
+ * and mobile images are always independent, uncropped files: an admin can
+ * upload only a desktop image, only a mobile image, or both, and neither
+ * upload is ever derived from the other.
  */
-export async function uploadStockHeroSet(
-  file: File,
-  namespace: string,
-): Promise<{ desktop: StockImageVariant; mobile: StockImageVariant }> {
-  const source = Buffer.from(await file.arrayBuffer());
-  const setId = crypto.randomUUID();
-
-  const [desktopBuffer, mobileBuffer] = await Promise.all([
-    cropToDimensions(source, STOCK_DESKTOP_HERO_DIMENSIONS),
-    cropToDimensions(source, STOCK_MOBILE_HERO_DIMENSIONS),
-  ]);
-
-  const desktopKey = `hero-sets/${namespace}/${setId}/desktop.jpg`;
-  const mobileKey = `hero-sets/${namespace}/${setId}/mobile.jpg`;
-
-  await Promise.all([
-    putStockImageObject(desktopKey, desktopBuffer, 'image/jpeg'),
-    putStockImageObject(mobileKey, mobileBuffer, 'image/jpeg'),
-  ]);
-
-  return {
-    desktop: {
-      s3Key: desktopKey,
-      url: stockImageCdnUrl(desktopKey),
-      ...STOCK_DESKTOP_HERO_DIMENSIONS,
-    },
-    mobile: {
-      s3Key: mobileKey,
-      url: stockImageCdnUrl(mobileKey),
-      ...STOCK_MOBILE_HERO_DIMENSIONS,
-    },
-  };
-}
-
-/**
- * Uploads a standalone `kind: 'general'` stock image as-is (no crop —
- * unused by any auto-pick tier in Phase 1, exists for the Phase 2 browsable
- * library).
- */
-export async function uploadGeneralStockImage(file: File, industry?: Industry): Promise<StockImageVariant> {
+async function uploadStockImageFile(file: File, key: string): Promise<StockImageVariant> {
   const buffer = Buffer.from(await file.arrayBuffer());
   const { width, height } = await sharp(buffer).metadata();
   if (!width || !height) {
     throw new Error('Could not read image dimensions.');
   }
 
+  await putStockImageObject(key, buffer, file.type || 'application/octet-stream');
+  return { s3Key: key, url: stockImageCdnUrl(key), width, height };
+}
+
+/**
+ * Uploads a `kind: 'hero'` StockImage's desktop image and, optionally, a
+ * separate mobile image, under a fresh `hero-sets/{industry}/{setId}/`
+ * namespace. `mobileFile` is genuinely optional — when omitted, this hero
+ * set has no dedicated mobile image at all; the auto hero-pick's mobile
+ * tier (`lib/image/resolve-hero-image.ts`) falls back to reusing the
+ * desktop image on mobile in that case, rather than requiring one here.
+ */
+export async function uploadStockHeroSet(
+  desktopFile: File,
+  mobileFile: File | null,
+  industry: Industry,
+): Promise<{ desktop: StockImageVariant; mobile?: StockImageVariant }> {
+  const setId = crypto.randomUUID();
+
+  const [desktop, mobile] = await Promise.all([
+    uploadStockImageFile(desktopFile, `hero-sets/${industry}/${setId}/desktop.${fileExtension(desktopFile)}`),
+    mobileFile
+      ? uploadStockImageFile(mobileFile, `hero-sets/${industry}/${setId}/mobile.${fileExtension(mobileFile)}`)
+      : Promise.resolve(undefined),
+  ]);
+
+  return mobile ? { desktop, mobile } : { desktop };
+}
+
+/**
+ * Uploads a standalone `kind: 'general'` stock image as-is — unused by any
+ * auto-pick tier in Phase 1, exists for the Phase 2 browsable library.
+ */
+export async function uploadGeneralStockImage(file: File, industry?: Industry): Promise<StockImageVariant> {
   const imageId = crypto.randomUUID();
   const key = `general/${industry ?? 'uncategorized'}/${imageId}.${fileExtension(file)}`;
-  await putStockImageObject(key, buffer, file.type || 'application/octet-stream');
-
-  return { s3Key: key, url: stockImageCdnUrl(key), width, height };
+  return uploadStockImageFile(file, key);
 }

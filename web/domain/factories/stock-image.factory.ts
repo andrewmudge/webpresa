@@ -6,12 +6,13 @@ import { generateId, nowIso } from './utils';
 export interface CreateStockHeroSetInput {
   industry: Industry;
   desktop: StockImageVariant;
-  mobile: StockImageVariant;
+  /** Optional — a hero set may have only a desktop image. See `StockImageSchema`'s doc comment. */
+  mobile?: StockImageVariant;
   isDefault?: boolean;
   uploadedBy?: string;
 }
 
-/** Create a new `kind: 'hero'` StockImage — a desktop+mobile pair for one industry. */
+/** Create a new `kind: 'hero'` StockImage — a desktop image and, optionally, an independent mobile image. */
 export function createStockHeroSet(input: CreateStockHeroSetInput): StockImage {
   const now = nowIso();
 
@@ -20,7 +21,7 @@ export function createStockHeroSet(input: CreateStockHeroSetInput): StockImage {
     kind: 'hero',
     industry: input.industry,
     desktop: input.desktop,
-    mobile: input.mobile,
+    ...(input.mobile !== undefined && { mobile: input.mobile }),
     status: 'active',
     isDefault: input.isDefault ?? false,
     ...(input.uploadedBy !== undefined && { uploadedBy: input.uploadedBy }),

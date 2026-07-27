@@ -19,10 +19,11 @@ function isIndustry(value: string): value is Industry {
 }
 
 // ---------------------------------------------------------------------------
-// Upload — branches by kind: 'hero' produces a desktop+mobile pair (crops
-// server-side to the exact hero dimensions, no interactive crop UI — see
-// build_log.md); 'general' stores the image as-is for the Phase 2 browsable
-// library (unused by any auto-pick tier today).
+// Upload — branches by kind: 'hero' takes a required desktop image and an
+// optional, entirely independent mobile image (two separate file inputs —
+// never one image cropped to produce the other, see build_log.md); 'general'
+// stores a single image as-is for the Phase 2 browsable library (unused by
+// any auto-pick tier today).
 // ---------------------------------------------------------------------------
 
 export type StockImageFormState = { message?: string } | undefined;
@@ -45,18 +46,20 @@ export async function uploadStockImageAction(
     return { message: 'Choose an industry for a hero image set.' };
   }
 
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) {
-    return { message: 'Choose an image to upload.' };
+  const desktopFile = formData.get('desktopFile');
+  if (!(desktopFile instanceof File) || desktopFile.size === 0) {
+    return { message: 'Choose a desktop image to upload.' };
   }
+  const mobileFileEntry = formData.get('mobileFile');
+  const mobileFile = mobileFileEntry instanceof File && mobileFileEntry.size > 0 ? mobileFileEntry : null;
 
   try {
     if (kind === 'hero' && industry) {
-      const { desktop, mobile } = await uploadStockHeroSet(file, industry);
+      const { desktop, mobile } = await uploadStockHeroSet(desktopFile, mobileFile, industry);
       const record = createStockHeroSet({ industry, desktop, mobile, uploadedBy: session.sub });
       await putStockImage(record);
     } else {
-      const desktop = await uploadGeneralStockImage(file, industry);
+      const desktop = await uploadGeneralStockImage(desktopFile, industry);
       const record = createGeneralStockImage({ industry, desktop, uploadedBy: session.sub });
       await putStockImage(record);
     }

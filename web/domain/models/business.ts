@@ -237,18 +237,6 @@ export interface Business extends MutableTimestampedRecord {
    * left-to-right so the hero text stays legible (see `GeneratedHero.tsx`).
    */
   heroPhotoUrlMobile?: string;
-  /**
-   * Auto-generated mobile companion crop produced alongside a custom-cropped
-   * desktop hero upload (the `heroPhotoUrl` direct-upload input on the
-   * business Photos card — see `updatePhotosAction`'s `heroPhotoFile`
-   * handling). Never admin-set directly and never shown as its own form
-   * field — always written or cleared together with the matching
-   * `heroPhotoUrl` crop it pairs with. Used only as the automatic hero
-   * fallback tier's mobile pick (see `lib/image/resolve-hero-image.ts`) when
-   * `heroPhotoUrlMobile` above is left unset — a real `heroPhotoUrlMobile`
-   * value always wins over this one.
-   */
-  heroPhotoUrlMobileAuto?: string;
 
   // -------------------------------------------------------------------------
   // Brand Theme System

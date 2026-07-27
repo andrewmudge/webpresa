@@ -11,14 +11,16 @@ import type { MutableTimestampedRecord } from './common';
 // two image sources use — since stock photography is never sensitive and is
 // reused across many businesses, unlike per-business assets.
 //
-// `kind: 'hero'` records always come as a desktop+mobile pair (one upload,
-// two precomputed crops) — the auto hero-pick fallback tier (see
-// `lib/image/resolve-hero-image.ts`) only ever selects from these.
-// `kind: 'general'` records are a single image with no mobile companion —
-// unused by any auto-pick logic in Phase 1; they exist so the Phase 2
-// browsable/filterable picker (across ALL stock photos, not just an
-// industry auto-pick) has a broader pool to draw from without a schema
-// change later.
+// `kind: 'hero'` records have an independently-uploaded `desktop` image and
+// an optional, independently-uploaded `mobile` image — never derived or
+// cropped from one another. The auto hero-pick fallback tier (see
+// `lib/image/resolve-hero-image.ts`) only ever selects from these; when a
+// set has no dedicated `mobile` image, that tier falls back to reusing
+// `desktop` on mobile rather than requiring one. `kind: 'general'` records
+// are a single image with no mobile companion at all — unused by any
+// auto-pick logic in Phase 1; they exist so the Phase 2 browsable/filterable
+// picker (across ALL stock photos, not just an industry auto-pick) has a
+// broader pool to draw from without a schema change later.
 // ---------------------------------------------------------------------------
 
 export const STOCK_IMAGE_KINDS = ['hero', 'general'] as const;
@@ -37,14 +39,14 @@ export interface StockImageVariant {
 }
 
 export interface StockImage extends MutableTimestampedRecord {
-  /** Format: stock_<uuid>. Identifies one desktop+mobile pair (`kind: 'hero'`) or one standalone image (`kind: 'general'`). */
+  /** Format: stock_<uuid>. Identifies one hero image group (`kind: 'hero'`, desktop + optional independent mobile) or one standalone image (`kind: 'general'`). */
   stockImageId: string;
   kind: StockImageKind;
   /** Curated industry this image is categorized under. Absent = the general/uncategorized pool (Phase 2). */
   industry?: Industry;
-  /** The primary (desktop, for `'hero'`; only, for `'general'`) variant — always exactly 1920x1080 for `'hero'`. */
+  /** The desktop (for `'hero'`) or only (for `'general'`) image, as uploaded — never cropped. */
   desktop: StockImageVariant;
-  /** Present only for `kind: 'hero'` — the paired mobile crop, precomputed at upload time. */
+  /** An independently-uploaded mobile image, for `kind: 'hero'` only. Optional — a hero set may have only a desktop image. */
   mobile?: StockImageVariant;
   status: StockImageStatus;
   /**

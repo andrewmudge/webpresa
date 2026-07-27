@@ -1,8 +1,12 @@
 /**
  * Unit tests for the automatic hero-image tier chain: admin override →
  * Firecrawl dimension-matched hero → curated stock-by-industry → theme
- * illustration, with mobile pairing rules layered on top. `checkHeroPhotoDimensions`
- * and `getDefaultStockHeroSet` are mocked — no real image processing, S3, or
+ * illustration. Desktop and mobile are always independent images — mobile
+ * only shows a genuinely separate photo when one exists (an explicit
+ * override, or a stock set's own uploaded mobile image); otherwise it
+ * reuses the resolved desktop photo as a preview rather than requiring a
+ * dedicated mobile asset. `checkHeroPhotoDimensions` and
+ * `getDefaultStockHeroSet` are mocked — no real image processing, S3, or
  * DynamoDB calls.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -54,7 +58,7 @@ function makeScanImage(overrides: Partial<ScanImageAsset> = {}): ScanImageAsset 
   };
 }
 
-const STOCK_SET = {
+const STOCK_SET_WITH_MOBILE = {
   stockImageId: 'stock_00000000-0000-0000-0000-000000000001',
   kind: 'hero' as const,
   industry: 'plumbing' as const,
@@ -64,6 +68,11 @@ const STOCK_SET = {
   isDefault: true,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+};
+
+const STOCK_SET_DESKTOP_ONLY = {
+  ...STOCK_SET_WITH_MOBILE,
+  mobile: undefined,
 };
 
 beforeEach(() => {
@@ -98,7 +107,7 @@ describe('tier 1 — explicit admin override', () => {
   });
 
   it('"none" forces no photo, even with a qualifying Firecrawl image or stock set available', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness({ heroPhotoUrl: 'none' });
     const acceptedScanImages = [makeScanImage({ width: 1920, height: 1080 })];
 
@@ -106,13 +115,23 @@ describe('tier 1 — explicit admin override', () => {
 
     expect(result.heroImageUrl).toBeUndefined();
     expect(result.heroStyle).toBe('illustration');
+    expect(result.heroImageUrlMobile).toBeUndefined();
   });
 
-  it('pairs with heroPhotoUrlMobileAuto when set, never an independent lookup', async () => {
+  it('mobile reuses the same overridden desktop photo when no dedicated mobile override is set', async () => {
+    mockCheckHeroPhotoDimensions.mockResolvedValueOnce({ isFullBleedEligible: true, width: 1920, height: 1080 });
+    const business = makeBusiness({ heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/0.jpg' });
+
+    const result = await resolveHeroImages({ business, acceptedScanImages: [] });
+
+    expect(result.heroImageUrlMobile).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+  });
+
+  it('a dedicated heroPhotoUrlMobile override is a genuinely separate photo, never derived from the desktop upload', async () => {
     mockCheckHeroPhotoDimensions.mockResolvedValueOnce({ isFullBleedEligible: true, width: 1920, height: 1080 });
     const business = makeBusiness({
       heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/0.jpg',
-      heroPhotoUrlMobileAuto: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
+      heroPhotoUrlMobile: '/api/assets/businesses/biz_1/assets/photos/1.jpg',
     });
 
     const result = await resolveHeroImages({ business, acceptedScanImages: [] });
@@ -143,64 +162,85 @@ describe('tier 2 — Firecrawl dimension-matched hero image', () => {
   });
 
   it('does not match a 1600x900 image — only the specific 1920x1080 (16:9) target qualifies for this tier', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness();
     const acceptedScanImages = [makeScanImage({ width: 1600, height: 900 })];
 
     const result = await resolveHeroImages({ business, acceptedScanImages });
 
-    expect(result.heroImageUrl).toBe(STOCK_SET.desktop.url);
+    expect(result.heroImageUrl).toBe(STOCK_SET_WITH_MOBILE.desktop.url);
   });
 
   it('falls through to tier 3 when the hero-role image is outside tolerance', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness();
     const acceptedScanImages = [makeScanImage({ width: 1200, height: 800 })];
 
     const result = await resolveHeroImages({ business, acceptedScanImages });
 
-    expect(result.heroImageUrl).toBe(STOCK_SET.desktop.url);
+    expect(result.heroImageUrl).toBe(STOCK_SET_WITH_MOBILE.desktop.url);
   });
 
   it('falls through to tier 3 when no accepted image is role:"hero"', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness();
     const acceptedScanImages = [makeScanImage({ role: 'gallery', width: 1920, height: 1080 })];
 
     const result = await resolveHeroImages({ business, acceptedScanImages });
 
-    expect(result.heroImageUrl).toBe(STOCK_SET.desktop.url);
+    expect(result.heroImageUrl).toBe(STOCK_SET_WITH_MOBILE.desktop.url);
   });
 
-  it('never sets a mobile pairing — a Firecrawl hero has no known mobile companion', async () => {
+  it('mobile reuses the same Firecrawl desktop image as a preview — a real photo beats no photo on mobile', async () => {
     const business = makeBusiness();
     const acceptedScanImages = [makeScanImage({ width: 1920, height: 1080 })];
 
     const result = await resolveHeroImages({ business, acceptedScanImages });
 
-    expect(result.heroImageUrlMobile).toBeUndefined();
+    expect(result.heroImageUrlMobile).toBe('/api/assets/scans/biz_1/scan_1/images/img1.jpg');
   });
 });
 
 describe('tier 3 — curated stock image by industry', () => {
   it('is used when no admin override and no dimension-matched Firecrawl hero exist', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness({ industry: 'plumbing' });
 
     const result = await resolveHeroImages({ business, acceptedScanImages: [] });
 
     expect(mockGetDefaultStockHeroSet).toHaveBeenCalledWith('plumbing');
-    expect(result.heroImageUrl).toBe(STOCK_SET.desktop.url);
+    expect(result.heroImageUrl).toBe(STOCK_SET_WITH_MOBILE.desktop.url);
     expect(result.heroStyle).toBe('image');
   });
 
-  it('pairs the stock set\'s own mobile variant as the mobile candidate', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+  it('uses the stock set\'s own independently-uploaded mobile image when one exists', async () => {
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness();
 
     const result = await resolveHeroImages({ business, acceptedScanImages: [] });
 
-    expect(result.heroImageUrlMobile).toBe(STOCK_SET.mobile.url);
+    expect(result.heroImageUrlMobile).toBe(STOCK_SET_WITH_MOBILE.mobile.url);
+  });
+
+  it('reuses the stock set\'s desktop image on mobile when the set has no dedicated mobile image', async () => {
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_DESKTOP_ONLY);
+    const business = makeBusiness();
+
+    const result = await resolveHeroImages({ business, acceptedScanImages: [] });
+
+    expect(result.heroImageUrlMobile).toBe(STOCK_SET_DESKTOP_ONLY.desktop.url);
+  });
+
+  it('renders imageSplit when the stock desktop image is not hero-dimensioned', async () => {
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce({
+      ...STOCK_SET_WITH_MOBILE,
+      desktop: { ...STOCK_SET_WITH_MOBILE.desktop, width: 1200, height: 800 },
+    });
+    const business = makeBusiness();
+
+    const result = await resolveHeroImages({ business, acceptedScanImages: [] });
+
+    expect(result.heroStyle).toBe('imageSplit');
   });
 });
 
@@ -217,8 +257,8 @@ describe('tier 4 — illustration fallback', () => {
 });
 
 describe('mobile resolution', () => {
-  it('an explicit heroPhotoUrlMobile always wins over any paired candidate', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+  it('an explicit heroPhotoUrlMobile always wins over the stock set\'s own mobile image', async () => {
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness({ heroPhotoUrlMobile: '/api/assets/businesses/biz_1/assets/photos/2.jpg' });
 
     const result = await resolveHeroImages({ business, acceptedScanImages: [] });
@@ -226,8 +266,8 @@ describe('mobile resolution', () => {
     expect(result.heroImageUrlMobile).toBe('/api/assets/businesses/biz_1/assets/photos/2.jpg');
   });
 
-  it('"none" forces no mobile photo even when a paired candidate exists', async () => {
-    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET);
+  it('"none" forces no mobile photo even when a desktop photo resolved', async () => {
+    mockGetDefaultStockHeroSet.mockResolvedValueOnce(STOCK_SET_WITH_MOBILE);
     const business = makeBusiness({ heroPhotoUrlMobile: 'none' });
 
     const result = await resolveHeroImages({ business, acceptedScanImages: [] });

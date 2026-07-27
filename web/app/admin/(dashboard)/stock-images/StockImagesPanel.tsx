@@ -15,7 +15,7 @@ import {
 } from './actions';
 
 const KINDS: { value: StockImageKind; label: string }[] = [
-  { value: 'hero', label: 'Hero set (desktop + mobile)' },
+  { value: 'hero', label: 'Hero image (desktop + optional mobile)' },
   { value: 'general', label: 'General stock photo' },
 ];
 
@@ -77,31 +77,46 @@ function UploadForm() {
       </div>
 
       <div>
-        <label htmlFor="file" className="block text-sm font-medium text-gray-700 mb-1">
-          Image
+        <label htmlFor="desktopFile" className="block text-sm font-medium text-gray-700 mb-1">
+          {kind === 'hero' ? 'Desktop image' : 'Image'}
         </label>
         <input
-          id="file"
-          name="file"
+          id="desktopFile"
+          name="desktopFile"
           type="file"
           accept="image/*"
           required
           className="block text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-gray-200"
         />
+        {kind === 'hero' && (
+          <p className="mt-1 text-xs text-gray-400">For a full-width background, use a photo within 100px of 1920×1080 or 1600×900px.</p>
+        )}
       </div>
+
+      {kind === 'hero' && (
+        <div>
+          <label htmlFor="mobileFile" className="block text-sm font-medium text-gray-700 mb-1">
+            Mobile image <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <input
+            id="mobileFile"
+            name="mobileFile"
+            type="file"
+            accept="image/*"
+            className="block text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-gray-200"
+          />
+          <p className="mt-1 text-xs text-gray-400">
+            A separate, independent image — not derived from the desktop image. Leave blank to show the
+            desktop image on mobile too.
+          </p>
+        </div>
+      )}
 
       <UploadSubmitButton />
 
       {state?.message && (
         <p role="alert" className="w-full text-sm text-red-600">
           {state.message}
-        </p>
-      )}
-
-      {kind === 'hero' && (
-        <p className="w-full text-xs text-gray-400">
-          Uploads a desktop (1920×1080) and mobile crop automatically — no interactive cropping yet, so
-          center-of-frame content displays best.
         </p>
       )}
     </form>

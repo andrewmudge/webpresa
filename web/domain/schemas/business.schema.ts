@@ -72,10 +72,6 @@ export const BusinessSchema = z.object({
   photoUrls: z.array(UrlOrPathSchema).max(6).optional(),
   heroPhotoUrl: PhotoSlotOverrideSchema,
   heroPhotoUrlMobile: PhotoSlotOverrideSchema,
-  // Plain optional URL, not PhotoSlotOverrideSchema — this is never
-  // admin-set directly and never takes the literal 'none'; see the field's
-  // doc comment on Business.
-  heroPhotoUrlMobileAuto: UrlOrPathSchema.optional(),
   aboutPhotoUrl: PhotoSlotOverrideSchema,
   whyChooseUsPhotoUrl: PhotoSlotOverrideSchema,
   servicesPhotoUrl: PhotoSlotOverrideSchema,

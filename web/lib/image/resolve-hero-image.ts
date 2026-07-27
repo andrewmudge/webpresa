@@ -6,33 +6,35 @@ import { getDefaultStockHeroSet } from '@/lib/db/stock-images';
 import { checkHeroPhotoDimensions, HERO_FULL_BLEED_DIMENSIONS, HERO_DIMENSION_TOLERANCE_PX } from './hero-dimensions';
 
 /**
- * Automatic hero-image resolution — the new (see build_log.md) auto-pick
- * chain used whenever the business hasn't explicitly overridden the hero
- * slot. Desktop is resolved first; mobile then pairs with whichever tier
- * supplied the desktop image (never an independent industry lookup), so
- * the two images always look like they belong together.
+ * Automatic hero-image resolution — the auto-pick chain used whenever the
+ * business hasn't explicitly overridden the hero slot. Desktop and mobile
+ * are always independent images — nothing here ever crops one to produce
+ * the other. Mobile only ever shows a genuinely separate photo when one
+ * exists for whichever tier resolved the desktop image (an explicit
+ * `heroPhotoUrlMobile` override, or a stock hero set's own uploaded mobile
+ * image); otherwise, mobile simply reuses the same desktop photo as a
+ * preview rather than requiring a dedicated mobile asset or falling back to
+ * the illustration — a real hero photo on mobile (even if not
+ * mobile-optimized) is preferable to no photo at all.
  *
  * Tier order:
  *   1. Explicit admin override (`business.heroPhotoUrl`) — `'none'` forces
- *      no-photo; a set value always wins outright. Mobile pairing candidate
- *      for this tier is `heroPhotoUrlMobileAuto` (the auto-crop paired with
- *      a custom hero upload — see `updatePhotosAction`).
+ *      no-photo; a set value always wins outright.
  *   2. A Firecrawl-discovered `role: 'hero'` image whose already-stored
  *      dimensions are within tolerance of 1920x1080 (16:9) — reuses the
  *      same constants `checkHeroPhotoDimensions` uses for uploaded photos,
- *      but checked directly against the stored width/height (no re-fetch).
- *      No mobile pairing — a Firecrawl hero has no known mobile companion,
- *      so mobile falls through to the illustration unless manually set.
- *   3. A curated stock hero set matching `business.industry` (required on
- *      every Business, so this tier only fails when no active stock set
- *      exists yet for that industry). Mobile pairing candidate is the
- *      stock set's own mobile variant.
+ *      checked directly against the stored width/height (no re-fetch).
+ *   3. A curated stock hero image matched to `business.industry` (required
+ *      on every Business, so this tier only fails when no active stock set
+ *      exists yet for that industry).
  *   4. Theme illustration fallback (no desktop image resolved at all).
  *
  * Mobile resolution, applied after whichever of the above fired:
  *   `business.heroPhotoUrlMobile === 'none'` forces no mobile photo; a set
- *   value always wins outright; otherwise the paired candidate from
- *   whichever desktop tier fired is used (undefined for tier 2).
+ *   value always wins outright; otherwise a tier-specific dedicated mobile
+ *   image is used if one exists (stock sets only), else the resolved
+ *   desktop photo is reused; nothing is shown on mobile only when no
+ *   desktop photo resolved either.
  */
 
 export interface ResolveHeroImagesInput {
@@ -47,9 +49,10 @@ export interface HeroImageResolution {
   heroStyle: HeroStyle;
 }
 
-function isFirecrawlHeroDimensionMatch(width?: number, height?: number): boolean {
+/** Shared by the Firecrawl and stock tiers — both work off already-known width/height, never a live fetch. */
+function isWithinHeroTolerance(width?: number, height?: number): boolean {
   if (!width || !height) return false;
-  const target = HERO_FULL_BLEED_DIMENSIONS[0]; // 1920x1080 — the specific 16:9 target this tier requires.
+  const target = HERO_FULL_BLEED_DIMENSIONS[0]; // 1920x1080 — the specific 16:9 target these tiers require.
   return Math.abs(target.width - width) <= HERO_DIMENSION_TOLERANCE_PX && Math.abs(target.height - height) <= HERO_DIMENSION_TOLERANCE_PX;
 }
 
@@ -58,7 +61,8 @@ export async function resolveHeroImages(input: ResolveHeroImagesInput): Promise<
 
   let heroImageUrl: string | undefined;
   let heroStyle: HeroStyle;
-  let mobilePairingCandidate: string | undefined;
+  /** A genuinely separate mobile image for whichever tier fires below — undefined when none exists, in which case mobile just reuses `heroImageUrl`. */
+  let dedicatedMobileCandidate: string | undefined;
 
   if (business.heroPhotoUrl === 'none') {
     heroStyle = 'illustration';
@@ -66,10 +70,9 @@ export async function resolveHeroImages(input: ResolveHeroImagesInput): Promise<
     heroImageUrl = business.heroPhotoUrl;
     const dimensionCheck = await checkHeroPhotoDimensions(heroImageUrl);
     heroStyle = dimensionCheck.isFullBleedEligible ? 'image' : 'imageSplit';
-    mobilePairingCandidate = business.heroPhotoUrlMobileAuto;
   } else {
     const firecrawlHero = acceptedScanImages.find(
-      (img) => img.role === 'hero' && isFirecrawlHeroDimensionMatch(img.width, img.height),
+      (img) => img.role === 'hero' && isWithinHeroTolerance(img.width, img.height),
     );
     if (firecrawlHero) {
       heroImageUrl = firecrawlHero.url;
@@ -78,8 +81,8 @@ export async function resolveHeroImages(input: ResolveHeroImagesInput): Promise<
       const stockSet = await getDefaultStockHeroSet(business.industry);
       if (stockSet) {
         heroImageUrl = stockSet.desktop.url;
-        heroStyle = 'image';
-        mobilePairingCandidate = stockSet.mobile?.url;
+        heroStyle = isWithinHeroTolerance(stockSet.desktop.width, stockSet.desktop.height) ? 'image' : 'imageSplit';
+        dedicatedMobileCandidate = stockSet.mobile?.url;
       } else {
         heroStyle = 'illustration';
       }
@@ -87,7 +90,9 @@ export async function resolveHeroImages(input: ResolveHeroImagesInput): Promise<
   }
 
   const heroImageUrlMobile =
-    business.heroPhotoUrlMobile === 'none' ? undefined : (business.heroPhotoUrlMobile ?? mobilePairingCandidate);
+    business.heroPhotoUrlMobile === 'none'
+      ? undefined
+      : (business.heroPhotoUrlMobile ?? dedicatedMobileCandidate ?? heroImageUrl);
 
   return { heroImageUrl, heroImageUrlMobile, heroStyle };
 }

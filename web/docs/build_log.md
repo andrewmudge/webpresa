@@ -5804,3 +5804,149 @@ Still pending: adding `STOCK_IMAGES_BUCKET_NAME`, `STOCK_IMAGES_CDN_DOMAIN`,
 and `STOCK_IMAGES_TABLE_NAME` to Vercel's environment variables (manual, via
 the Vercel dashboard) — needed before the app itself can read/write the new
 bucket/table or resolve stock images by industry.
+
+## Fix: missing DynamoDB grant on the stock-images table (2026-07-27, same day)
+
+After adding the three env vars to Vercel and redeploying, the admin Stock
+Images page failed with:
+
+```
+User: arn:aws:iam::539898341083:user/webpresa-vercel-dev is not authorized
+to perform: dynamodb:Scan on resource:
+arn:aws:dynamodb:us-east-1:539898341083:table/webpresa-dev-stock-image-metadata
+because no identity-based policy allows the dynamodb:Scan action
+```
+
+Root cause: `vercel-access-stack.ts`'s `DataAccessPolicy` grants DynamoDB
+access via a `tablesWithIndexes` array — the new `stock-image-metadata`
+table was never added to it, even though the matching `S3StockImages`
+statement for the bucket was. The `stockImagesTable` prop was missing
+entirely from `WebpresaVercelAccessStackProps`.
+
+Fix: added `stockImagesTable: dynamodb.ITable` to the props interface,
+added `props.stockImagesTable` to `tablesWithIndexes` (now 6 tables instead
+of 5 — `resources: tablesWithIndexes.flatMap(...)` picks it up
+automatically, no new statement needed), wired
+`stockImagesTable: stockImagesStack.table` from `bin/webpresa.ts`, and
+updated `vercel-access-stack.test.ts`'s resource-count assertion (10 → 12
+resource entries) and `buildStacks()` helper accordingly.
+
+Deployed the fix the same way as the original deploy — `cdk diff` reviewed
+first (confirmed it only added the `stock-image-metadata` table ARN +
+`/index/*` to the existing `DynamoDbTables` statement, nothing else
+touched), then `cdk deploy WebpresaDevVercelAccessStack` (which also pushed
+one new cross-stack `Output` — the table ARN export — to
+`WebpresaDevStockImagesStack` first, since `WebpresaDevVercelAccessStack`
+now needs to `Fn::ImportValue` it).
+
+### Verification
+
+```
+infra:
+npm run build (tsc)  — passes
+npm test             — 6 files, 141 tests passed
+cdk diff             — reviewed and approved before deploy
+cdk deploy WebpresaDevVercelAccessStack — succeeded
+```
+
+### Files changed
+
+```
+infra/lib/stacks/vercel-access-stack.ts   MODIFIED — stockImagesTable prop
+                                              + added to tablesWithIndexes
+infra/bin/webpresa.ts                     MODIFIED — stockImagesTable wiring
+infra/test/vercel-access-stack.test.ts   MODIFIED — buildStacks() +
+                                              resource-count assertion
+                                              (10 → 12)
+web/docs/build_log.md                     MODIFIED — this entry
+```
+
+## Correction: desktop and mobile hero images are independent, never cropped from each other (2026-07-27, same day)
+
+Direct product feedback after the stock-images admin page shipped: the
+Phase 1 hero-upload design was wrong. It auto-cropped a single uploaded
+image into both a desktop (1920×1080) and mobile (1080×1350) variant —
+both for the admin's own custom hero upload (`updatePhotosAction`'s
+`heroPhotoFile` branch) and for the Stock Images admin page's "hero set"
+upload (`uploadStockHeroSet`). The actual requirement: desktop and mobile
+must be two **independently uploaded** images — uploading a desktop photo
+must never generate or imply a mobile crop from it, and vice versa.
+Clarified constraint: it's fine for mobile to simply *show* the desktop
+photo as a preview when no dedicated mobile image exists — that's a
+fallback-to-reuse, not a crop.
+
+### Fix
+
+- **Removed `lib/image/crop-hero-photo.ts` entirely** — no cropping
+  anywhere in this feature anymore.
+- **`updatePhotosAction`** (`businesses/[businessId]/actions.ts`) — reverted
+  the `heroPhotoUrl` slot back to the same plain `uploadBusinessAsset` path
+  every other slot uses. No more auto-crop, no more
+  `Business.heroPhotoUrlMobileAuto` (removed from the model/schema entirely
+  — this field never shipped to real data before being reverted).
+- **`lib/s3/stock-images.ts`** — `uploadStockHeroSet(desktopFile, mobileFile, industry)`
+  now takes two separate `File` inputs (mobile optional) and uploads each
+  as-is via a new shared `uploadStockImageFile()` helper (`sharp` used only
+  to read actual pixel dimensions, never to resize/crop).
+- **`domain/schemas/stock-image.schema.ts`** — dropped the `.superRefine`
+  that required `mobile` for `kind: 'hero'`; `mobile` is now optional
+  unconditionally (a hero set may have only a desktop image).
+  `domain/factories/stock-image.factory.ts`'s `createStockHeroSetInput.mobile`
+  is likewise now optional.
+- **`/admin/stock-images` upload form** — replaced the single "Image" file
+  input with two independent inputs when `kind: 'hero'`: "Desktop image"
+  (required) and "Mobile image (optional)", each posted as its own form
+  field (`desktopFile`/`mobileFile`) and uploaded independently.
+- **`lib/image/resolve-hero-image.ts`** — simplified the mobile-resolution
+  rule uniformly across every tier: `heroPhotoUrlMobile === 'none'` forces
+  no mobile photo; an explicit `heroPhotoUrlMobile` always wins; otherwise a
+  tier-specific *dedicated* mobile image is used if one genuinely exists
+  (only the stock tier can have one, via its own independent mobile
+  upload); otherwise mobile simply reuses whatever desktop photo resolved,
+  as a preview — never an independent crop, never a forced illustration
+  just because no mobile-specific asset exists. This also simplified the
+  Firecrawl tier, which previously (incorrectly) never offered a mobile
+  preview at all.
+- `PhotosForm.tsx`'s hero-photo hint text reverted to its original
+  dimension-warning copy; the mobile hero field's hint updated to describe
+  the new "Auto reuses the desktop photo" behavior instead of "falls back
+  to the illustration."
+
+### Verification
+
+```
+npm run lint        — passes
+npx tsc --noEmit    — passes
+npm test             — 64 files, 717 tests passed
+npm run build        — succeeds
+```
+
+No infrastructure changed — this was entirely an application-code
+correction, so no `cdk diff`/`cdk deploy` was needed.
+
+### Files changed
+
+```
+lib/image/crop-hero-photo.ts                                                    DELETED
+lib/image/resolve-hero-image.ts                                                 MODIFIED — simplified mobile rule
+lib/image/__tests__/resolve-hero-image.test.ts                                 MODIFIED — rewritten for new rule
+lib/s3/stock-images.ts                                                          MODIFIED — separate desktop/mobile
+                                                                                     uploads, no crop
+domain/models/stock-image.ts                                                    MODIFIED — doc comments
+domain/schemas/stock-image.schema.ts                                            MODIFIED — mobile always optional
+domain/factories/stock-image.factory.ts                                        MODIFIED — mobile optional
+domain/models/business.ts                                                       MODIFIED — removed
+                                                                                     heroPhotoUrlMobileAuto
+domain/schemas/business.schema.ts                                              MODIFIED — removed
+                                                                                     heroPhotoUrlMobileAuto
+app/admin/(dashboard)/businesses/[businessId]/actions.ts                        MODIFIED — reverted
+                                                                                     updatePhotosAction crop branch
+app/admin/(dashboard)/businesses/PhotosForm.tsx                                MODIFIED — hint text reverted/updated
+app/admin/(dashboard)/stock-images/actions.ts                                   MODIFIED — desktopFile/mobileFile
+app/admin/(dashboard)/stock-images/StockImagesPanel.tsx                       MODIFIED — two file inputs
+app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts        MODIFIED — removed crop mocks
+app/admin/(dashboard)/businesses/[businessId]/__tests__/business-details-actions.test.ts  MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts  MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/website-sections-actions.test.ts  MODIFIED — same
+web/docs/build_log.md                                                          MODIFIED — this entry
+```
