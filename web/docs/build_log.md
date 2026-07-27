@@ -5950,3 +5950,133 @@ app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts  
 app/admin/(dashboard)/businesses/[businessId]/__tests__/website-sections-actions.test.ts  MODIFIED — same
 web/docs/build_log.md                                                          MODIFIED — this entry
 ```
+
+## Stock images admin redesign: a flat photo gallery, not a dual-upload card (2026-07-27, same day)
+
+Further direct feedback: even after removing the crop-based pairing, the
+Stock Images upload UI was still "too complicated" — it presented desktop
+and mobile as two fields on one card. The actual mental model wanted: a
+plain photo gallery filtered **industry → hero/general → desktop/mobile**,
+where admins upload a batch of photos at a time (not a paired
+desktop-and-mobile set) and separately mark a default desktop photo and a
+default mobile photo per industry.
+
+### Data model change
+
+`StockImage` no longer has `desktop`/`mobile` fields at all — every record
+is exactly one uploaded image:
+
+```ts
+interface StockImage {
+  stockImageId: string;
+  kind: 'hero' | 'general';
+  variant?: 'desktop' | 'mobile';  // required for kind:'hero', absent for 'general'
+  industry?: Industry;
+  image: StockImageAsset;          // s3Key/url/width/height — the one image, as uploaded
+  status: 'active' | 'archived';
+  isDefault: boolean;
+  uploadedBy?: string;
+}
+```
+
+`domain/schemas/stock-image.schema.ts`'s `.superRefine` now enforces the
+`kind`↔`variant` coupling directly (variant required for `'hero'`, forbidden
+for `'general'`) instead of the old desktop/mobile-pair requirement.
+`domain/factories/stock-image.factory.ts` collapsed to a single
+`createStockImage()` (replacing the old `createStockHeroSet`/
+`createGeneralStockImage` pair).
+
+### Independent desktop/mobile lookups, not a paired set
+
+`lib/db/stock-images.ts`'s `getDefaultStockHeroSet(industry)` (one call
+returning a desktop+mobile pair) was replaced with
+`getDefaultHeroImage(industry, variant)` — two entirely independent calls.
+`lib/image/resolve-hero-image.ts`'s stock tier now:
+
+```ts
+const stockDesktop = await getDefaultHeroImage(business.industry, 'desktop');
+if (stockDesktop) {
+  heroImageUrl = stockDesktop.image.url;
+  heroStyle = isWithinHeroTolerance(...) ? 'image' : 'imageSplit';
+  const stockMobile = await getDefaultHeroImage(business.industry, 'mobile'); // independent
+  dedicatedMobileCandidate = stockMobile?.image.url;
+} else {
+  heroStyle = 'illustration'; // no desktop default → mobile is never even looked up
+}
+```
+
+An industry can have a default desktop hero with no default mobile hero,
+or vice versa — the two "default" flags are completely separate settings,
+each set independently via its own "Set as default" action scoped to the
+exact (industry, kind, variant) group.
+
+The `industry-kind-index` GSI's partition-key value format changed from
+`"{industry}#{kind}"` to `"{industry}#{kind}#{variant}"` — no infra change
+was needed for this: the GSI's CDK definition only declares the attribute
+name/type (String), never its value format, so this is a pure
+application-layer change. Updated the doc comment in
+`infra/lib/stacks/stock-images-stack.ts` for accuracy; no `cdk diff`/
+`cdk deploy` required.
+
+### Admin UI
+
+`/admin/stock-images` is now a straightforward gallery:
+- **Upload form**: pick image type (Hero image / General stock photo), then
+  (for hero) desktop-or-mobile, then industry, then select a batch of
+  photos (`<input type="file" multiple>`) — every file becomes its own
+  independent `StockImage` record tagged with the same kind/variant/
+  industry. A per-file upload failure doesn't block the rest of the batch
+  (`uploadStockImagesAction` reports "Uploaded N, M failed" rather than
+  all-or-nothing).
+- **Gallery filters**: Industry → Type (All/Hero/General) → Desktop-or-mobile
+  (only shown once "Hero images" is selected) — a strict three-level filter
+  matching the lookup hierarchy above, not a flat industry-only filter.
+- **Cards**: one image each (no more side-by-side desktop+mobile thumbnail),
+  labeled with industry/kind/variant, with independent Set-as-default/
+  Archive/Delete actions per image.
+
+### Verification
+
+```
+web:
+npm run lint         — passes
+npx tsc --noEmit     — passes
+npm test             — 64 files, 718 tests passed
+npm run build        — succeeds (new /admin/stock-images route present)
+
+infra:
+npm run build (tsc)  — passes
+npm test             — 6 files, 141 tests passed
+```
+
+No infrastructure changed — this was entirely an application-code and
+data-model correction (the GSI value format change needs no CDK update),
+so no `cdk deploy` was needed.
+
+### Files changed
+
+```
+domain/models/stock-image.ts                                                    MODIFIED — flat shape,
+                                                                                     StockImageAsset rename,
+                                                                                     variant field
+domain/schemas/stock-image.schema.ts                                            MODIFIED — kind/variant
+                                                                                     superRefine
+domain/factories/stock-image.factory.ts                                        MODIFIED — single
+                                                                                     createStockImage()
+lib/db/stock-images.ts                                                          MODIFIED — listStockImages()
+                                                                                     + getDefaultHeroImage()
+lib/s3/stock-images.ts                                                          MODIFIED — single
+                                                                                     uploadStockImage() helper
+lib/image/resolve-hero-image.ts                                                 MODIFIED — independent
+                                                                                     desktop/mobile stock lookups
+lib/image/__tests__/resolve-hero-image.test.ts                                 MODIFIED — rewritten for
+                                                                                     independent lookups
+app/admin/(dashboard)/stock-images/actions.ts                                   MODIFIED — batch upload,
+                                                                                     per-file resilience
+app/admin/(dashboard)/stock-images/StockImagesPanel.tsx                       MODIFIED — gallery + 3-level
+                                                                                     filters
+app/admin/(dashboard)/stock-images/page.tsx                                    MODIFIED — description text
+infra/lib/stacks/stock-images-stack.ts                                          MODIFIED — doc comment only,
+                                                                                     no resource change
+web/docs/build_log.md                                                          MODIFIED — this entry
+```

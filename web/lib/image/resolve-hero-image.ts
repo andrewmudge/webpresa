@@ -2,20 +2,22 @@ import 'server-only';
 import type { Business } from '@/domain/models/business';
 import type { HeroStyle } from '@/domain/models/site-preview';
 import type { ScanImageAsset } from '@/domain/models/scan-image';
-import { getDefaultStockHeroSet } from '@/lib/db/stock-images';
+import { getDefaultHeroImage } from '@/lib/db/stock-images';
 import { checkHeroPhotoDimensions, HERO_FULL_BLEED_DIMENSIONS, HERO_DIMENSION_TOLERANCE_PX } from './hero-dimensions';
 
 /**
  * Automatic hero-image resolution — the auto-pick chain used whenever the
  * business hasn't explicitly overridden the hero slot. Desktop and mobile
- * are always independent images — nothing here ever crops one to produce
- * the other. Mobile only ever shows a genuinely separate photo when one
- * exists for whichever tier resolved the desktop image (an explicit
- * `heroPhotoUrlMobile` override, or a stock hero set's own uploaded mobile
- * image); otherwise, mobile simply reuses the same desktop photo as a
- * preview rather than requiring a dedicated mobile asset or falling back to
- * the illustration — a real hero photo on mobile (even if not
- * mobile-optimized) is preferable to no photo at all.
+ * are always independent images — nothing here ever crops or derives one
+ * from the other, and the stock tier looks each up as a completely separate
+ * query (an industry may have a default desktop hero with no default
+ * mobile hero, or vice versa). Mobile only ever shows a genuinely separate
+ * photo when one exists for whichever tier resolved the desktop image (an
+ * explicit `heroPhotoUrlMobile` override, or the industry's own default
+ * mobile stock image); otherwise, mobile simply reuses the same desktop
+ * photo as a preview rather than requiring a dedicated mobile asset or
+ * falling back to the illustration — a real hero photo on mobile (even if
+ * not mobile-specific) is preferable to no photo at all.
  *
  * Tier order:
  *   1. Explicit admin override (`business.heroPhotoUrl`) — `'none'` forces
@@ -24,17 +26,19 @@ import { checkHeroPhotoDimensions, HERO_FULL_BLEED_DIMENSIONS, HERO_DIMENSION_TO
  *      dimensions are within tolerance of 1920x1080 (16:9) — reuses the
  *      same constants `checkHeroPhotoDimensions` uses for uploaded photos,
  *      checked directly against the stored width/height (no re-fetch).
- *   3. A curated stock hero image matched to `business.industry` (required
- *      on every Business, so this tier only fails when no active stock set
- *      exists yet for that industry).
+ *   3. The curated stock gallery's default desktop hero image for
+ *      `business.industry` (required on every Business, so this tier only
+ *      fails when no active default desktop hero exists yet for that
+ *      industry).
  *   4. Theme illustration fallback (no desktop image resolved at all).
  *
  * Mobile resolution, applied after whichever of the above fired:
  *   `business.heroPhotoUrlMobile === 'none'` forces no mobile photo; a set
- *   value always wins outright; otherwise a tier-specific dedicated mobile
- *   image is used if one exists (stock sets only), else the resolved
- *   desktop photo is reused; nothing is shown on mobile only when no
- *   desktop photo resolved either.
+ *   value always wins outright; otherwise the industry's default mobile
+ *   stock image is used if one exists (looked up independently of the
+ *   desktop stock image — only reached when tier 3 supplied the desktop
+ *   image), else the resolved desktop photo is reused; nothing is shown on
+ *   mobile only when no desktop photo resolved either.
  */
 
 export interface ResolveHeroImagesInput {
@@ -78,11 +82,15 @@ export async function resolveHeroImages(input: ResolveHeroImagesInput): Promise<
       heroImageUrl = firecrawlHero.url;
       heroStyle = 'image';
     } else {
-      const stockSet = await getDefaultStockHeroSet(business.industry);
-      if (stockSet) {
-        heroImageUrl = stockSet.desktop.url;
-        heroStyle = isWithinHeroTolerance(stockSet.desktop.width, stockSet.desktop.height) ? 'image' : 'imageSplit';
-        dedicatedMobileCandidate = stockSet.mobile?.url;
+      const stockDesktop = await getDefaultHeroImage(business.industry, 'desktop');
+      if (stockDesktop) {
+        heroImageUrl = stockDesktop.image.url;
+        heroStyle = isWithinHeroTolerance(stockDesktop.image.width, stockDesktop.image.height) ? 'image' : 'imageSplit';
+        // Independent lookup — an industry may have a default mobile stock
+        // image without a default desktop one, or vice versa; only queried
+        // once we know a desktop stock image actually resolved.
+        const stockMobile = await getDefaultHeroImage(business.industry, 'mobile');
+        dedicatedMobileCandidate = stockMobile?.image.url;
       } else {
         heroStyle = 'illustration';
       }

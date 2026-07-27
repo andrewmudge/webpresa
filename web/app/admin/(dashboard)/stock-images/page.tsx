@@ -14,14 +14,17 @@ export default async function StockImagesPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-8 max-w-6xl">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-gray-900">Stock images</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Webpresa&apos;s curated hero-image library. A business with no admin-chosen hero photo and no
-          hero-dimensioned image found on its own site automatically falls back to the default set for its
-          industry. Uploading a new default replaces the automatic pick for future generations only —
-          existing previews keep whatever they already resolved.
+          Webpresa&apos;s curated photo gallery — filter by industry, then by hero images or general
+          photos, then (for hero images) by desktop or mobile. Desktop and mobile are always independent
+          photos, never cropped from one another. A business with no admin-chosen hero photo and no
+          hero-dimensioned image found on its own site automatically falls back to the default desktop
+          hero (and, separately, the default mobile hero) for its industry. Marking a new default replaces
+          the automatic pick for future generations only — existing previews keep whatever they already
+          resolved.
         </p>
       </div>
 
