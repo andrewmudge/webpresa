@@ -3,6 +3,7 @@ import type { Business } from '@/domain/models/business';
 import type { PreviewContent, PreviewTheme } from '@/domain/models/site-preview';
 import type { Industry } from '@/domain/constants/industries';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
+import type { ClaimBannerState } from '@/lib/claim/banner-state';
 import type { ResolvedCta } from './cta';
 import { GeneratedSiteHeader } from './GeneratedSiteHeader';
 import { GeneratedHero } from './GeneratedHero';
@@ -33,7 +34,7 @@ export interface SectionRenderContext {
   businessName: string;
   logoUrl?: string;
   industry?: Industry;
-  isClaimed: boolean;
+  claimBannerState: ClaimBannerState;
   phone?: string;
   email?: string;
   primary: ResolvedCta | null;
@@ -149,7 +150,7 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
       hours={ctx.content.hours}
       services={ctx.content.services}
       serviceAreas={ctx.content.serviceAreas}
-      isClaimed={ctx.isClaimed}
+      isClaimed={ctx.claimBannerState === 'active'}
     />
   ),
 };

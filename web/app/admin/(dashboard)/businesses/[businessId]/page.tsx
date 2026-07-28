@@ -7,6 +7,9 @@ import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
 import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
+import { listClaimsForBusiness } from '@/lib/db/claims';
+import { adminGetCustomerEmailBySub } from '@/lib/auth/customer-cognito';
+import { ClaimSection } from './ClaimSection';
 import {
   // createSeedPreviewAction, — unused now that "Create test preview" is disabled (see Preview actions card below)
   updatePreviewCtaAction,
@@ -78,15 +81,20 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
 
-  const [business, previews, scans, postcards, scanExecutions] = await Promise.all([
+  const [business, previews, scans, postcards, scanExecutions, claims] = await Promise.all([
     getBusinessById(businessId),
     listPreviewsForBusiness(businessId).catch(() => []),
     listScansForBusiness(businessId).catch(() => []),
     listPostcardsForBusiness(businessId).catch(() => []),
     listScanExecutionsForBusiness(businessId).catch(() => []),
+    listClaimsForBusiness(businessId).catch(() => []),
   ]);
 
   if (!business) notFound();
+
+  const ownerEmail = business.ownerUserId
+    ? ((await adminGetCustomerEmailBySub(business.ownerUserId)) ?? undefined)
+    : undefined;
 
   const detailPageUrl = `/admin/businesses/${businessId}`;
 
@@ -180,6 +188,14 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
             )}
           </DetailCard>
         )}
+
+        <ClaimSection
+          businessId={businessId}
+          ownerUserId={business.ownerUserId}
+          ownerEmail={ownerEmail}
+          claimedAt={business.claimedAt}
+          claims={claims}
+        />
       </div>
 
       {/* History */}

@@ -127,6 +127,8 @@ export const BusinessSchema = z.object({
   latestScanExecutionId: z.string().optional(),
   scanExecutionStatus: z.enum(SCAN_WORKFLOW_STATUSES).optional(),
   scanExecutionUpdatedAt: IsoTimestampSchema.optional(),
+  ownerUserId: z.string().min(1).optional(),
+  claimedAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

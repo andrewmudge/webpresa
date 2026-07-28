@@ -18,7 +18,11 @@ import {
 } from '@/lib/db/site-previews';
 import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
-import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness } from '@/lib/db/businesses';
+import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness, releaseOwnership } from '@/lib/db/businesses';
+import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@/lib/db/claims';
+import { createClaim } from '@/domain/factories/claim.factory';
+import { generateAndHashClaimToken } from '@/lib/claim/token';
+import { adminGetCustomerEmailBySub } from '@/lib/auth/customer-cognito';
 import { getSession } from '@/lib/auth/session';
 import type { WebsiteSectionsConfig } from '@/domain/models/website-sections';
 import { WEBSITE_SECTION_TYPES, REQUIRED_SECTION_TYPES, SECTION_CONFIG_VERSION } from '@/domain/constants/website-sections';
@@ -1416,23 +1420,95 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   if (!business) return { error: 'Business not found' };
 
   // Fetch all downstream records concurrently
-  const [previews, scans, postcards] = await Promise.all([
+  const [previews, scans, postcards, claims] = await Promise.all([
     listPreviewsForBusiness(businessId),
     listScansForBusiness(businessId),
     listPostcardsForBusiness(businessId),
+    listClaimsForBusiness(businessId),
   ]);
 
-  // Delete downstream records concurrently
+  // Delete downstream records concurrently. Claims are included here for
+  // consistency with the existing cascade (Stage 17) — this is an explicit
+  // admin-destructive action, not a claim-lifecycle event, so it does not
+  // conflict with "claim history is preserved during normal operation."
   await Promise.all([
     ...previews.map((p) => deletePreviewById(p.previewId)),
     ...scans.map((s) => deleteScanEventById(s.scanId)),
     ...postcards.map((p) => deletePostcardById(p.postcardId)),
+    ...claims.map((c) => deleteClaimById(c.claimId)),
   ]);
 
   // Delete the business record last
   await deleteBusinessById(businessId);
 
   redirect('/admin/businesses');
+}
+
+// ---------------------------------------------------------------------------
+// Claim link + ownership recovery (Stage 17)
+// ---------------------------------------------------------------------------
+
+export interface ClaimLinkResult {
+  error?: string;
+  /** The raw claim token — shown once, never persisted, never retrievable again. */
+  rawToken?: string;
+  claimId?: string;
+}
+
+/**
+ * Issues a new claim token for this business. The raw token is returned
+ * once in this response for the admin to copy into the postcard-generation
+ * pipeline — it is never written to storage; only its hash is (see
+ * `lib/claim/token.ts`).
+ */
+export async function generateClaimLinkAction(businessId: string): Promise<ClaimLinkResult> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { error: 'Business not found' };
+
+  const { rawToken, tokenHash } = await generateAndHashClaimToken();
+  const claim = createClaim({ businessId, tokenHash });
+  await putClaim(claim);
+
+  return { rawToken, claimId: claim.claimId };
+}
+
+export async function revokeClaimAction(claimId: string): Promise<{ error?: string }> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const revoked = await revokeClaim(claimId, 'Revoked by admin');
+  if (!revoked) return { error: 'This claim can no longer be revoked (already consumed, expired, or revoked).' };
+  return {};
+}
+
+export interface ReleaseOwnershipResult {
+  error?: string;
+  releasedOwnerEmail?: string;
+}
+
+/**
+ * Exceptional admin recovery workflow (Stage 17): clears ownership on a
+ * business that was claimed but never activated, without touching the
+ * original (terminal) Claim record. Never automatic — the admin is expected
+ * to follow up with `generateClaimLinkAction` to let a legitimate claimant
+ * try again.
+ */
+export async function releaseOwnershipAction(businessId: string): Promise<ReleaseOwnershipResult> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const business = await getBusinessById(businessId);
+  if (!business) return { error: 'Business not found' };
+  if (!business.ownerUserId) return { error: 'This business is not currently claimed.' };
+
+  const releasedOwnerEmail = await adminGetCustomerEmailBySub(business.ownerUserId);
+  const released = await releaseOwnership(businessId);
+  if (!released) return { error: 'This business is not currently claimed.' };
+
+  return { releasedOwnerEmail: releasedOwnerEmail ?? undefined };
 }
 
 // ---------------------------------------------------------------------------

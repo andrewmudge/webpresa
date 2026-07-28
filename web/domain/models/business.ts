@@ -354,4 +354,18 @@ export interface Business extends MutableTimestampedRecord {
   latestScanExecutionId?: string;
   scanExecutionStatus?: ScanWorkflowStatus;
   scanExecutionUpdatedAt?: string;
+
+  // -------------------------------------------------------------------------
+  // Ownership (Stage 17 — Website Claim Flow)
+  //
+  // The sole ownership signal — never `status`, never any Stripe-related
+  // field. `ownerUserId` is a Cognito `sub`, set only by the claim-token
+  // consumption transaction (see `lib/db/claims.ts`, `consumeClaim`) or
+  // cleared by the admin-only ownership-release action (`lib/db/businesses.ts`,
+  // `releaseOwnership`). Absence means unclaimed. Not unique per user — one
+  // customer account may own multiple Businesses (`owner-user-id-index`).
+  // -------------------------------------------------------------------------
+
+  ownerUserId?: string;
+  claimedAt?: string;
 }

@@ -2,6 +2,7 @@ import { Fragment } from 'react';
 import type { SitePreview } from '@/domain/models/site-preview';
 import type { Business } from '@/domain/models/business';
 import type { Industry } from '@/domain/constants/industries';
+import type { ClaimBannerState } from '@/lib/claim/banner-state';
 import { buildSiteTokens, isValidPhone, isValidEmail } from './tokens';
 import { resolvePreviewCtaConfig } from './cta';
 import { ClaimBanner } from '../ClaimBanner';
@@ -17,7 +18,7 @@ interface Props {
   businessName: string;
   logoUrl?: string;
   industry?: Industry;
-  isClaimed: boolean;
+  claimBannerState: ClaimBannerState;
   isDraft: boolean;
   isAdmin: boolean;
 }
@@ -28,7 +29,7 @@ export function GeneratedWebsite({
   businessName,
   logoUrl,
   industry,
-  isClaimed,
+  claimBannerState,
   isDraft,
   isAdmin,
 }: Props) {
@@ -51,7 +52,7 @@ export function GeneratedWebsite({
     businessName,
     logoUrl,
     industry,
-    isClaimed,
+    claimBannerState,
     phone,
     email,
     primary,
@@ -79,8 +80,13 @@ export function GeneratedWebsite({
           </div>
         )}
 
-        {/* Claim banner */}
-        {!isClaimed && !isDraft && <ClaimBanner businessName={businessName} />}
+        {/* Claim banner — hidden only once genuinely active (paid); a
+            claimed-but-unpaid business still shows a softer message rather
+            than losing the banner entirely (see implementation.md, Stage 17,
+            "Public claim-banner behavior"). */}
+        {claimBannerState !== 'active' && !isDraft && (
+          <ClaimBanner businessName={businessName} state={claimBannerState} />
+        )}
 
         {/* Configured sections, rendered in order through the controlled registry */}
         {sections.map((section) => (

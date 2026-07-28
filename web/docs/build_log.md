@@ -6195,3 +6195,181 @@ app/admin/(dashboard)/businesses/[businessId]/onboarding/photos/page.tsx MODIFIE
                                                                             (local dev only)
 web/docs/build_log.md                                                   MODIFIED — this entry
 ```
+
+# Stage 17 — Website Claim Flow
+
+## Scope
+
+Full implementation per the rewritten Stage 17 section of `implementation.md` (rewritten across two prior sessions: a v1 research/proposal, then a v2 revision addressing eleven architecture-review points — see that file and `web/docs/architecture.md`/`deployment.md` for the up-to-date spec). A business represented by a mailed postcard (or an admin-issued link) proves control of a single random claim token, authenticates via a Cognito-backed customer account, and reserves ownership of the canonical `Business` record — an authenticated, pre-payment state that Stage 18 will hand off into Stripe Checkout. No manual verification, no admin approval queue, no dashboard access before payment.
+
+The single biggest departure from a naive "clone the admin's scrypt+JWT pattern" implementation is customer identity: this stage introduces an Amazon Cognito User Pool for customer accounts, not a second hand-rolled password store. That decision (and the ten others reviewed alongside it — multi-business ownership, a signed claim-attempt cookie, dropping a speculative `requireActiveSubscription()` stub, an admin ownership-recovery workflow, a three-state claim banner, folding rate-limiting into the Claims table instead of a dedicated table, never persisting a reconstructable claim token, and keeping customer identity structurally decoupled from business deletion) is documented in full in the plan file this session worked from, not repeated here — this entry covers what was actually built and any implementation-time refinements.
+
+## Domain model
+
+- `domain/models/claim.ts` (new) + `domain/schemas/claim.schema.ts` (new) + `domain/factories/claim.factory.ts` (new) — `Claim` (`claim_<uuid>`), `CLAIM_STATUSES = ['issued','consumed','expired','revoked']`. `tokenHash` is a 64-hex-char HMAC-SHA256 digest — the schema regex-enforces this shape, so a claim record can never accidentally carry anything else. Status models token lifecycle only, never ownership.
+- `domain/models/business.ts` / `.schema.ts` — additive-only `ownerUserId?` (a Cognito `sub`) and `claimedAt?`. No other Business field touched; `status`, `stripeCustomerId`, `stripeSubscriptionId` are all Stage 18's.
+- **No `CustomerAccount` model exists** — Cognito is the customer directory; the app never stores a customer password or account row.
+
+## Persistence
+
+- `lib/db/claims.ts` (new) — `getClaimById`, `listClaimsForBusiness` (business-id-index), `putClaim`, `revokeClaim` (conditional, `issued→revoked` only), `deleteClaimById`, and the two pieces doing the real work:
+  - `getClaimByTokenHashWithLazyExpiry` — looks up by `token-hash-index`, lazily flips `issued→expired` via a conditional `UpdateCommand` when `expiresAt` has passed (never a DynamoDB TTL deletion — claim history is preserved indefinitely). A lost race against a concurrent consume is handled by re-reading the claim rather than throwing.
+  - `consumeClaim` — this codebase's first `TransactWriteItems` call: one `Update` on Claims (`status='issued' AND expiresAt > now`) and one `Update` on Businesses (`attribute_not_exists(ownerUserId)`) in a single transaction. On `TransactionCanceledException`, re-reads the Claim to distinguish "this exact user already consumed it" (idempotent double-submit → success) from any other conflict.
+  - `checkAndIncrementRateLimit` / `buildRateLimitKey` — rate-limit counters live as a distinct item shape in the *same* Claims table (`PK = RATELIMIT#<ipHash>#<windowBucket>`), not a dedicated table. The conditional increment is `attribute_not_exists(#count) OR #count < :limit` — not a bare comparison — so the first request in a new window creates the counter instead of throwing. A new `ttl` (epoch-seconds) attribute cleans these counter items up; real Claim records never populate it.
+  - `isClaimUsable` — a plain, side-effect-free predicate (`status==='issued' && expiresAt` not yet passed) factored out so `/claim/continue`'s Server Component doesn't call `Date.now()` inline itself (React's `react-hooks/purity` lint rule flags impure calls made directly in component bodies — this was caught by `npm run lint`, not anticipated in the plan).
+- `lib/db/businesses.ts` — added `getBusinessesByOwnerUserId` (queries `owner-user-id-index`, **not** unique per user — a customer may own several businesses) and `releaseOwnership` (conditional `REMOVE ownerUserId, claimedAt`, admin-only recovery path).
+- `lib/db/client.ts` — added `TABLE_CLAIMS`.
+
+## Claim-token generation and hashing
+
+- `lib/claim/token.ts` (new) — `generateClaimToken` (160-bit `crypto.randomBytes(20)`, Crockford Base32, dash-grouped in fours — 32 characters / 8 groups, longer than the plan's illustrative 16-character example since that was shorthand, not a literal spec), `normalizeClaimToken` (strip dashes/whitespace, uppercase), `hashClaimToken` (HMAC-SHA256 keyed by a new `webpresa-{env}-claim-token` Secrets Manager secret), and `generateAndHashClaimToken` (the admin action's single entry point — the raw token exists only in the value returned from this call, never persisted).
+- `lib/claim/banner-state.ts` (new) — `getClaimBannerState(business)` → `'unclaimed' | 'claimed_pending' | 'active'`, derived from `ownerUserId` alone. The `'active'` branch is intentionally unreachable until Stage 18 supplies real subscription data into the same function.
+- `lib/claim/validate-token.ts` (new) — the entrypoint-agnostic core shared by `GET /claim/[claimToken]` and the `POST /claim` manual-entry action: rate-limits, normalizes/hashes, looks up with lazy expiry, and returns `'invalid' | 'valid' | 'resume'`. `hashIp` (SHA-256) means raw IPs are never stored in rate-limit keys.
+
+## Customer authentication — Amazon Cognito, not a second scrypt store
+
+- `infra/lib/constructs/webpresa-user-pool.ts` (new) — `WebpresaUserPool`: one Cognito User Pool (`selfSignUpEnabled`, `signInAliases: { email: true }`, `autoVerify: { email: true }`, `accountRecovery: EMAIL_ONLY`, `mfa: OFF`) and one User Pool Client (`generateSecret: false` — no `SECRET_HASH` needed; `authFlows: { userPassword: true }` — **required explicitly**, CDK's default `authFlows` does not include `USER_PASSWORD_AUTH`). No Lambda triggers. Wired into `data-stack.ts` as `customerUserPool`/`customerUserPoolClient`.
+- `lib/auth/customer-cognito.ts` (new) — thin, error-mapping wrappers around `SignUpCommand`/`ConfirmSignUpCommand`/`ResendConfirmationCodeCommand`/`InitiateAuthCommand`/`ForgotPasswordCommand`/`ConfirmForgotPasswordCommand`/`ListUsersCommand` from the new `@aws-sdk/client-cognito-identity-provider` dependency. Every Cognito exception maps to a small generic reason code (`email_taken`, `weak_password`, `needs_confirmation`, `invalid_credentials`, `rate_limited`, `unknown`, …) — no Cognito-specific error string ever reaches a Server Action's return value. `signInCustomer` decodes `sub`/`email` directly from the `InitiateAuth` response's ID token payload (no second signature check needed — it's a direct, trusted server-to-server AWS response, not client input). `adminGetCustomerEmailBySub` uses `ListUsers` with a `sub` filter (not `AdminGetUser`, since the Cognito-assigned Username isn't necessarily the `sub`) for the admin ownership-release UI, guarded by a sub-shape regex before ever calling AWS.
+- `lib/auth/customer-session.ts` (new) — structurally identical to the admin's `session.ts`: `jose`-signed JWT, cookie `webpresa_customer_session`, its own `CUSTOMER_SESSION_SECRET` so an admin session can never verify as a customer session or vice versa.
+- `lib/auth/claim-attempt.ts` (new) — the signed, purpose-scoped, 15-minute `webpresa_claim_attempt` cookie (`CLAIM_ATTEMPT_SECRET`, its own secret again). Deliberately pure sign/verify only (mirrors `lib/capture-token.ts`) — cookie get/set is left to each call site since the Route Handler and the Server Action entry points use different cookie APIs.
+- `lib/auth/customer-authorization.ts` (new) — `requireCustomerSession` + `requireBusinessOwnership` only. **No `requireActiveSubscription()` stub** — there's no dashboard route in this stage for one to protect; Stage 18 defines it from its own real requirements.
+- `lib/auth/customer-actions.ts` (new) — `customerSignInAction`/`customerSignOutAction` for the resume-checkout path (a returning owner signing in directly, without a fresh claim token). Redirect target is allowlisted to `/account/*` — no open redirect.
+- `proxy.ts` — extended with a second, fully parallel branch for `/account/:path*`, alongside the untouched `/admin/:path*` branch. `/claim/*` is deliberately not proxy-protected — it's gated by the claim-attempt cookie at the page/route level instead.
+
+## Routes
+
+- `GET /claim/[claimToken]` (`app/claim/[claimToken]/route.ts`, new) — a Route Handler, not a page component (only Route Handlers/Server Actions can set cookies and redirect from a single request). Sets `Referrer-Policy: no-referrer` and the signed claim-attempt cookie on success; redirects to `/claim?error=1` on any invalid/expired/revoked/consumed-by-someone-else outcome (never distinguished), or straight to `/account/claim-status` on an idempotent resume.
+- `GET /claim` + `POST` action (`app/claim/page.tsx`, `ClaimTokenForm.tsx`, new) — manual code entry, same validation path.
+- `GET, POST /claim/continue` (`app/claim/continue/page.tsx`, `ClaimContinueForm.tsx`, `app/claim/actions.ts`, new) — sign-up-or-sign-in scoped to the claim-attempt cookie. Cognito's self-service sign-up requires email confirmation before `InitiateAuth` succeeds (`UserNotConfirmedException` otherwise) — not explicitly called out in the plan, discovered while implementing — so this flow has a real confirm-code step: sign-up → Cognito emails a code → confirm (the password is carried through as client-side React state into the confirm form's hidden field, never round-tripped through a server response) → `InitiateAuth` → the shared `completeClaimAttempt` helper runs `consumeClaim` and establishes the session. Sign-in hits the same `completeClaimAttempt` helper directly.
+- `GET /account/sign-in` + `GET /account/claim-status` (new) — the resume-checkout path and Stage 17's one protected screen. `claim-status` is business-scoped via `getBusinessesByOwnerUserId` (supports owning more than one business) and ships as an informational-only "activate (coming soon)" placeholder — there's nothing for it to call yet, and building even a stub Checkout call would encroach on Stage 18.
+
+## Public preview banner
+
+`isClaimed: boolean` (previously `business.status === 'active'`) is replaced end-to-end with `claimBannerState: ClaimBannerState` — threaded through `app/b/[slug]/page.tsx` → `template/index.tsx` → `SectionRenderContext` (`section-registry.tsx`) → `ClaimBanner.tsx` (now three-way: unclaimed CTA / softer "claimed, activation pending" message / hidden entirely at `'active'`) and `GeneratedSiteFooter.tsx` (its `isClaimed` boolean is now derived locally as `claimBannerState === 'active'` — the "Website by Webpresa" credit only disappears once genuinely paid, not merely claimed). SEO `noindex`/`index` in `generateMetadata` is untouched — still `business.status === 'active'`, renamed to `isIndexable` locally to make the deliberate non-relationship to ownership explicit.
+
+## Admin
+
+- `app/admin/(dashboard)/businesses/[businessId]/actions.ts` — added `generateClaimLinkAction` (returns the raw token once), `revokeClaimAction`, `releaseOwnershipAction` (looks up the current owner's email via `adminGetCustomerEmailBySub` before clearing ownership, for the confirmation UI). `deleteBusinessAction`'s existing cascade (previews, scans, postcards) now also deletes that business's Claims.
+- `ClaimSection.tsx` (new) — added to the business detail page's meta-info grid: shows current owner (email if resolvable, else the raw `sub`) + claimed-at, a "Release ownership" button, "Generate claim link" (the one-time-reveal code, in an amber warning box), and claim history with per-issued-claim revoke.
+
+## Infrastructure (CDK)
+
+- `infra/lib/constructs/webpresa-table.ts` — added an optional `timeToLiveAttribute` prop, default unset (every existing table's CDK output is unaffected; confirmed via `cdk diff` showing zero changes to any table but Businesses/Claims).
+- `infra/lib/stacks/data-stack.ts` — new `claims` table (6th table; PK `claimId`; GSIs `token-hash-index`, `business-id-index`; TTL attribute `ttl`, populated only by rate-limit counter items); new `owner-user-id-index` GSI on the existing `businesses` table (PK `ownerUserId`, SK `claimedAt` — **not** `createdAt`, since this sorts by claim date); new `claim-token` secret (9th secret); new `WebpresaUserPool` construct instantiated as `customerUserPool`/`customerUserPoolClient`.
+- `infra/lib/stacks/vercel-access-stack.ts` — added `claimsTable` to the existing table-ARN grant loop, `claimTokenSecret` to the Secrets Manager grant, and a new minimal `CognitoCustomerAuth` statement (`SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`, `InitiateAuth`, `ForgotPassword`, `ConfirmForgotPassword`, `ListUsers` — no wildcard, no `Admin*` actions) scoped to the User Pool ARN.
+- `infra/bin/webpresa.ts` — passes `claimsTable`, `claimTokenSecret`, `customerUserPool` through to the Vercel access stack.
+- `cdk diff WebpresaDevDataStack` confirmed purely additive: one new table, one new User Pool + Client, one new secret, and an in-place (non-replacing) GSI addition to the existing Businesses table — no resource replacement, no destructive change. **Not deployed** — per the standing deployment gate, this stage only synthesizes/diffs; a real `cdk deploy` requires separate explicit approval.
+
+## Environment / dependencies
+
+- New env vars (`.env.local.example`): `CLAIMS_TABLE_NAME`, `CLAIM_TOKEN_SECRET_NAME`, `COGNITO_USER_POOL_ID`, `COGNITO_USER_POOL_CLIENT_ID`, `CUSTOMER_SESSION_SECRET`, `CLAIM_ATTEMPT_SECRET`.
+- New dependency: `@aws-sdk/client-cognito-identity-provider` (`web/package.json`).
+
+## Verification
+
+```
+npm run lint         — passes (one finding along the way: react-hooks/purity
+                         flagged a direct Date.now() call in the
+                         /claim/continue Server Component — fixed by
+                         factoring the check into lib/db/claims.ts's
+                         isClaimUsable(), see Persistence above)
+npx tsc --noEmit     — passes
+npm test             — 71 files, 793 tests passed
+npm run build        — succeeds; all new routes registered
+                         (/claim, /claim/[claimToken], /claim/continue,
+                         /account/sign-in, /account/claim-status)
+
+cd ../infra
+npm test             — 6 files, 153 tests passed
+npx tsc -p . --noEmit — passes
+npx cdk synth --profile webpresa       — succeeds
+npx cdk diff WebpresaDevDataStack --profile webpresa
+                     — additive only (see Infrastructure above)
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+                     — reviewed, no destructive changes
+```
+
+**Not verified**: no real AWS deployment exists yet (no Cognito User Pool, no `claims`/rate-limit table, no populated `claim-token` secret) and no headless-browser tooling is available in this sandbox, so the full claim flow (scan/paste a token → sign up → confirm code → ownership reserved → `/account/claim-status`) has not been exercised end-to-end against real infrastructure. Unit/integration tests mock every AWS boundary; `cdk synth`/`diff` confirm the infrastructure is well-formed and additive, not that it behaves correctly once deployed. This should be deployed to dev and walked through manually (including the Cognito email-confirmation round trip) before relying on it.
+
+## Files changed
+
+```
+domain/models/claim.ts                                                  NEW
+domain/schemas/claim.schema.ts                                          NEW
+domain/factories/claim.factory.ts                                       NEW
+domain/models/business.ts                                               MODIFIED — ownerUserId/claimedAt
+domain/schemas/business.schema.ts                                       MODIFIED — same
+domain/__tests__/stage17.test.ts                                        NEW
+
+lib/db/claims.ts                                                        NEW
+lib/db/businesses.ts                                                    MODIFIED — owner GSI query,
+                                                                            releaseOwnership
+lib/db/client.ts                                                        MODIFIED — TABLE_CLAIMS
+lib/db/__tests__/claims.test.ts                                         NEW
+lib/db/__tests__/businesses.test.ts                                     MODIFIED — new tests
+
+lib/claim/token.ts                                                      NEW
+lib/claim/banner-state.ts                                               NEW
+lib/claim/validate-token.ts                                             NEW
+lib/claim/__tests__/token.test.ts                                       NEW
+lib/claim/__tests__/validate-token.test.ts                              NEW
+
+lib/auth/customer-cognito.ts                                           NEW
+lib/auth/customer-session.ts                                           NEW
+lib/auth/claim-attempt.ts                                              NEW
+lib/auth/customer-authorization.ts                                     NEW
+lib/auth/customer-actions.ts                                           NEW
+lib/auth/__tests__/customer-cognito.test.ts                            NEW
+lib/auth/__tests__/customer-session.test.ts                            NEW
+lib/auth/__tests__/claim-attempt.test.ts                                NEW
+
+lib/secrets/client.ts                                                   MODIFIED — SECRET_CLAIM_TOKEN
+lib/secrets/index.ts                                                    MODIFIED — getClaimTokenSecret
+
+proxy.ts                                                                MODIFIED — /account branch
+
+app/claim/actions.ts                                                    NEW
+app/claim/page.tsx                                                      NEW
+app/claim/ClaimTokenForm.tsx                                            NEW
+app/claim/[claimToken]/route.ts                                        NEW
+app/claim/continue/page.tsx                                             NEW
+app/claim/continue/ClaimContinueForm.tsx                                NEW
+app/account/sign-in/page.tsx                                            NEW
+app/account/sign-in/SignInForm.tsx                                      NEW
+app/account/claim-status/page.tsx                                       NEW
+
+app/b/[slug]/page.tsx                                                   MODIFIED — claimBannerState,
+                                                                            isIndexable
+app/b/[slug]/ClaimBanner.tsx                                            MODIFIED — three states
+app/b/[slug]/template/index.tsx                                         MODIFIED — claimBannerState prop
+app/b/[slug]/template/section-registry.tsx                              MODIFIED — same
+app/b/[slug]/template/GeneratedSiteFooter.tsx                           unchanged (still isClaimed boolean,
+                                                                            derived at the call site)
+
+app/admin/(dashboard)/businesses/[businessId]/actions.ts                MODIFIED — claim link/revoke/
+                                                                            release actions, cascade delete
+app/admin/(dashboard)/businesses/[businessId]/page.tsx                  MODIFIED — ClaimSection wired in
+app/admin/(dashboard)/businesses/[businessId]/ClaimSection.tsx          NEW
+app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts MODIFIED — mock new imports
+app/admin/(dashboard)/businesses/[businessId]/__tests__/business-details-actions.test.ts MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts MODIFIED — same
+app/admin/(dashboard)/businesses/[businessId]/__tests__/website-sections-actions.test.ts MODIFIED — same
+
+infra/lib/constructs/webpresa-table.ts                                  MODIFIED — timeToLiveAttribute
+infra/lib/constructs/webpresa-user-pool.ts                              NEW
+infra/lib/stacks/data-stack.ts                                          MODIFIED — claims table,
+                                                                            owner-user-id-index GSI,
+                                                                            claim-token secret,
+                                                                            customer User Pool
+infra/lib/stacks/vercel-access-stack.ts                                 MODIFIED — claims/secret/Cognito
+                                                                            grants
+infra/bin/webpresa.ts                                                   MODIFIED — pass-through props
+infra/test/data-stack.test.ts                                           MODIFIED — new assertions
+infra/test/vercel-access-stack.test.ts                                  MODIFIED — new assertions
+
+web/.env.local.example                                                  MODIFIED — new env vars
+web/package.json                                                        MODIFIED — Cognito SDK dependency
+web/docs/implementation.md                                              MODIFIED — Stage 17/18/19
+                                                                            (earlier sessions)
+web/docs/build_log.md                                                   MODIFIED — this entry
+```

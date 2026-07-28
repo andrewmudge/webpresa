@@ -8,6 +8,7 @@ import {
   SECRET_LOB,
   SECRET_CAPTURE_TOKEN,
   SECRET_INTERNAL_API,
+  SECRET_CLAIM_TOKEN,
 } from './client';
 
 /**
@@ -49,6 +50,11 @@ export interface InternalApiSecret {
   sharedSecret: string;
 }
 
+/** Stage 17 — HMAC pepper for hashing claim tokens (see lib/claim/token.ts). */
+export interface ClaimTokenSecret {
+  hmacSecret: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -75,4 +81,8 @@ export async function getCaptureTokenSecret(): Promise<CaptureTokenSecret> {
 
 export async function getInternalApiSecret(): Promise<InternalApiSecret> {
   return (await getSecretJson(SECRET_INTERNAL_API())) as unknown as InternalApiSecret;
+}
+
+export async function getClaimTokenSecret(): Promise<ClaimTokenSecret> {
+  return (await getSecretJson(SECRET_CLAIM_TOKEN())) as unknown as ClaimTokenSecret;
 }

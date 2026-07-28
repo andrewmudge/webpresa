@@ -54,6 +54,22 @@ vi.mock('@/lib/db/postcards', () => ({
   deletePostcardById: vi.fn(),
 }));
 
+vi.mock('@/lib/db/claims', () => ({
+  listClaimsForBusiness: vi.fn(),
+  deleteClaimById: vi.fn(),
+  putClaim: vi.fn(),
+  revokeClaim: vi.fn(),
+}));
+
+vi.mock('@/lib/claim/token', () => ({
+  generateAndHashClaimToken: vi.fn(),
+}));
+
+vi.mock('@/lib/auth/customer-cognito', () => ({
+  adminGetCustomerEmailBySub: vi.fn(),
+}));
+
+
 // actions.ts unconditionally imports these at module scope for the other
 // (unrelated) actions in the same file — they pull in `server-only`-guarded
 // singletons that throw outside a real Next.js server context, so they must

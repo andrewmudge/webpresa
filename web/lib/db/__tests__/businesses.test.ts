@@ -3,6 +3,7 @@
  * All DynamoDB interactions are mocked — no real AWS calls.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mock the DynamoDB client module before importing the module under test
@@ -32,6 +33,8 @@ import {
   listAllBusinesses,
   matchesBusinessFilters,
   updateBusiness,
+  getBusinessesByOwnerUserId,
+  releaseOwnership,
 } from '@/lib/db/businesses';
 import { createBusiness } from '@/domain/factories/business.factory';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
@@ -409,5 +412,56 @@ describe('updateBusiness', () => {
     await expect(updateBusiness('biz_notfound', { name: 'New Name' })).rejects.toThrow(
       'Business not found',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getBusinessesByOwnerUserId (Stage 17)
+// ---------------------------------------------------------------------------
+
+describe('getBusinessesByOwnerUserId', () => {
+  it('queries owner-user-id-index, newest claim first', async () => {
+    const business = { ...makeBusiness(), ownerUserId: 'cognito-sub-1', claimedAt: new Date().toISOString() };
+    mockSend.mockResolvedValueOnce({ Items: [business] });
+
+    const result = await getBusinessesByOwnerUserId('cognito-sub-1');
+
+    expect(result).toHaveLength(1);
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.IndexName).toBe('owner-user-id-index');
+    expect(command.input.ScanIndexForward).toBe(false);
+  });
+
+  it('returns multiple businesses for the same owner — no one-account-one-business restriction', async () => {
+    const owner = 'cognito-sub-1';
+    const businessAId = 'biz_00000000-0000-0000-0000-0000000000aa';
+    const businessBId = 'biz_00000000-0000-0000-0000-0000000000bb';
+    const businessA = { ...makeBusiness(), businessId: businessAId, ownerUserId: owner, claimedAt: new Date().toISOString() };
+    const businessB = { ...makeBusiness(), businessId: businessBId, ownerUserId: owner, claimedAt: new Date().toISOString() };
+    mockSend.mockResolvedValueOnce({ Items: [businessA, businessB] });
+
+    const result = await getBusinessesByOwnerUserId(owner);
+    expect(result.map((b) => b.businessId)).toEqual([businessAId, businessBId]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// releaseOwnership (Stage 17 — admin ownership recovery)
+// ---------------------------------------------------------------------------
+
+describe('releaseOwnership', () => {
+  it('returns true when the business was claimed and ownership is cleared', async () => {
+    mockSend.mockResolvedValueOnce({});
+    expect(await releaseOwnership('biz_x')).toBe(true);
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.ConditionExpression).toBe('attribute_exists(ownerUserId)');
+    expect(command.input.UpdateExpression).toContain('REMOVE ownerUserId, claimedAt');
+  });
+
+  it('returns false (never throws) when the business is not currently claimed', async () => {
+    mockSend.mockRejectedValueOnce(
+      new ConditionalCheckFailedException({ message: 'conditional check failed', $metadata: {} }),
+    );
+    expect(await releaseOwnership('biz_x')).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { getScanEventById } from '@/lib/db/scan-events';
 import { getSession } from '@/lib/auth/session';
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-token';
+import { getClaimBannerState } from '@/lib/claim/banner-state';
 import { GeneratedWebsite } from './template';
 
 export const dynamic = 'force-dynamic';
@@ -88,12 +89,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const { preview } = found;
   const business = await getBusinessById(preview.businessId);
-  const isClaimed = business?.status === 'active';
+  // Deliberately unrelated to claim ownership (Stage 17) — this stays on
+  // the general `Business.status` lifecycle field until Stage 18/19 decide
+  // whether paid activation should also flip it. See
+  // implementation.md, Stage 17, "Public claim-banner behavior".
+  const isIndexable = business?.status === 'active';
 
   return {
     title: preview.content.seo?.title ?? preview.content.hero.headline,
     description: preview.content.seo?.description ?? preview.content.hero.subheadline,
-    robots: isClaimed ? 'index, follow' : 'noindex, nofollow',
+    robots: isIndexable ? 'index, follow' : 'noindex, nofollow',
   };
 }
 
@@ -110,7 +115,7 @@ export default async function PreviewPage({ params }: Props) {
   const business = await getBusinessById(preview.businessId);
   if (!business) notFound();
 
-  const isClaimed = business.status === 'active';
+  const claimBannerState = getClaimBannerState(business);
 
   return (
     <GeneratedWebsite
@@ -119,7 +124,7 @@ export default async function PreviewPage({ params }: Props) {
       businessName={business.name}
       logoUrl={business.logoUrl}
       industry={business.industry}
-      isClaimed={isClaimed}
+      claimBannerState={claimBannerState}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}
     />

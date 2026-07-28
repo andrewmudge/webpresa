@@ -2127,81 +2127,196 @@ Define the state machine, Lambda integrations, IAM permissions, log groups, and 
 
 # Stage 17 — Website Claim Flow
 
+## Status
+
+Not started. This specification replaces the original Stage 17 draft, which assumed manual verification and an admin approval queue. The approved MVP direction uses a single claim token as the sole ownership proof, verified automatically, with no manual review step and no dedicated customer-account table — customer identity is provided by Amazon Cognito.
+
 ## Objective
 
-Allow a real business representative to submit a secure request to claim a Webpresa preview.
+Let a business represented by a mailed postcard (or an admin-issued link) prove control of a claim token, authenticate via a Cognito-backed customer account, and reserve ownership of the canonical `Business` record — establishing an authenticated, pre-payment state that Stage 18 hands off into Stripe Checkout.
 
 ## Dependencies
 
-Stages 7, 8, and 11.
+Stages 7, 8, 10, and 11.
 
 ## Major deliverables
 
-- Claim data model and table
-- Claim token generation
-- `/claim/[claimToken]`
-- Claim form
-- Authority confirmation
-- Manual verification queue
-- Claim status lifecycle
-- Token expiration and revocation
-- Audit history
+- `Claim` domain model, schema, factory, and repository
+- Claim-token generation, normalization, hashing, and validation
+- A Cognito User Pool + User Pool Client for customer identity (sign-up, sign-in, password reset, email change) — no app-owned customer-account table
+- `owner-user-id-index` GSI on the existing Businesses table, supporting one customer owning multiple Businesses
+- New `webpresa-{env}-claims` DynamoDB table, carrying both claim records and (as a distinct item shape) rate-limit counters
+- New `webpresa-{env}-claim-token` Secrets Manager secret (HMAC pepper)
+- Public claim routes: `/claim/[claimToken]`, `/claim`, `/claim/continue`
+- Customer session system (`webpresa_customer_session` cookie), separate from the existing admin session, issued after Cognito authentication
+- `requireCustomerSession` / `requireBusinessOwnership` authorization primitives
+- `/account/sign-in` and `/account/claim-status` routes
+- Admin claim-link generation/revocation UI, plus an ownership-release/reissue workflow, on the business detail page
+- Rate limiting on the claim-validation entrypoints
+- A three-state claim-banner derivation on the public preview site (unclaimed / claimed-pending / active)
 
-## Implementation requirements
+## Non-goals
 
-A claim token must be:
+- Charging the customer or creating any Stripe object (Stage 18)
+- Webhook processing or subscription-state sync (Stage 18)
+- Unlocking any customer dashboard route (Stage 18+, a later stage)
+- Full customer website-editing UI (a later stage)
+- Automatic preview regeneration after customer edits (a later stage)
+- Billing portal, lead history, custom domains, team members, ownership transfer between customers (deferred indefinitely)
+- Manual verification, admin approval/rejection of claims, business-email verification, phone verification, document verification (rejected by the approved product decisions, not merely deferred)
+- Changing `BusinessStatus` or adding a subscription-status field to `Business` (left to Stage 18)
+- A `requireActiveSubscription()` authorization primitive — no dashboard route exists yet for it to protect; Stage 18 defines it from its own real requirements once subscriptions exist, rather than inheriting a speculative interface
 
-- random
-- difficult to guess
-- tied to one business
-- expirable
-- revocable
-- single-use after successful claim
-- stored hashed when practical
+## Domain-model changes
 
-Collect:
+New `Claim` model (`web/domain/models/claim.ts`):
 
-- claimant name
-- role
-- business email
-- phone
-- confirmation of authority
-- requested corrections
-- desired domain
-- agreement acceptance
-- verification evidence as required
+- `claimId` (`claim_<uuid>`), `businessId`, optional `postcardId`, optional `previewId`
+- `tokenHash` (HMAC-SHA256 of the normalized token; the raw token is never persisted)
+- `status`: `'issued' | 'consumed' | 'expired' | 'revoked'` — token state only, never overloaded with ownership or subscription meaning
+- `expiresAt`, `consumedByUserId?` (a Cognito `sub`), `consumedAt?`, `revokedAt?`, `revokedReason?`
+- `createdAt`/`updatedAt` (standard `MutableTimestampedRecord`)
 
-Initial verification is manual.
+`Business` (`web/domain/models/business.ts`) — additive only:
 
-Possible checks include:
+- `ownerUserId?: string` — a Cognito `sub`. Presence means claimed; absence means unclaimed. This is the sole ownership signal.
+- `claimedAt?: string` — set together with `ownerUserId`.
+- No other existing field changes. `status`, `stripeCustomerId`, and `stripeSubscriptionId` are untouched by this stage.
 
-- business-domain email
-- verified callback to the public business phone
-- consistency with public business records
-- supporting documentation
-- Google Business information
+**No `CustomerAccount` model.** Customer identity (email, password, verification, lockout, password reset, email change) lives entirely in the Cognito User Pool. The app never stores customer credentials; `Business.ownerUserId` references a Cognito `sub`, not a row in an app-owned table.
 
-Never transfer control based only on a matching business name.
+## Authentication requirements — Amazon Cognito, not custom auth
+
+Customer accounts are public-facing: unknown users sign up, choose passwords, log in repeatedly, forget passwords, and need account recovery, lockout protection, and email changes — a fundamentally different problem than the existing admin auth's single hardcoded operator credential. Extending the admin's custom scrypt+JWT pattern would require building, from scratch, a password-reset token flow, an email-sending pipeline (none exists anywhere in this repo today), an account-lockout mechanism, and an email-change flow — and would leave no path to per-user session revocation. Amazon Cognito provides all of this natively, is already the documented "future path" for this project's own auth evolution (`architecture.md`'s admin-auth section, Stage 7's own text, and Stage 11.x's description of the future customer dashboard as "Cognito-authenticated" all anticipate exactly this), and removes more bespoke code than it adds (no customer-account table, no email-uniqueness workaround).
+
+- One Cognito User Pool, customers only. Admin auth (`web/lib/auth/session.ts`, `actions.ts`) is completely untouched.
+- User Pool Client: `generateSecret: false` (no `SECRET_HASH` computation needed for server-side calls), `authFlows: { userPassword: true }` explicitly enabled (not Cognito's default).
+- Direct server-side SDK calls (`SignUp`, `ConfirmSignUp`, `InitiateAuth`, `ForgotPassword`, `ConfirmForgotPassword`, `GetUser`) from Next.js Server Actions via `@aws-sdk/client-cognito-identity-provider` (new dependency), authenticated the same way every other AWS call in this app is — the existing Vercel IAM user's credentials, extended with `cognito-idp:*` actions scoped to the User Pool ARN. No Lambda triggers required for the MVP.
+- Email sending: Cognito's default sender for MVP (a documented ~50/day ceiling — acceptable at this stage; migrating the User Pool to SES-backed email is a deferred item once volume requires it, not a blocker).
+- The app still issues its **own** short-lived session after a successful Cognito authentication: cookie `webpresa_customer_session`, `jose`-signed JWT, HttpOnly, `secure` in production, `sameSite=lax`, payload `{ sub, email, expiresAt }`, signed with a separate `CUSTOMER_SESSION_SECRET` so a captured admin session token can never verify as a customer session or vice versa.
+- **Hard rule**: Cognito's `email_verified` attribute is never read by any authorization or ownership check. Email is a login identifier only. Business ownership is decided exclusively by `Business.ownerUserId`, set only by the claim-token consumption transaction — never by anything Cognito reports about the account.
+- `proxy.ts` extended with a second matcher prefix (`/account/:path*`) and a parallel verification branch, alongside the existing, untouched admin branch.
+- Account recovery, password reset, and email change are provided by Cognito directly — no app-level implementation needed for any of them.
+
+## Ownership model — one owner per Business, one customer may own several
+
+Each `Business` has exactly one owner. A single customer account (Cognito `sub`) may own multiple Businesses — there is no one-account-one-business restriction, and no rejection check preventing an existing owner from claiming a second business. This requires no special schema: the `owner-user-id-index` GSI (PK `ownerUserId`, SK `claimedAt`) is not unique per user by construction — querying it returns every Business a given customer owns. `requireBusinessOwnership(userId, businessId)` is already parametrized per business and needs no change to support this.
+
+Team members, staff accounts, and shared ownership of a single Business remain out of scope.
+
+## Infrastructure changes
+
+In `infra/lib/stacks/data-stack.ts`:
+
+- New table `claims` — PK `claimId`; GSIs `token-hash-index` (PK `tokenHash`) and `business-id-index` (PK `businessId`, SK `createdAt`). No `status-index` (low cardinality, matches the existing warning already documented for other tables' status indexes). A table-wide TTL attribute (e.g. `ttl`) is added for this stage's rate-limit counter items only — real `Claim` records never populate it, so claim history is never auto-deleted; claim-token expiration remains a status transition at read time, never a TTL deletion.
+- Existing `businesses` table gains GSI `owner-user-id-index` (PK `ownerUserId`, SK `claimedAt`), not unique per user.
+- New Secrets Manager secret `claim-token` (key: `hmacSecret`) via the existing `WebpresaSecret` construct.
+- New Cognito User Pool + User Pool Client (a new construct, e.g. `WebpresaUserPool`, following the existing construct-per-concern pattern) for customer identity.
+
+In `infra/lib/constructs/webpresa-table.ts`:
+
+- Small additive extension exposing an optional `timeToLiveAttribute` prop, defaulting to unset, so every existing table's CDK output is unaffected.
+
+In `infra/lib/stacks/vercel-access-stack.ts`:
+
+- Extend the managed policy with the new Claims table ARN (+ indexes), the Businesses table's new GSI, the new secret ARN, and `cognito-idp:SignUp`/`InitiateAuth`/`ConfirmSignUp`/`ForgotPassword`/`ConfirmForgotPassword`/`GetUser`/`AdminGetUser` scoped to the User Pool ARN (the `AdminGetUser` grant supports the admin ownership-release UI showing which customer currently owns a business).
+
+No new compute (no Lambda, no API Gateway). Show `cdk diff` for the affected stacks and wait for explicit approval before any deploy, per the standing deployment gate.
+
+## Required routes
+
+- `GET /claim/[claimToken]` — public; validates the token; on success, sets a short-lived, signed, purpose-scoped HttpOnly `webpresa_claim_attempt` cookie (a JWT carrying the `claimId`, never the raw token) and redirects to `/claim/continue`.
+- `GET /claim` — public; manual token entry for a printed/typed code.
+- `GET, POST /claim/continue` — requires the signed `claim_attempt` cookie; sign-up-or-sign-in via Cognito, then performs the ownership transaction. The server re-validates the claim's state (issued, unexpired, unrevoked) on every use regardless of the cookie's signature — signing prevents tampering, it does not replace validation.
+- `GET /account/sign-in` — public; Cognito sign-in for resuming checkout without a token.
+- `GET /account/claim-status` — requires an authenticated customer session and business ownership; business-scoped (resolved from the business just claimed, or via `owner-user-id-index` — showing a short list if the customer owns more than one business).
+
+## Detailed workflow
+
+1. Customer opens `/claim/[claimToken]` (QR scan or typed URL).
+2. Server normalizes the token, computes its HMAC hash, and queries the `token-hash-index` GSI on Claims.
+3. Not-found, expired (lazily transitioned), revoked, or consumed-by-a-different-session all render the same generic "invalid or expired" page — never distinguished to the caller.
+4. Consumed-by-the-current-session (idempotent resume) skips directly to step 9.
+5. A valid, `issued`, unexpired token sets the signed `claim_attempt` cookie and redirects to `/claim/continue`.
+6. `/claim/continue` collects sign-up or sign-in credentials and resolves a `userId` via Cognito (`SignUp`/`ConfirmSignUp` or `InitiateAuth`). Cognito enforces email uniqueness natively — no app-level uniqueness transaction is needed.
+7. Server runs one `TransactWriteItems`:
+   - Claims: condition `status='issued' AND expiresAt > now`, set `status='consumed', consumedByUserId, consumedAt`.
+   - Businesses: condition `attribute_not_exists(ownerUserId)`, set `ownerUserId, claimedAt`.
+8. On cancellation, inspect the per-item cancellation reasons:
+   - Claims condition failed but `consumedByUserId` already equals this user (a double-submit) → treat as success, continue.
+   - Claims condition failed otherwise, or the Businesses condition failed → generic error; no ownership or token state changes.
+9. On success, establish the `webpresa_customer_session` cookie (populated from Cognito's authentication response), clear the `claim_attempt` cookie, and redirect to `/account/claim-status`.
+10. `/account/claim-status` shows the claimed business and a call-to-action toward Stage 18's checkout. Returning, still-unpaid owners reach the same screen by signing in directly at `/account/sign-in` — no new token is ever required to resume, and no restriction prevents the same account from later claiming a different business.
+
+## Claim-token requirements
+
+- 160-bit random token (`crypto.randomBytes(20)`), Crockford Base32 encoded, dash-grouped for manual entry.
+- Normalized (strip dashes/whitespace, uppercase) before every hash or comparison.
+- Hashed with HMAC-SHA256 keyed by a dedicated Secrets-Manager-held pepper — never stored or logged in plaintext, never logged even as a partial hash.
+- Looked up via a dedicated high-cardinality GSI (`token-hash-index`), not scanned.
+- Expiration enforced at read time against a stored `expiresAt`; never enforced via DynamoDB TTL (the table's TTL attribute is scoped to rate-limit counter items only — see Infrastructure changes).
+- Revocable by an admin at any point while `status='issued'`.
+- Single-use: enforced by a `TransactWriteItems` condition, not by application-level "check then write" logic.
+- **Never persisted in any recoverable form beyond its hash** — including on `Postcard` records. The raw token exists only in memory at issuance; any QR/PDF artifact is rendered synchronously from it at that moment (or, for a future async pipeline, the raw token is passed as job input at enqueue time, never fetched back from storage). If a postcard needs regeneration for reasons unrelated to token compromise, that's a resubmission of the already-rendered artifact via `providerPostcardId`; if regeneration is needed because the token itself is suspect, that is handled by the ownership-recovery workflow below (revoke, then issue a replacement claim and token) — never by recalling a discarded token.
+- Rate-limited per requester (IP-hash bucket) on every entrypoint that accepts a token guess (`GET /claim/[claimToken]` and the `POST /claim` manual-entry form). Implemented as a distinct item shape in the Claims table itself (`PK = RATELIMIT#<ipHash>#<windowBucket>`), not a dedicated table — the token's 160-bit entropy is the real defense against brute force, so rate limiting here is abuse/cost protection, not the security boundary. The conditional increment must use `ConditionExpression: attribute_not_exists(#count) OR #count < :limit` (not a bare `#count < :limit`), so the first request in a new window creates the counter rather than throwing — the same conditional-update idiom already established by `claimScanExecutionStatus()` in `web/lib/db/scan-executions.ts`. On exceeding the limit, return the same generic "invalid or expired" response, not a distinct "rate limited" message.
+
+## Ownership, entitlement, and recovery rules
+
+- Ownership is represented solely by `Business.ownerUserId` (presence) and `claimedAt` (when) — never by `Business.status`, and never by any Stripe-related field.
+- Entitlement (a paid, active subscription) is not modeled by this stage at all, and no stub function stands in for it — there is no dashboard route in this stage for one to protect.
+- **Ownership recovery (new)**: if a business is claimed but the claimant never completes payment (or claims incorrectly), an admin can run an exceptional recovery workflow — `releaseOwnershipAction(businessId, reason)` clears `ownerUserId`/`claimedAt` via a conditional update (`attribute_exists(ownerUserId)`), without touching the original (now-historical, terminal) `Claim` record. The admin then issues a new claim/token for the same business through the existing "generate claim link" action, allowing a legitimate claimant to try again. Ownership does not expire automatically — this recovery path is manual and administrative only, logged via structured server-side logging (businessId, previous owner, admin identity, reason, timestamp).
+- It must be structurally impossible to reach a dashboard-equivalent state from token possession alone, from the Stripe success-redirect URL alone, or from `ownerUserId` being set without a verified, webhook-confirmed active subscription — none of those exist as capabilities in this stage in the first place.
+
+## Public claim-banner behavior
+
+The public preview's claim banner reflects three states, not a single ownership flip: `getClaimBannerState(business)` returns `'unclaimed'` (no owner — "claim this business" CTA), `'claimed_pending'` (owned, but this stage has no subscription concept yet — a softer "claimed, activation pending" message that neither invites a conflicting claim nor implies the business is paying), or `'active'` (a real paid subscription — Stage 18's concern; this branch is defined now but unreachable until Stage 18 supplies real subscription data into the same function). This avoids a claimed-but-never-paid business permanently losing its conversion-driving banner, while the exactly-once claim guarantee itself is enforced independently by the `TransactWriteItems` condition, not by banner content. SEO `noindex`/`index` logic stays entirely on `business.status === 'active'`, unrelated to ownership and unchanged by this stage.
+
+## Failure and recovery behavior
+
+- **Account creation succeeds, the ownership transaction fails**: the Cognito account is durable (created before the transaction). The user can retry — the same account resolves, and the retry either idempotently detects it already succeeded or attempts the transaction again with no orphaned state.
+- **Ownership reserved, Stripe Checkout abandoned**: `ownerUserId` remains set indefinitely — ownership does not expire or roll back on its own. The customer returns via `/account/sign-in` to resume, or an admin runs the ownership-recovery workflow above if the claim was made in error and abandoned.
+- **Concurrent submissions of the same token**: the `TransactWriteItems` condition on the Claims item ensures exactly one submission commits; the loser sees a generic error unless it's the same user re-submitting (idempotent path).
+- **Token already consumed by someone else**: generic error, no disclosure of who claimed it or when.
+- **Business deletion**: deleting a Business must never delete or disable the owning customer's Cognito account — there is no code path from business deletion into Cognito, since customer identity is not stored in any app-owned, business-linked table. `deleteBusinessAction`'s existing cascade (SitePreviews, ScanEvents, Postcards) is extended to also delete that business's Claims, for consistency; this is an explicit admin-destructive action, not a claim-lifecycle event, and does not conflict with claim-history preservation during normal operation.
+
+## Security requirements
+
+- No plaintext claim token in logs, error messages, or persisted records, at any point — including on `Postcard` records (see Claim-token requirements).
+- Generic, uniform error responses across invalid/expired/revoked/consumed-by-another-account token states.
+- Rate limiting on every token-guessing entrypoint, implemented within the Claims table (see above).
+- The `webpresa_claim_attempt` cookie is signed and purpose-scoped, not a raw identifier; the server always re-validates claim state independent of the cookie's signature.
+- `Referrer-Policy: no-referrer` on the token-bearing initial claim page; no third-party resource loads on that page.
+- All three cookies in play (admin session, customer session, claim-attempt) remain HttpOnly, `secure` in production, `sameSite=lax`, each signed with its own dedicated secret so none can be replayed as another.
+- All claim-flow mutations run as Next.js Server Actions, inheriting Next.js's built-in same-origin Server Action protection.
+- Any post-authentication redirect target is validated against an allowlist of internal paths — no open redirect.
+- No AWS credentials, secrets, table names, or Cognito identifiers beyond the already-public naming convention ever reach the browser bundle.
+- Cognito API errors (e.g. `UsernameExistsException`, `NotAuthorizedException`, `TooManyRequestsException`) are mapped to the same generic, non-disclosing messages the rest of this flow uses — no Cognito-specific error detail leaks to the client.
 
 ## Acceptance criteria
 
-- Admin can create and revoke a claim token.
-- Public users cannot claim with a slug alone.
-- Expired and revoked tokens fail safely.
-- A valid token opens the correct claim form.
-- Claim submissions create a verification-pending record.
-- Reusing a completed token is blocked.
-- Admin can approve or reject a claim.
-- Claim history is preserved.
-- Public responses do not expose internal verification data.
+- Admin can generate and revoke a claim token for a business, and can release ownership and issue a replacement claim for a business that was claimed but never activated.
+- Public visitors cannot claim a business using only its slug or ID.
+- Invalid, expired, revoked, and already-consumed-by-another-account tokens all fail with the same generic message.
+- A valid, unexpired, unconsumed token followed by successful Cognito account creation or sign-in reserves ownership exactly once, even under concurrent submission of the same token.
+- The same authenticated user resubmitting an already-consumed-by-them token is treated as a successful, idempotent resume, not an error.
+- A customer account may own more than one business; there is no rejection for claiming a second business.
+- Claim history (all Claim records, including expired/revoked/consumed ones) is preserved indefinitely — never deleted by normal operation.
+- A claimed business shows `ownerUserId`/`claimedAt`; its public claim banner reflects claimed-pending (not silently disappearing); its `Business.status` and Stripe fields are untouched by this stage.
+- An authenticated owner with no active subscription cannot reach any route this stage does not explicitly grant — there is no dashboard, and no route exists that could be mistaken for one.
+- Deleting a Business never deletes or disables the owning customer's Cognito account.
+- The Stripe success-redirect URL (not built in this stage) is never treated as proof of anything, by construction — no code path in this stage could act on it, because no such code path exists yet.
 
 ## Deferred work
 
-- Automated domain-email verification
-- Document verification provider
-- Self-service re-verification
-- Organization accounts
-- Multiple owners and staff
+- Stripe customer/Checkout/webhook handling (Stage 18)
+- Dashboard entitlement and any protected dashboard route, including the `requireActiveSubscription()` primitive (Stage 18+)
+- Full customer website-editing UI and automatic preview regeneration (a later customer-dashboard stage)
+- Async/regenerable postcard PDF generation and Lob integration (a later postcard/campaign stage — see the token-handling guidance above for the constraint any such stage must respect)
+- Billing portal, lead history, custom domains
+- Team members, shared ownership, ownership transfer between customers
+- Manual/document/phone/business-email verification (rejected for the MVP, not merely deferred)
+- SES-backed Cognito email (deferred until default sending volume requires it)
+- Full customer-account deletion (GDPR-style), alongside team accounts
 
 ---
 
@@ -2230,7 +2345,7 @@ Stages 10 and 17.
 ## Initial product
 
 - Product: Webpresa Managed Website
-- Price: `$149/month`
+- Price: `$149/month` (unchanged placeholder from the original draft — confirm this is still the current price with product/business decisions before implementing Stage 18; not revisited as part of the Stage 17 rewrite)
 - Billing: monthly recurring
 
 Any minimum commitment must be enforced through clear agreements and business processes, not assumed from the Stripe price configuration.
@@ -2240,12 +2355,12 @@ Any minimum commitment must be enforced through clear agreements and business pr
 Checkout input should identify:
 
 - business
-- claim
+- claim (the `Claim` record whose consumption already reserved ownership in Stage 17 — by this point the claim itself is fully consumed and terminal; it is carried through for provenance/audit, not re-validated as a claim)
 - preview
 
 Server actions must:
 
-- validate claim eligibility
+- validate business ownership (`requireCustomerSession` + `requireBusinessOwnership`, from Stage 17) and the absence of an already-active subscription — there is no claim-eligibility check left to perform here, since Stage 17's `TransactWriteItems` already made claim consumption and ownership reservation atomic and exactly-once
 - create or reuse the Stripe customer
 - create a subscription-mode Checkout Session
 - attach internal metadata
@@ -2291,6 +2406,17 @@ Make webhook processing idempotent and resilient to duplicates and out-of-order 
 
 # Stage 19 — Customer Activation and Dashboard
 
+## Note on this section's wording (pending full rewrite)
+
+This section still reflects assumptions made before Stage 17 was finalized and conflicts with two approved decisions in two specific places, flagged below rather than rewritten wholesale — this stage isn't finalized enough yet to warrant a full rewrite alongside Stage 17, and doing so risks guessing at decisions that are still open.
+
+- **"provision the customer identity" (below, under Implementation requirements) is wrong as written.** The customer identity (a Cognito-backed account, `Business.ownerUserId`) is created in Stage 17, *before* Stripe Checkout — not provisioned here after payment. Whatever this stage actually needs to do post-payment should be worded as "confirm dashboard entitlement for the already-existing owner" (i.e., Stage 18's webhook flips the real gate this stage's `requireActiveSubscription()` checks), not "create the identity."
+- **"Change-request submission" and the `/app/requests` route conflict with the approved "direct customer editing replaces customer change requests" direction.** Whatever dashboard stage actually gets built should let the customer edit the canonical `Business` directly, generating draft `SitePreview`s, rather than submitting requests into an admin-reviewed queue. Not rewritten here since the direct-editing dashboard's shape isn't finalized yet.
+- **"mark the business as customer" has no field to write to.** `BUSINESS_STATUSES` has no `'customer'` value, and Stage 17 deliberately left `Business.status` untouched — whether paid activation should introduce a new status value (and whether that should affect the existing SEO `noindex`/`index` logic, which currently reads `business.status === 'active'`) is an open question for whichever stage finalizes this, not resolved by Stage 17.
+- **"Customer authentication" is no longer this stage's deliverable.** Stage 17 already builds the full Cognito-backed customer identity, session, and `requireCustomerSession`/`requireBusinessOwnership` primitives. This stage only needs to add `requireActiveSubscription()` (Stage 18-informed) on top of what Stage 17 already provides.
+
+The rest of this section (dashboard content, billing link, settings, change-request replacement, deferred work) is left as-is pending that fuller rewrite.
+
 ## Objective
 
 Convert a verified paid claim into an active customer account and provide a minimal self-service dashboard.
@@ -2301,16 +2427,16 @@ Stages 8, 17, and 18.
 
 ## Major deliverables
 
-- Customer authentication
+- Dashboard entitlement (`requireActiveSubscription()`, informed by Stage 18's webhook-confirmed subscription state — the only new authorization primitive this stage adds; session/ownership already come from Stage 17)
 - Activation workflow
 - Business status transition
 - Claimed preview status
-- Preview banner removal
+- Preview banner activation state (Stage 17 already defines the three-state `getClaimBannerState()`; this stage supplies the real `'active'` input)
 - Welcome communication
 - Onboarding checklist
 - Customer dashboard
 - Website information view
-- Change-request submission
+- Change-request submission (see note above — likely replaced by direct editing once this stage is finalized)
 - Billing link
 - Settings page
 
@@ -2327,10 +2453,10 @@ Stages 8, 17, and 18.
 After verified payment:
 
 - mark the claim paid/activated
-- mark the business as customer
+- mark the business as customer (see note above — no `BusinessStatus` value exists for this yet)
 - mark the preview claimed
-- provision the customer identity
-- remove the public claim banner
+- confirm dashboard entitlement for the already-existing owner (see note above — the identity itself was already created in Stage 17, before Checkout)
+- remove the public claim banner (via Stage 17's `getClaimBannerState()` reaching its `'active'` branch)
 - send a welcome message
 - collect final business details
 - request domain information
@@ -2344,10 +2470,10 @@ Customers must only access records belonging to their organization.
 ## Acceptance criteria
 
 - A paid, verified claim activates exactly once.
-- The customer can sign in.
+- The customer can sign in. (Already true as of Stage 17 — this stage only needs to additionally *unlock the dashboard* for a subscription-entitled session.)
 - The dashboard shows website, domain, requests, billing, and settings information.
 - The customer cannot access another business.
-- A customer can submit a change request.
+- A customer can submit a change request. (Pending the direct-editing reconsideration noted above.)
 - Billing management opens the correct Stripe portal.
 - The claimed site no longer displays the Webpresa claim banner.
 - Activation failures are recoverable without duplicate accounts.

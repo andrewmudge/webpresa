@@ -1,4 +1,5 @@
 import 'server-only';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import {
   GetCommand,
   PutCommand,
@@ -284,6 +285,27 @@ export async function getBusinessByGooglePlaceId(googlePlaceId: string): Promise
 }
 
 /**
+ * Retrieve every business owned by a given customer (Cognito `sub`), newest
+ * claim first, via the `owner-user-id-index` GSI (Stage 17). Not unique per
+ * user by design — one customer account may own multiple Businesses; there
+ * is no one-account-one-business restriction (see implementation.md, Stage
+ * 17, "Ownership model").
+ */
+export async function getBusinessesByOwnerUserId(ownerUserId: string): Promise<Business[]> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_BUSINESSES(),
+      IndexName: 'owner-user-id-index',
+      KeyConditionExpression: 'ownerUserId = :ownerUserId',
+      ExpressionAttributeValues: { ':ownerUserId': ownerUserId },
+      ScanIndexForward: false,
+    }),
+  );
+  return (result.Items ?? []).map((item) => parseBusinessItem(item));
+}
+
+/**
  * Retrieve every business in the table, paging through Scan until
  * exhausted (or a safety cap is hit). Used for the domain/phone/name+address
  * duplicate-detection signals (Stage 12) that have no dedicated GSI —
@@ -401,6 +423,38 @@ export async function resolveUniqueSlug(baseSlug: string): Promise<string> {
   }
 
   throw new Error(`Could not generate a unique slug for: ${baseSlug}`);
+}
+
+/**
+ * Admin-only ownership recovery (Stage 17): clears `ownerUserId`/`claimedAt`
+ * on a claimed business, without touching the original (terminal, historical)
+ * `Claim` record. An exceptional operation, not a customer-facing feature —
+ * ownership never expires automatically; this is the only way to reopen a
+ * business for a fresh claim after one was made in error or abandoned. The
+ * admin is expected to issue a new claim/token afterward via the existing
+ * claim-link generation action.
+ *
+ * Returns `false` (never throws) when the business is already unclaimed,
+ * matching the conditional-update convention used throughout this codebase.
+ */
+export async function releaseOwnership(businessId: string): Promise<boolean> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  try {
+    await client.send(
+      new UpdateCommand({
+        TableName: TABLE_BUSINESSES(),
+        Key: { businessId },
+        UpdateExpression: 'REMOVE ownerUserId, claimedAt SET updatedAt = :now',
+        ConditionExpression: 'attribute_exists(ownerUserId)',
+        ExpressionAttributeValues: { ':now': now },
+      }),
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return false;
+    throw err;
+  }
 }
 
 export async function deleteBusinessById(businessId: string): Promise<void> {

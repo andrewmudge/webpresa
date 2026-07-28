@@ -65,3 +65,4 @@ export const TABLE_SCAN_EVENTS = () => getTableName('SCAN_EVENTS_TABLE_NAME');
 export const TABLE_POSTCARDS = () => getTableName('POSTCARDS_TABLE_NAME');
 export const TABLE_SCAN_EXECUTIONS = () => getTableName('SCAN_EXECUTIONS_TABLE_NAME');
 export const TABLE_STOCK_IMAGES = () => getTableName('STOCK_IMAGES_TABLE_NAME');
+export const TABLE_CLAIMS = () => getTableName('CLAIMS_TABLE_NAME');

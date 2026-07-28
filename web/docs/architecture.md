@@ -84,8 +84,8 @@ Customer-facing route that renders a `SitePreview` record as a professional loca
 
 - `/b/[slug]` — server-rendered (`force-dynamic`), queries the `slug-index` GSI on `webpresa-dev-site-previews`
 - Draft / ready previews visible to authenticated admins only; published visible publicly; archived returns 404
-- `generateMetadata` sets `noindex, nofollow` on unclaimed previews (`Business.status !== 'active'`); prefers `content.seo.title`/`description` when an AI-generated preview supplied them, falling back to the hero headline/subheadline otherwise
-- Dismissible claim banner shown on published-but-unclaimed previews
+- `generateMetadata` sets `noindex, nofollow` based on `business.status !== 'active'` (locally named `isIndexable`) — **deliberately unrelated to claim ownership** (Stage 17); prefers `content.seo.title`/`description` when an AI-generated preview supplied them, falling back to the hero headline/subheadline otherwise
+- **Claim banner (Stage 17):** `lib/claim/banner-state.ts`'s `getClaimBannerState(business)` derives a three-way `'unclaimed' | 'claimed_pending' | 'active'` state from `business.ownerUserId` alone (`'active'` is unreachable until Stage 18 supplies real subscription data into the same function). `ClaimBanner.tsx` renders a dismissible "claim it" CTA for `'unclaimed'`, a softer "claimed, activation pending" message for `'claimed_pending'` (never disappearing entirely just because someone claimed-but-never-paid — that would kill the conversion path back to Checkout), and nothing at `'active'`. `GeneratedSiteFooter`'s "Website by Webpresa" credit line uses the same signal, computed locally as `claimBannerState === 'active'` — the credit only disappears once genuinely paid, not merely claimed.
 - Theme colors applied via CSS custom properties (`--site-primary`, `--site-accent`, `--site-background`, `--site-surface`, `--site-text`, `--site-muted`, `--site-border`, `--site-success`, `--site-warning`, `--site-danger`) set on the root wrapper by `buildSiteTokens()` (`template/tokens.ts`), which resolves the preview's `PreviewTheme` to a full `BrandTheme` palette via `resolveThemePalette()` (`lib/themes.ts`) — see "Brand Theme System" below. All child sections reference `var(--site-*)`, either via Tailwind v4's `bg-(--site-*)`/`text-(--site-*)`/`border-(--site-*)` CSS-variable shorthand (parentheses, not square brackets — bracket arbitrary-value syntax emits the variable name as a literal, invalid value; see `build_log.md`, "Bug Fix — Tailwind CSS-variable syntax") or inline styles through the `V` shorthand object. No template component contains a hardcoded branding color.
 - Template: `app/b/[slug]/template/` — 15 rendering components plus a shared `cta.tsx` resolver and a `section-registry.tsx` component registry:
   `GeneratedSiteHeader`, `GeneratedHero`, `TrustStrip`, `ServicesGrid`, `GallerySection`, `WhyChooseUs`, `AboutSection`, `ReviewsSection`, `ServiceAreaSection`, `ProcessSection`, `FaqSection`, `FinalCTA`, `ContactSection`, `GeneratedSiteFooter`, `MobileCallBar`. (2026-07-26: the former standalone `TestimonialsSection` was merged into `ReviewsSection` — see "Reviews/Testimonials merge" below.)
@@ -147,10 +147,11 @@ TypeScript interfaces only. No runtime code.
 
 | Model | Key fields |
 |---|---|
-| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), photo-slot overrides (`heroPhotoUrl?`, `aboutPhotoUrl?`, `whyChooseUsPhotoUrl?`, `servicesPhotoUrl?` — see "Photo slot assignment" below), `theme?` (the stored Brand Theme System preset), Stage 11.x section-eligibility signals (`googleRating?`, `googleReviewCount?`, `testimonials?`, `faqItems?`, `processSteps?` — see "Configurable Website-Section System" below), `websiteSections?` (the stored per-business section configuration), Stage 13 enrichment disposition (`enrichmentStatus?`, `manualApprovalReason?`, `manualApprovalNote?` — see "Firecrawl Website Enrichment" below), and Stage 15 qualification disposition (`qualification?`, `leadPriority?`, `websiteQualityScore?` — all AI-produced; `adminReviewedQualification?`/`adminReviewedScore?` — the admin override, stored separately so the original AI values are always recoverable — see "AI Website Scoring (Stage 15)" below) |
+| `Business` | `businessId`, `slug`, `name`, `industry`, `status`, `source`, `websiteUrl?`, `googlePlaceId?`, `scores?`, `currentPreviewId?`, Stripe IDs, optional Stage 11 website-generation inputs (`servicesOffered?`, `serviceAreas?`, `description?`, `differentiators?`, `brandTone?`, `notes?`), asset references (`logoUrl?`, `photoUrls?`), photo-slot overrides (`heroPhotoUrl?`, `aboutPhotoUrl?`, `whyChooseUsPhotoUrl?`, `servicesPhotoUrl?` — see "Photo slot assignment" below), `theme?` (the stored Brand Theme System preset), Stage 11.x section-eligibility signals (`googleRating?`, `googleReviewCount?`, `testimonials?`, `faqItems?`, `processSteps?` — see "Configurable Website-Section System" below), `websiteSections?` (the stored per-business section configuration), Stage 13 enrichment disposition (`enrichmentStatus?`, `manualApprovalReason?`, `manualApprovalNote?` — see "Firecrawl Website Enrichment" below), Stage 15 qualification disposition (`qualification?`, `leadPriority?`, `websiteQualityScore?` — all AI-produced; `adminReviewedQualification?`/`adminReviewedScore?` — the admin override, stored separately so the original AI values are always recoverable — see "AI Website Scoring (Stage 15)" below), and Stage 17 ownership (`ownerUserId?` — a Cognito `sub`, presence means claimed; `claimedAt?` — set only by the claim-consumption transaction, never by `status` or any Stripe field) |
 | `SitePreview` | `previewId`, `businessId`, `slug`, `version` (monotonic), `status`, `templateId`, `content` (strict shape, includes optional `cta` — see `PreviewCtaConfig`), `theme` (`PreviewTheme.themeName` — see "Brand Theme System"), `generationMetadata?` (now includes `source?: 'seed' \| 'manual_ai' \| 'firecrawl_enriched'` and `scanId?` — Stage 13 provenance) |
 | `ScanEvent` | Redesigned in Stage 13 (its first real caller — Stage 12 creates none), extended in Stage 14 and Stage 15: `scanId`, `businessId`, `provider` (`'firecrawl'` \| `'playwright'` \| `'openai'`), `operation` (`'scrape'` \| `'screenshot'` \| `'score'`), `status` (`queued`\|`running`\|`completed`\|`partial`\|`failed`\|`manual_approval_required` — `partial` is Stage 14 only, one viewport succeeded and one failed), `sourceUrl?`, `finalUrl?`, `httpStatus?`, `failureCategory?` (`ScanFailureCategory`, 23 values — 14 Firecrawl, 6 Playwright, 3 Stage 15 AI scoring), `failureMessage?`, `attempt`, `retryOfScanId?`, `rawArtifactKey?`, `extractedArtifactKey?`, `images?` (`ScanImageAsset[]`), `generatedPreviewId?`, `scores?` (reserved, unused — superseded by `assessment?` below), `storageKeys?` (reserved, unused — see "S3 asset storage" above), `targetType?` (`'existing_site'` \| `'generated_preview'`, Stage 14 only), `previewId?` (Stage 14 only — the preview *being captured*, distinct from `generatedPreviewId`), `captureResults?` (Stage 14 only — per-viewport `{ desktop?, mobile? }` outcome), `deterministicMetrics?`/`assessment?`/`aiResponseArtifactKey?`/`aiMetadata?` (Stage 15 only — see "AI Website Scoring (Stage 15)" below), `startedAt?`, `completedAt?` |
 | `Postcard` | `postcardId`, `businessId`, `previewId`, `provider`, `campaignCode`, `qrDestination`, `status`, `mailedAt?`, `deliveredAt?` |
+| `Claim` (Stage 17) | `claimId`, `businessId`, `postcardId?`, `previewId?`, `tokenHash` (HMAC-SHA256 of the normalized raw token — never the raw token itself), `status` (`'issued'\|'consumed'\|'expired'\|'revoked'` — token lifecycle only, never ownership), `expiresAt`, `consumedByUserId?` (a Cognito `sub`), `consumedAt?`, `revokedAt?`, `revokedReason?` |
 
 All records extend `MutableTimestampedRecord` → `createdAt` + `updatedAt` (ISO 8601 UTC strings).
 
@@ -178,6 +179,7 @@ ID generation: `crypto.randomUUID()` global (Node 14.17+, modern browsers, edge 
 | `createSitePreview` | `preview_` | `draft` |
 | `createScanEvent` | `scan_` | `pending` |
 | `createPostcard` | `postcard_` | `pending` |
+| `createClaim` (Stage 17) | `claim_` | `issued` |
 
 ---
 
@@ -236,6 +238,7 @@ All tables: PAY_PER_REQUEST billing, AWS-managed encryption at rest, `Projection
 | GSI: `slug-index` | PK: `slug` |
 | GSI: `google-place-id-index` | PK: `googlePlaceId` |
 | GSI: `status-index` ⚠ | PK: `status` |
+| GSI: `owner-user-id-index` (Stage 17) | PK: `ownerUserId`, SK: `claimedAt` — sparse (only claimed businesses appear); **not** unique per user, since one customer account may own multiple businesses |
 
 ### `webpresa-dev-site-previews`
 
@@ -271,6 +274,17 @@ All tables: PAY_PER_REQUEST billing, AWS-managed encryption at rest, `Projection
 | Partition key | `scanExecutionId` (S) |
 | GSI: `business-id-index` | PK: `businessId`, SK: `createdAt` |
 | GSI: `status-index` ⚠ | PK: `status` |
+
+### `webpresa-dev-claims` (Stage 17)
+
+| | |
+|---|---|
+| Partition key | `claimId` (S) |
+| GSI: `token-hash-index` | PK: `tokenHash` — high-cardinality (256-bit-derived), avoids the low-cardinality hot-partition anti-pattern flagged below for status GSIs |
+| GSI: `business-id-index` | PK: `businessId`, SK: `createdAt` — per-business claim history for the admin UI |
+| TTL attribute: `ttl` | Populated **only** by this table's second item shape — rate-limit counters (`PK = RATELIMIT#<ipHash>#<windowBucket>`, folded into this table rather than a dedicated one). Real `Claim` records never set `ttl`; claim history is preserved indefinitely, and claim-token expiration is a `status` transition at read time, never a TTL deletion. |
+
+Deliberately **no** `status-index` — only 4 low-cardinality values (`issued`/`consumed`/`expired`/`revoked`); per-business queries via `business-id-index` cover admin needs, and a global cross-business claim list is YAGNI for the MVP.
 
 ### `webpresa-dev-stock-image-metadata` (Phase 1 stock image repository)
 
@@ -365,7 +379,7 @@ See `build_log.md`, "Stock image repository — curated hero-photo fallback (Pha
 
 ## Secrets Manager
 
-**Implemented in Stage 10; extended in Stage 14 and Stage 16.** Eight secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
+**Implemented in Stage 10; extended in Stage 14, Stage 16, and Stage 17.** Nine secrets provisioned via the reusable `WebpresaSecret` construct (`infra/lib/constructs/webpresa-secret.ts`), wired into the same `WebpresaDataStack` as the tables and bucket. Each secret is created with a securely-generated random placeholder value only — no real credential ever appears in the CDK synth output, the CloudFormation template, or Git history. Real values are populated out-of-band (`aws secretsmanager put-secret-value`) by whichever later stage first needs that integration; CloudFormation does not re-touch a secret's value on subsequent `cdk deploy` runs as long as its `jsonKeys` are unchanged, so a manually-set real value is never clobbered by a redeploy.
 
 | Secret name | JSON shape | Owner (stage) |
 |---|---|---|
@@ -374,19 +388,22 @@ See `build_log.md`, "Stock image repository — curated hero-photo fallback (Pha
 | `webpresa-{env}-google-places` | `{ apiKey }` | Stage 12 — business discovery |
 | `webpresa-{env}-stripe` | `{ secretKey, webhookSecret }` | Stage 18 — subscriptions |
 | `webpresa-{env}-lob` | `{ apiKey }` | Stage 22 — postcard integration |
+| `webpresa-{env}-claim-token` | `{ hmacSecret }` | Stage 17 — HMAC pepper for hashing claim tokens (`lib/claim/token.ts`). Not a third-party credential — an internally-generated key, held entirely within this platform. |
 | `webpresa-{env}-capture-token` | `{ signingKey }` | Stage 14 — Playwright preview capture token. Not a third-party credential like the other five — an internally-generated HMAC key, read (never minted) by this app, minted (never read-only-verified) by the screenshot Lambda. |
 | `webpresa-{env}-vercel-protection-bypass` | `{ bypassSecret }` | Stage 14 — Vercel "Protection Bypass for Automation" secret, generated in Vercel's dashboard (not by this platform). Read-only by the screenshot Lambda's own execution role; the Next.js app has no code path that touches it at all — see "Playwright Screenshots (Stage 14)" below, "Platform-level access". |
 | `webpresa-{env}-internal-api` | `{ sharedSecret }` | Stage 16 — authenticates Step Functions' `HttpInvoke` calls into `/api/internal/scan/*`. Not a third-party credential — an internally-generated shared secret read by this app (`lib/internal-auth.ts`) and sourced by the EventBridge Connection in `scan-workflow-stack.ts` to send as a request header; nothing else ever reads or writes it. |
 
+Customer identity itself (email, password, verification, lockout) is **not** a Secrets Manager entry at all — it lives in the Cognito User Pool described under "Authentication" below, which manages its own credential storage.
+
 ### Application-side access
 
 - `web/lib/secrets/client.ts` — `server-only` singleton `SecretsManagerClient`, same region/credential pattern as `web/lib/db/client.ts` and `web/lib/s3/client.ts`. `getSecretJson(secretName)` fetches and JSON-parses a secret's `SecretString`, caching the result **indefinitely for the lifetime of the process** (matches Vercel's serverless function instance reuse — a fresh cold start re-fetches). Automated rotation is deferred work; today, rotating a secret requires a redeploy or cold start to take effect.
-- `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`, `getCaptureTokenSecret()`, `getInternalApiSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
+- `web/lib/secrets/index.ts` — typed wrappers (`getOpenAiSecret()`, `getFirecrawlSecret()`, `getGooglePlacesSecret()`, `getStripeSecret()`, `getLobSecret()`, `getClaimTokenSecret()`, `getCaptureTokenSecret()`, `getInternalApiSecret()`) reading the secret *name* from an env var (`OPENAI_SECRET_NAME`, etc.), matching the `TABLE_*`/`getAssetsBucketName()` accessor pattern.
 - `getOpenAiSecret()` got its first real caller in Stage 11 (see "AI / OpenAI integration" below); `getGooglePlacesSecret()` in Stage 12; `getFirecrawlSecret()` in Stage 13 (see "Firecrawl Website Enrichment" above) — the real API key was populated via the standard `aws secretsmanager put-secret-value` pattern (see `deployment.md`), no infra change needed since the secret was already provisioned in Stage 10. `getCaptureTokenSecret()` (Stage 14, `web/lib/capture-token.ts`) is the first secret this app only ever *reads*, never writes or forwards to a third party — the same value is independently read by the screenshot Lambda (its own Secrets Manager client, `infra/lambda/screenshot-capture/src/aws.ts`) to mint tokens this app verifies. Stripe and Lob remain foundation-only for their respective later stages. Never log a secret's parsed value or raw `SecretString`.
 
 ### IAM
 
-The `webpresa-vercel-dev` IAM user's `webpresa-dev-vercel-data-access` **CDK-managed policy** (`infra/lib/stacks/vercel-access-stack.ts`) grants `secretsmanager:GetSecretValue` scoped to all 8 dev secret ARNs, including `webpresa-dev-capture-token` and `webpresa-dev-internal-api`. This was five separate hand-run inline policies (one per grant category) until 2026-07-24, when a `put-user-policy` call adding Stage 16's grants hit a hard, non-adjustable 2048-byte aggregate inline-policy-size limit — see `deployment.md`, "AWS credentials for Vercel", for the full migration record. New secrets now only require adding their ARN to this one managed policy in code, reviewed via `cdk diff` like every other resource. Stage 14's screenshot-capture Lambda is the first dedicated execution role with its own narrower Secrets Manager grant (`secretsmanager:GetSecretValue` on just the capture-token secret) rather than reusing this policy — Stages 18 and 22 remain expected future adopters of the same narrower pattern.
+The `webpresa-vercel-dev` IAM user's `webpresa-dev-vercel-data-access` **CDK-managed policy** (`infra/lib/stacks/vercel-access-stack.ts`) grants `secretsmanager:GetSecretValue` scoped to all 9 dev secret ARNs, including `webpresa-dev-claim-token`, `webpresa-dev-capture-token`, and `webpresa-dev-internal-api`. This was five separate hand-run inline policies (one per grant category) until 2026-07-24, when a `put-user-policy` call adding Stage 16's grants hit a hard, non-adjustable 2048-byte aggregate inline-policy-size limit — see `deployment.md`, "AWS credentials for Vercel", for the full migration record. New secrets now only require adding their ARN to this one managed policy in code, reviewed via `cdk diff` like every other resource. Stage 14's screenshot-capture Lambda is the first dedicated execution role with its own narrower Secrets Manager grant (`secretsmanager:GetSecretValue` on just the capture-token secret) rather than reusing this policy — Stages 18 and 22 remain expected future adopters of the same narrower pattern. The same managed policy also grants a minimal, explicit set of `cognito-idp:*` actions (`SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`, `InitiateAuth`, `ForgotPassword`, `ConfirmForgotPassword`, `ListUsers` — no wildcard, no `Admin*` action) scoped to the Stage 17 customer User Pool ARN.
 
 ---
 
@@ -791,7 +808,9 @@ Environment variables must never be bundled into client-side code. DynamoDB acce
 
 ## Authentication
 
-**Implemented in Stage 7** for the single-admin use case.
+### Admin
+
+**Implemented in Stage 7** for the single-admin use case. Completely separate from, and untouched by, the Stage 17 customer authentication below — two different problems (one hardcoded operator credential vs. public self-service accounts) intentionally solved two different ways.
 
 - Public homepage: no authentication
 - Admin application: username + scrypt-hashed password from environment variables; JWT issued by `jose`, stored in an HTTP-only `SameSite=lax` cookie
@@ -800,7 +819,21 @@ Environment variables must never be bundled into client-side code. DynamoDB acce
 - Defense-in-depth: admin layout server component also reads the session and redirects if missing
 - Server Actions independently verify the session before any DynamoDB write
 
-**Future path:** Migrate to Amazon Cognito User Pool when multiple admin users or role-based permissions are needed.
+**Future path:** Migrate to Amazon Cognito User Pool when multiple admin users or role-based permissions are needed — not yet done for admin; Stage 17 below is the customer-facing use of that same future path, arriving first because public self-service accounts (password reset, lockout, email changes) need it now, not later.
+
+### Customer (Stage 17 — Website Claim Flow)
+
+Public, self-service accounts: unknown users sign up, choose passwords, forget passwords, and need account recovery, lockout protection, and email changes — none of which the admin's single hardcoded credential ever needed to solve. Rather than hand-rolling a second password store (which would additionally require building an email-sending pipeline that doesn't exist anywhere else in this repo), customer identity is an **Amazon Cognito User Pool**, provisioned by the new `WebpresaUserPool` construct (`infra/lib/constructs/webpresa-user-pool.ts`) and instantiated inside `WebpresaDataStack` as `customerUserPool`/`customerUserPoolClient`.
+
+- Self-service sign-up, `signInAliases: { email: true }`, `autoVerify: { email: true }` (Cognito emails a confirmation code; `ConfirmSignUp` must succeed before `InitiateAuth` will authenticate the account). `accountRecovery: EMAIL_ONLY`, MFA off.
+- User Pool Client: `generateSecret: false` (no `SECRET_HASH` computation needed) and `authFlows: { userPassword: true }` **set explicitly** — CDK's default `authFlows` (when the prop is omitted) does not include `USER_PASSWORD_AUTH`, which every sign-in call here depends on.
+- No Lambda triggers, no hosted UI — `web/lib/auth/customer-cognito.ts` calls `SignUp`/`ConfirmSignUp`/`ResendConfirmationCode`/`InitiateAuth`/`ForgotPassword`/`ConfirmForgotPassword`/`ListUsers` directly via `@aws-sdk/client-cognito-identity-provider`, authenticated the same way every other AWS call in this app is (the Vercel IAM user's credentials, scoped to the User Pool ARN — see "IAM" under Secrets Manager above). Every Cognito exception is mapped to a small generic reason code before it ever reaches a Server Action's return value — no Cognito-specific error text reaches the client.
+- The app still issues its **own** session after a successful Cognito authentication — `web/lib/auth/customer-session.ts`, structurally identical to the admin's `session.ts` (a `jose`-signed JWT in an HttpOnly/`SameSite=lax` cookie), but a completely separate cookie name (`webpresa_customer_session`) and secret (`CUSTOMER_SESSION_SECRET`) so an admin session can never be replayed as a customer session or vice versa.
+- **Hard rule:** Cognito's `email_verified` attribute is never read by any authorization or ownership check. Business ownership is decided exclusively by `Business.ownerUserId`, set only by the claim-token consumption transaction (`lib/db/claims.ts`, `consumeClaim`) — email confirmation proves control of an inbox, nothing more.
+- A third, even shorter-lived cookie — `webpresa_claim_attempt` (`lib/auth/claim-attempt.ts`), its own secret again (`CLAIM_ATTEMPT_SECRET`) — scopes the sign-up-or-sign-in step at `/claim/continue` to one specific, already-validated claim token. Signed and purpose-scoped (a JWT carrying `{ purpose: 'claim_attempt', claimId }`), but signing only prevents tampering — the server re-validates the claim's live state on every use regardless.
+- Route protection: `proxy.ts` carries a second, fully parallel branch for `/account/:path*`, alongside the untouched `/admin/:path*` branch. `/claim/*` is deliberately not proxy-protected — it's the public claim entry point, gated by the claim-attempt cookie at the page/route level instead.
+- `web/lib/auth/customer-authorization.ts` — `requireCustomerSession()`/`requireBusinessOwnership()` only. No `requireActiveSubscription()` — there is no dashboard route in Stage 17 for one to protect; Stage 18 will define it from its own real requirements once subscriptions exist, rather than inheriting a speculative interface.
+- Email sending uses Cognito's own default sender for the MVP (a documented ~50/day ceiling) — migrating to SES-backed email is deferred until real signup volume requires it, not a blocker today.
 
 ---
 
@@ -814,6 +847,12 @@ Admin mutations use **Next.js Server Actions** (`'use server'` modules):
 - `web/app/admin/(dashboard)/discover/actions.ts` — `searchPlacesAction`, `importSelectedPlacesAction` (Stage 12)
 - `web/app/admin/(dashboard)/businesses/[businessId]/enrichment-actions.ts` — `enrichWebsiteAction`, `retryEnrichmentAction` (Stage 13) — kept in their own module rather than added to the already 1200+ line `actions.ts`; both redirect back to the business detail page with an `?enrichmentResult=` query param the page reads to show a result banner, rather than returning inline `useActionState` feedback
 - `web/app/admin/(dashboard)/businesses/[businessId]/workflow-actions.ts` — `runScanWorkflowAction`, `rerunScanWorkflowAction` (Stage 16) — the only server-side entry points that call Step Functions; same redirect + `?workflowResult=` query-param shape as the enrichment actions above.
+- `web/app/admin/(dashboard)/businesses/[businessId]/actions.ts` — also `generateClaimLinkAction`, `revokeClaimAction`, `releaseOwnershipAction` (Stage 17)
+
+Public/customer-facing Server Actions (Stage 17), separate from the admin actions above:
+
+- `web/app/claim/actions.ts` — `submitClaimTokenAction` (manual token entry), `signUpForClaimAction`/`confirmSignUpForClaimAction`/`resendConfirmationCodeAction`/`signInForClaimAction` (the `/claim/continue` sign-up-or-sign-in flow, ending in the ownership-reservation transaction)
+- `web/lib/auth/customer-actions.ts` — `customerSignInAction`/`customerSignOutAction` (the resume-checkout path, signing in without a fresh claim token)
 
 All actions validate input with Zod and verify the admin session before any DynamoDB call. No raw DynamoDB code in UI components — all reads and writes go through the repository layer.
 

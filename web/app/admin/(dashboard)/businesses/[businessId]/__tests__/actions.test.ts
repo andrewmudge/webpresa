@@ -71,6 +71,22 @@ vi.mock('@/lib/db/postcards', () => ({
   deletePostcardById: mockDeletePostcardById,
 }));
 
+vi.mock('@/lib/db/claims', () => ({
+  listClaimsForBusiness: vi.fn(),
+  deleteClaimById: vi.fn(),
+  putClaim: vi.fn(),
+  revokeClaim: vi.fn(),
+}));
+
+vi.mock('@/lib/claim/token', () => ({
+  generateAndHashClaimToken: vi.fn(),
+}));
+
+vi.mock('@/lib/auth/customer-cognito', () => ({
+  adminGetCustomerEmailBySub: vi.fn(),
+}));
+
+
 vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
   deleteBusinessById: mockDeleteBusinessById,

@@ -1,12 +1,15 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import type { ClaimBannerState } from '@/lib/claim/banner-state';
 
 interface Props {
   businessName: string;
+  /** Never rendered at all for `'active'` — callers only mount this for `'unclaimed'`/`'claimed_pending'`. */
+  state: Exclude<ClaimBannerState, 'active'>;
 }
 
-export function ClaimBanner({ businessName }: Props) {
+export function ClaimBanner({ businessName, state }: Props) {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
@@ -14,13 +17,22 @@ export function ClaimBanner({ businessName }: Props) {
   return (
     <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-4">
       <p className="text-sm text-amber-800 text-center flex-1">
-        <span className="font-semibold">{businessName}</span> — this is a preview website.{' '}
-        <Link
-          href="/#contact"
-          className="underline font-medium hover:text-amber-900 transition-colors"
-        >
-          Claim it for free →
-        </Link>
+        {state === 'unclaimed' ? (
+          <>
+            <span className="font-semibold">{businessName}</span> — this is a preview website.{' '}
+            <Link
+              href="/#contact"
+              className="underline font-medium hover:text-amber-900 transition-colors"
+            >
+              Claim it for free →
+            </Link>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
+            pending.
+          </>
+        )}
       </p>
       <button
         onClick={() => setDismissed(true)}

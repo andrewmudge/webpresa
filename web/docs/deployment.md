@@ -103,7 +103,13 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `STOCK_IMAGES_TABLE_NAME` | CloudFormation export `webpresa-dev-stock-image-metadata-name` | Stock image repository (Phase 1) — table deliberately named differently from the bucket to avoid a duplicate CloudFormation export name; not yet deployed |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
-| `SESSION_SECRET` | `openssl rand -base64 32` | Signs JWT session cookies |
+| `SESSION_SECRET` | `openssl rand -base64 32` | Signs admin JWT session cookies |
+| `CLAIMS_TABLE_NAME` | CloudFormation export `webpresa-dev-claims-name` | Stage 17 — not yet deployed |
+| `CLAIM_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-claim-token` | Secrets Manager (Stage 17) — not yet deployed |
+| `COGNITO_USER_POOL_ID` | CloudFormation export `webpresa-dev-customers-user-pool-id` | Stage 17 — not yet deployed |
+| `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — not yet deployed |
+| `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
+| `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
 
 Never put these in client-side code or commit `.env` files that contain real values.
 
@@ -154,7 +160,7 @@ The user and its access keys are deliberately **not** managed by CDK — a long-
 
 `WebpresaVercelAccessStack` imports the existing user by name (`iam.User.fromUserName`) and attaches two managed policies:
 
-- `webpresa-{env}-vercel-data-access` — DynamoDB (all 5 tables + their indexes, including `scan-executions` — a gap the migration also closed, since Stage 16's internal API routes needed it and nothing had granted it yet), S3 (assets bucket), Secrets Manager (all 8 secrets).
+- `webpresa-{env}-vercel-data-access` — DynamoDB (all 6 tables + their indexes, including `scan-executions` — a gap the migration also closed, since Stage 16's internal API routes needed it and nothing had granted it yet — and `claims`, Stage 17), S3 (assets bucket), Secrets Manager (all 9 secrets, incl. `claim-token`, Stage 17), and (Stage 17) a minimal, explicit `cognito-idp:*` action set scoped to the customer User Pool ARN.
 - `webpresa-{env}-vercel-compute-invoke` — `lambda:InvokeFunction` on the screenshot Lambda (Stage 14), `states:StartExecution` on the scan workflow state machine (Stage 16).
 
 **To grant a new permission** (e.g. Stage 18 Stripe webhooks, Stage 22 Lob): add a `PolicyStatement` to the relevant `iam.ManagedPolicy` in `vercel-access-stack.ts`, then `cdk diff WebpresaDevVercelAccessStack` → review → `cdk deploy WebpresaDevVercelAccessStack`, same gate as every other resource in this repo. No more hand-run CLI commands to keep in sync with this document.
@@ -189,6 +195,8 @@ aws secretsmanager put-secret-value \
   --secret-string '{"apiKey":"AIza..."}' \
   --profile webpresa
 ```
+
+The claim-token secret (Stage 17) is generated locally, not obtained from a third party — same pattern as `capture-token`/`internal-api` (see "Stage 17" above for the full command).
 
 Because CloudFormation only touches a secret's value when the CDK construct's `jsonKeys` change, running `cdk deploy` afterward does not overwrite a value set this way. Never paste real secret values into a commit, a CDK construct prop, or this document.
 
@@ -477,15 +485,63 @@ Add `INTERNAL_API_SECRET_NAME` (`webpresa-dev-internal-api`), `SCAN_EXECUTIONS_T
 
 ---
 
+## Stage 17 — Website Claim Flow deployment guidance
+
+**Not yet deployed.** Adds one new table (`claims` — carries both claim records and, as a distinct item shape, rate-limit counters), one new GSI on the existing `businesses` table (`owner-user-id-index`), one new secret (`claim-token`), and one new Cognito User Pool + Client (`customerUserPool`/`customerUserPoolClient`) — all inside the existing `WebpresaDataStack`, no new stack. `WebpresaVercelAccessStack` gains the corresponding grants (Claims table ARN, claim-token secret ARN, a minimal explicit `cognito-idp:*` action set on the User Pool ARN). `cdk diff WebpresaDevDataStack` for this stage is purely additive — one new table, one new User Pool/Client, one new secret, and an in-place (non-replacing) GSI addition to the existing Businesses table.
+
+### Deploy sequence (first time)
+
+```bash
+# 1. Data stack — adds the claims table, the owner-user-id-index GSI on
+#    businesses, the claim-token secret, and the customer User Pool. Review first:
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
+npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Populate the real HMAC pepper (generated locally, not obtained from a
+#    third party — same pattern as capture-token/internal-api in Stages 14/16):
+openssl rand -base64 48 | tr -d '\n' > /tmp/claim-token-secret.txt
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-claim-token \
+  --secret-string "{\"hmacSecret\":\"$(cat /tmp/claim-token-secret.txt)\"}" \
+  --profile webpresa
+rm /tmp/claim-token-secret.txt
+
+# 3. Vercel access stack — grants Claims table access, claim-token secret
+#    access, and the Cognito actions:
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+No Lambda, no ECR repo, no container image — unlike Stage 14, this stage adds no compute at all; every new capability is either a DynamoDB table/GSI, a Secrets Manager secret, or a Cognito User Pool called directly from Next.js Server Actions/Route Handlers.
+
+### Vercel environment variables
+
+Add all six new Stage 17 variables from "Required environment variables" above: `CLAIMS_TABLE_NAME` (`webpresa-dev-claims`), `CLAIM_TOKEN_SECRET_NAME` (`webpresa-dev-claim-token`), `COGNITO_USER_POOL_ID`/`COGNITO_USER_POOL_CLIENT_ID` (the `UserPoolId`/`UserPoolClientId` CloudFormation outputs from step 1 above), and freshly generated `CUSTOMER_SESSION_SECRET`/`CLAIM_ATTEMPT_SECRET` values (`openssl rand -base64 32` each — do not reuse `SESSION_SECRET` or each other).
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `CLAIM_TOKEN_SECRET_NAME` missing/wrong | Every claim-token hash/verify call throws before any DynamoDB read — `/claim/[claimToken]` and the manual entry form both fail closed with the generic invalid-token page, never a raw error |
+| `COGNITO_USER_POOL_ID`/`COGNITO_USER_POOL_CLIENT_ID` missing/wrong | Every sign-up/sign-in call throws; `/claim/continue` and `/account/sign-in` both fail rather than silently succeeding — there is no fallback authentication path |
+| `webpresa-vercel-dev` missing the Cognito grant | `AccessDeniedException` from the Cognito SDK call itself, mapped to the generic `'unknown'` reason code — no Cognito-specific error text reaches the client |
+| `CUSTOMER_SESSION_SECRET`/`CLAIM_ATTEMPT_SECRET` missing | The relevant cookie module throws immediately (`"... environment variable is not set"`) rather than signing with an empty/undefined key |
+| Real signup volume exceeds Cognito's default ~50 emails/day | Confirmation/reset emails silently stop sending past the cap — deferred fix is configuring the User Pool for SES-backed email (see `architecture.md`, "Authentication → Customer") |
+
+---
+
 ## Deployment order
 
 Infrastructure must be deployed before application code that depends on it.
 
 ```
 1. CDK bootstrap (once per account/region)
-2. WebpresaDevDataStack                 ← DynamoDB tables, S3 bucket, secrets (incl. Stage 14's
+2. WebpresaDevDataStack                 ← DynamoDB tables, S3 bucket, secrets, and the Stage 17
+                                            customer Cognito User Pool (incl. Stage 14's
                                             capture-token and Stage 16's internal-api, deployed,
-                                            real values populated)
+                                            real values populated; Stage 17's claims table,
+                                            owner-user-id-index GSI, claim-token secret, and
+                                            User Pool — not yet deployed)
 3. Create webpresa-vercel-dev IAM user and add keys to Vercel (manual, one-time — see "AWS
                                             credentials for Vercel" above)
 4. WebpresaDevScreenshotRepositoryStack ← Stage 14 — ECR repo (deployed)
@@ -496,10 +552,14 @@ Infrastructure must be deployed before application code that depends on it.
                                             Connection (depends on #2's internal-api secret) —
                                             deployed, see "Stage 16" above
 8. WebpresaDevVercelAccessStack         ← every webpresa-vercel-dev permission (data access +
-                                            compute invoke), depends on #2, #6, #7 — replaces the
-                                            old manual `aws iam put-user-policy` steps entirely,
-                                            see "AWS credentials for Vercel" above
-9. (future) Auth stack   ← Cognito (when multi-user admin is needed)
+                                            compute invoke + Stage 17's Cognito actions), depends
+                                            on #2, #6, #7 — replaces the old manual
+                                            `aws iam put-user-policy` steps entirely, see "AWS
+                                            credentials for Vercel" above; Stage 17's grants not
+                                            yet deployed, see "Stage 17" above
+9. (future) Admin multi-user auth       ← Cognito for the *admin* app specifically (still deferred —
+                                            not the same Cognito User Pool as Stage 17's customer
+                                            accounts, which is deployed as part of #2 above)
 10. Web application      ← Vercel deployment (automatic on push)
 ```
 

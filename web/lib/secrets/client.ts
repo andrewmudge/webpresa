@@ -66,6 +66,11 @@ export const SECRET_CAPTURE_TOKEN = () => getSecretName('CAPTURE_TOKEN_SECRET_NA
 // (via an EventBridge Connection) into this app's `/api/internal/scan/*`
 // routes. See `lib/internal-auth.ts`.
 export const SECRET_INTERNAL_API = () => getSecretName('INTERNAL_API_SECRET_NAME');
+// Stage 17 — HMAC pepper for hashing claim tokens (see lib/claim/token.ts).
+// Held entirely within this platform, provisioned the same way as
+// capture-token above: a random placeholder at creation, a real value
+// populated out-of-band.
+export const SECRET_CLAIM_TOKEN = () => getSecretName('CLAIM_TOKEN_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval
