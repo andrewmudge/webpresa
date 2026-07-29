@@ -18,7 +18,7 @@ export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClai
   if (dismissed) return null;
 
   return (
-    <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-4">
+    <div className="sticky top-0 z-[60] bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-4">
       <p className="text-sm text-amber-800 text-center flex-1">
         {state === 'claimed_pending' ? (
           <>
