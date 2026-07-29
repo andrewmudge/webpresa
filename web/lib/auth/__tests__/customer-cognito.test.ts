@@ -23,8 +23,10 @@ import {
   signUpCustomer,
   signInCustomer,
   confirmCustomerPasswordReset,
-  adminGetCustomerEmailBySub,
+  adminGetCustomerProfileBySub,
 } from '../customer-cognito';
+
+const testProfile = { firstName: 'Jane', lastName: 'Doe', phone: '555-123-4567' };
 
 function fakeIdToken(claims: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url');
@@ -48,31 +50,31 @@ beforeEach(() => {
 describe('signUpCustomer', () => {
   it('returns ok on success', async () => {
     mockSend.mockResolvedValueOnce({});
-    const result = await signUpCustomer('owner@example.com', 'correct horse battery staple');
+    const result = await signUpCustomer('owner@example.com', 'correct horse battery staple', testProfile);
     expect(result).toEqual({ ok: true });
   });
 
   it('maps UsernameExistsException to email_taken — without disclosing Cognito-specific text', async () => {
     mockSend.mockRejectedValueOnce(namedError('UsernameExistsException'));
-    const result = await signUpCustomer('owner@example.com', 'password');
+    const result = await signUpCustomer('owner@example.com', 'password', testProfile);
     expect(result).toEqual({ ok: false, reason: 'email_taken' });
   });
 
   it('maps InvalidPasswordException to weak_password', async () => {
     mockSend.mockRejectedValueOnce(namedError('InvalidPasswordException'));
-    const result = await signUpCustomer('owner@example.com', 'weak');
+    const result = await signUpCustomer('owner@example.com', 'weak', testProfile);
     expect(result).toEqual({ ok: false, reason: 'weak_password' });
   });
 
   it('maps TooManyRequestsException to rate_limited', async () => {
     mockSend.mockRejectedValueOnce(namedError('TooManyRequestsException'));
-    const result = await signUpCustomer('owner@example.com', 'password');
+    const result = await signUpCustomer('owner@example.com', 'password', testProfile);
     expect(result).toEqual({ ok: false, reason: 'rate_limited' });
   });
 
   it('maps any other error to unknown — never leaks the raw Cognito error', async () => {
     mockSend.mockRejectedValueOnce(namedError('SomeInternalCognitoDetail'));
-    const result = await signUpCustomer('owner@example.com', 'password');
+    const result = await signUpCustomer('owner@example.com', 'password', testProfile);
     expect(result).toEqual({ ok: false, reason: 'unknown' });
   });
 });
@@ -121,24 +123,38 @@ describe('confirmCustomerPasswordReset', () => {
   });
 });
 
-describe('adminGetCustomerEmailBySub', () => {
-  it('resolves the email for a well-formed sub', async () => {
+describe('adminGetCustomerProfileBySub', () => {
+  it('resolves the profile for a well-formed sub', async () => {
     mockSend.mockResolvedValueOnce({
-      Users: [{ Attributes: [{ Name: 'email', Value: 'owner@example.com' }] }],
+      Users: [
+        {
+          Attributes: [
+            { Name: 'email', Value: 'owner@example.com' },
+            { Name: 'given_name', Value: 'Jane' },
+            { Name: 'family_name', Value: 'Doe' },
+            { Name: 'phone_number', Value: '+15551234567' },
+          ],
+        },
+      ],
     });
-    const email = await adminGetCustomerEmailBySub('12345678-1234-1234-1234-123456789012');
-    expect(email).toBe('owner@example.com');
+    const profile = await adminGetCustomerProfileBySub('12345678-1234-1234-1234-123456789012');
+    expect(profile).toEqual({
+      email: 'owner@example.com',
+      firstName: 'Jane',
+      lastName: 'Doe',
+      phone: '+15551234567',
+    });
   });
 
   it('rejects a malformed sub without calling Cognito at all', async () => {
-    const email = await adminGetCustomerEmailBySub('; DROP TABLE users; --');
-    expect(email).toBeNull();
+    const profile = await adminGetCustomerProfileBySub('; DROP TABLE users; --');
+    expect(profile).toBeNull();
     expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('returns null when no user matches', async () => {
     mockSend.mockResolvedValueOnce({ Users: [] });
-    const email = await adminGetCustomerEmailBySub('12345678-1234-1234-1234-123456789012');
-    expect(email).toBeNull();
+    const profile = await adminGetCustomerProfileBySub('12345678-1234-1234-1234-123456789012');
+    expect(profile).toBeNull();
   });
 });

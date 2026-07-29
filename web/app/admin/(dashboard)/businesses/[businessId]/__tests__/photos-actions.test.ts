@@ -62,7 +62,7 @@ vi.mock('@/lib/claim/token', () => ({
 }));
 
 vi.mock('@/lib/auth/customer-cognito', () => ({
-  adminGetCustomerEmailBySub: vi.fn(),
+  adminGetCustomerProfileBySub: vi.fn(),
 }));
 
 

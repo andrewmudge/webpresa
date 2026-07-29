@@ -7,6 +7,7 @@ import { getScanEventById } from '@/lib/db/scan-events';
 import { getSession } from '@/lib/auth/session';
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-token';
 import { getClaimBannerState } from '@/lib/claim/banner-state';
+import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
 import { GeneratedWebsite } from './template';
 
 export const dynamic = 'force-dynamic';
@@ -117,6 +118,10 @@ export default async function PreviewPage({ params }: Props) {
 
   const claimBannerState = getClaimBannerState(business);
 
+  const cookieStore = await cookies();
+  const claimIntent = await verifyClaimIntent(cookieStore.get(CLAIM_INTENT_COOKIE_NAME)?.value);
+  const hasMatchingClaimIntent = claimIntent?.businessId === business.businessId;
+
   return (
     <GeneratedWebsite
       preview={preview}
@@ -125,6 +130,7 @@ export default async function PreviewPage({ params }: Props) {
       logoUrl={business.logoUrl}
       industry={business.industry}
       claimBannerState={claimBannerState}
+      hasMatchingClaimIntent={hasMatchingClaimIntent}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}
     />

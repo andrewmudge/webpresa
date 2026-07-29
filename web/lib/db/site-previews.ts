@@ -68,6 +68,37 @@ export async function putSitePreview(preview: SitePreview): Promise<void> {
   );
 }
 
+/**
+ * Publishes a `draft`/`ready` preview — the missing piece that makes a
+ * business's public preview (`/b/[slug]`) actually reachable by a real,
+ * non-admin visitor. `resolvePreview()` (`app/b/[slug]/page.tsx`) only ever
+ * shows a `published` preview to anyone without an admin session, so a
+ * business with no published preview effectively doesn't exist publicly yet
+ * — this is what fixes that.
+ *
+ * Only one preview per business is ever `published` at a time: any other
+ * currently-published preview for the same business is archived first, so
+ * `getPreviewsBySlug()`'s `.find(p => p.status === 'published')` always
+ * resolves to exactly the one just published, never a stale earlier version.
+ */
+export async function publishSitePreview(previewId: string): Promise<SitePreview | null> {
+  const target = await getSitePreviewById(previewId);
+  if (!target) return null;
+
+  const siblings = await listPreviewsForBusiness(target.businessId);
+  const now = new Date().toISOString();
+
+  await Promise.all(
+    siblings
+      .filter((p) => p.previewId !== previewId && p.status === 'published')
+      .map((p) => putSitePreview({ ...p, status: 'archived', updatedAt: now })),
+  );
+
+  const published: SitePreview = { ...target, status: 'published', updatedAt: now };
+  await putSitePreview(published);
+  return published;
+}
+
 
 export async function deletePreviewById(previewId: string): Promise<void> {
   const client = getDynamoDBClient();

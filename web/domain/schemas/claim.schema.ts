@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CLAIM_STATUSES } from '@/domain/models/claim';
-import { IsoTimestampSchema } from './common.schema';
+import { AddressSchema, IsoTimestampSchema } from './common.schema';
 
 export const ClaimSchema = z.object({
   claimId: z
@@ -19,6 +19,8 @@ export const ClaimSchema = z.object({
   revokedReason: z.string().max(500).optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
+  customerSubmittedBusinessName: z.string().min(1).max(200).optional(),
+  customerSubmittedBusinessAddress: AddressSchema.optional(),
 });
 
 export type ClaimSchemaInput = z.input<typeof ClaimSchema>;

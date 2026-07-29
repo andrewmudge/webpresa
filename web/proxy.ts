@@ -13,7 +13,7 @@ import { decryptCustomerSession, CUSTOMER_SESSION_COOKIE } from '@/lib/auth/cust
  * All /account/* routes are protected the same way, using a completely
  * separate cookie/session (Stage 17) — `/claim/*` is deliberately NOT listed
  * here: it's the public claim entry point, gated by its own short-lived
- * signed claim-attempt cookie at the page/route-handler level, not a full
+ * signed claim-intent cookie at the page/route-handler level, not a full
  * customer session.
  *
  * Note: Only the session cookie is read here — no DynamoDB calls.  Full session

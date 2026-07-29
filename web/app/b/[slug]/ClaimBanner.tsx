@@ -5,11 +5,14 @@ import type { ClaimBannerState } from '@/lib/claim/banner-state';
 
 interface Props {
   businessName: string;
+  businessSlug: string;
   /** Never rendered at all for `'active'` — callers only mount this for `'unclaimed'`/`'claimed_pending'`. */
   state: Exclude<ClaimBannerState, 'active'>;
+  /** Whether this browser holds a validated claim-intent cookie for this specific business (Stage 17). */
+  hasMatchingClaimIntent: boolean;
 }
 
-export function ClaimBanner({ businessName, state }: Props) {
+export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClaimIntent }: Props) {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
@@ -17,20 +20,28 @@ export function ClaimBanner({ businessName, state }: Props) {
   return (
     <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-4">
       <p className="text-sm text-amber-800 text-center flex-1">
-        {state === 'unclaimed' ? (
+        {state === 'claimed_pending' ? (
           <>
-            <span className="font-semibold">{businessName}</span> — this is a preview website.{' '}
-            <Link
-              href="/#contact"
-              className="underline font-medium hover:text-amber-900 transition-colors"
-            >
-              Claim it for free →
+            <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
+            pending.
+          </>
+        ) : hasMatchingClaimIntent ? (
+          <>
+            Your website preview is ready. This site was prepared for{' '}
+            <span className="font-semibold">{businessName}</span>. Explore it, then{' '}
+            <Link href="/claim/continue" className="underline font-medium hover:text-amber-900 transition-colors">
+              claim my website →
             </Link>
           </>
         ) : (
           <>
-            <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
-            pending.
+            <span className="font-semibold">{businessName}</span> — is this your business?{' '}
+            <Link
+              href={`/claim?business=${businessSlug}`}
+              className="underline font-medium hover:text-amber-900 transition-colors"
+            >
+              Claim my website →
+            </Link>
           </>
         )}
       </p>

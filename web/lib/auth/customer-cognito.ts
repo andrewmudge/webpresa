@@ -89,15 +89,43 @@ function mapSignUpError(err: unknown): SignUpFailureReason {
 }
 
 /**
+ * Normalizes a US phone number to E.164 (`+1XXXXXXXXXX`) — the format Cognito
+ * requires for its `phone_number` standard attribute, or `SignUpCommand`
+ * throws `InvalidParameterException`. Callers are expected to have already
+ * validated the input is a 10-digit US number (see `SignUpSchema` in
+ * `app/claim/actions.ts`); this just reformats it.
+ */
+export function toE164UsPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  const tenDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  return `+1${tenDigits}`;
+}
+
+export interface CustomerProfileInput {
+  firstName: string;
+  lastName: string;
+  /** 10-digit US number — normalized to E.164 before reaching Cognito. */
+  phone: string;
+}
+
+/**
  * Create a new Cognito account. Cognito enforces email uniqueness natively
  * — no app-level uniqueness transaction is needed (contrast the removed
  * `CustomerAccount` email-lock-item design this replaced). Self-service
  * sign-up leaves the account `UNCONFIRMED` until `confirmCustomerSignUp`
  * succeeds with the emailed code.
+ *
+ * `given_name`/`family_name`/`phone_number` are sent as plain standard
+ * attributes — deliberately not added to the User Pool's CDK-managed
+ * `standardAttributes` schema (see `infra/lib/constructs/webpresa-user-pool.ts`),
+ * since changing that schema after pool creation forces a destructive
+ * CloudFormation replacement of the whole pool. "Required" for these three
+ * is enforced only at the application layer (`SignUpSchema`), not by Cognito.
  */
 export async function signUpCustomer(
   email: string,
   password: string,
+  profile: CustomerProfileInput,
 ): Promise<{ ok: true } | { ok: false; reason: SignUpFailureReason }> {
   try {
     await getCognitoClient().send(
@@ -105,7 +133,12 @@ export async function signUpCustomer(
         ClientId: getClientId(),
         Username: email,
         Password: password,
-        UserAttributes: [{ Name: 'email', Value: email }],
+        UserAttributes: [
+          { Name: 'email', Value: email },
+          { Name: 'given_name', Value: profile.firstName },
+          { Name: 'family_name', Value: profile.lastName },
+          { Name: 'phone_number', Value: toE164UsPhone(profile.phone) },
+        ],
       }),
     );
     return { ok: true };
@@ -242,14 +275,22 @@ export async function confirmCustomerPasswordReset(
 
 const SUB_SHAPE = /^[0-9a-f-]{10,64}$/i;
 
+export interface CustomerProfile {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}
+
 /**
- * Resolve a customer's email from their Cognito `sub` (the value stored in
- * `Business.ownerUserId`) — used only so an admin can confirm which
- * customer currently owns a business before releasing ownership. Uses
- * `ListUsers` with a `sub` filter rather than `AdminGetUser`, since the
- * Username Cognito assigns internally is not necessarily the `sub` itself.
+ * Resolve a customer's profile from their Cognito `sub` (the value stored in
+ * `Business.ownerUserId`) — used so an admin can see who currently owns a
+ * business (e.g. before releasing ownership, or just displayed on the
+ * business detail page). Uses `ListUsers` with a `sub` filter rather than
+ * `AdminGetUser`, since the Username Cognito assigns internally is not
+ * necessarily the `sub` itself.
  */
-export async function adminGetCustomerEmailBySub(sub: string): Promise<string | null> {
+export async function adminGetCustomerProfileBySub(sub: string): Promise<CustomerProfile | null> {
   if (!SUB_SHAPE.test(sub)) return null;
   try {
     const result = await getCognitoClient().send(
@@ -260,8 +301,16 @@ export async function adminGetCustomerEmailBySub(sub: string): Promise<string | 
       }),
     );
     const user = result.Users?.[0];
-    const emailAttr = user?.Attributes?.find((a) => a.Name === 'email');
-    return emailAttr?.Value ?? null;
+    if (!user) return null;
+    const attr = (name: string) => user.Attributes?.find((a) => a.Name === name)?.Value;
+    const email = attr('email');
+    if (!email) return null;
+    return {
+      email,
+      firstName: attr('given_name'),
+      lastName: attr('family_name'),
+      phone: attr('phone_number'),
+    };
   } catch {
     return null;
   }

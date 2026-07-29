@@ -7,6 +7,7 @@ interface Props {
   businessId: string;
   ownerUserId?: string;
   ownerEmail?: string;
+  ownerName?: string;
   claimedAt?: string;
   claims: Claim[];
 }
@@ -17,7 +18,7 @@ interface Props {
  * it is never persisted, and there is no "reveal again" capability, by
  * design (see implementation.md, Stage 17, "Claim-token requirements").
  */
-export function ClaimSection({ businessId, ownerUserId, ownerEmail, claimedAt, claims }: Props) {
+export function ClaimSection({ businessId, ownerUserId, ownerEmail, ownerName, claimedAt, claims }: Props) {
   const [generated, setGenerated] = useState<{ rawToken: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -66,7 +67,10 @@ export function ClaimSection({ businessId, ownerUserId, ownerEmail, claimedAt, c
       {ownerUserId ? (
         <div className="space-y-2 text-sm">
           <p className="text-gray-700">
-            Claimed by <span className="font-medium">{ownerEmail ?? ownerUserId}</span>
+            Claimed by{' '}
+            <span className="font-medium">
+              {ownerName ? `${ownerName} (${ownerEmail ?? ownerUserId})` : (ownerEmail ?? ownerUserId)}
+            </span>
             {claimedAt && <span className="text-gray-400"> · {new Date(claimedAt).toLocaleString()}</span>}
           </p>
           <button
@@ -106,19 +110,28 @@ export function ClaimSection({ businessId, ownerUserId, ownerEmail, claimedAt, c
           <p className="text-xs font-medium text-gray-500 mb-2">History</p>
           <ul className="space-y-1.5">
             {claims.map((claim) => (
-              <li key={claim.claimId} className="flex items-center justify-between text-xs text-gray-600">
-                <span>
-                  {claim.status} · {new Date(claim.createdAt).toLocaleDateString()}
-                </span>
-                {claim.status === 'issued' && (
-                  <button
-                    type="button"
-                    onClick={() => handleRevoke(claim.claimId)}
-                    disabled={isPending}
-                    className="text-red-600 hover:text-red-700 underline disabled:opacity-60"
-                  >
-                    Revoke
-                  </button>
+              <li key={claim.claimId} className="text-xs text-gray-600">
+                <div className="flex items-center justify-between">
+                  <span>
+                    {claim.status} · {new Date(claim.createdAt).toLocaleDateString()}
+                  </span>
+                  {claim.status === 'issued' && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevoke(claim.claimId)}
+                      disabled={isPending}
+                      className="text-red-600 hover:text-red-700 underline disabled:opacity-60"
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+                {claim.customerSubmittedBusinessName && (
+                  <p className="mt-0.5 text-gray-400">
+                    Customer submitted: {claim.customerSubmittedBusinessName}
+                    {claim.customerSubmittedBusinessAddress &&
+                      ` · ${claim.customerSubmittedBusinessAddress.line1}, ${claim.customerSubmittedBusinessAddress.city}, ${claim.customerSubmittedBusinessAddress.state} ${claim.customerSubmittedBusinessAddress.postalCode}`}
+                  </p>
                 )}
               </li>
             ))}

@@ -8,7 +8,7 @@ import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
 import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
 import { listClaimsForBusiness } from '@/lib/db/claims';
-import { adminGetCustomerEmailBySub } from '@/lib/auth/customer-cognito';
+import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { ClaimSection } from './ClaimSection';
 import {
   // createSeedPreviewAction, — unused now that "Create test preview" is disabled (see Preview actions card below)
@@ -29,6 +29,7 @@ import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
+import { PublishPreviewButton } from './PublishPreviewButton';
 import { WorkflowSection } from './WorkflowSection';
 import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
@@ -92,9 +93,12 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
 
   if (!business) notFound();
 
-  const ownerEmail = business.ownerUserId
-    ? ((await adminGetCustomerEmailBySub(business.ownerUserId)) ?? undefined)
-    : undefined;
+  const ownerProfile = business.ownerUserId ? await adminGetCustomerProfileBySub(business.ownerUserId) : null;
+  const ownerEmail = ownerProfile?.email ?? undefined;
+  const ownerName =
+    ownerProfile?.firstName && ownerProfile?.lastName
+      ? `${ownerProfile.firstName} ${ownerProfile.lastName}`
+      : undefined;
 
   const detailPageUrl = `/admin/businesses/${businessId}`;
 
@@ -193,6 +197,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           businessId={businessId}
           ownerUserId={business.ownerUserId}
           ownerEmail={ownerEmail}
+          ownerName={ownerName}
           claimedAt={business.claimedAt}
           claims={claims}
         />
@@ -374,6 +379,15 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
                 Live URL: <span className="font-mono">/b/{business.slug}</span>
               </p>
             )}
+            {previews[0] && (previews[0].status === 'draft' || previews[0].status === 'ready') && (
+              <div className="mt-3">
+                <PublishPreviewButton
+                  businessId={businessId}
+                  previewId={previews[0].previewId}
+                  version={previews[0].version}
+                />
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-gray-100">
@@ -396,8 +410,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
 
         {/* Deferred actions */}
         <div className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-400 text-center">
-          Actions — <em>Run scan, Generate postcard, Publish preview (AI)</em> — will be
-          available in later stages.
+          Actions — <em>Run scan, Generate postcard</em> — will be available in later stages.
         </div>
       </div>
     </div>

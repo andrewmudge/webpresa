@@ -1,6 +1,7 @@
 import 'server-only';
 import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import type { Address } from '@/domain/models/common';
 import type { Claim } from '@/domain/models/claim';
 import { ClaimSchema } from '@/domain/schemas/claim.schema';
 import { getDynamoDBClient, TABLE_CLAIMS, TABLE_BUSINESSES } from './client';
@@ -121,6 +122,32 @@ export async function putClaim(claim: Claim): Promise<void> {
     new PutCommand({
       TableName: TABLE_CLAIMS(),
       Item: claim,
+    }),
+  );
+}
+
+/**
+ * Records what the customer typed for "Business Name"/"Business Address" at
+ * sign-up — informational only, never written to `Business.name`/`address`
+ * (which remain canonical). Unconditional; this isn't a status transition.
+ */
+export async function recordCustomerSubmittedBusinessInfo(
+  claimId: string,
+  info: { businessName: string; businessAddress: Address },
+): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_CLAIMS(),
+      Key: { claimId },
+      UpdateExpression:
+        'SET customerSubmittedBusinessName = :name, customerSubmittedBusinessAddress = :address, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':name': info.businessName,
+        ':address': info.businessAddress,
+        ':now': now,
+      },
     }),
   );
 }

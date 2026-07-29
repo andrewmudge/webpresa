@@ -21,7 +21,7 @@ vi.mock('server-only', () => ({}));
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { getPreviewsBySlug, getSitePreviewById, putSitePreview } from '@/lib/db/site-previews';
+import { getPreviewsBySlug, getSitePreviewById, putSitePreview, publishSitePreview } from '@/lib/db/site-previews';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 
 // ---------------------------------------------------------------------------
@@ -141,5 +141,65 @@ describe('putSitePreview', () => {
     const invalid = { ...makePreview(), status: 'not-a-status' } as unknown as Parameters<typeof putSitePreview>[0];
     await expect(putSitePreview(invalid)).rejects.toThrow();
     expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// publishSitePreview
+// ---------------------------------------------------------------------------
+
+describe('publishSitePreview', () => {
+  it('returns null when the target preview does not exist', async () => {
+    mockSend.mockResolvedValueOnce({ Item: undefined }); // getSitePreviewById
+    const result = await publishSitePreview('preview_notfound');
+    expect(result).toBeNull();
+  });
+
+  it('publishes the target preview', async () => {
+    const target = makePreview({ status: 'draft' });
+    mockSend.mockResolvedValueOnce({ Item: target }); // getSitePreviewById
+    mockSend.mockResolvedValueOnce({ Items: [target] }); // listPreviewsForBusiness (no other siblings)
+    mockSend.mockResolvedValueOnce({}); // putSitePreview (publish target)
+
+    const result = await publishSitePreview(target.previewId);
+
+    expect(result?.status).toBe('published');
+    const publishCall = mockSend.mock.calls[2][0].input;
+    expect(publishCall.Item.previewId).toBe(target.previewId);
+    expect(publishCall.Item.status).toBe('published');
+  });
+
+  it('archives a different currently-published sibling for the same business', async () => {
+    const target = makePreview({ status: 'draft', previousVersion: 1 }); // version 2
+    const previouslyPublished = makePreview({ status: 'published', previousVersion: 0 }); // version 1
+
+    mockSend.mockResolvedValueOnce({ Item: target }); // getSitePreviewById
+    mockSend.mockResolvedValueOnce({ Items: [target, previouslyPublished] }); // listPreviewsForBusiness
+    mockSend.mockResolvedValueOnce({}); // putSitePreview (archive sibling)
+    mockSend.mockResolvedValueOnce({}); // putSitePreview (publish target)
+
+    await publishSitePreview(target.previewId);
+
+    const archiveCall = mockSend.mock.calls[2][0].input;
+    expect(archiveCall.Item.previewId).toBe(previouslyPublished.previewId);
+    expect(archiveCall.Item.status).toBe('archived');
+
+    const publishCall = mockSend.mock.calls[3][0].input;
+    expect(publishCall.Item.previewId).toBe(target.previewId);
+    expect(publishCall.Item.status).toBe('published');
+  });
+
+  it('does not touch draft/ready/archived siblings, only a published one', async () => {
+    const target = makePreview({ status: 'draft', previousVersion: 2 });
+    const draftSibling = makePreview({ status: 'draft', previousVersion: 0 });
+    const archivedSibling = makePreview({ status: 'archived', previousVersion: 1 });
+
+    mockSend.mockResolvedValueOnce({ Item: target });
+    mockSend.mockResolvedValueOnce({ Items: [target, draftSibling, archivedSibling] });
+    mockSend.mockResolvedValueOnce({}); // putSitePreview (publish target) — the only put call
+
+    await publishSitePreview(target.previewId);
+
+    expect(mockSend).toHaveBeenCalledTimes(3);
   });
 });

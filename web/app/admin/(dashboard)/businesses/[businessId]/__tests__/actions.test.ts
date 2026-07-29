@@ -13,6 +13,7 @@ const {
   mockPutSitePreview,
   mockListPreviewsForBusiness,
   mockDeletePreviewById,
+  mockPublishSitePreview,
   mockListScansForBusiness,
   mockDeleteScanEventById,
   mockListPostcardsForBusiness,
@@ -27,6 +28,7 @@ const {
   mockPutSitePreview: vi.fn(),
   mockListPreviewsForBusiness: vi.fn(),
   mockDeletePreviewById: vi.fn(),
+  mockPublishSitePreview: vi.fn(),
   mockListScansForBusiness: vi.fn(),
   mockDeleteScanEventById: vi.fn(),
   mockListPostcardsForBusiness: vi.fn(),
@@ -59,6 +61,7 @@ vi.mock('@/lib/db/site-previews', () => ({
   putSitePreview: mockPutSitePreview,
   listPreviewsForBusiness: mockListPreviewsForBusiness,
   deletePreviewById: mockDeletePreviewById,
+  publishSitePreview: mockPublishSitePreview,
 }));
 
 vi.mock('@/lib/db/scan-events', () => ({
@@ -83,7 +86,7 @@ vi.mock('@/lib/claim/token', () => ({
 }));
 
 vi.mock('@/lib/auth/customer-cognito', () => ({
-  adminGetCustomerEmailBySub: vi.fn(),
+  adminGetCustomerProfileBySub: vi.fn(),
 }));
 
 
@@ -128,7 +131,7 @@ vi.mock('next/navigation', () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { updatePreviewCtaAction, generateWebsiteAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
+import { updatePreviewCtaAction, generateWebsiteAction, publishPreviewAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
 import type { SitePreview } from '@/domain/models/site-preview';
 import type { Business } from '@/domain/models/business';
 
@@ -230,6 +233,52 @@ describe('generateWebsiteAction', () => {
     const result = await generateWebsiteAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
     expect(result?.message).toBe('Unauthorized');
     expect(mockGenerateAndSaveWebsite).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// publishPreviewAction
+// ---------------------------------------------------------------------------
+
+describe('publishPreviewAction', () => {
+  it('publishes the preview, updates Business.currentPreviewId, and redirects', async () => {
+    const published = { ...EXISTING_PREVIEW, status: 'published' as const };
+    mockPublishSitePreview.mockResolvedValueOnce(published);
+
+    await expect(
+      publishPreviewAction(EXISTING_BUSINESS.businessId, EXISTING_PREVIEW.previewId, undefined, new FormData()),
+    ).rejects.toThrow(`REDIRECT:/admin/businesses/${EXISTING_BUSINESS.businessId}`);
+
+    expect(mockPublishSitePreview).toHaveBeenCalledWith(EXISTING_PREVIEW.previewId);
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, {
+      currentPreviewId: published.previewId,
+    });
+  });
+
+  it('returns an error without redirecting when the preview is not found', async () => {
+    mockPublishSitePreview.mockResolvedValueOnce(null);
+
+    const result = await publishPreviewAction(
+      EXISTING_BUSINESS.businessId,
+      'preview_missing',
+      undefined,
+      new FormData(),
+    );
+
+    expect(result?.error).toBe('Preview not found.');
+    expect(mockUpdateBusiness).not.toHaveBeenCalled();
+  });
+
+  it('returns Unauthorized when session is missing, without calling publishSitePreview', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const result = await publishPreviewAction(
+      EXISTING_BUSINESS.businessId,
+      EXISTING_PREVIEW.previewId,
+      undefined,
+      new FormData(),
+    );
+    expect(result?.error).toBe('Unauthorized');
+    expect(mockPublishSitePreview).not.toHaveBeenCalled();
   });
 });
 

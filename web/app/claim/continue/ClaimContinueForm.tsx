@@ -11,6 +11,9 @@ interface Props {
   businessName: string;
 }
 
+const inputClassName =
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent';
+
 export function ClaimContinueForm({ businessName }: Props) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
   const [password, setPassword] = useState('');
@@ -92,19 +95,48 @@ export function ClaimContinueForm({ businessName }: Props) {
 
       {mode === 'signup' ? (
         <>
+          <p className="text-xs text-gray-500">
+            You&apos;ll use this account to subscribe, edit, and manage your website.
+          </p>
           {signUpState?.step === 'signup' && signUpState.error && (
             <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
               {signUpState.error}
             </div>
           )}
           <form action={signUpFormAction} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                name="firstName"
+                type="text"
+                placeholder="First name"
+                required
+                autoComplete="given-name"
+                className={inputClassName}
+              />
+              <input
+                name="lastName"
+                type="text"
+                placeholder="Last name"
+                required
+                autoComplete="family-name"
+                className={inputClassName}
+              />
+            </div>
             <input
               name="email"
               type="email"
               placeholder="Email"
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+              className={inputClassName}
+            />
+            <input
+              name="phone"
+              type="tel"
+              placeholder="Phone number"
+              required
+              autoComplete="tel"
+              className={inputClassName}
             />
             <input
               name="password"
@@ -114,8 +146,57 @@ export function ClaimContinueForm({ businessName }: Props) {
               autoComplete="new-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+              className={inputClassName}
             />
+
+            <div className="pt-2 border-t border-gray-100">
+              <p className="text-xs font-medium text-gray-500 mb-2">Business information</p>
+              <div className="space-y-3">
+                <input
+                  name="businessName"
+                  type="text"
+                  placeholder="Business name"
+                  required
+                  autoComplete="organization"
+                  className={inputClassName}
+                />
+                <input
+                  name="addressLine1"
+                  type="text"
+                  placeholder="Street address"
+                  required
+                  autoComplete="address-line1"
+                  className={inputClassName}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    name="addressCity"
+                    type="text"
+                    placeholder="City"
+                    required
+                    autoComplete="address-level2"
+                    className={inputClassName}
+                  />
+                  <input
+                    name="addressState"
+                    type="text"
+                    placeholder="State"
+                    required
+                    autoComplete="address-level1"
+                    className={inputClassName}
+                  />
+                </div>
+                <input
+                  name="addressPostalCode"
+                  type="text"
+                  placeholder="ZIP code"
+                  required
+                  autoComplete="postal-code"
+                  className={inputClassName}
+                />
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={signUpPending}
@@ -139,7 +220,7 @@ export function ClaimContinueForm({ businessName }: Props) {
               placeholder="Email"
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+              className={inputClassName}
             />
             <input
               name="password"
@@ -149,7 +230,7 @@ export function ClaimContinueForm({ businessName }: Props) {
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+              className={inputClassName}
             />
             <button
               type="submit"

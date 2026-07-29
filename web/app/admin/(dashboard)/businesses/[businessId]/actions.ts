@@ -15,6 +15,7 @@ import {
   getSitePreviewById,
   putSitePreview,
   deletePreviewById,
+  publishSitePreview,
 } from '@/lib/db/site-previews';
 import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
@@ -22,7 +23,7 @@ import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness, relea
 import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@/lib/db/claims';
 import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
-import { adminGetCustomerEmailBySub } from '@/lib/auth/customer-cognito';
+import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { getSession } from '@/lib/auth/session';
 import type { WebsiteSectionsConfig } from '@/domain/models/website-sections';
 import { WEBSITE_SECTION_TYPES, REQUIRED_SECTION_TYPES, SECTION_CONFIG_VERSION } from '@/domain/constants/website-sections';
@@ -867,6 +868,41 @@ export async function createSeedPreviewAction(businessId: string): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
+// Publish preview — makes a draft/ready preview publicly visible at /b/[slug]
+// ---------------------------------------------------------------------------
+
+export type PublishPreviewState = { error?: string } | undefined;
+
+/**
+ * Publishes a `draft`/`ready` preview. Until this exists, `resolvePreview()`
+ * (`app/b/[slug]/page.tsx`) never shows anything to a non-admin visitor —
+ * the "DRAFT PREVIEW — visible to admins only" banner is the *only* thing a
+ * real customer would otherwise see (or rather, they'd 404, since that
+ * banner itself is admin-only). The Stage 17 claim flow redirects a
+ * validated visitor straight to `/b/[slug]`, so a business needs a published
+ * preview before its claim link is usable by an actual customer.
+ */
+export async function publishPreviewAction(
+  businessId: string,
+  previewId: string,
+  // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _prevState: PublishPreviewState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _formData: FormData,
+): Promise<PublishPreviewState> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const published = await publishSitePreview(previewId);
+  if (!published) return { error: 'Preview not found.' };
+
+  await updateBusiness(businessId, { currentPreviewId: published.previewId });
+
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+// ---------------------------------------------------------------------------
 // Manual AI website generation (Stage 11)
 // ---------------------------------------------------------------------------
 
@@ -1504,11 +1540,11 @@ export async function releaseOwnershipAction(businessId: string): Promise<Releas
   if (!business) return { error: 'Business not found' };
   if (!business.ownerUserId) return { error: 'This business is not currently claimed.' };
 
-  const releasedOwnerEmail = await adminGetCustomerEmailBySub(business.ownerUserId);
+  const ownerProfile = await adminGetCustomerProfileBySub(business.ownerUserId);
   const released = await releaseOwnership(businessId);
   if (!released) return { error: 'This business is not currently claimed.' };
 
-  return { releasedOwnerEmail: releasedOwnerEmail ?? undefined };
+  return { releasedOwnerEmail: ownerProfile?.email ?? undefined };
 }
 
 // ---------------------------------------------------------------------------

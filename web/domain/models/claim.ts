@@ -1,4 +1,4 @@
-import type { MutableTimestampedRecord } from './common';
+import type { Address, MutableTimestampedRecord } from './common';
 
 // ---------------------------------------------------------------------------
 // Status enum
@@ -44,4 +44,18 @@ export interface Claim extends MutableTimestampedRecord {
   revokedAt?: string;
   /** Free text, admin-entered. */
   revokedReason?: string;
+
+  // -------------------------------------------------------------------------
+  // Customer-submitted business info (collected at sign-up)
+  //
+  // What the customer typed in for "Business Name"/"Business Address" during
+  // account creation — informational only, for admin reference/reconciliation.
+  // Deliberately NOT written to `Business.name`/`Business.address` (which
+  // remain canonical, usually admin-entered/Google-Places-sourced) — see
+  // architecture.md, "Business is canonical". Set once, at sign-up, via
+  // `recordCustomerSubmittedBusinessInfo` (`lib/db/claims.ts`).
+  // -------------------------------------------------------------------------
+
+  customerSubmittedBusinessName?: string;
+  customerSubmittedBusinessAddress?: Address;
 }

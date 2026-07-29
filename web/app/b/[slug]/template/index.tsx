@@ -19,6 +19,8 @@ interface Props {
   logoUrl?: string;
   industry?: Industry;
   claimBannerState: ClaimBannerState;
+  /** Whether this browser holds a signed claim-intent cookie for this specific business. */
+  hasMatchingClaimIntent: boolean;
   isDraft: boolean;
   isAdmin: boolean;
 }
@@ -30,6 +32,7 @@ export function GeneratedWebsite({
   logoUrl,
   industry,
   claimBannerState,
+  hasMatchingClaimIntent,
   isDraft,
   isAdmin,
 }: Props) {
@@ -85,7 +88,12 @@ export function GeneratedWebsite({
             than losing the banner entirely (see implementation.md, Stage 17,
             "Public claim-banner behavior"). */}
         {claimBannerState !== 'active' && !isDraft && (
-          <ClaimBanner businessName={businessName} state={claimBannerState} />
+          <ClaimBanner
+            businessName={businessName}
+            state={claimBannerState}
+            businessSlug={business.slug}
+            hasMatchingClaimIntent={hasMatchingClaimIntent}
+          />
         )}
 
         {/* Configured sections, rendered in order through the controlled registry */}

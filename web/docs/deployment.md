@@ -104,10 +104,10 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `ADMIN_USERNAME` | Set manually | Admin sign-in username |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | No quoting needed; pure hex output |
 | `SESSION_SECRET` | `openssl rand -base64 32` | Signs admin JWT session cookies |
-| `CLAIMS_TABLE_NAME` | CloudFormation export `webpresa-dev-claims-name` | Stage 17 — not yet deployed |
-| `CLAIM_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-claim-token` | Secrets Manager (Stage 17) — not yet deployed |
-| `COGNITO_USER_POOL_ID` | CloudFormation export `webpresa-dev-customers-user-pool-id` | Stage 17 — not yet deployed |
-| `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — not yet deployed |
+| `CLAIMS_TABLE_NAME` | CloudFormation export `webpresa-dev-claims-name` | Stage 17 — deployed (`webpresa-dev-claims`) |
+| `CLAIM_TOKEN_SECRET_NAME` | Deterministic name — `webpresa-dev-claim-token` | Secrets Manager (Stage 17) — deployed, real `hmacSecret` populated |
+| `COGNITO_USER_POOL_ID` | CloudFormation export `webpresa-dev-customers-user-pool-id` | Stage 17 — deployed (`webpresa-dev-customers`) |
+| `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — deployed |
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
 
@@ -399,6 +399,24 @@ The first `generated_preview` capture run from the actual admin UI (not a script
 
 Verified against [Vercel's own current documentation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) before implementing — their own Playwright example uses the identical header pair.
 
+### Manual browser testing on the `dev` Preview deployment (hit while testing Stage 17, 2026-07-29)
+
+Same platform-level gate as above, hit again by a *human* this time: an incognito browser navigating straight to `https://webpresa-git-dev-andrew-mudges-projects.vercel.app/claim/<code>` — to test the claim flow as a fresh, unauthenticated customer — was redirected to Vercel's own login page instead of reaching `/claim/[claimToken]` at all. The Stage 14 fix above doesn't transfer here: it delivers the bypass secret as an HTTP request header (`x-vercel-protection-bypass`) sent by Playwright's browser context, and a real browser's address bar has no way to attach a custom header to a plain navigation.
+
+Vercel's "Protection Bypass for Automation" supports a second delivery mode for exactly this case — a query-string parameter on the first request, which sets a cookie for the rest of that browser session. Same secret as Stage 14 (`webpresa-{env}-vercel-protection-bypass`'s value from Vercel's dashboard) — do not generate a second one, or the copy in Secrets Manager the screenshot Lambda reads goes stale.
+
+Confirmed working procedure:
+
+1. Get the bypass secret's value: Vercel dashboard → Project → Settings → Deployment Protection → "Protection Bypass for Automation."
+2. In the incognito/test browser, before doing anything else, visit:
+   `https://<preview-domain>/?x-vercel-protection-bypass=<secret>&x-vercel-set-bypass-cookie=true`
+   — this sets a bypass cookie scoped to that deployment's host.
+3. Then navigate normally (e.g. to `/claim/<code>`) in the same window — every subsequent request in that session passes the edge gate like a normal unauthenticated visitor.
+
+Lower-effort alternatives, if handling the raw secret value by hand each time is undesirable:
+- Vercel's dashboard **"Share"** link on the specific deployment (Deployments list → the deployment → "..." menu) — one click, sets the same kind of bypass cookie, no secret copy/paste.
+- Log into Vercel in the test browser first (any account with project access) — simplest, but no longer simulates a true first-time anonymous visitor, so it's weaker for testing the real customer experience end to end.
+
 ### Extending `webpresa-vercel-dev` (manual, outside CDK) — done 2026-07-23
 
 This IAM user is created and managed via AWS CLI commands (see "AWS credentials for Vercel" above), not CDK — it needed two new grants before the Next.js app can invoke the Lambda and verify capture tokens, both applied:
@@ -487,7 +505,7 @@ Add `INTERNAL_API_SECRET_NAME` (`webpresa-dev-internal-api`), `SCAN_EXECUTIONS_T
 
 ## Stage 17 — Website Claim Flow deployment guidance
 
-**Not yet deployed.** Adds one new table (`claims` — carries both claim records and, as a distinct item shape, rate-limit counters), one new GSI on the existing `businesses` table (`owner-user-id-index`), one new secret (`claim-token`), and one new Cognito User Pool + Client (`customerUserPool`/`customerUserPoolClient`) — all inside the existing `WebpresaDataStack`, no new stack. `WebpresaVercelAccessStack` gains the corresponding grants (Claims table ARN, claim-token secret ARN, a minimal explicit `cognito-idp:*` action set on the User Pool ARN). `cdk diff WebpresaDevDataStack` for this stage is purely additive — one new table, one new User Pool/Client, one new secret, and an in-place (non-replacing) GSI addition to the existing Businesses table.
+**Deployed to dev 2026-07-28.** Adds one new table (`claims` — carries both claim records and, as a distinct item shape, rate-limit counters), one new GSI on the existing `businesses` table (`owner-user-id-index`), one new secret (`claim-token`), and one new Cognito User Pool + Client (`customerUserPool`/`customerUserPoolClient`) — all inside the existing `WebpresaDataStack`, no new stack. `WebpresaVercelAccessStack` gains the corresponding grants (Claims table ARN, claim-token secret ARN, a minimal explicit `cognito-idp:*` action set on the User Pool ARN). `cdk diff WebpresaDevDataStack` for this stage is purely additive — one new table, one new User Pool/Client, one new secret, and an in-place (non-replacing) GSI addition to the existing Businesses table. `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` are both live (verified directly via `aws dynamodb list-tables`, `aws cognito-idp list-user-pools`, `aws secretsmanager describe-secret`, and `aws iam get-policy-version` — the data-access policy's `v4`, dated 2026-07-28, includes the claims table, claim-token secret, and Cognito grants).
 
 ### Deploy sequence (first time)
 
@@ -541,7 +559,7 @@ Infrastructure must be deployed before application code that depends on it.
                                             capture-token and Stage 16's internal-api, deployed,
                                             real values populated; Stage 17's claims table,
                                             owner-user-id-index GSI, claim-token secret, and
-                                            User Pool — not yet deployed)
+                                            User Pool — deployed)
 3. Create webpresa-vercel-dev IAM user and add keys to Vercel (manual, one-time — see "AWS
                                             credentials for Vercel" above)
 4. WebpresaDevScreenshotRepositoryStack ← Stage 14 — ECR repo (deployed)
@@ -555,8 +573,8 @@ Infrastructure must be deployed before application code that depends on it.
                                             compute invoke + Stage 17's Cognito actions), depends
                                             on #2, #6, #7 — replaces the old manual
                                             `aws iam put-user-policy` steps entirely, see "AWS
-                                            credentials for Vercel" above; Stage 17's grants not
-                                            yet deployed, see "Stage 17" above
+                                            credentials for Vercel" above; Stage 17's grants
+                                            deployed, see "Stage 17" above
 9. (future) Admin multi-user auth       ← Cognito for the *admin* app specifically (still deferred —
                                             not the same Cognito User Pool as Stage 17's customer
                                             accounts, which is deployed as part of #2 above)

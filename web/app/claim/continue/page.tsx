@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { CLAIM_ATTEMPT_COOKIE_NAME, verifyClaimAttempt } from '@/lib/auth/claim-attempt';
+import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
 import { getClaimById, isClaimUsable } from '@/lib/db/claims';
 import { getBusinessById } from '@/lib/db/businesses';
 import { ClaimContinueForm } from './ClaimContinueForm';
@@ -8,19 +8,20 @@ import { ClaimContinueForm } from './ClaimContinueForm';
 export const dynamic = 'force-dynamic';
 
 /**
- * Sign-up-or-sign-in, scoped to a specific claim attempt (Stage 17). Gated
- * by the short-lived, signed `claim_attempt` cookie only — never a full
- * customer session, and never the raw token. Every load re-validates the
- * claim's current state server-side; the cookie's signature only proves it
- * wasn't tampered with in the browser.
+ * Sign-up-or-sign-in, scoped to a specific claim intent (Stage 17). Gated by
+ * the short-lived, signed `claim_intent` cookie only — never a full customer
+ * session, and never the raw token. Every load re-validates the claim's
+ * current state server-side; the cookie's signature only proves it wasn't
+ * tampered with in the browser (see `completeClaimIntent` in
+ * `app/claim/actions.ts` for the same re-validation at submission time).
  */
 export default async function ClaimContinuePage() {
   const cookieStore = await cookies();
-  const attempt = await verifyClaimAttempt(cookieStore.get(CLAIM_ATTEMPT_COOKIE_NAME)?.value);
-  if (!attempt) redirect('/claim?error=1');
+  const intent = await verifyClaimIntent(cookieStore.get(CLAIM_INTENT_COOKIE_NAME)?.value);
+  if (!intent) redirect('/claim?error=1');
 
-  const claim = await getClaimById(attempt.claimId);
-  if (!claim || !isClaimUsable(claim)) {
+  const claim = await getClaimById(intent.claimId);
+  if (!claim || claim.businessId !== intent.businessId || !isClaimUsable(claim)) {
     redirect('/claim?error=1');
   }
 

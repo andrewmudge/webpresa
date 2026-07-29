@@ -115,15 +115,24 @@ describe('validateClaimToken', () => {
     expect(result).toEqual({ outcome: 'invalid' });
   });
 
-  it('returns "valid" with the business name for a genuinely valid, issued, unexpired claim', async () => {
+  it('returns "valid" with the business name/slug for a genuinely valid, issued, unexpired claim', async () => {
     mockGetClaimByTokenHashWithLazyExpiry.mockResolvedValueOnce(CLAIM);
-    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1', name: 'Acme Plumbing' });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1', name: 'Acme Plumbing', slug: 'acme-plumbing' });
     const result = await validateClaimToken({ rawToken: 'XXXX-XXXX-XXXX-XXXX', ipHash: 'hash' });
     expect(result).toEqual({
       outcome: 'valid',
       claimId: 'claim_1',
       businessId: 'biz_1',
       businessName: 'Acme Plumbing',
+      slug: 'acme-plumbing',
+      previewId: undefined,
     });
+  });
+
+  it('returns "valid" with previewId when the claim carries one', async () => {
+    mockGetClaimByTokenHashWithLazyExpiry.mockResolvedValueOnce({ ...CLAIM, previewId: 'preview_xyz' });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1', name: 'Acme Plumbing', slug: 'acme-plumbing' });
+    const result = await validateClaimToken({ rawToken: 'XXXX-XXXX-XXXX-XXXX', ipHash: 'hash' });
+    expect(result).toMatchObject({ outcome: 'valid', previewId: 'preview_xyz' });
   });
 });

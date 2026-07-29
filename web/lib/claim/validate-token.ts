@@ -28,7 +28,14 @@ export function hashIp(ip: string): string {
 
 export type ValidateClaimTokenResult =
   | { outcome: 'invalid' }
-  | { outcome: 'valid'; claimId: string; businessId: string; businessName: string }
+  | {
+      outcome: 'valid';
+      claimId: string;
+      businessId: string;
+      businessName: string;
+      slug: string;
+      previewId?: string;
+    }
   /** The visitor's current customer session already consumed this exact claim — idempotent resume. */
   | { outcome: 'resume'; businessId: string };
 
@@ -68,5 +75,12 @@ export async function validateClaimToken(params: {
   const business = await getBusinessById(claim.businessId);
   if (!business) return { outcome: 'invalid' };
 
-  return { outcome: 'valid', claimId: claim.claimId, businessId: claim.businessId, businessName: business.name };
+  return {
+    outcome: 'valid',
+    claimId: claim.claimId,
+    businessId: claim.businessId,
+    businessName: business.name,
+    slug: business.slug,
+    previewId: claim.previewId,
+  };
 }
