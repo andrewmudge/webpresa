@@ -110,6 +110,10 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — deployed |
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
+| `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — not yet deployed |
+| `STRIPE_PRICE_ID_BASIC` | Stripe Dashboard test-mode Price ID | Stage 18 — not yet deployed; not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_GROWTH` | Stripe Dashboard test-mode Price ID | Stage 18 — not yet deployed; not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet deployed; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
 
 Never put these in client-side code or commit `.env` files that contain real values.
 
@@ -545,6 +549,53 @@ Add all six new Stage 17 variables from "Required environment variables" above: 
 | `webpresa-vercel-dev` missing the Cognito grant | `AccessDeniedException` from the Cognito SDK call itself, mapped to the generic `'unknown'` reason code — no Cognito-specific error text reaches the client |
 | `CUSTOMER_SESSION_SECRET`/`CLAIM_ATTEMPT_SECRET` missing | The relevant cookie module throws immediately (`"... environment variable is not set"`) rather than signing with an empty/undefined key |
 | Real signup volume exceeds Cognito's default ~50 emails/day | Confirmation/reset emails silently stop sending past the cap — deferred fix is configuring the User Pool for SES-backed email (see `architecture.md`, "Authentication → Customer") |
+
+---
+
+## Stage 18 — Stripe Subscriptions deployment guidance
+
+**Not yet deployed.** Adds one new table (`customer-billing-profiles` — PK `userId`, no GSI), one new GSI on the existing `businesses` table (`stripe-subscription-id-index`) — both inside the existing `WebpresaDataStack`, no new stack, no new compute. No new secret: the existing `webpresa-{env}-stripe` secret (provisioned Stage 10, still holding only its random placeholder values) gets its first real test-mode `secretKey`/`webhookSecret` values as part of this stage's implementation.
+
+### Deploy sequence (first time)
+
+```bash
+# 1. Data stack — adds the customer-billing-profiles table and the
+#    stripe-subscription-id-index GSI on businesses. Review first:
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
+npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Populate the real Stripe test-mode secret (obtained from the Stripe
+#    Dashboard — API keys page and, once the webhook endpoint is registered,
+#    the webhook's signing secret):
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-stripe \
+  --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
+  --profile webpresa
+
+# 3. Vercel access stack — grants the new table and GSI ARNs (the Stripe
+#    secret is already granted from Stage 10):
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+Stripe Products and Prices (two monthly Prices — Basic `$39`, Growth `$79`) are created once via the Stripe Dashboard or CLI, in **test mode only** — never via CDK, and never as part of a deploy command. The webhook endpoint URL (`https://<real-app-domain>/api/webhooks/stripe`) is registered in the Stripe Dashboard's test-mode webhook settings once the app is deployed and reachable; its signing secret is what populates `webhookSecret` in step 2 above.
+
+### Stripe API version
+
+The Stripe SDK client (`web/lib/stripe/client.ts`) pins an explicit `apiVersion` at construction rather than drifting with Stripe's account-level default. Document the pinned version here once the implementation lands, and bump it deliberately (reviewing Stripe's changelog for the affected API surface — Checkout Sessions, Subscriptions, Billing Portal, webhooks) rather than upgrading the `stripe` npm package and the pinned version separately.
+
+### Vercel environment variables
+
+Add the new Stage 18 variables to "Required environment variables" above once implemented: `CUSTOMER_BILLING_PROFILES_TABLE_NAME` (CloudFormation export), `STRIPE_PRICE_ID_BASIC`/`STRIPE_PRICE_ID_GROWTH` (plain, non-secret — from the Stripe Dashboard's test-mode Price objects), and a server-side app base-URL variable used to build Checkout success/cancel URLs and the Customer Portal return URL (reusing the `WEBPRESA_APP_BASE_URL` naming already established for Stage 14/16's infra-side callback URLs, added here as a `web/` runtime variable rather than an infra-only one).
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `STRIPE_SECRET_NAME` secret still holds its placeholder value | Every Stripe API call (Checkout Session creation, Portal Session creation, webhook signature verification) fails closed with a generic error — no fallback, no silent success |
+| `STRIPE_PRICE_ID_BASIC`/`STRIPE_PRICE_ID_GROWTH` missing/wrong | `resolvePriceId()` throws before any Stripe call — Checkout creation fails with a generic `plan_unavailable` reason, never a raw Stripe error |
+| Stripe webhook signing secret mismatched | Every webhook delivery fails signature verification (`400`) — Stripe's dashboard shows persistent delivery failures, a clear signal to re-check the registered endpoint's secret against the stored `webhookSecret` |
+| `webpresa-vercel-dev` missing the new table/GSI grant | `AccessDeniedException` from the DynamoDB call — Checkout/webhook processing fails closed rather than silently skipping the entitlement write |
 
 ---
 

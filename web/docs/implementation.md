@@ -2322,9 +2322,13 @@ The public preview's claim banner reflects three states, not a single ownership 
 
 # Stage 18 — Stripe Subscriptions
 
+## Status
+
+Not started. This specification replaces the original single-plan draft (`$149/month`), which predated the approved two-plan pricing decision and Stage 17's finalized multi-business ownership model.
+
 ## Objective
 
-Collect subscription payment using Stripe Checkout and synchronize subscription state through verified webhooks.
+Let an authenticated customer who owns a claimed (Stage 17) but unpaid Business choose a Webpresa plan, pay through Stripe Checkout, and have dashboard entitlement unlock automatically once Stripe confirms payment through a verified webhook — never from the browser redirect, a query parameter, or `ownerUserId` alone.
 
 ## Dependencies
 
@@ -2332,75 +2336,167 @@ Stages 10 and 17.
 
 ## Major deliverables
 
-- Stripe account and test-mode configuration
-- Product and recurring price
-- Checkout-session endpoint
-- Stripe webhook endpoint
-- Signature verification
-- Idempotent event handling
-- Business and claim subscription updates
-- Payment-failure handling
-- Test-mode validation
+- Stripe test-mode Product/Price configuration (two monthly Prices — Basic, Growth) — Dashboard/CLI, not CDK
+- New `CustomerBillingProfile` record and table — the canonical Cognito-`sub` → Stripe-Customer mapping
+- `WebpresaPlan`/`SubscriptionStatus`/`BillingPurpose` domain constants
+- Additive `Business` fields: `plan`, `subscriptionStatus`, `stripeRawStatus`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `lastStripeEventId`, `lastStripeEventAt`, `lastStripeSyncAt`, `pendingCheckoutSessionId`, `pendingCheckoutExpiresAt`, `termsVersion`, `acceptedTermsAt`
+- New `stripe-subscription-id-index` GSI on the Businesses table
+- Stripe SDK client wrapper (`web/lib/stripe/`), with a pinned, documented API version — Price ID mapping, status mapping, metadata helpers
+- `createCheckoutSessionAction` (plan-gated, ownership-gated, pending-Session-aware)
+- `createBillingPortalSessionAction`
+- `POST /api/webhooks/stripe` Route Handler — raw-body signature verification, allowlist, `billingPurpose` guard, snapshot-based reconciliation
+- `requireBusinessAccess()` / `requireActiveSubscription()` on `web/lib/auth/customer-authorization.ts`
+- Plan-selection UI on `/account/claim-status`, plus `/account/checkout/success` and `/account/checkout/canceled`
+- Terms-acceptance checkbox + `termsVersion`/`acceptedTermsAt` capture, mirrored into Checkout metadata (placeholder legal copy — see Stage 26)
 
-## Initial product
+## Approved plans
 
-- Product: Webpresa Managed Website
-- Price: `$149/month` (unchanged placeholder from the original draft — confirm this is still the current price with product/business decisions before implementing Stage 18; not revisited as part of the Stage 17 rewrite)
-- Billing: monthly recurring
+- **Basic** — `$39/month` — single-page site, primary-city SEO, lead/contact functionality per current architecture.
+- **Growth** — `$79/month` — expanded site, multiple city-SEO pages (per current product limits), lead forms and Growth-tier functionality per current architecture.
+- Monthly recurring only. No trial, no setup fee, no minimum commitment enforced through Stripe, no annual billing, no usage-based billing, no coupons.
+- The customer chooses Basic or Growth before Checkout; the same consumed Stage 17 Claim may purchase either plan.
+- One Stripe Customer per Cognito customer (via `CustomerBillingProfile`), reused across every Business that customer subscribes, and reserved for future one-time charges (domain purchase/renewal).
 
-Any minimum commitment must be enforced through clear agreements and business processes, not assumed from the Stripe price configuration.
+## Non-goals
 
-## Implementation requirements
+- Re-validating or reopening the Stage 17 `Claim`
+- Recreating customer identity or requiring the customer to reclaim the Business
+- Any dashboard beyond the minimum needed to prove entitlement (Stage 19)
+- Domain purchase, DNS connection, SSL, or live-site cutover (a dedicated later stage) — though the `billingPurpose` metadata boundary is reserved now so that stage's future Checkout Sessions can never be misread as a website-subscription event
+- Custom credit-card forms, custom invoice/payment-method management, card storage
+- Annual billing, coupons, usage-based billing, automated tax calculation
+- Self-service Basic⇄Growth plan switching through the Customer Portal (deferred)
+- A `requirePlanCapability()` implementation (the future boundary is documented in prose; no unimplemented function is shipped)
 
-Checkout input should identify:
+## Domain-model changes
 
-- business
-- claim (the `Claim` record whose consumption already reserved ownership in Stage 17 — by this point the claim itself is fully consumed and terminal; it is carried through for provenance/audit, not re-validated as a claim)
-- preview
+New `CustomerBillingProfile`:
 
-Server actions must:
+- `userId` (Cognito `sub`, partition key) — one row per customer, ever
+- `stripeCustomerId`
+- `createdAt`/`updatedAt`
 
-- validate business ownership (`requireCustomerSession` + `requireBusinessOwnership`, from Stage 17) and the absence of an already-active subscription — there is no claim-eligibility check left to perform here, since Stage 17's `TransactWriteItems` already made claim consumption and ownership reservation atomic and exactly-once
-- create or reuse the Stripe customer
-- create a subscription-mode Checkout Session
-- attach internal metadata
-- use controlled success and cancellation URLs
+`Business` (additive only):
 
-Webhook handling must include at least:
+- `plan?: 'basic' | 'growth'`
+- `subscriptionStatus?: 'active' | 'past_due' | 'canceled'` — the sole field authorization and the claim banner read
+- `stripeRawStatus?: string` — diagnostics only, never branched on
+- `currentPeriodEnd?: string` (ISO)
+- `cancelAtPeriodEnd?: boolean` — when true and `subscriptionStatus` is still `'active'`, the customer remains entitled through `currentPeriodEnd`; no separate `entitledUntil` field
+- `lastStripeEventId?: string`, `lastStripeEventAt?: string`, `lastStripeSyncAt?: string` — diagnostics only, never a write gate
+- `pendingCheckoutSessionId?: string`, `pendingCheckoutExpiresAt?: string` — a checked-before-reuse in-flight Checkout Session reference
+- `termsVersion?: string`, `acceptedTermsAt?: string` — latest acceptance only, also mirrored into Checkout metadata
 
-- `checkout.session.completed`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
-- `invoice.paid`
-- `invoice.payment_failed`
+No changes to `Claim` or `BusinessStatus`. `stripeSubscriptionId` (Stage 5/17 placeholder) is populated for the first time by this stage; `stripeCustomerId` becomes a denormalized display copy of `CustomerBillingProfile.stripeCustomerId`.
 
-Use the raw request body for signature verification.
+## Infrastructure and Stripe configuration
 
-Do not activate a customer solely from the browser redirect.
+- One new table: `webpresa-{env}-customer-billing-profiles` (PK `userId`, no GSI).
+- One new GSI on `webpresa-{env}-businesses`: `stripe-subscription-id-index` (PK `stripeSubscriptionId`).
+- No new secret, no new IAM role beyond adding the new table/GSI ARNs to the existing Vercel data-access policy. The existing `webpresa-{env}-stripe` secret gets its first real test-mode values.
+- Two new plain (non-secret) environment variables: `STRIPE_PRICE_ID_BASIC`, `STRIPE_PRICE_ID_GROWTH` — server-only, never `NEXT_PUBLIC_`.
+- One new server-side base-URL environment variable for building Checkout success/cancel URLs.
+- A pinned Stripe API version, set explicitly on the SDK client and documented in `deployment.md`.
+- Stripe Products/Prices are created once via the Stripe Dashboard or CLI, in test mode only — never via CDK.
 
-Make webhook processing idempotent and resilient to duplicates and out-of-order events.
+## Required routes
+
+- `/account/claim-status` (existing — extended with plan selection, live status display, and a "Manage billing" link)
+- `/account/checkout/success` (new)
+- `/account/checkout/canceled` (new)
+- `POST /api/webhooks/stripe` (new)
+
+## Detailed Checkout workflow
+
+1. `requireCustomerSession()` → `requireBusinessOwnership(userId, businessId)`.
+2. Validate the submitted plan against `WEBPRESA_PLANS`; reject anything else.
+3. Reject (redirect to Portal) if `business.subscriptionStatus` is already `active` or `past_due`.
+4. Resolve the Stripe Customer from `CustomerBillingProfile(userId)` — reuse if present; otherwise create a new Stripe Customer and conditionally create the profile (`attribute_not_exists(userId)`), reusing the winner's ID on a lost race.
+5. If `business.pendingCheckoutSessionId` is set, retrieve it from Stripe; if still `open`, redirect to its URL instead of creating a new Session.
+6. Resolve the Stripe Price ID for the plan server-side — never from the browser.
+7. Create a subscription-mode Checkout Session with trusted metadata (`businessId`, `ownerUserId`, `plan`, `billingPurpose: 'website_subscription'`, `environment`, `termsVersion`/`acceptedTermsAt`, optional `claimId`), a single-use idempotency key for this one call, `billing_address_collection: 'required'`, and controlled success/cancel URLs.
+8. Persist `pendingCheckoutSessionId`/`pendingCheckoutExpiresAt`, then redirect the browser to the Stripe-hosted Checkout URL.
+
+## Webhook workflow
+
+1. Read the raw request body; verify the Stripe signature; reject invalid signatures with `400`.
+2. Check the event type against an explicit allowlist (`checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`); acknowledge (`200`) and ignore anything else.
+3. Confirm `metadata.billingPurpose === 'website_subscription'` (and `mode === 'subscription'` where applicable); acknowledge and ignore anything else — this is the boundary that protects website entitlement from a future domain-purchase/renewal event.
+4. Resolve the target `Business` from the event's metadata, cross-checked via `stripe-subscription-id-index`.
+5. Re-fetch the current Subscription object from the Stripe API — this, not `event.created` ordering, is the authority for what gets written.
+6. Map Stripe's status to the application's 3-value enum.
+7. Write the resulting snapshot to `Business` unconditionally (safe to repeat; safe out of order by construction), clear `pendingCheckoutSessionId`, and record `lastStripeEventId`/`lastStripeEventAt`/`lastStripeSyncAt` as diagnostics only.
+8. Log safely (event ID, type, resolved business ID, outcome) — never the full payload.
+
+## Subscription status mapping
+
+| Stripe status | App `subscriptionStatus` |
+|---|---|
+| `active` | `active` |
+| `trialing` | *(no entitlement — log a configuration anomaly; Webpresa never intentionally creates trials)* |
+| `past_due`, `unpaid`, `paused` | `past_due` |
+| `canceled` | `canceled` |
+| `incomplete`, `incomplete_expired` | *(leave unset — no entitlement granted)* |
+
+`cancel_at_period_end` and `current_period_end` are recorded independently of the status mapping above, on every reconciliation.
+
+## Entitlement rules
+
+- `requireBusinessAccess(userId, businessId)` builds on `requireBusinessOwnership`; returns `{ mode: 'full' | 'billing_recovery' | 'none', plan? }` — `'full'` only when `subscriptionStatus === 'active'`, `'billing_recovery'` when `'past_due'`, `'none'` when `'canceled'` or unset. A strict `requireActiveSubscription()` wraps this and redirects unless `mode === 'full'`.
+- Never trusts: browser state, the success-URL query parameter, `ownerUserId` alone, `stripeCustomerId`'s mere presence, or any client-supplied identifier.
+- A future `requirePlanCapability(businessId, capability)` boundary is documented, not implemented — Stage 19/20 add it once a real Basic/Growth feature difference exists to gate.
+
+## Customer Portal requirements
+
+- `createBillingPortalSessionAction(businessId)` — authenticated, ownership-checked, resolves the Stripe Customer exclusively from `CustomerBillingProfile(userId)` (not from `Business.stripeCustomerId`), fixed server-controlled return URL.
+- Permitted via Portal: payment-method updates, invoices/receipts, billing history, cancellation.
+- Self-service Basic⇄Growth switching via Portal is configured later (Stripe Dashboard toggle only — no application code changes needed).
+
+## Failure and recovery behavior
+
+- Abandoned Checkout: `pendingCheckoutSessionId` is checked and reused if still open, or superseded by a fresh Session if not.
+- Duplicate click: the pending-Session check plus a disabled submit control during the Server Action's pending state, not a coarse idempotency key.
+- Webhook delayed: success page shows "processing" and refreshes until entitlement lands or a bounded timeout is reached.
+- Recurring payment failure: `past_due` — restricted access, billing-recovery banner, Portal link; nothing deleted or unpublished.
+- Cancellation (scheduled): `subscriptionStatus` stays `active` with `cancelAtPeriodEnd: true` until Stripe's period actually ends.
+- Cancellation (completed): `subscriptionStatus` becomes `canceled`; paid editing/management locks; all records preserved; reactivation is a fresh Checkout Session reusing the same `CustomerBillingProfile` Stripe Customer.
+- Plan change: reconciled generically through the same webhook path.
+
+## Security requirements
+
+- Stripe secret key and webhook secret are never sent to the browser and never logged.
+- Stripe Price IDs are resolved server-side only; the browser never submits or influences a Price ID.
+- Stripe Customer IDs are resolved server-side only, exclusively from `CustomerBillingProfile`; the browser never submits one.
+- Dashboard entitlement is granted exclusively by the verified webhook handler.
+- Webhook signature verification uses the raw request body.
+- A `billingPurpose` check prevents any non-website-subscription event from altering website entitlement.
+- Success/cancel/return URLs are built from a fixed server-side base URL — no open redirect.
+- Errors returned to the browser are generic, non-disclosing reason codes.
 
 ## Acceptance criteria
 
-- Test checkout can be created for an eligible claim.
-- Successful payment produces verified webhook processing.
-- Duplicate events do not duplicate activation or records.
-- Failed payments update internal status.
-- Cancellation updates internal status without deleting records.
-- Declined, abandoned, authentication-required, delayed, and duplicate-event scenarios are tested.
-- Secret keys are never exposed to the browser.
-- The business is not activated without verified server-side payment state.
+- An authenticated owner of an unpaid, claimed Business can select Basic or Growth and complete a test-mode Checkout.
+- Dashboard entitlement only ever flips to granted after a verified webhook updates `Business.subscriptionStatus` — never from the success redirect alone.
+- Two concurrent first-checkouts across two businesses owned by the same customer resolve to exactly one Stripe Customer (via `CustomerBillingProfile`'s conditional write), not two.
+- A `trialing` Stripe status never grants entitlement.
+- Duplicate and out-of-order webhook delivery do not corrupt or regress subscription state (verified as a snapshot-write property, not an event-ordering property).
+- A recurring payment failure moves the Business to `past_due` with restricted, non-destructive access.
+- A completed cancellation moves the Business to `canceled` without deleting any business, claim, preview, or customer data.
+- A customer owning multiple businesses can subscribe each independently, reusing one Stripe Customer via `CustomerBillingProfile`.
+- A repeated Checkout click while a Session is still open returns the same Session rather than creating a new one.
+- The claim banner and footer credit correctly reach their `'active'` state once, and only once, entitlement is genuinely granted.
+- Secret keys and webhook secrets never appear in browser bundles, logs, or error responses.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, and `npm run build` pass in `web/`; `npm test`, `npx tsc -p . --noEmit`, and `npx cdk synth`/`diff` pass in `infra/`.
 
 ## Deferred work
 
-- Taxes
-- Coupons
-- Multiple plans
-- Annual billing
-- Usage-based products
-- Dunning automation
-- Accounting integration
+- Self-service Basic⇄Growth plan switching via Customer Portal (Stripe Dashboard configuration only, once decided)
+- Annual billing, coupons, usage-based billing
+- Automated tax calculation (Stripe Tax)
+- Final legal terms content/versioning and a dedicated agreement-history record (Stage 26)
+- `requirePlanCapability()` implementation (Stage 19/20, once a real capability exists to gate)
+- Full customer dashboard (Stage 19)
+- Domain purchase, DNS connection, SSL, custom-domain activation, live-site cutover (a dedicated later stage — reusing `CustomerBillingProfile` and the `billingPurpose` boundary this stage reserves)
 
 ---
 
@@ -2408,14 +2504,14 @@ Make webhook processing idempotent and resilient to duplicates and out-of-order 
 
 ## Note on this section's wording (pending full rewrite)
 
-This section still reflects assumptions made before Stage 17 was finalized and conflicts with two approved decisions in two specific places, flagged below rather than rewritten wholesale — this stage isn't finalized enough yet to warrant a full rewrite alongside Stage 17, and doing so risks guessing at decisions that are still open.
+This section still reflects assumptions made before Stage 17 and Stage 18 were finalized. The items below were flagged as open conflicts; Stage 18's rewrite now resolves each of them (see Stage 18, "Domain-model changes" and "Entitlement rules"). They are recorded here as resolved, rather than rewritten wholesale, since this stage's own dashboard shape still isn't finalized.
 
-- **"provision the customer identity" (below, under Implementation requirements) is wrong as written.** The customer identity (a Cognito-backed account, `Business.ownerUserId`) is created in Stage 17, *before* Stripe Checkout — not provisioned here after payment. Whatever this stage actually needs to do post-payment should be worded as "confirm dashboard entitlement for the already-existing owner" (i.e., Stage 18's webhook flips the real gate this stage's `requireActiveSubscription()` checks), not "create the identity."
+- **"provision the customer identity" (below, under Implementation requirements) is wrong as written.** The customer identity (a Cognito-backed account, `Business.ownerUserId`) is created in Stage 17, *before* Stripe Checkout — not provisioned here after payment. **Resolved by Stage 18**: this stage's post-payment work is "confirm dashboard entitlement for the already-existing owner" via `requireBusinessAccess()`/`requireActiveSubscription()` (Stage 18's webhook flips the real gate these check), not "create the identity."
 - **"Change-request submission" and the `/app/requests` route conflict with the approved "direct customer editing replaces customer change requests" direction.** Whatever dashboard stage actually gets built should let the customer edit the canonical `Business` directly, generating draft `SitePreview`s, rather than submitting requests into an admin-reviewed queue. Not rewritten here since the direct-editing dashboard's shape isn't finalized yet.
-- **"mark the business as customer" has no field to write to.** `BUSINESS_STATUSES` has no `'customer'` value, and Stage 17 deliberately left `Business.status` untouched — whether paid activation should introduce a new status value (and whether that should affect the existing SEO `noindex`/`index` logic, which currently reads `business.status === 'active'`) is an open question for whichever stage finalizes this, not resolved by Stage 17.
-- **"Customer authentication" is no longer this stage's deliverable.** Stage 17 already builds the full Cognito-backed customer identity, session, and `requireCustomerSession`/`requireBusinessOwnership` primitives. This stage only needs to add `requireActiveSubscription()` (Stage 18-informed) on top of what Stage 17 already provides.
+- **"mark the business as customer" has no field to write to.** `BUSINESS_STATUSES` has no `'customer'` value, and Stage 17 deliberately left `Business.status` untouched. **Resolved by Stage 18**: no new `BusinessStatus` value is introduced. Paid activation is represented by `Business.subscriptionStatus === 'active'` (a Stage 18 field), which is what this stage's entitlement check and the claim banner's `'active'` branch read. The existing SEO `noindex`/`index` logic continues to read `business.status === 'active'` unchanged and unrelated to billing.
+- **"Customer authentication" is no longer this stage's deliverable.** Stage 17 already builds the full Cognito-backed customer identity, session, and `requireCustomerSession`/`requireBusinessOwnership` primitives. This stage only needs to call `requireBusinessAccess()`/`requireActiveSubscription()` (Stage 18) on top of what Stage 17 already provides — it does not provision Stripe or subscription state itself, and should reuse Stage 18's `CustomerBillingProfile` (not re-derive a Stripe Customer) for any future billing-adjacent feature (e.g. a billing/settings page).
 
-The rest of this section (dashboard content, billing link, settings, change-request replacement, deferred work) is left as-is pending that fuller rewrite.
+The rest of this section (dashboard content, billing link, settings, change-request replacement, deferred work) is left as-is pending a fuller rewrite once this stage's own dashboard shape is finalized.
 
 ## Objective
 
