@@ -2324,7 +2324,7 @@ The public preview's claim banner reflects three states, not a single ownership 
 
 ## Status
 
-Not started. This specification replaces the original single-plan draft (`$149/month`), which predated the approved two-plan pricing decision and Stage 17's finalized multi-business ownership model.
+Implemented in development — application code complete, automatically tested (unit tests mocking every AWS/Stripe SDK boundary), and `cdk synth` verified. **Not yet deployed and not yet manually verified end-to-end**: no real AWS deployment of the new table/GSI, no Stripe test-mode Product/Price objects created, no populated `webpresa-{env}-stripe` secret values. See `build_log.md`, "Stage 18 — Stripe Subscriptions", for the full implementation record and exactly what remains before this can be exercised against a real Stripe test-mode account. This specification replaces the original single-plan draft (`$149/month`), which predated the approved two-plan pricing decision and Stage 17's finalized multi-business ownership model.
 
 ## Objective
 

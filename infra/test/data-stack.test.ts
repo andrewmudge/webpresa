@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly five DynamoDB tables', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 5);
+  it('creates exactly seven DynamoDB tables', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 7);
   });
 });
 
@@ -105,6 +105,24 @@ describe('partition keys', () => {
       ]),
     });
   });
+
+  it('Claims table has claimId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-claims',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'claimId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+
+  it('CustomerBillingProfiles table has userId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-customer-billing-profiles',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'userId', KeyType: 'HASH' },
+      ]),
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -112,15 +130,99 @@ describe('partition keys', () => {
 // ---------------------------------------------------------------------------
 
 describe('GSI names', () => {
-  it('Businesses table has slug-index, google-place-id-index, status-index', () => {
+  it('Businesses table has slug-index, google-place-id-index, status-index, owner-user-id-index, stripe-subscription-id-index', () => {
     dev.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'webpresa-dev-businesses',
       GlobalSecondaryIndexes: Match.arrayWith([
         Match.objectLike({ IndexName: 'slug-index' }),
         Match.objectLike({ IndexName: 'google-place-id-index' }),
         Match.objectLike({ IndexName: 'status-index' }),
+        Match.objectLike({ IndexName: 'owner-user-id-index' }),
+        Match.objectLike({ IndexName: 'stripe-subscription-id-index' }),
       ]),
     });
+  });
+
+  it('Businesses stripe-subscription-id-index is keyed on stripeSubscriptionId only (sparse, high-cardinality — Stage 18)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-businesses',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'stripe-subscription-id-index',
+          KeySchema: [{ AttributeName: 'stripeSubscriptionId', KeyType: 'HASH' }],
+        }),
+      ]),
+    });
+  });
+
+  it('CustomerBillingProfiles table has no GSI (direct GetItem by userId only)', () => {
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-customer-billing-profiles' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes?: unknown };
+    };
+    expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('Businesses owner-user-id-index is keyed on ownerUserId with claimedAt as sort key — not unique per user (Stage 17)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-businesses',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'owner-user-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'ownerUserId', KeyType: 'HASH' },
+            { AttributeName: 'claimedAt', KeyType: 'RANGE' },
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  it('Claims table has token-hash-index and business-id-index, and no status-index (low cardinality)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-claims',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({ IndexName: 'token-hash-index' }),
+        Match.objectLike({ IndexName: 'business-id-index' }),
+      ]),
+    });
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-claims' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes: Array<{ IndexName: string }> };
+    };
+    const indexNames = table.Properties.GlobalSecondaryIndexes.map((g) => g.IndexName);
+    expect(indexNames).not.toContain('status-index');
+  });
+
+  it('Claims table has a TTL attribute (used only by rate-limit-counter items, never real Claim records)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-claims',
+      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+    });
+  });
+
+  it('no table other than Claims has a TTL attribute', () => {
+    const tableNames = [
+      'webpresa-dev-businesses',
+      'webpresa-dev-site-previews',
+      'webpresa-dev-scan-events',
+      'webpresa-dev-scan-executions',
+      'webpresa-dev-postcards',
+      'webpresa-dev-customer-billing-profiles',
+    ];
+    for (const tableName of tableNames) {
+      const resources = dev.findResources('AWS::DynamoDB::Table', {
+        Properties: { TableName: tableName },
+      });
+      const table = Object.values(resources)[0] as {
+        Properties: { TimeToLiveSpecification?: unknown };
+      };
+      expect(table.Properties.TimeToLiveSpecification).toBeUndefined();
+    }
   });
 
   it('SitePreviews table has slug-index, business-id-index, status-index', () => {
@@ -272,9 +374,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 20 outputs — 10 table outputs, 2 bucket outputs, 8 secret ARN outputs', () => {
+  it('creates 27 outputs — 14 table outputs (Stage 18 adds CustomerBillingProfiles), 2 bucket outputs, 9 secret ARN outputs, 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(20);
+    expect(Object.keys(outputs)).toHaveLength(27);
   });
 });
 
@@ -352,14 +454,18 @@ describe('prod config (in-memory only — not deployed)', () => {
 // ---------------------------------------------------------------------------
 
 describe('GSI projection', () => {
-  it('all GSIs use ProjectionType.ALL', () => {
-    dev.allResourcesProperties('AWS::DynamoDB::Table', {
-      GlobalSecondaryIndexes: Match.arrayWith([
-        Match.objectLike({
-          Projection: { ProjectionType: 'ALL' },
-        }),
-      ]),
-    });
+  it('all GSIs use ProjectionType.ALL — skipping tables with no GSI at all (e.g. CustomerBillingProfiles, Stage 18)', () => {
+    const resources = dev.findResources('AWS::DynamoDB::Table');
+    const tablesWithGsis = Object.values(resources).filter(
+      (table) => (table as { Properties: { GlobalSecondaryIndexes?: unknown[] } }).Properties.GlobalSecondaryIndexes,
+    ) as Array<{ Properties: { GlobalSecondaryIndexes: Array<{ Projection: { ProjectionType: string } }> } }>;
+
+    expect(tablesWithGsis.length).toBeGreaterThan(0);
+    for (const table of tablesWithGsis) {
+      for (const gsi of table.Properties.GlobalSecondaryIndexes) {
+        expect(gsi.Projection.ProjectionType).toBe('ALL');
+      }
+    }
   });
 });
 
@@ -502,8 +608,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly eight secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 8);
+  it('creates exactly nine secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 9);
   });
 
   const devSecretNames = [
@@ -512,6 +618,7 @@ describe('secrets', () => {
     'webpresa-dev-google-places',
     'webpresa-dev-stripe',
     'webpresa-dev-lob',
+    'webpresa-dev-claim-token',
     'webpresa-dev-capture-token',
     'webpresa-dev-vercel-protection-bypass',
     'webpresa-dev-internal-api',
@@ -582,6 +689,45 @@ describe('secrets', () => {
     });
     dev.hasResourceProperties('AWS::SecretsManager::Secret', {
       Tags: Match.arrayWith([{ Key: 'ManagedBy', Value: 'CDK' }]),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Customer identity — Cognito User Pool (Stage 17)
+// ---------------------------------------------------------------------------
+
+describe('customer Cognito User Pool', () => {
+  it('creates exactly one User Pool and one User Pool Client', () => {
+    dev.resourceCountIs('AWS::Cognito::UserPool', 1);
+    dev.resourceCountIs('AWS::Cognito::UserPoolClient', 1);
+  });
+
+  it('User Pool allows self-service sign-up with email as the sign-in alias', () => {
+    dev.hasResourceProperties('AWS::Cognito::UserPool', {
+      UserPoolName: 'webpresa-dev-customers',
+      AdminCreateUserConfig: { AllowAdminCreateUserOnly: false },
+      AutoVerifiedAttributes: ['email'],
+    });
+  });
+
+  it('User Pool Client has no client secret and explicitly enables USER_PASSWORD_AUTH', () => {
+    dev.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'webpresa-dev-customers-client',
+      GenerateSecret: false,
+      ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_PASSWORD_AUTH']),
+    });
+  });
+
+  it('creates no Lambda triggers on the User Pool', () => {
+    const pools = dev.findResources('AWS::Cognito::UserPool');
+    const pool = Object.values(pools)[0] as { Properties: { LambdaConfig?: unknown } };
+    expect(pool.Properties.LambdaConfig).toBeUndefined();
+  });
+
+  it('prod User Pool name carries the prod suffix', () => {
+    prod.hasResourceProperties('AWS::Cognito::UserPool', {
+      UserPoolName: 'webpresa-prod-customers',
     });
   });
 });

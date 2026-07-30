@@ -2,11 +2,13 @@ import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 import { WebpresaTable } from '../constructs/webpresa-table';
 import { WebpresaBucket } from '../constructs/webpresa-bucket';
 import { WebpresaSecret } from '../constructs/webpresa-secret';
+import { WebpresaUserPool } from '../constructs/webpresa-user-pool';
 
 export interface WebpresaDataStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
@@ -20,7 +22,7 @@ export interface WebpresaDataStackProps extends cdk.StackProps {
  *   dev  →  WebpresaDevDataStack
  *   prod →  WebpresaProdDataStack
  *
- * All four tables share the WebpresaTable construct, which applies
+ * Every table shares the WebpresaTable construct, which applies
  * consistent encryption, billing, removal policy, and PITR settings
  * derived from the EnvironmentConfig.
  *
@@ -59,12 +61,17 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly scanEventsTable: dynamodb.Table;
   public readonly scanExecutionsTable: dynamodb.Table;
   public readonly postcardsTable: dynamodb.Table;
+  public readonly claimsTable: dynamodb.Table;
+  public readonly customerBillingProfilesTable: dynamodb.Table;
+  public readonly customerUserPool: cognito.UserPool;
+  public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
   public readonly openAiSecret: secretsmanager.Secret;
   public readonly firecrawlSecret: secretsmanager.Secret;
   public readonly googlePlacesSecret: secretsmanager.Secret;
   public readonly stripeSecret: secretsmanager.Secret;
   public readonly lobSecret: secretsmanager.Secret;
+  public readonly claimTokenSecret: secretsmanager.Secret;
   public readonly captureTokenSecret: secretsmanager.Secret;
   public readonly vercelProtectionBypassSecret: secretsmanager.Secret;
   public readonly internalApiSecret: secretsmanager.Secret;
@@ -93,6 +100,12 @@ export class WebpresaDataStack extends cdk.Stack {
       type: S,
     };
 
+    /** Stage 17 — sorts a customer's owned businesses by claim date, not record-creation date. */
+    const claimedAtSortKey: dynamodb.Attribute = {
+      name: 'claimedAt',
+      type: S,
+    };
+
     // ───────────────────────────────────────────────────────────────────────
     // Businesses
     //   PK: businessId
@@ -115,6 +128,24 @@ export class WebpresaDataStack extends cdk.Stack {
         {
           indexName: 'status-index',
           partitionKey: { name: 'status', type: S },
+        },
+        // Stage 17 — Website Claim Flow. NOT unique per user by design: one
+        // customer account may own multiple Businesses (see
+        // implementation.md, Stage 17, "Ownership model"). Sparse — only
+        // claimed businesses appear here.
+        {
+          indexName: 'owner-user-id-index',
+          partitionKey: { name: 'ownerUserId', type: S },
+          sortKey: claimedAtSortKey,
+        },
+        // Stage 18 — Stripe Subscriptions. Sparse (only populated after a
+        // business's first Checkout), high-cardinality (Stripe subscription
+        // IDs) — avoids the low-cardinality hot-partition anti-pattern noted
+        // above for status GSIs. The webhook handler's primary Business
+        // lookup when an event references a subscription ID.
+        {
+          indexName: 'stripe-subscription-id-index',
+          partitionKey: { name: 'stripeSubscriptionId', type: S },
         },
       ],
     });
@@ -242,6 +273,74 @@ export class WebpresaDataStack extends cdk.Stack {
     this.postcardsTable = postcards.table;
 
     // ───────────────────────────────────────────────────────────────────────
+    // Claims (Stage 17 — Website Claim Flow)
+    //   PK: claimId
+    //   GSIs: token-hash-index (high-cardinality — avoids the low-cardinality
+    //           hot-partition anti-pattern flagged above for status GSIs)
+    //         business-id-index (SK: createdAt — per-business claim history)
+    //   No status-index: only 4 low-cardinality values; per-business queries
+    //   cover admin needs; a global cross-business list is YAGNI.
+    //
+    //   TTL attribute `ttl` is enabled on this table, but is populated ONLY
+    //   by the rate-limit-counter item shape this table also carries (PK
+    //   `RATELIMIT#<ipHash>#<windowBucket>` — see web/lib/db/claims.ts).
+    //   Real Claim records never set `ttl`, so claim history — which must be
+    //   preserved indefinitely — is never touched by TTL deletion. Claim
+    //   *token* expiration is a status transition at read time, never a TTL
+    //   deletion.
+    // ───────────────────────────────────────────────────────────────────────
+    const claims = new WebpresaTable(this, 'Claims', {
+      config,
+      tableName: 'claims',
+      partitionKey: { name: 'claimId', type: S },
+      timeToLiveAttribute: 'ttl',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'token-hash-index',
+          partitionKey: { name: 'tokenHash', type: S },
+        },
+        {
+          indexName: 'business-id-index',
+          partitionKey: { name: 'businessId', type: S },
+          sortKey: createdAtSortKey,
+        },
+      ],
+    });
+    this.claimsTable = claims.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // CustomerBillingProfiles (Stage 18 — Stripe Subscriptions)
+    //   PK: userId (Cognito `sub`)
+    //   No GSI — every lookup is a direct GetItem by userId, always
+    //   available from the authenticated customer session.
+    //
+    //   The canonical userId → stripeCustomerId mapping. One Cognito
+    //   customer may own several Businesses (Stage 17); they share one
+    //   Stripe Customer rather than minting a new one per Business. Not a
+    //   "billing account"/organization concept — a single foreign key, one
+    //   row per customer, ever, created via a conditional PutItem
+    //   (see web/lib/db/customer-billing.ts).
+    // ───────────────────────────────────────────────────────────────────────
+    const customerBillingProfiles = new WebpresaTable(this, 'CustomerBillingProfiles', {
+      config,
+      tableName: 'customer-billing-profiles',
+      partitionKey: { name: 'userId', type: S },
+    });
+    this.customerBillingProfilesTable = customerBillingProfiles.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Customer identity (Stage 17 — Website Claim Flow)
+    //
+    // Amazon Cognito User Pool for customer accounts only — the admin auth
+    // system (single hardcoded operator, scrypt + JWT) is completely
+    // separate and untouched. See `webpresa-user-pool.ts` for the full
+    // rationale.
+    // ───────────────────────────────────────────────────────────────────────
+    const customerAuth = new WebpresaUserPool(this, 'CustomerUserPool', { config });
+    this.customerUserPool = customerAuth.userPool;
+    this.customerUserPoolClient = customerAuth.userPoolClient;
+
+    // ───────────────────────────────────────────────────────────────────────
     // Assets bucket — private object storage for scan artifacts, preview
     // assets, and postcard files. Single bucket, prefix-scoped:
     //   scans/{businessId}/{scanId}/...
@@ -300,6 +399,18 @@ export class WebpresaDataStack extends cdk.Stack {
       jsonKeys: ['apiKey'],
     });
     this.lobSecret = lob.secret;
+
+    // Stage 17 — HMAC pepper for hashing claim tokens (see
+    // web/lib/claim/token.ts). Held entirely within this platform — a
+    // random placeholder at creation, a real value populated out-of-band,
+    // same as capture-token below.
+    const claimToken = new WebpresaSecret(this, 'ClaimTokenSecret', {
+      config,
+      secretName: 'claim-token',
+      description: 'Claim-token HMAC pepper (Stage 17 — website claim flow)',
+      jsonKeys: ['hmacSecret'],
+    });
+    this.claimTokenSecret = claimToken.secret;
 
     // Stage 14 — HMAC signing key for the screenshot Lambda's preview
     // capture token (see architecture.md, "Draft preview visibility"). Not

@@ -6373,3 +6373,139 @@ web/docs/implementation.md                                              MODIFIED
                                                                             (earlier sessions)
 web/docs/build_log.md                                                   MODIFIED — this entry
 ```
+
+---
+
+# Stage 18 — Stripe Subscriptions
+
+## Scope
+
+Full implementation per the rewritten Stage 18 section of `implementation.md` (the rewrite itself, and a subsequent revision incorporating six required changes from architecture review, were done in prior planning sessions — see that file and `web/docs/architecture.md`/`deployment.md` for the up-to-date spec). An authenticated customer who owns a claimed (Stage 17) but unpaid Business chooses a Webpresa plan (Basic `$39/month` or Growth `$79/month`), pays through Stripe Checkout, and gets dashboard entitlement unlocked automatically once Stripe confirms payment through a verified webhook — never from the browser redirect, a query parameter, or `ownerUserId` alone.
+
+The single biggest departure from a naive "Business.stripeCustomerId reuse" implementation is `CustomerBillingProfile` — a new, minimal per-Cognito-customer record (`userId → stripeCustomerId`) that makes Stripe-Customer creation atomic per customer via a conditional `PutItem`, rather than scanning a customer's other owned Businesses (which has no atomic "does one already exist" check and risks creating two Stripe Customers under concurrent first-checkouts). That decision — and the others reviewed alongside it (a checked-live pending-Checkout-Session reuse pattern instead of a coarse time-bucketed idempotency key, `trialing` mapping to no entitlement rather than `active`, snapshot-first webhook reconciliation instead of `event.created`-gated writes, a `billingPurpose` metadata boundary reserved for a future domain-billing feature, and renaming the entitlement helper to `requireBusinessAccess`/`requireActiveSubscription`) — is documented in full in the approved planning session, not repeated here; this entry covers what was actually built.
+
+## Domain model
+
+- `domain/constants/plans.ts` (new) — `WEBPRESA_PLANS = ['basic', 'growth']`, `SUBSCRIPTION_STATUSES = ['active', 'past_due', 'canceled']`, `BILLING_PURPOSES = ['website_subscription', 'domain_purchase', 'domain_renewal']` (only `'website_subscription'` is ever created by this stage — the other two are reserved for a future domain-connection stage).
+- `domain/models/customer-billing-profile.ts` (new) + `domain/schemas/customer-billing-profile.schema.ts` (new) — `CustomerBillingProfile { userId, stripeCustomerId, createdAt, updatedAt }`. No factory — no generated ID or status; the repository's create function is a conditional `PutItem`, not a validate-and-generate factory.
+- `domain/models/business.ts` / `.schema.ts` — additive-only Stage 18 fields: `plan`, `subscriptionStatus`, `stripeRawStatus`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `lastStripeEventId`/`lastStripeEventAt`/`lastStripeSyncAt` (diagnostics only — explicitly do **not** gate whether a webhook-driven write is applied; the write is always an idempotent snapshot of current Stripe truth), `pendingCheckoutSessionId`/`pendingCheckoutExpiresAt`, `termsVersion`/`acceptedTermsAt` (latest acceptance only, not a permanent history). `stripeSubscriptionId` (Stage 5/17 placeholder) is populated for the first time by this stage; `stripeCustomerId` becomes a denormalized display copy of `CustomerBillingProfile.stripeCustomerId`, never independently authoritative.
+
+## Persistence
+
+- `lib/db/customer-billing.ts` (new) — `getCustomerBillingProfile(userId)` (direct `GetItem`), `createCustomerBillingProfile(userId, stripeCustomerId)` (conditional `PutItem`, `attribute_not_exists(userId)`; on a lost race, re-reads and returns the winning row rather than throwing — the caller discards the Stripe Customer it just created).
+- `lib/db/businesses.ts` — added `getBusinessByStripeSubscriptionId` (queries the new `stripe-subscription-id-index` GSI). No new dedicated "update subscription state" function — webhook reconciliation and Checkout-session bookkeeping both reuse the existing generic `updateBusiness()` read-merge-write helper, since the design calls for an unconditional idempotent snapshot write, not a conditional one.
+- `lib/db/client.ts` — added `TABLE_CUSTOMER_BILLING_PROFILES`.
+
+## Stripe integration
+
+- `lib/stripe/client.ts` (new) — singleton Stripe SDK client, pins an explicit `apiVersion` (`2026-06-24.dahlia`, matching the installed `stripe@22.3.2` package's own default) rather than drifting with Stripe's account-level default.
+- `lib/stripe/plans.ts` (new) — `resolvePriceId(plan)` (env-var-backed, throws on missing config) and `resolvePlanFromPriceId(priceId)` (reverse lookup for webhook-driven plan-change detection).
+- `lib/stripe/status-mapping.ts` (new) — `mapStripeStatusToAppStatus` (the Stripe-status → app-status table, `trialing` deliberately mapped to no entitlement with a logged anomaly rather than `active`) and `mapStripeSubscriptionToAppState` (the full snapshot-reconciliation function, reading `current_period_end` off the subscription's first item per this API version's shape, not off the subscription object itself).
+- `lib/stripe/metadata.ts` (new) — `buildTrustedMetadata`/`extractBusinessId`/`extractBillingPurpose`/`resolveRuntimeEnvironment` — every Checkout Session/Subscription this stage creates carries `businessId`, `ownerUserId`, `plan`, `billingPurpose: 'website_subscription'`, `environment`, and (optionally) `claimId`/`termsVersion`/`acceptedTermsAt`, all resolved server-side, never from browser input.
+- No Stripe Products/Prices created from CDK or from this session — that's a one-time, manual, test-mode Stripe Dashboard/CLI step, not yet performed (see "Not verified" below).
+
+## Entitlement authorization
+
+`lib/auth/customer-authorization.ts` — added `requireBusinessAccess(userId, businessId)` (returns `{ mode: 'full' | 'billing_recovery' | 'none', plan? }`, built on Stage 17's `requireBusinessOwnership`) and `requireActiveSubscription` (a thin wrapper redirecting unless `mode === 'full'`). Named `requireBusinessAccess` rather than `requireActiveSubscription` as the primary helper because it deliberately also admits `'past_due'` as a restricted mode — a name implying "active only" would be misleading. No `requirePlanCapability()` stub was added — the future boundary is documented in a code comment only, following the same "no speculative interface" principle Stage 17 already applied to this file.
+
+## Checkout and Customer Portal
+
+- `app/account/checkout/actions.ts` (new) — `createCheckoutSessionAction` (plan-gated against `WEBPRESA_PLANS`, ownership-gated via `requireBusinessOwnership`, guards against creating a second Checkout for an already-`active`/`past_due` Business by redirecting to the Portal instead, resolves/creates the customer's one Stripe Customer via `CustomerBillingProfile`, checks any `pendingCheckoutSessionId` live against Stripe before creating a fresh Session, uses a fresh single-use `crypto.randomUUID()` idempotency key per creation call) and `createBillingPortalSessionAction` (resolves the Stripe Customer exclusively from `CustomerBillingProfile`, never from `Business.stripeCustomerId` or any client input).
+- `app/api/webhooks/stripe/route.ts` (new) — this repo's first Route Handler needing raw-body access (`await request.text()` before any parsing). Verifies the Stripe signature, checks an explicit event allowlist (`checkout.session.completed`, `customer.subscription.created/updated/deleted`, `invoice.payment_failed`), checks `billingPurpose === 'website_subscription'` (ignoring anything else — the boundary protecting website entitlement from a future domain-purchase/renewal event), resolves the target Business via metadata with a `stripe-subscription-id-index` GSI fallback, always re-fetches the current Subscription from the Stripe API, and writes the resulting snapshot unconditionally — safe to repeat on duplicate/out-of-order delivery by construction, not by event-ordering logic.
+
+## Routes and UI
+
+- `/account/claim-status` (existing, Stage 17 — extended) — the disabled "Activate (coming soon)" placeholder is replaced with a real `PlanSelectionForm` (Basic/Growth radio + required terms checkbox) for unpaid/canceled businesses, live plan/status display plus a "Manage billing" button for `active`, and a billing-recovery banner plus "Update payment method" button for `past_due`.
+- `app/account/claim-status/PlanSelectionForm.tsx` (new, client component) — `useActionState(createCheckoutSessionAction, undefined)`, matching this repo's existing form-action convention (`SignInForm.tsx`, `ClaimTokenForm.tsx`).
+- `/account/checkout/success` (new) — reads `?business=` for display/lookup only (never trusted for activation), re-checks ownership via `requireBusinessOwnership` (so a guessed/reused URL for another business/customer 404s), shows "payment processing" with bounded client-side polling (`AutoRefresh.tsx`, ~1 minute, then stops) until `subscriptionStatus === 'active'`, then "payment confirmed."
+- `/account/checkout/canceled` (new) — simple "no charge was made" page.
+
+## Infrastructure (CDK)
+
+- `infra/lib/stacks/data-stack.ts` — new `customer-billing-profiles` table (7th table; PK `userId`, no GSI — every lookup is a direct `GetItem`); new `stripe-subscription-id-index` GSI on the existing `businesses` table (PK `stripeSubscriptionId`, sparse/high-cardinality). No new secret — the existing `webpresa-{env}-stripe` secret (Stage 10) is reused, still holding only its placeholder values.
+- `infra/lib/stacks/vercel-access-stack.ts` — added `customerBillingProfilesTable` to the existing table-ARN grant loop. No new IAM statement needed for the new Businesses GSI — the existing `DynamoDbTables` statement already grants `${table.tableArn}/index/*` as a wildcard.
+- `infra/bin/webpresa.ts` — passes `customerBillingProfilesTable` through to the Vercel access stack.
+
+## Environment / dependencies
+
+- New env vars (`.env.local.example`): `CUSTOMER_BILLING_PROFILES_TABLE_NAME`, `STRIPE_PRICE_ID_BASIC`, `STRIPE_PRICE_ID_GROWTH`, `WEBPRESA_APP_BASE_URL` (a separate `web/`-runtime copy of the existing infra-side shell variable of the same name), `TERMS_VERSION`.
+- New dependency: `stripe` (`web/package.json`, `^22.3.2`).
+
+## Verification
+
+```
+npm run lint         — passes
+npx tsc --noEmit     — passes
+npm test             — 78 files, 863 tests passed
+npm run build        — succeeds; all new routes registered
+                         (/account/checkout/success, /account/checkout/canceled,
+                         /api/webhooks/stripe; /account/claim-status extended)
+
+cd ../infra
+npm test             — 6 files, 156 tests passed (2 pre-existing assertions
+                         updated for the new table: CloudFormation output
+                         count 25→27, GSI-projection check scoped to skip
+                         tables with no GSI at all)
+npx tsc -p . --noEmit — passes
+npx cdk synth --profile webpresa       — succeeds
+npx cdk diff WebpresaDevDataStack --profile webpresa
+                     — could not run in this sandbox (no AWS credentials
+                       configured for the `webpresa` profile here); must be
+                       run and reviewed before any real deploy
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+                     — same
+```
+
+**Not verified**: no real AWS deployment (no `customer-billing-profiles` table, no `stripe-subscription-id-index` GSI deployed), no Stripe test-mode Product/Price objects created, no populated `webpresa-{env}-stripe` secret values, and no headless-browser tooling available in this sandbox — so the full Checkout flow (plan selection → Stripe-hosted Checkout → test-mode payment → webhook → entitlement unlock → claim-status reflecting `active`) has not been exercised end-to-end against real infrastructure or a real Stripe test-mode account. Unit tests mock every AWS/Stripe SDK boundary; `cdk synth` confirms the infrastructure is well-formed, and `cdk diff` (additive-only expected: one new table, one new GSI, no secret/IAM-role changes) should be reviewed against the real dev account before any deploy. This should be deployed to dev, given real Stripe test-mode Price IDs and secret values, and walked through manually (including a real test-mode Checkout and webhook delivery) before relying on it.
+
+## Files changed
+
+```
+web/domain/constants/plans.ts                                          NEW
+web/domain/models/customer-billing-profile.ts                          NEW
+web/domain/schemas/customer-billing-profile.schema.ts                  NEW
+web/domain/models/business.ts                                          MODIFIED — Stage 18 fields
+web/domain/schemas/business.schema.ts                                  MODIFIED — same
+
+web/lib/stripe/client.ts                                               NEW
+web/lib/stripe/plans.ts                                                NEW
+web/lib/stripe/status-mapping.ts                                       NEW
+web/lib/stripe/metadata.ts                                             NEW
+web/lib/stripe/__tests__/plans.test.ts                                 NEW
+web/lib/stripe/__tests__/status-mapping.test.ts                        NEW
+web/lib/stripe/__tests__/metadata.test.ts                              NEW
+
+web/lib/db/customer-billing.ts                                         NEW
+web/lib/db/__tests__/customer-billing.test.ts                          NEW
+web/lib/db/businesses.ts                                               MODIFIED — getBusinessByStripeSubscriptionId
+web/lib/db/__tests__/businesses.test.ts                                MODIFIED — same
+web/lib/db/client.ts                                                   MODIFIED — TABLE_CUSTOMER_BILLING_PROFILES
+
+web/lib/auth/customer-authorization.ts                                 MODIFIED — requireBusinessAccess,
+                                                                            requireActiveSubscription
+web/lib/auth/__tests__/customer-authorization.test.ts                  NEW
+
+web/app/account/checkout/actions.ts                                    NEW
+web/app/account/checkout/__tests__/actions.test.ts                     NEW
+web/app/account/checkout/success/page.tsx                              NEW
+web/app/account/checkout/success/AutoRefresh.tsx                       NEW
+web/app/account/checkout/canceled/page.tsx                             NEW
+web/app/account/claim-status/page.tsx                                  MODIFIED — plan selector, live
+                                                                            status, billing link
+web/app/account/claim-status/PlanSelectionForm.tsx                     NEW
+
+web/app/api/webhooks/stripe/route.ts                                   NEW
+web/app/api/webhooks/stripe/__tests__/route.test.ts                    NEW
+
+infra/lib/stacks/data-stack.ts                                         MODIFIED — customer-billing-profiles
+                                                                            table, stripe-subscription-id-index GSI
+infra/lib/stacks/vercel-access-stack.ts                                MODIFIED — new table grant
+infra/bin/webpresa.ts                                                  MODIFIED — pass-through prop
+infra/test/data-stack.test.ts                                          MODIFIED — new table/GSI assertions,
+                                                                            updated output count
+infra/test/vercel-access-stack.test.ts                                 MODIFIED — new table in buildStacks
+
+web/.env.local.example                                                 MODIFIED — new env vars
+web/package.json                                                       MODIFIED — stripe dependency
+web/docs/build_log.md                                                  MODIFIED — this entry
+```

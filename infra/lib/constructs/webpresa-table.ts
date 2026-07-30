@@ -41,6 +41,13 @@ export interface WebpresaTableProps {
   readonly partitionKey: dynamodb.Attribute;
   readonly sortKey?: dynamodb.Attribute;
   readonly globalSecondaryIndexes?: WebpresaGsiDefinition[];
+  /**
+   * Optional DynamoDB TTL attribute name (Stage 17 — Claims table only, for
+   * its rate-limit-counter item shape; real Claim records never populate
+   * this attribute, so claim history is never auto-deleted). Defaults to
+   * unset so every existing table's CDK output is unaffected.
+   */
+  readonly timeToLiveAttribute?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +70,7 @@ export interface WebpresaTableProps {
  *   - Deletion protection:   disabled (dev) | enabled (prod)
  *   - All GSIs:              ProjectionType.ALL
  *   - CloudFormation outputs: TableName and TableArn for each table
+ *   - TTL attribute:          none, unless `timeToLiveAttribute` is set (opt-in)
  *
  * Adding a future table (e.g. Claims, Campaigns, QRScans) requires only:
  *
@@ -98,6 +106,7 @@ export class WebpresaTable extends Construct {
         pointInTimeRecoveryEnabled: props.config.pointInTimeRecovery,
       },
       deletionProtection: props.config.deletionProtection,
+      ...(props.timeToLiveAttribute ? { timeToLiveAttribute: props.timeToLiveAttribute } : {}),
     });
 
     for (const gsi of props.globalSecondaryIndexes ?? []) {

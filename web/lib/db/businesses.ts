@@ -285,6 +285,29 @@ export async function getBusinessByGooglePlaceId(googlePlaceId: string): Promise
 }
 
 /**
+ * Retrieve a single business by Stripe Subscription ID using the
+ * stripe-subscription-id-index GSI (Stage 18). The webhook handler's
+ * primary Business lookup when an event references a subscription ID —
+ * a sparse, high-cardinality index, deliberately not `Business.status`-like
+ * low-cardinality.
+ */
+export async function getBusinessByStripeSubscriptionId(stripeSubscriptionId: string): Promise<Business | null> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_BUSINESSES(),
+      IndexName: 'stripe-subscription-id-index',
+      KeyConditionExpression: 'stripeSubscriptionId = :stripeSubscriptionId',
+      ExpressionAttributeValues: { ':stripeSubscriptionId': stripeSubscriptionId },
+      Limit: 1,
+    }),
+  );
+  const items = result.Items ?? [];
+  if (items.length === 0) return null;
+  return parseBusinessItem(items[0]);
+}
+
+/**
  * Retrieve every business owned by a given customer (Cognito `sub`), newest
  * claim first, via the `owner-user-id-index` GSI (Stage 17). Not unique per
  * user by design — one customer account may own multiple Businesses; there

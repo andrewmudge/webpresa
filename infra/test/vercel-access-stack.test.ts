@@ -41,6 +41,8 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     scanEventsTable: dataStack.scanEventsTable,
     scanExecutionsTable: dataStack.scanExecutionsTable,
     postcardsTable: dataStack.postcardsTable,
+    claimsTable: dataStack.claimsTable,
+    customerBillingProfilesTable: dataStack.customerBillingProfilesTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -49,11 +51,13 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     googlePlacesSecret: dataStack.googlePlacesSecret,
     stripeSecret: dataStack.stripeSecret,
     lobSecret: dataStack.lobSecret,
+    claimTokenSecret: dataStack.claimTokenSecret,
     captureTokenSecret: dataStack.captureTokenSecret,
     vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
     internalApiSecret: dataStack.internalApiSecret,
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
+    customerUserPool: dataStack.customerUserPool,
   });
   return Template.fromStack(vercelAccessStack);
 }
@@ -107,7 +111,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16) and stock-image-metadata (Phase 1 stock images)', () => {
+  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), and customer-billing-profiles (Stage 18)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -117,8 +121,8 @@ describe('data-access policy statements', () => {
     expect(statement.Action).toEqual(
       expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
     );
-    // 6 tables × (table + index/*) = 12 resource entries.
-    expect(statement.Resource).toHaveLength(12);
+    // 8 tables × (table + index/*) = 16 resource entries.
+    expect(statement.Resource).toHaveLength(16);
   });
 
   it('grants S3 GetObject/PutObject/DeleteObject/ListBucket scoped to the assets bucket', () => {
@@ -146,13 +150,35 @@ describe('data-access policy statements', () => {
     expect(statement.Action).not.toContain('s3:GetObject');
   });
 
-  it('grants secretsmanager:GetSecretValue on all 8 secrets', () => {
+  it('grants secretsmanager:GetSecretValue on all 9 secrets, including claim-token (Stage 17)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
     const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Resource: unknown[] }> } } };
     const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SecretsManager')!;
-    expect(statement.Resource).toHaveLength(8);
+    expect(statement.Resource).toHaveLength(9);
+  });
+
+  it('grants a minimal, explicit set of Cognito actions scoped to the customer User Pool (Stage 17)', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string[]; Resource: unknown }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'CognitoCustomerAuth')!;
+
+    expect(statement.Action).toEqual(
+      expect.arrayContaining([
+        'cognito-idp:SignUp',
+        'cognito-idp:ConfirmSignUp',
+        'cognito-idp:ResendConfirmationCode',
+        'cognito-idp:InitiateAuth',
+        'cognito-idp:ForgotPassword',
+        'cognito-idp:ConfirmForgotPassword',
+        'cognito-idp:ListUsers',
+      ]),
+    );
+    // No wildcard admin/global actions — least privilege.
+    expect(statement.Action).not.toContain('cognito-idp:*');
   });
 });
 

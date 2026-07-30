@@ -27,6 +27,7 @@ import {
   getBusinessById,
   getBusinessBySlug,
   getBusinessByGooglePlaceId,
+  getBusinessByStripeSubscriptionId,
   putBusiness,
   resolveUniqueSlug,
   listBusinesses,
@@ -151,6 +152,29 @@ describe('getBusinessByGooglePlaceId', () => {
   it('returns null when no business has that Place ID', async () => {
     mockSend.mockResolvedValueOnce({ Items: [] });
     const result = await getBusinessByGooglePlaceId('place_missing');
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getBusinessByStripeSubscriptionId (Stage 18)
+// ---------------------------------------------------------------------------
+
+describe('getBusinessByStripeSubscriptionId', () => {
+  it('queries the stripe-subscription-id-index GSI and returns the matching business', async () => {
+    const b = { ...makeBusiness(), stripeSubscriptionId: 'sub_abc' };
+    mockSend.mockResolvedValueOnce({ Items: [b] });
+
+    const result = await getBusinessByStripeSubscriptionId('sub_abc');
+
+    expect(result?.stripeSubscriptionId).toBe('sub_abc');
+    const arg = mockSend.mock.calls[0][0].input;
+    expect(arg.IndexName).toBe('stripe-subscription-id-index');
+  });
+
+  it('returns null when no business has that subscription ID', async () => {
+    mockSend.mockResolvedValueOnce({ Items: [] });
+    const result = await getBusinessByStripeSubscriptionId('sub_missing');
     expect(result).toBeNull();
   });
 });

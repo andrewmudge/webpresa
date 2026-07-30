@@ -6,6 +6,7 @@ import type { WebsiteSectionsConfig } from './website-sections';
 import type { PreviewCtaConfig } from './site-preview';
 import type { LeadPriority, QualificationResult } from './website-assessment';
 import type { ScanWorkflowStatus } from './scan-execution';
+import type { WebpresaPlan, SubscriptionStatus } from '@/domain/constants/plans';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -368,4 +369,54 @@ export interface Business extends MutableTimestampedRecord {
 
   ownerUserId?: string;
   claimedAt?: string;
+
+  // -------------------------------------------------------------------------
+  // Subscription entitlement (Stage 18 — Stripe Subscriptions)
+  //
+  // Business-scoped subscription state. A Stripe Subscription maps 1:1 to
+  // exactly one Business — the Stripe *Customer*, by contrast, is scoped to
+  // the customer (one Cognito `sub` may own several Businesses) and lives on
+  // `CustomerBillingProfile`, not here; `stripeCustomerId` below is only a
+  // denormalized display copy of that authoritative value.
+  // -------------------------------------------------------------------------
+
+  /** Purchased Webpresa tier. Absent = never subscribed. Never derived from
+   *  a Stripe Price ID directly by any caller outside `lib/stripe/plans.ts`. */
+  plan?: WebpresaPlan;
+  /** Application-owned lifecycle — the only status most of the app should
+   *  ever branch on. Written exclusively by the verified webhook handler. */
+  subscriptionStatus?: SubscriptionStatus;
+  /** Stripe's own raw status string (e.g. 'trialing', 'incomplete', 'unpaid')
+   *  — diagnostics only, never branched on outside the mapping module. */
+  stripeRawStatus?: string;
+  /** Stripe's current_period_end, ISO string. Drives "renews/ends on" UI copy. */
+  currentPeriodEnd?: string;
+  /** Mirrors Stripe's cancel_at_period_end. When true and subscriptionStatus
+   *  is still 'active', the customer has scheduled cancellation but remains
+   *  entitled through currentPeriodEnd — Stripe itself keeps status 'active'
+   *  for the whole paid period in this case, so no separate `entitledUntil`
+   *  field is needed. */
+  cancelAtPeriodEnd?: boolean;
+  /** Diagnostics only — recorded on every webhook reconciliation, but never
+   *  gates whether a write is applied. The write itself is always an
+   *  idempotent snapshot of current Stripe truth, safe to repeat and safe
+   *  out of order by construction; an older duplicate event will never equal
+   *  the most-recently-*stored* event ID, so these fields cannot alone
+   *  provide full duplicate-event detection — that safety comes from the
+   *  snapshot property of the write, not from tracking event IDs. */
+  lastStripeEventId?: string;
+  lastStripeEventAt?: string;
+  lastStripeSyncAt?: string;
+  /** A still-open Checkout Session awaiting completion, checked (via a live
+   *  Stripe lookup) and reused if still open, rather than blindly trusted —
+   *  replaces a coarse time-bucketed idempotency key. Cleared once the
+   *  webhook activates the subscription. */
+  pendingCheckoutSessionId?: string;
+  pendingCheckoutExpiresAt?: string;
+  /** The latest subscription-agreement acceptance — NOT a permanent legal
+   *  history. Also duplicated into Checkout/Subscription metadata at
+   *  acceptance time for redundant audit trail. Final legal copy and
+   *  versioning are Stage 26's responsibility. */
+  termsVersion?: string;
+  acceptedTermsAt?: string;
 }

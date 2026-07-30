@@ -5,6 +5,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 
@@ -15,6 +16,8 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly scanEventsTable: dynamodb.ITable;
   readonly scanExecutionsTable: dynamodb.ITable;
   readonly postcardsTable: dynamodb.ITable;
+  readonly claimsTable: dynamodb.ITable;
+  readonly customerBillingProfilesTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
@@ -23,11 +26,13 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly googlePlacesSecret: secretsmanager.ISecret;
   readonly stripeSecret: secretsmanager.ISecret;
   readonly lobSecret: secretsmanager.ISecret;
+  readonly claimTokenSecret: secretsmanager.ISecret;
   readonly captureTokenSecret: secretsmanager.ISecret;
   readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly internalApiSecret: secretsmanager.ISecret;
   readonly screenshotLambdaFunction: lambda.IFunction;
   readonly scanWorkflowStateMachine: sfn.IStateMachine;
+  readonly customerUserPool: cognito.IUserPool;
 }
 
 /**
@@ -80,6 +85,8 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.scanEventsTable,
       props.scanExecutionsTable,
       props.postcardsTable,
+      props.claimsTable,
+      props.customerBillingProfilesTable,
       props.stockImagesTable,
     ];
 
@@ -115,10 +122,28 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
             props.googlePlacesSecret.secretArn,
             props.stripeSecret.secretArn,
             props.lobSecret.secretArn,
+            props.claimTokenSecret.secretArn,
             props.captureTokenSecret.secretArn,
             props.vercelProtectionBypassSecret.secretArn,
             props.internalApiSecret.secretArn,
           ],
+        }),
+        // Stage 17 — customer identity. Minimal, explicit action list rather
+        // than a wildcard; extend here (e.g. UpdateUserAttributes,
+        // VerifyUserAttribute) only when a feature actually needs it, such
+        // as email-change support in a later stage.
+        new iam.PolicyStatement({
+          sid: 'CognitoCustomerAuth',
+          actions: [
+            'cognito-idp:SignUp',
+            'cognito-idp:ConfirmSignUp',
+            'cognito-idp:ResendConfirmationCode',
+            'cognito-idp:InitiateAuth',
+            'cognito-idp:ForgotPassword',
+            'cognito-idp:ConfirmForgotPassword',
+            'cognito-idp:ListUsers',
+          ],
+          resources: [props.customerUserPool.userPoolArn],
         }),
       ],
     });

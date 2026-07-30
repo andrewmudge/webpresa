@@ -66,3 +66,4 @@ export const TABLE_POSTCARDS = () => getTableName('POSTCARDS_TABLE_NAME');
 export const TABLE_SCAN_EXECUTIONS = () => getTableName('SCAN_EXECUTIONS_TABLE_NAME');
 export const TABLE_STOCK_IMAGES = () => getTableName('STOCK_IMAGES_TABLE_NAME');
 export const TABLE_CLAIMS = () => getTableName('CLAIMS_TABLE_NAME');
+export const TABLE_CUSTOMER_BILLING_PROFILES = () => getTableName('CUSTOMER_BILLING_PROFILES_TABLE_NAME');

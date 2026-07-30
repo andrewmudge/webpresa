@@ -11,6 +11,7 @@ import {
 } from '@/domain/models/business';
 import { QUALIFICATION_RESULTS, LEAD_PRIORITIES } from '@/domain/models/website-assessment';
 import { SCAN_WORKFLOW_STATUSES } from '@/domain/models/scan-execution';
+import { WEBPRESA_PLANS, SUBSCRIPTION_STATUSES } from '@/domain/constants/plans';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 import { PreviewCtaConfigSchema } from './site-preview.schema';
@@ -129,6 +130,18 @@ export const BusinessSchema = z.object({
   scanExecutionUpdatedAt: IsoTimestampSchema.optional(),
   ownerUserId: z.string().min(1).optional(),
   claimedAt: IsoTimestampSchema.optional(),
+  plan: z.enum(WEBPRESA_PLANS).optional(),
+  subscriptionStatus: z.enum(SUBSCRIPTION_STATUSES).optional(),
+  stripeRawStatus: z.string().optional(),
+  currentPeriodEnd: IsoTimestampSchema.optional(),
+  cancelAtPeriodEnd: z.boolean().optional(),
+  lastStripeEventId: z.string().optional(),
+  lastStripeEventAt: IsoTimestampSchema.optional(),
+  lastStripeSyncAt: IsoTimestampSchema.optional(),
+  pendingCheckoutSessionId: z.string().optional(),
+  pendingCheckoutExpiresAt: IsoTimestampSchema.optional(),
+  termsVersion: z.string().max(50).optional(),
+  acceptedTermsAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

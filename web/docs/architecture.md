@@ -855,7 +855,7 @@ Public, self-service accounts: unknown users sign up, choose passwords, forget p
 
 ## Stripe Subscriptions (Stage 18)
 
-Not started — this section documents the approved design a later implementation session will build against (see `implementation.md`, Stage 18).
+**Implemented in development, not yet deployed.** See `implementation.md`, Stage 18, and `build_log.md` for the full implementation record and what remains (real AWS deployment of the new table/GSI, Stripe test-mode Product/Price objects, and a populated `webpresa-{env}-stripe` secret) before this can be exercised end-to-end.
 
 **One Stripe Customer per Cognito customer, not per Business.** A customer may own several businesses (Stage 17), and each subscribes independently, but they should share one Stripe Customer rather than minting a new one per Business. The authoritative mapping is a new record, `CustomerBillingProfile` (`userId` → `stripeCustomerId`, one row per customer, ever — see "DynamoDB tables" above), created via a conditional `PutItem` the first time a customer checks out for any Business. This is not a "billing account"/organization concept — it carries no seats, roles, or team semantics, only a single foreign key — and it exists specifically because deriving Stripe-Customer reuse by scanning a customer's other owned Businesses (the naive approach) has no atomic "does one already exist" check and risks creating two Stripe Customers for one person under concurrent first-checkouts. `Business.stripeCustomerId` (the Stage 5/17 placeholder field) remains, but only as a denormalized copy for the existing admin display — the profile is always the authority.
 
