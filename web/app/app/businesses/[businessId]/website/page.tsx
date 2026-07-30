@@ -74,52 +74,59 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
         </div>
       )}
 
-      <nav className="mt-6 border-b border-gray-200 overflow-x-auto" aria-label="Jump to section">
-        <div className="flex gap-1 min-w-max">
-          {SECTIONS.map((s) => (
-            <a
-              key={s.id}
-              href={`#${s.id}`}
-              className="px-3.5 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-(--color-brand) hover:border-(--color-brand)/40 transition-colors"
-            >
-              {s.label}
-            </a>
-          ))}
-        </div>
-      </nav>
+      {/* Sticky once scrolled past its natural position, so the customer can
+          always jump between sections without scrolling back to the top.
+          `top-14` on mobile clears AppSidebar's own sticky hamburger bar
+          (md:hidden); at md:+ that bar doesn't exist, so the nav sticks
+          flush to the very top instead. */}
+      <div className="mt-6 sticky top-14 md:top-0 z-20 -mt-px bg-[#F0F4F8]">
+        <nav className="border-b border-gray-200 overflow-x-auto shadow-[0_1px_2px_rgba(0,0,0,0.04)]" aria-label="Jump to section">
+          <div className="flex gap-1 min-w-max">
+            {SECTIONS.map((s) => (
+              <a
+                key={s.id}
+                href={`#${s.id}`}
+                className="px-3.5 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-(--color-brand) hover:border-(--color-brand)/40 transition-colors"
+              >
+                {s.label}
+              </a>
+            ))}
+          </div>
+        </nav>
+      </div>
 
       <div className="mt-6 space-y-10">
-        <section id="content" className="scroll-mt-6">
+        <section id="content" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <ContentTab businessId={businessId} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
-        <section id="services" className="scroll-mt-6">
+        <section id="services" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <ServicesTab businessId={businessId} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
-        <section id="photos" className="scroll-mt-6">
+        <section id="photos" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <PhotosTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
-        <section id="sections" className="scroll-mt-6">
+        <section id="sections" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
-        <section id="contact" className="scroll-mt-6">
+        <section id="contact" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <ContactTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
-        <section id="seo" className="scroll-mt-6">
+        <section id="seo" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <SeoTab businessId={businessId} isReadOnly={isReadOnly} />
           </Suspense>
