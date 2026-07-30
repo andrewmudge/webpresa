@@ -171,6 +171,58 @@ The user and its access keys are deliberately **not** managed by CDK — a long-
 
 > Future Lambda execution roles (Stage 22 postcard service) should still get their own prefix/secret-scoped policy (e.g. `s3:PutObject` on `arn:aws:s3:::webpresa-dev-assets/scans/*` only, or `secretsmanager:GetSecretValue` on just its one secret) rather than reusing the Vercel app's broader data-access policy — this note carries forward from before the migration and still applies to any *new* execution role, just not to the Vercel user's own permissions anymore.
 
+## Vercel CLI — managing environment variables
+
+Env vars can be managed from the terminal instead of the Vercel dashboard. The CLI isn't installed globally (global `npm install -g vercel` failed with `EACCES` in this environment) — invoke it via `npx vercel`, which downloads and caches it on first use, no install/permissions needed.
+
+### One-time setup (already done on this machine)
+
+```bash
+npx vercel login          # device-flow auth: opens a URL + code, approve once in a browser
+npx vercel link           # links the current directory to a Vercel project
+```
+
+Run both from `web/` (`.vercel/project.json` lives there, gitignored). This machine is logged in as `andrewmudge` and `web/` is linked to `andrew-mudges-projects/webpresa` — the real, deployed project.
+
+**Gotcha (hit 2026-07-29):** `vercel link --yes` with no project match prompts interactively; running it non-interactively without `--project <name>` silently **creates a new empty project** instead of linking to the existing one, rather than erroring. Always pass the project explicitly to relink:
+
+```bash
+npx vercel link --yes --project webpresa
+```
+
+Verify the link before trusting any `env` command: `cat web/.vercel/project.json` should show `"projectName":"webpresa"`.
+
+### List variables
+
+```bash
+npx vercel env ls
+```
+
+### Add a variable
+
+```bash
+npx vercel env add MY_VAR_NAME production
+npx vercel env add MY_VAR_NAME preview
+```
+
+Prompts for the value (or pipe it: `echo -n "value" | npx vercel env add MY_VAR_NAME production`). This project sets each var on both `production` and `preview` — see "Required environment variables" above for the full list and what each one is for. `development` is not used; local dev reads `.env.local` directly (see "Local vs deployed AWS credentials" above).
+
+### Remove a variable
+
+```bash
+npx vercel env rm MY_VAR_NAME production
+```
+
+### Pull deployed values into `.env.local`
+
+```bash
+npx vercel env pull .env.local
+```
+
+Overwrites local values with what's actually deployed — useful for confirming drift, but review the diff before committing to it, since `.env.local` may hold local-only overrides (e.g. `AWS_PROFILE`) that don't exist in Vercel.
+
+---
+
 ## Populating a real secret value (Stage 10)
 
 Secrets are created by CDK with a random placeholder only — never a real value. Populate the real value out-of-band once the stage that needs it is being implemented:
@@ -622,7 +674,7 @@ The Stripe SDK client (`web/lib/stripe/client.ts`) pins an explicit `apiVersion`
 
 ### Vercel environment variables
 
-Still need to be added in the Vercel dashboard (not yet done — no Vercel CLI/token was available when the rest of this setup ran):
+**Added 2026-07-29** via `npx vercel env add <name> production,preview --value "..." --yes` (see "Vercel CLI — managing environment variables" above), matching every existing var's `Production, Preview` scoping:
 
 ```
 CUSTOMER_BILLING_PROFILES_TABLE_NAME=webpresa-dev-customer-billing-profiles
@@ -633,6 +685,10 @@ TERMS_VERSION=draft-2026-07
 ```
 
 Price IDs are not secrets — server-only (never `NEXT_PUBLIC_`) purely so the browser can never submit or influence which Price a Checkout Session charges.
+
+Newly added/changed env vars only take effect on a new deployment — the already-running preview does not pick them up live. Redeployed via `npx vercel redeploy <deployment-url> --target preview` (rebuilds the same commit, re-points the `webpresa-git-dev-...` alias); re-verified with `stripe trigger checkout.session.completed` afterward (`pending_webhooks: 0` again).
+
+**`WEBPRESA_APP_BASE_URL`'s `Production` value is a placeholder, not yet correct for real production.** This project already has a real domain connected (`webpresa.com`, confirmed via `vercel domains ls`; `vercel redeploy`'s own output references `www.webpresa.com` as the production target) — every Stage 18 env var was set identically across `Production`/`Preview` only because that already matches how every earlier var in this table is configured (no separate production AWS account/Stripe live keys exist yet either). Before actually promoting Stage 18 to production, update `WEBPRESA_APP_BASE_URL`'s `Production` value to the real `https://www.webpresa.com` (or equivalent) — using the dev preview URL there would send live-mode Checkout redirects and Portal return URLs to the wrong host.
 
 ### Expected failure behavior
 
