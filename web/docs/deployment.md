@@ -111,8 +111,8 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
 | `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — deployed (`webpresa-dev-customer-billing-profiles`); not yet added to Vercel |
-| `STRIPE_PRICE_ID_BASIC` | Stripe Dashboard test-mode Price ID | Stage 18 — Stripe test-mode Product/Price not yet created; not a secret, but server-only (never `NEXT_PUBLIC_`) |
-| `STRIPE_PRICE_ID_GROWTH` | Stripe Dashboard test-mode Price ID | Stage 18 — Stripe test-mode Product/Price not yet created; not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_BASIC` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjryHTxTryrfUCNCT4A9Yn`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_GROWTH` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjsnHTxTryrfUCMeAT0q3K`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
 | `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet added to Vercel; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
 
 Never put these in client-side code or commit `.env` files that contain real values.
@@ -554,7 +554,7 @@ Add all six new Stage 17 variables from "Required environment variables" above: 
 
 ## Stage 18 — Stripe Subscriptions deployment guidance
 
-**Deployed to dev 2026-07-29.** Adds one new table (`customer-billing-profiles` — PK `userId`, no GSI), one new GSI on the existing `businesses` table (`stripe-subscription-id-index`) — both inside the existing `WebpresaDataStack`, no new stack, no new compute. Both are now live in `webpresa-dev-*`; `WebpresaDevVercelAccessStack` was redeployed alongside it (`DataAccessPolicy` gained the new table's ARN + `/index/*`). The existing `webpresa-{env}-stripe` secret (provisioned Stage 10) still holds only its random placeholder values — real test-mode `secretKey`/`webhookSecret` values, the Stripe Price IDs, and the new Vercel environment variables remain to be populated (see "Required environment variables" above and the deploy sequence below).
+**Deployed to dev 2026-07-29 — including a real Stripe test-mode account.** Adds one new table (`customer-billing-profiles` — PK `userId`, no GSI), one new GSI on the existing `businesses` table (`stripe-subscription-id-index`) — both inside the existing `WebpresaDataStack`, no new stack, no new compute. Both are live in `webpresa-dev-*`; `WebpresaDevVercelAccessStack` was redeployed alongside it (`DataAccessPolicy` gained the new table's ARN + `/index/*`). The `webpresa-dev-stripe` secret now holds real test-mode `secretKey`/`webhookSecret` values, two real test-mode Products/Prices exist, and a real webhook endpoint is registered and delivering successfully. Remaining: add the Vercel environment variables below (no Vercel CLI/token available in the environment that ran this setup).
 
 ### Deploy sequence (first time)
 
@@ -564,21 +564,57 @@ Add all six new Stage 17 variables from "Required environment variables" above: 
 cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
 npx cdk deploy WebpresaDevDataStack --profile webpresa
 
-# 2. Populate the real Stripe test-mode secret (obtained from the Stripe
-#    Dashboard — API keys page and, once the webhook endpoint is registered,
-#    the webhook's signing secret):
-aws secretsmanager put-secret-value \
-  --secret-id webpresa-dev-stripe \
-  --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
-  --profile webpresa
-
-# 3. Vercel access stack — grants the new table and GSI ARNs (the Stripe
+# 2. Vercel access stack — grants the new table and GSI ARNs (the Stripe
 #    secret is already granted from Stage 10):
 npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
 npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
 ```
 
-Stripe Products and Prices (two monthly Prices — Basic `$39`, Growth `$79`) are created once via the Stripe Dashboard or CLI, in **test mode only** — never via CDK, and never as part of a deploy command. The webhook endpoint URL (`https://<real-app-domain>/api/webhooks/stripe`) is registered in the Stripe Dashboard's test-mode webhook settings once the app is deployed and reachable; its signing secret is what populates `webhookSecret` in step 2 above.
+### Stripe setup via CLI (not the Dashboard) — the actual recipe used for dev, and the recipe for prod later
+
+Stripe Products/Prices/webhook endpoints are never created from CDK — this is entirely a Stripe-side, one-time setup, done here via `npx --yes @stripe/cli` (no global install, no `stripe login`/browser device-auth needed — every command takes `--api-key` directly). The exact same sequence below, run again with a live secret key and `--live`, is the literal recipe for production — not a Dashboard "copy to live mode" click, so there's no manual re-derivation or drift risk between environments.
+
+```bash
+export STRIPE_SECRET_KEY='sk_test_...'   # or sk_live_... for prod, with --live added below
+
+# Products + monthly recurring Prices — check for an existing Product by
+# name first (stripe products list --api-key "$STRIPE_SECRET_KEY") before
+# creating, so reruns don't duplicate.
+npx --yes @stripe/cli products create --name="Webpresa Basic" \
+  --description="Single-page professionally designed website with city-specific SEO for your primary city." \
+  --api-key "$STRIPE_SECRET_KEY"
+npx --yes @stripe/cli prices create --product=<prod_id_basic> --unit-amount=3900 --currency=usd \
+  -d "recurring[interval]=month" --api-key "$STRIPE_SECRET_KEY"
+
+npx --yes @stripe/cli products create --name="Webpresa Growth" \
+  --description="Expanded website with multiple city-specific SEO pages and Growth-tier lead forms." \
+  --api-key "$STRIPE_SECRET_KEY"
+npx --yes @stripe/cli prices create --product=<prod_id_growth> --unit-amount=7900 --currency=usd \
+  -d "recurring[interval]=month" --api-key "$STRIPE_SECRET_KEY"
+
+# Webhook endpoint — no dedicated `stripe webhook_endpoints create` resource
+# command exists; the CLI's generic REST passthrough works and returns the
+# same JSON the API would, including the one-time-only `secret` field
+# (capture it immediately — Stripe never shows it again):
+npx --yes @stripe/cli post /v1/webhook_endpoints \
+  -d url="https://<real-app-domain>/api/webhooks/stripe?x-vercel-protection-bypass=<bypass-secret>" \
+  -d "enabled_events[]=checkout.session.completed" \
+  -d "enabled_events[]=customer.subscription.created" \
+  -d "enabled_events[]=customer.subscription.updated" \
+  -d "enabled_events[]=customer.subscription.deleted" \
+  -d "enabled_events[]=invoice.payment_failed" \
+  --api-key "$STRIPE_SECRET_KEY"
+
+# Populate the real secret:
+aws secretsmanager put-secret-value \
+  --secret-id webpresa-dev-stripe \
+  --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
+  --profile webpresa
+```
+
+**Why the webhook URL carries a `?x-vercel-protection-bypass=` query parameter**: this `dev` deployment has Vercel Deployment Protection enabled, which redirects *every* unauthenticated request — including Stripe's webhook POSTs — to Vercel's own SSO login page at the edge, before Next.js ever runs (confirmed directly: a `curl -X POST` to `/api/webhooks/stripe` returned a `302` to `vercel.com/sso-api`). Stripe (like Slack, GitHub, and any third-party webhook sender) can't attach the `x-vercel-protection-bypass` HTTP header Playwright uses (Stage 14) — there's no custom-header support in Stripe's webhook delivery config, and no persistent cookie jar between deliveries anyway. Vercel's own docs name this exact scenario and document the fix: append the bypass secret as a **query parameter** on the registered URL instead — this is checked per-request, statelessly, with no cookie needed, so every individual Stripe delivery independently passes. Reuses the existing `webpresa-{env}-vercel-protection-bypass` secret (Stage 14) — do not generate a second one, or the copy the screenshot Lambda reads goes stale. This query parameter has zero effect on this app's own webhook signature verification, which is based only on the raw POST body + `Stripe-Signature` header, never the URL.
+
+**Verified working (2026-07-29)**: `stripe trigger checkout.session.completed --api-key "$STRIPE_SECRET_KEY"` produced a real event whose `pending_webhooks` count dropped to `0` (`stripe events list --api-key ... -d "types[]=checkout.session.completed"`) — confirming Stripe successfully delivered it through the Vercel bypass to the real deployed handler and received a `200` back end-to-end.
 
 ### Stripe API version
 
@@ -586,7 +622,17 @@ The Stripe SDK client (`web/lib/stripe/client.ts`) pins an explicit `apiVersion`
 
 ### Vercel environment variables
 
-Add the new Stage 18 variables to "Required environment variables" above once implemented: `CUSTOMER_BILLING_PROFILES_TABLE_NAME` (CloudFormation export), `STRIPE_PRICE_ID_BASIC`/`STRIPE_PRICE_ID_GROWTH` (plain, non-secret — from the Stripe Dashboard's test-mode Price objects), and a server-side app base-URL variable used to build Checkout success/cancel URLs and the Customer Portal return URL (reusing the `WEBPRESA_APP_BASE_URL` naming already established for Stage 14/16's infra-side callback URLs, added here as a `web/` runtime variable rather than an infra-only one).
+Still need to be added in the Vercel dashboard (not yet done — no Vercel CLI/token was available when the rest of this setup ran):
+
+```
+CUSTOMER_BILLING_PROFILES_TABLE_NAME=webpresa-dev-customer-billing-profiles
+STRIPE_PRICE_ID_BASIC=price_1TyjryHTxTryrfUCNCT4A9Yn
+STRIPE_PRICE_ID_GROWTH=price_1TyjsnHTxTryrfUCMeAT0q3K
+WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app
+TERMS_VERSION=draft-2026-07
+```
+
+Price IDs are not secrets — server-only (never `NEXT_PUBLIC_`) purely so the browser can never submit or influence which Price a Checkout Session charges.
 
 ### Expected failure behavior
 
