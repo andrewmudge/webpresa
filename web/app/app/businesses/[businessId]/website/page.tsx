@@ -20,10 +20,10 @@ interface Props {
 const SECTIONS = [
   { id: 'theme', label: 'Theme' },
   { id: 'logo', label: 'Logo' },
+  { id: 'sections', label: 'Sections' },
   { id: 'content', label: 'Content' },
   { id: 'services', label: 'Services' },
   { id: 'photos', label: 'Photos' },
-  { id: 'sections', label: 'Sections' },
   { id: 'contact', label: 'Contact & CTAs' },
   { id: 'seo', label: 'SEO' },
 ] as const;
@@ -113,6 +113,12 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
           <LogoTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
         </section>
 
+        <section id="sections" className="scroll-mt-20">
+          <Suspense fallback={<SectionSkeleton />}>
+            <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
         <section id="content" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <ContentTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
@@ -128,12 +134,6 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
         <section id="photos" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <PhotosTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="sections" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 

@@ -75,7 +75,15 @@ export function PhotoSlotPicker({
             aria-label={`Photo ${i + 1}`}
             aria-pressed={selected === url}
             className={`relative w-16 h-16 shrink-0 rounded-lg overflow-hidden border-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-              selected === url ? 'border-(--color-brand)' : 'border-gray-200 hover:border-gray-300'
+              // Two-tone selection ring, not just a colored border: a white
+              // border hugging the photo stays visible over dark images, and
+              // the brighter accent ring outside it stays visible over light
+              // images and the card's own white background — a single dark
+              // brand-blue border (the original treatment) disappeared
+              // against dark photos.
+              selected === url
+                ? 'border-white ring-4 ring-(--color-accent)'
+                : 'border-gray-200 hover:border-gray-300'
             }`}
           >
             <Image src={url} alt={`Photo ${i + 1}`} fill className="object-cover" sizes="64px" unoptimized />

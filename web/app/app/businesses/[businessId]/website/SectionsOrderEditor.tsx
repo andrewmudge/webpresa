@@ -1,11 +1,40 @@
 'use client';
 
 import { startTransition, useActionState, useState } from 'react';
+import Link from 'next/link';
 import { WEBSITE_SECTION_CATALOG } from '@/domain/constants/website-sections';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
 import type { WebsiteSectionConfig } from '@/domain/models/website-sections';
 import { moveSection } from '@/lib/forms/reorder';
 import { autoSaveSectionsActionCustomer } from '../actions';
+
+/**
+ * Where each section's title actually links to, when it has a genuine
+ * editable home elsewhere on the dashboard. Sections with no dedicated
+ * editor today (page chrome like `header`/`footer`/`trustStrip`, and a few
+ * without a content form built yet — `reviews` beyond hide/show,
+ * `ctaBanner`'s heading override, `faq`, `process`) are intentionally
+ * omitted rather than linking to a dead end.
+ */
+function getSectionHref(type: WebsiteSectionType, businessId: string): string | undefined {
+  switch (type) {
+    case 'hero':
+    case 'about':
+      return '#content';
+    case 'services':
+    case 'whyChooseUs':
+    case 'serviceAreas':
+      return '#services';
+    case 'gallery':
+      return '#photos';
+    case 'contact':
+      return '#contact';
+    case 'socialLinks':
+      return `/app/businesses/${businessId}/settings`;
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Customer-scoped counterpart to the admin's `SectionConfigForm.tsx` up/down
@@ -71,12 +100,15 @@ function MoveButtons({
 
 function SectionRow({
   type,
+  href,
   enabled,
   onToggleEnabled,
   disabled,
   moveButtons,
 }: {
   type: WebsiteSectionType;
+  /** When present, the title links to that section's actual editor — see `getSectionHref`. */
+  href?: string;
   enabled: boolean;
   onToggleEnabled: (checked: boolean) => void;
   disabled: boolean;
@@ -94,7 +126,13 @@ function SectionRow({
         className="h-4 w-4 rounded border-gray-300 text-(--color-brand) focus:ring-(--color-brand) disabled:opacity-50"
       />
       <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium text-gray-800">{catalog.label}</span>
+        {href ? (
+          <Link href={href} className="text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors">
+            {catalog.label}
+          </Link>
+        ) : (
+          <span className="text-sm font-medium text-gray-800">{catalog.label}</span>
+        )}
         {catalog.required && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">Required</span>}
       </div>
       {moveButtons ?? <div className="w-6 shrink-0" />}
@@ -175,6 +213,7 @@ export function SectionsOrderEditor({ businessId, sections, isReadOnly }: Props)
             <SectionRow
               key={type}
               type={type}
+              href={getSectionHref(type, businessId)}
               enabled={enabled}
               onToggleEnabled={(checked) => handleToggleEnabled(type, checked)}
               disabled={isReadOnly}
