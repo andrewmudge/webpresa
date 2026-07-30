@@ -110,10 +110,10 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — deployed |
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
-| `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — not yet deployed |
-| `STRIPE_PRICE_ID_BASIC` | Stripe Dashboard test-mode Price ID | Stage 18 — not yet deployed; not a secret, but server-only (never `NEXT_PUBLIC_`) |
-| `STRIPE_PRICE_ID_GROWTH` | Stripe Dashboard test-mode Price ID | Stage 18 — not yet deployed; not a secret, but server-only (never `NEXT_PUBLIC_`) |
-| `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet deployed; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
+| `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — deployed (`webpresa-dev-customer-billing-profiles`); not yet added to Vercel |
+| `STRIPE_PRICE_ID_BASIC` | Stripe Dashboard test-mode Price ID | Stage 18 — Stripe test-mode Product/Price not yet created; not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_GROWTH` | Stripe Dashboard test-mode Price ID | Stage 18 — Stripe test-mode Product/Price not yet created; not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet added to Vercel; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
 
 Never put these in client-side code or commit `.env` files that contain real values.
 
@@ -554,7 +554,7 @@ Add all six new Stage 17 variables from "Required environment variables" above: 
 
 ## Stage 18 — Stripe Subscriptions deployment guidance
 
-**Not yet deployed.** Adds one new table (`customer-billing-profiles` — PK `userId`, no GSI), one new GSI on the existing `businesses` table (`stripe-subscription-id-index`) — both inside the existing `WebpresaDataStack`, no new stack, no new compute. No new secret: the existing `webpresa-{env}-stripe` secret (provisioned Stage 10, still holding only its random placeholder values) gets its first real test-mode `secretKey`/`webhookSecret` values as part of this stage's implementation.
+**Deployed to dev 2026-07-29.** Adds one new table (`customer-billing-profiles` — PK `userId`, no GSI), one new GSI on the existing `businesses` table (`stripe-subscription-id-index`) — both inside the existing `WebpresaDataStack`, no new stack, no new compute. Both are now live in `webpresa-dev-*`; `WebpresaDevVercelAccessStack` was redeployed alongside it (`DataAccessPolicy` gained the new table's ARN + `/index/*`). The existing `webpresa-{env}-stripe` secret (provisioned Stage 10) still holds only its random placeholder values — real test-mode `secretKey`/`webhookSecret` values, the Stripe Price IDs, and the new Vercel environment variables remain to be populated (see "Required environment variables" above and the deploy sequence below).
 
 ### Deploy sequence (first time)
 

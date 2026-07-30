@@ -6449,14 +6449,17 @@ npm test             — 6 files, 156 tests passed (2 pre-existing assertions
 npx tsc -p . --noEmit — passes
 npx cdk synth --profile webpresa       — succeeds
 npx cdk diff WebpresaDevDataStack --profile webpresa
-                     — could not run in this sandbox (no AWS credentials
-                       configured for the `webpresa` profile here); must be
-                       run and reviewed before any real deploy
+                     — additive only: +1 table (customer-billing-profiles),
+                       +1 GSI on businesses (stripe-subscription-id-index,
+                       in-place, non-replacing)
 npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-                     — same
+                     — additive only: DataAccessPolicy gains 2 resource ARNs
+                       (the new table + its /index/*), no new IAM actions
 ```
 
-**Not verified**: no real AWS deployment (no `customer-billing-profiles` table, no `stripe-subscription-id-index` GSI deployed), no Stripe test-mode Product/Price objects created, no populated `webpresa-{env}-stripe` secret values, and no headless-browser tooling available in this sandbox — so the full Checkout flow (plan selection → Stripe-hosted Checkout → test-mode payment → webhook → entitlement unlock → claim-status reflecting `active`) has not been exercised end-to-end against real infrastructure or a real Stripe test-mode account. Unit tests mock every AWS/Stripe SDK boundary; `cdk synth` confirms the infrastructure is well-formed, and `cdk diff` (additive-only expected: one new table, one new GSI, no secret/IAM-role changes) should be reviewed against the real dev account before any deploy. This should be deployed to dev, given real Stripe test-mode Price IDs and secret values, and walked through manually (including a real test-mode Checkout and webhook delivery) before relying on it.
+**Deployed to dev 2026-07-29.** `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` both deployed successfully (account `539898341083`, `us-east-1`) — verified directly via the `cdk deploy` output (`webpresa-dev-customer-billing-profiles` table created, `stripe-subscription-id-index` GSI added to `webpresa-dev-businesses`, `DataAccessPolicy` managed policy updated). No other stack changed.
+
+**Still not verified**: no Stripe test-mode Product/Price objects have been created yet, no real values populated into the `webpresa-dev-stripe` secret (still holds only its Stage 10 random placeholder), and the new Vercel environment variables (`CUSTOMER_BILLING_PROFILES_TABLE_NAME`, `STRIPE_PRICE_ID_BASIC`, `STRIPE_PRICE_ID_GROWTH`, `WEBPRESA_APP_BASE_URL`, `TERMS_VERSION`) have not been added to the Vercel project (no Vercel CLI/token available in this sandbox). No headless-browser tooling is available here either. So the full Checkout flow (plan selection → Stripe-hosted Checkout → test-mode payment → webhook → entitlement unlock → claim-status reflecting `active`) has not yet been exercised end-to-end. Unit tests mock every AWS/Stripe SDK boundary; the real infrastructure is now live, but behaves correctly only once the Stripe test-mode setup and Vercel env vars above are completed and a real test-mode Checkout is walked through manually.
 
 ## Files changed
 

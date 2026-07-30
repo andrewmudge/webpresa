@@ -2324,7 +2324,7 @@ The public preview's claim banner reflects three states, not a single ownership 
 
 ## Status
 
-Implemented in development — application code complete, automatically tested (unit tests mocking every AWS/Stripe SDK boundary), and `cdk synth` verified. **Not yet deployed and not yet manually verified end-to-end**: no real AWS deployment of the new table/GSI, no Stripe test-mode Product/Price objects created, no populated `webpresa-{env}-stripe` secret values. See `build_log.md`, "Stage 18 — Stripe Subscriptions", for the full implementation record and exactly what remains before this can be exercised against a real Stripe test-mode account. This specification replaces the original single-plan draft (`$149/month`), which predated the approved two-plan pricing decision and Stage 17's finalized multi-business ownership model.
+Application code complete, automatically tested (unit tests mocking every AWS/Stripe SDK boundary), and deployed to development — `webpresa-dev-customer-billing-profiles` table and the `stripe-subscription-id-index` GSI on `webpresa-dev-businesses` are live (deployed 2026-07-29). **Not yet manually verified end-to-end**: no Stripe test-mode Product/Price objects created yet, no real values populated into the `webpresa-dev-stripe` secret, and the new Vercel environment variables not yet added. See `build_log.md`, "Stage 18 — Stripe Subscriptions", for the full implementation/deployment record and exactly what remains before this can be exercised against a real Stripe test-mode account. This specification replaces the original single-plan draft (`$149/month`), which predated the approved two-plan pricing decision and Stage 17's finalized multi-business ownership model.
 
 ## Objective
 
