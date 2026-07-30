@@ -78,10 +78,15 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
           always jump between sections without scrolling back to the top.
           `top-14` on mobile clears AppSidebar's own sticky hamburger bar
           (md:hidden); at md:+ that bar doesn't exist, so the nav sticks
-          flush to the very top instead. */}
-      <div className="mt-6 sticky top-14 md:top-0 z-20 -mt-px bg-[#F0F4F8]">
-        <nav className="border-b border-gray-200 overflow-x-auto shadow-[0_1px_2px_rgba(0,0,0,0.04)]" aria-label="Jump to section">
-          <div className="flex gap-1 min-w-max">
+          right under the very top of the screen instead. The visible gap
+          above/below the nav card — matching the gap every other card on
+          this page gets from `space-y-10` — lives INSIDE this sticky
+          element (as padding, with the page's own background color) rather
+          than as an outer margin, so that gap stays visible even once the
+          nav is pinned and content is scrolling up underneath it. */}
+      <div className="sticky top-14 md:top-0 z-20 pt-6 pb-6 bg-[#F0F4F8]">
+        <nav className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-x-auto" aria-label="Jump to section">
+          <div className="flex gap-1 min-w-max px-2">
             {SECTIONS.map((s) => (
               <a
                 key={s.id}
@@ -95,7 +100,7 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
         </nav>
       </div>
 
-      <div className="mt-6 space-y-10">
+      <div className="space-y-10">
         <section id="content" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
             <ContentTab businessId={businessId} isReadOnly={isReadOnly} />
