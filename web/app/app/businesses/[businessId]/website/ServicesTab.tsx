@@ -1,16 +1,18 @@
-import type { PreviewContent } from '@/domain/models/site-preview';
 import { Card, TextField, SaveButton } from '../FormBits';
 import { updateSectionContentActionCustomer } from '../actions';
+import { getCachedPreviews } from './data';
 
 interface Props {
   businessId: string;
-  content?: PreviewContent;
   isReadOnly: boolean;
 }
 
 const EXTRA_ROWS = 2;
 
-export function ServicesTab({ businessId, content, isReadOnly }: Props) {
+export async function ServicesTab({ businessId, isReadOnly }: Props) {
+  const previews = await getCachedPreviews(businessId);
+  const content = previews[0]?.content;
+
   if (!content) {
     return (
       <Card title="No website yet">

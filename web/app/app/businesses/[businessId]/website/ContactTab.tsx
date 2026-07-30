@@ -1,14 +1,13 @@
 import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
-import type { PreviewContent } from '@/domain/models/site-preview';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
 import { Card, TextField, SaveButton } from '../FormBits';
 import { updateCtaActionCustomer } from '../actions';
+import { getCachedPreviews } from './data';
 
 interface Props {
   businessId: string;
   business: Business;
-  content?: PreviewContent;
   isReadOnly: boolean;
 }
 
@@ -21,7 +20,9 @@ const CTA_TYPE_LABELS: Record<(typeof CTA_ACTION_TYPES)[number], string> = {
   none: 'Hidden',
 };
 
-export function ContactTab({ businessId, business, content, isReadOnly }: Props) {
+export async function ContactTab({ businessId, business, isReadOnly }: Props) {
+  const previews = await getCachedPreviews(businessId);
+  const content = previews[0]?.content;
   const cta = content?.cta ?? business.cta;
 
   return (

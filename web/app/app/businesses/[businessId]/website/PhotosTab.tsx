@@ -1,17 +1,18 @@
 import Image from 'next/image';
 import type { Business } from '@/domain/models/business';
-import type { PreviewContent } from '@/domain/models/site-preview';
 import { Card, SaveButton } from '../FormBits';
 import { addPhotosActionCustomer, deletePhotoActionCustomer, updateSectionContentActionCustomer } from '../actions';
+import { getCachedPreviews } from './data';
 
 interface Props {
   businessId: string;
   business: Business;
-  content?: PreviewContent;
   isReadOnly: boolean;
 }
 
-export function PhotosTab({ businessId, business, content, isReadOnly }: Props) {
+export async function PhotosTab({ businessId, business, isReadOnly }: Props) {
+  const previews = await getCachedPreviews(businessId);
+  const content = previews[0]?.content;
   const photoUrls = business.photoUrls ?? [];
   const galleryImages = content?.gallerySection?.images ?? [];
   const captionFor = (url: string) => galleryImages.find((g) => g.url === url)?.caption ?? '';

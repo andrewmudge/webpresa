@@ -1,55 +1,23 @@
 import type { Business } from '@/domain/models/business';
-import type { WebsiteSectionConfig } from '@/domain/models/website-sections';
-import { WEBSITE_SECTION_CATALOG } from '@/domain/constants/website-sections';
-import { Card, SaveButton } from '../FormBits';
-import { updateSectionsActionCustomer, toggleReviewVisibilityActionCustomer } from '../actions';
+import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
+import { Card } from '../FormBits';
+import { toggleReviewVisibilityActionCustomer } from '../actions';
+import { SectionsOrderEditor } from './SectionsOrderEditor';
 
 interface Props {
   businessId: string;
-  sections: WebsiteSectionConfig[];
   business: Business;
   isReadOnly: boolean;
 }
 
-export function SectionsTab({ businessId, sections, business, isReadOnly }: Props) {
+export function SectionsTab({ businessId, business, isReadOnly }: Props) {
+  const sections = resolveStoredOrDefaultSections(business.websiteSections);
   const googleReviews = (business.testimonials ?? []).filter((t) => t.source === 'google');
 
   return (
     <div className="space-y-6">
-      <Card title="Page sections" description="Choose which sections appear on your website, and in what order (lower numbers appear first).">
-        <form action={updateSectionsActionCustomer.bind(null, businessId)} className="space-y-2">
-          {sections.map((section) => {
-            const catalog = WEBSITE_SECTION_CATALOG[section.component];
-            return (
-              <div
-                key={section.component}
-                className="flex items-center gap-3 rounded-lg border border-gray-100 px-3 py-2.5"
-              >
-                <input
-                  type="checkbox"
-                  name={`enabled_${section.component}`}
-                  defaultChecked={section.enabled}
-                  disabled={isReadOnly || catalog.required}
-                  className="h-4 w-4 rounded border-gray-300 text-(--color-brand) focus:ring-(--color-brand)"
-                />
-                <span className="flex-1 text-sm text-gray-800">
-                  {catalog.label}
-                  {catalog.required && <span className="ml-2 text-xs text-gray-400">Always on</span>}
-                </span>
-                <input
-                  type="number"
-                  name={`order_${section.component}`}
-                  defaultValue={section.order}
-                  disabled={isReadOnly}
-                  className="w-16 rounded-md border border-(--color-border) px-2 py-1 text-sm text-gray-900 disabled:bg-gray-50"
-                />
-              </div>
-            );
-          })}
-          <div className="pt-2">
-            <SaveButton disabled={isReadOnly} />
-          </div>
-        </form>
+      <Card title="Page sections" description="Choose which sections appear on your website, and use the arrows to reorder them.">
+        <SectionsOrderEditor businessId={businessId} sections={sections} isReadOnly={isReadOnly} />
       </Card>
 
       {googleReviews.length > 0 && (

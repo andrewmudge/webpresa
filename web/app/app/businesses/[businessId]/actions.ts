@@ -43,11 +43,21 @@ async function requireEditAccess(businessId: string): Promise<string> {
   return session.sub;
 }
 
-function withError(path: string, message: string | undefined): string {
-  return message ? `${path}${path.includes('?') ? '&' : '?'}error=${encodeURIComponent(message)}` : `${path}${path.includes('?') ? '&' : '?'}saved=1`;
+/**
+ * The website editor (`/app/businesses/[businessId]/website`) is a single
+ * scrollable page, not six separate `?tab=` routes — every save redirects
+ * back to the same page with a `#section` anchor so the browser scrolls
+ * back to whichever section the customer was just editing, instead of
+ * landing at the top. `anchor` is appended after the query string, since a
+ * URL's fragment always comes last (`path?query#fragment`).
+ */
+function withError(path: string, message: string | undefined, anchor?: string): string {
+  const query = message ? `error=${encodeURIComponent(message)}` : 'saved=1';
+  const base = `${path}${path.includes('?') ? '&' : '?'}${query}`;
+  return anchor ? `${base}#${anchor}` : base;
 }
 
-const SECTION_TAB: Partial<Record<WebsiteSectionType, string>> = {
+const SECTION_ANCHOR: Partial<Record<WebsiteSectionType, string>> = {
   hero: 'content',
   about: 'content',
   services: 'services',
@@ -92,7 +102,7 @@ export async function updatePhotoSlotsAction(businessId: string, formData: FormD
 export async function updateCtaActionCustomer(businessId: string, formData: FormData): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerCta(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=contact`, result?.message ?? (result?.errors ? 'Please fix the highlighted fields.' : undefined)));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message ?? (result?.errors ? 'Please fix the highlighted fields.' : undefined), 'contact'));
 }
 
 export async function updateSectionContentActionCustomer(
@@ -102,19 +112,29 @@ export async function updateSectionContentActionCustomer(
 ): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerSectionContent(businessId, section, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=${SECTION_TAB[section] ?? 'content'}`, result?.message));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, SECTION_ANCHOR[section] ?? 'content'));
 }
 
 export async function updateSeoActionCustomer(businessId: string, formData: FormData): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerSeo(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=seo`, result?.message));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'seo'));
 }
 
-export async function updateSectionsActionCustomer(businessId: string, formData: FormData): Promise<void> {
+/**
+ * Auto-save variant (no redirect) — mirrors the admin's
+ * `autoSaveWebsiteSectionsAction`. Every checkbox toggle or up/down reorder
+ * click on the customer Sections editor dispatches this immediately via
+ * `useActionState`/`startTransition`, so the client's own optimistic
+ * ordering state never has to survive a full page reload.
+ */
+export async function autoSaveSectionsActionCustomer(
+  businessId: string,
+  _prevState: { message?: string } | undefined,
+  formData: FormData,
+): Promise<{ message?: string } | undefined> {
   await requireEditAccess(businessId);
-  const result = await persistWebsiteSections(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=sections`, result?.message));
+  return persistWebsiteSections(businessId, formData);
 }
 
 export async function updateBusinessListFieldActionCustomer(
@@ -124,7 +144,7 @@ export async function updateBusinessListFieldActionCustomer(
 ): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerBusinessListField(businessId, field, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=services`, result?.message));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'services'));
 }
 
 export async function toggleReviewVisibilityActionCustomer(businessId: string, formData: FormData): Promise<void> {
@@ -133,7 +153,7 @@ export async function toggleReviewVisibilityActionCustomer(businessId: string, f
   if (typeof googleReviewId === 'string') {
     await toggleCustomerReviewVisibility(businessId, googleReviewId);
   }
-  redirect(`/app/businesses/${businessId}/website?tab=sections&saved=1`);
+  redirect(`/app/businesses/${businessId}/website?saved=1#sections`);
 }
 
 export async function reorderTestimonialsActionCustomer(businessId: string, formData: FormData): Promise<void> {
@@ -142,13 +162,13 @@ export async function reorderTestimonialsActionCustomer(businessId: string, form
   if (order.length > 0) {
     await reorderCustomerTestimonials(businessId, order);
   }
-  redirect(`/app/businesses/${businessId}/website?tab=sections&saved=1`);
+  redirect(`/app/businesses/${businessId}/website?saved=1#sections`);
 }
 
 export async function addPhotosActionCustomer(businessId: string, formData: FormData): Promise<void> {
   await requireEditAccess(businessId);
   const result = await addCustomerBusinessPhotos(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/website?tab=photos`, result?.message));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'photos'));
 }
 
 export async function deletePhotoActionCustomer(businessId: string, formData: FormData): Promise<void> {
@@ -157,7 +177,7 @@ export async function deletePhotoActionCustomer(businessId: string, formData: Fo
   if (typeof photoUrl === 'string') {
     await deleteCustomerBusinessPhoto(businessId, photoUrl);
   }
-  redirect(`/app/businesses/${businessId}/website?tab=photos&saved=1`);
+  redirect(`/app/businesses/${businessId}/website?saved=1#photos`);
 }
 
 // ---------------------------------------------------------------------------

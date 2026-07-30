@@ -1,8 +1,6 @@
-import Link from 'next/link';
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
-import { listPreviewsForBusiness } from '@/lib/db/site-previews';
-import { resolveStoredOrDefaultSections } from '@/lib/website-sections/resolve';
 import { ContentTab } from './ContentTab';
 import { ServicesTab } from './ServicesTab';
 import { PhotosTab } from './PhotosTab';
@@ -14,23 +12,38 @@ export const dynamic = 'force-dynamic';
 
 interface Props {
   params: Promise<{ businessId: string }>;
-  searchParams: Promise<{ tab?: string; error?: string; saved?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string }>;
 }
 
-const TABS = [
-  { key: 'content', label: 'Content' },
-  { key: 'services', label: 'Services' },
-  { key: 'photos', label: 'Photos' },
-  { key: 'sections', label: 'Sections' },
-  { key: 'contact', label: 'Contact & CTAs' },
-  { key: 'seo', label: 'SEO' },
+const SECTIONS = [
+  { id: 'content', label: 'Content' },
+  { id: 'services', label: 'Services' },
+  { id: 'photos', label: 'Photos' },
+  { id: 'sections', label: 'Sections' },
+  { id: 'contact', label: 'Contact & CTAs' },
+  { id: 'seo', label: 'SEO' },
 ] as const;
 
-type TabKey = (typeof TABS)[number]['key'];
+/**
+ * Shown while a section's own data fetch (`getCachedPreviews`, see
+ * `./data.ts`) is still in flight — each section is an independently
+ * `<Suspense>`-wrapped async component below, so the page shell and nav
+ * render immediately and sections stream in as their (deduped, shared)
+ * data resolves, rather than the whole page blocking on all six at once.
+ */
+function SectionSkeleton() {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 animate-pulse space-y-3">
+      <div className="h-4 w-32 bg-gray-100 rounded" />
+      <div className="h-3 w-full bg-gray-100 rounded" />
+      <div className="h-3 w-2/3 bg-gray-100 rounded" />
+    </div>
+  );
+}
 
 export default async function WebsiteEditorPage({ params, searchParams }: Props) {
   const { businessId } = await params;
-  const { tab, error, saved } = await searchParams;
+  const { error, saved } = await searchParams;
   const session = await requireCustomerSession();
   const business = await requireBusinessOwnership(session.sub, businessId);
   const { mode } = await requireBusinessAccess(session.sub, businessId);
@@ -38,16 +51,12 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
   if (mode === 'none') redirect(`/app/businesses/${businessId}`);
   const isReadOnly = mode === 'billing_recovery';
 
-  const previews = await listPreviewsForBusiness(businessId);
-  const latest = previews[0];
-  const sections = resolveStoredOrDefaultSections(business.websiteSections);
-
-  const activeTab: TabKey = (TABS.find((t) => t.key === tab)?.key ?? 'content') as TabKey;
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-gray-900">Website</h1>
-      <p className="mt-1 text-sm text-gray-500">Edit your website&apos;s content, photos, and layout.</p>
+      <p className="mt-1 text-sm text-gray-500">
+        Scroll through everything below, or jump straight to a section.
+      </p>
 
       {isReadOnly && (
         <div role="alert" className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
@@ -65,31 +74,56 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
         </div>
       )}
 
-      <div className="mt-6 border-b border-gray-200 overflow-x-auto">
-        <nav className="flex gap-1 min-w-max" aria-label="Website editor sections">
-          {TABS.map((t) => (
-            <Link
-              key={t.key}
-              href={`/app/businesses/${businessId}/website?tab=${t.key}`}
-              className={`px-3.5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === t.key
-                  ? 'border-(--color-brand) text-(--color-brand)'
-                  : 'border-transparent text-gray-500 hover:text-gray-800'
-              }`}
+      <nav className="mt-6 border-b border-gray-200 overflow-x-auto" aria-label="Jump to section">
+        <div className="flex gap-1 min-w-max">
+          {SECTIONS.map((s) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              className="px-3.5 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-(--color-brand) hover:border-(--color-brand)/40 transition-colors"
             >
-              {t.label}
-            </Link>
+              {s.label}
+            </a>
           ))}
-        </nav>
-      </div>
+        </div>
+      </nav>
 
-      <div className="mt-6">
-        {activeTab === 'content' && <ContentTab businessId={businessId} content={latest?.content} isReadOnly={isReadOnly} />}
-        {activeTab === 'services' && <ServicesTab businessId={businessId} content={latest?.content} isReadOnly={isReadOnly} />}
-        {activeTab === 'photos' && <PhotosTab businessId={businessId} business={business} content={latest?.content} isReadOnly={isReadOnly} />}
-        {activeTab === 'sections' && <SectionsTab businessId={businessId} sections={sections} business={business} isReadOnly={isReadOnly} />}
-        {activeTab === 'contact' && <ContactTab businessId={businessId} business={business} content={latest?.content} isReadOnly={isReadOnly} />}
-        {activeTab === 'seo' && <SeoTab businessId={businessId} content={latest?.content} isReadOnly={isReadOnly} />}
+      <div className="mt-6 space-y-10">
+        <section id="content" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <ContentTab businessId={businessId} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
+        <section id="services" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <ServicesTab businessId={businessId} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
+        <section id="photos" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <PhotosTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
+        <section id="sections" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
+        <section id="contact" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <ContactTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
+
+        <section id="seo" className="scroll-mt-6">
+          <Suspense fallback={<SectionSkeleton />}>
+            <SeoTab businessId={businessId} isReadOnly={isReadOnly} />
+          </Suspense>
+        </section>
       </div>
     </div>
   );

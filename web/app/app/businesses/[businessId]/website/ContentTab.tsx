@@ -1,14 +1,15 @@
-import type { PreviewContent } from '@/domain/models/site-preview';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
 import { updateSectionContentActionCustomer } from '../actions';
+import { getCachedPreviews } from './data';
 
 interface Props {
   businessId: string;
-  content?: PreviewContent;
   isReadOnly: boolean;
 }
 
-export function ContentTab({ businessId, content, isReadOnly }: Props) {
+export async function ContentTab({ businessId, isReadOnly }: Props) {
+  const previews = await getCachedPreviews(businessId);
+  const content = previews[0]?.content;
   const heroAction = updateSectionContentActionCustomer.bind(null, businessId, 'hero');
   const aboutAction = updateSectionContentActionCustomer.bind(null, businessId, 'about');
 

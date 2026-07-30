@@ -19,9 +19,7 @@ const NAV_ITEMS = [
 function Brand() {
   return (
     <Link href="/admin/businesses" className="flex items-center gap-3">
-      <div className="relative h-8 w-8 shrink-0 rounded-lg bg-white/15 overflow-hidden">
-        <Image src="/webpresa_w.png" alt="Webpresa" fill className="object-contain p-1" />
-      </div>
+      <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-8 w-auto shrink-0" />
       <div>
         <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
         <p className="text-xs text-white/50 leading-none mt-0.5">Admin</p>
