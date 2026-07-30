@@ -86,7 +86,7 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
               <a
                 key={s.id}
                 href={`#${s.id}`}
-                className="px-3.5 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-(--color-brand) hover:border-(--color-brand)/40 transition-colors"
+                className="px-4 py-3 text-base font-semibold text-(--color-brand) border-b-2 border-transparent hover:border-(--color-brand) transition-colors"
               >
                 {s.label}
               </a>
