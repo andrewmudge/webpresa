@@ -43,6 +43,33 @@ export interface BusinessAccessResult {
 }
 
 /**
+ * Pure `subscriptionStatus` → `BusinessAccessMode` mapping, extracted so
+ * `requireBusinessAccess` below and `app/b/[slug]/page.tsx`'s draft-preview
+ * resolution (Stage 19) share exactly one implementation instead of two
+ * copies of this mapping drifting apart. Takes only the two fields it needs
+ * rather than a whole `Business`, so callers that already have a narrower
+ * shape (or a business fetched for an unrelated reason) don't need to
+ * reshape anything to call it.
+ *
+ * `'canceled'` still within Stripe's own `active`+`cancel_at_period_end`
+ * grace window is NOT a fourth state here — Stripe itself keeps
+ * `subscriptionStatus` at `'active'` for the customer's entire paid period,
+ * only flipping to `'canceled'` once the period genuinely ends (see
+ * `lib/stripe/status-mapping.ts`).
+ */
+export function computeBusinessAccessMode(
+  business: Pick<Business, 'subscriptionStatus' | 'plan'>,
+): BusinessAccessResult {
+  if (business.subscriptionStatus === 'active') {
+    return { mode: 'full', plan: business.plan };
+  }
+  if (business.subscriptionStatus === 'past_due') {
+    return { mode: 'billing_recovery', plan: business.plan };
+  }
+  return { mode: 'none' }; // 'canceled' or unset — never purchased, or fully ended
+}
+
+/**
  * The real entitlement boundary. Named `requireBusinessAccess` rather than
  * `requireActiveSubscription` because it deliberately also admits
  * `'past_due'` (as a restricted `'billing_recovery'` mode) — a name implying
@@ -53,22 +80,10 @@ export interface BusinessAccessResult {
  * alone, `stripeCustomerId`'s mere presence, or any client-supplied
  * identifier — only `business.subscriptionStatus`, which only the verified
  * webhook handler ever writes.
- *
- * `'canceled'` still within Stripe's own `active`+`cancel_at_period_end`
- * grace window is NOT a fourth state here — Stripe itself keeps
- * `subscriptionStatus` at `'active'` for the customer's entire paid period,
- * only flipping to `'canceled'` once the period genuinely ends (see
- * `lib/stripe/status-mapping.ts`).
  */
 export async function requireBusinessAccess(userId: string, businessId: string): Promise<BusinessAccessResult> {
   const business = await requireBusinessOwnership(userId, businessId);
-  if (business.subscriptionStatus === 'active') {
-    return { mode: 'full', plan: business.plan };
-  }
-  if (business.subscriptionStatus === 'past_due') {
-    return { mode: 'billing_recovery', plan: business.plan };
-  }
-  return { mode: 'none' }; // 'canceled' or unset — never purchased, or fully ended
+  return computeBusinessAccessMode(business);
 }
 
 /**

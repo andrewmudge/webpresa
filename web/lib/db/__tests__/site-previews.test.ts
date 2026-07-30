@@ -21,7 +21,7 @@ vi.mock('server-only', () => ({}));
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { getPreviewsBySlug, getSitePreviewById, putSitePreview, publishSitePreview } from '@/lib/db/site-previews';
+import { getPreviewsBySlug, getSitePreviewById, putSitePreview, publishSitePreview, ensureDraftPreview } from '@/lib/db/site-previews';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 
 // ---------------------------------------------------------------------------
@@ -201,5 +201,70 @@ describe('publishSitePreview', () => {
     await publishSitePreview(target.previewId);
 
     expect(mockSend).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureDraftPreview (Stage 19 — customer copy-on-write draft safety)
+// ---------------------------------------------------------------------------
+
+describe('ensureDraftPreview', () => {
+  it('returns null when the business has no preview at all', async () => {
+    mockSend.mockResolvedValueOnce({ Items: [] }); // listPreviewsForBusiness
+    const result = await ensureDraftPreview('biz_00000000-0000-0000-0000-000000000001');
+    expect(result).toBeNull();
+    expect(mockSend).toHaveBeenCalledTimes(1); // no put — nothing to clone
+  });
+
+  it('returns the existing preview unchanged when it is already a draft', async () => {
+    const draft = makePreview({ status: 'draft' });
+    mockSend.mockResolvedValueOnce({ Items: [draft] }); // listPreviewsForBusiness
+
+    const result = await ensureDraftPreview(draft.businessId);
+
+    expect(result?.previewId).toBe(draft.previewId);
+    expect(result?.version).toBe(draft.version);
+    expect(mockSend).toHaveBeenCalledTimes(1); // list only — never patches in place itself
+  });
+
+  it('returns the existing preview unchanged when it is "ready"', async () => {
+    const ready = makePreview({ status: 'ready' });
+    mockSend.mockResolvedValueOnce({ Items: [ready] });
+
+    const result = await ensureDraftPreview(ready.businessId);
+
+    expect(result?.previewId).toBe(ready.previewId);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('clones a published preview into a new draft version — never mutates the published one', async () => {
+    const published = makePreview({ status: 'published' }); // version 1
+    mockSend.mockResolvedValueOnce({ Items: [published] }); // listPreviewsForBusiness
+    mockSend.mockResolvedValueOnce({}); // putSitePreview (the new draft clone)
+
+    const result = await ensureDraftPreview(published.businessId);
+
+    expect(result).not.toBeNull();
+    expect(result?.previewId).not.toBe(published.previewId); // a genuinely new record
+    expect(result?.version).toBe(published.version + 1);
+    expect(result?.status).toBe('draft');
+    expect(result?.content).toEqual(published.content);
+    expect(result?.theme).toEqual(published.theme);
+
+    // The put call wrote the clone, not the original published record.
+    const putCall = mockSend.mock.calls[1][0].input;
+    expect(putCall.Item.previewId).toBe(result?.previewId);
+    expect(putCall.Item.status).toBe('draft');
+  });
+
+  it('clones an archived preview into a new draft version', async () => {
+    const archived = makePreview({ status: 'archived' });
+    mockSend.mockResolvedValueOnce({ Items: [archived] });
+    mockSend.mockResolvedValueOnce({});
+
+    const result = await ensureDraftPreview(archived.businessId);
+
+    expect(result?.status).toBe('draft');
+    expect(result?.version).toBe(archived.version + 1);
   });
 });

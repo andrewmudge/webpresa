@@ -5,6 +5,8 @@ import { getPreviewsBySlug } from '@/lib/db/site-previews';
 import { getBusinessById } from '@/lib/db/businesses';
 import { getScanEventById } from '@/lib/db/scan-events';
 import { getSession } from '@/lib/auth/session';
+import { getCustomerSession } from '@/lib/auth/customer-session';
+import { computeBusinessAccessMode } from '@/lib/auth/customer-authorization';
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-token';
 import { getClaimBannerState } from '@/lib/claim/banner-state';
 import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
@@ -63,6 +65,29 @@ async function resolvePreview(slug: string) {
   if (isAdmin) {
     const draftOrReady = previews.find((p) => p.status === 'draft' || p.status === 'ready');
     return draftOrReady ? { preview: draftOrReady, isAdmin } : null;
+  }
+
+  // Stage 19 — an owning customer with 'full' or 'billing_recovery' access
+  // may view their own business's draft/ready preview (the dashboard's
+  // "Preview draft" iframe/link resolves through this exact page). Checked
+  // before the Stage 14 capture-token loop below since it's a single
+  // targeted lookup rather than a per-preview loop. `isAdmin: false` here is
+  // deliberate and safe — `isAdmin` in this file gates exactly one thing
+  // (the admin-only draft banner in `template/index.tsx`), which a customer
+  // must never see; the dashboard shell outside this iframe already
+  // communicates draft state.
+  const draftOrReady = previews.find((p) => p.status === 'draft' || p.status === 'ready');
+  if (draftOrReady) {
+    const customerSession = await getCustomerSession();
+    if (customerSession) {
+      const business = await getBusinessById(draftOrReady.businessId);
+      if (business?.ownerUserId === customerSession.sub) {
+        const { mode } = computeBusinessAccessMode(business);
+        if (mode === 'full' || mode === 'billing_recovery') {
+          return { preview: draftOrReady, isAdmin: false };
+        }
+      }
+    }
   }
 
   // Stage 14 — a Lambda holding a valid, scan-scoped capture token can see

@@ -2500,89 +2500,207 @@ No changes to `Claim` or `BusinessStatus`. `stripeSubscriptionId` (Stage 5/17 pl
 
 ---
 
-# Stage 19 — Customer Activation and Dashboard
+# Stage 19 — Customer Website Dashboard and Self-Service Editing
 
-## Note on this section's wording (pending full rewrite)
+## Status
 
-This section still reflects assumptions made before Stage 17 and Stage 18 were finalized. The items below were flagged as open conflicts; Stage 18's rewrite now resolves each of them (see Stage 18, "Domain-model changes" and "Entitlement rules"). They are recorded here as resolved, rather than rewritten wholesale, since this stage's own dashboard shape still isn't finalized.
-
-- **"provision the customer identity" (below, under Implementation requirements) is wrong as written.** The customer identity (a Cognito-backed account, `Business.ownerUserId`) is created in Stage 17, *before* Stripe Checkout — not provisioned here after payment. **Resolved by Stage 18**: this stage's post-payment work is "confirm dashboard entitlement for the already-existing owner" via `requireBusinessAccess()`/`requireActiveSubscription()` (Stage 18's webhook flips the real gate these check), not "create the identity."
-- **"Change-request submission" and the `/app/requests` route conflict with the approved "direct customer editing replaces customer change requests" direction.** Whatever dashboard stage actually gets built should let the customer edit the canonical `Business` directly, generating draft `SitePreview`s, rather than submitting requests into an admin-reviewed queue. Not rewritten here since the direct-editing dashboard's shape isn't finalized yet.
-- **"mark the business as customer" has no field to write to.** `BUSINESS_STATUSES` has no `'customer'` value, and Stage 17 deliberately left `Business.status` untouched. **Resolved by Stage 18**: no new `BusinessStatus` value is introduced. Paid activation is represented by `Business.subscriptionStatus === 'active'` (a Stage 18 field), which is what this stage's entitlement check and the claim banner's `'active'` branch read. The existing SEO `noindex`/`index` logic continues to read `business.status === 'active'` unchanged and unrelated to billing.
-- **"Customer authentication" is no longer this stage's deliverable.** Stage 17 already builds the full Cognito-backed customer identity, session, and `requireCustomerSession`/`requireBusinessOwnership` primitives. This stage only needs to call `requireBusinessAccess()`/`requireActiveSubscription()` (Stage 18) on top of what Stage 17 already provides — it does not provision Stripe or subscription state itself, and should reuse Stage 18's `CustomerBillingProfile` (not re-derive a Stripe Customer) for any future billing-adjacent feature (e.g. a billing/settings page).
-
-The rest of this section (dashboard content, billing link, settings, change-request replacement, deferred work) is left as-is pending a fuller rewrite once this stage's own dashboard shape is finalized.
+Not started. Customer identity and claim ownership are implemented in Stage 17. Subscription state, Checkout, Stripe webhook reconciliation, billing recovery, and the `requireBusinessAccess()`/`requireActiveSubscription()` authorization primitives are implemented in Stage 18 — deployed to dev, not yet manually verified end-to-end. This stage begins only once Stage 18 is verified; it does not perform activation, does not touch `Business.status`, and does not duplicate any Stage 17/18 work.
 
 ## Objective
 
-Convert a verified paid claim into an active customer account and provide a minimal self-service dashboard.
+Give an authenticated, subscription-entitled business owner a polished self-service dashboard to view, edit, preview, and publish their Webpresa website, reusing the Stage 11.x admin editing primitives under new customer-scoped authorization — while staying strictly isolated from other customers' businesses and from internal admin operations (scans, AI scores, claim management, provider IDs).
 
 ## Dependencies
 
-Stages 8, 17, and 18.
+Stages 8, 11.x, 17, and 18. Stage 11.x is a hard dependency, not a soft one: its controlled section registry (`lib/website-sections/`), per-section content editors, and durable `Business` fields (photo slots, theme, cta, testimonials/FAQ/process) are the actual editing surface this stage exposes — Stage 19 adds new authorization and UI around them, not a second content model.
 
 ## Major deliverables
 
-- Dashboard entitlement (`requireActiveSubscription()`, informed by Stage 18's webhook-confirmed subscription state — the only new authorization primitive this stage adds; session/ownership already come from Stage 17)
-- Activation workflow
-- Business status transition
-- Claimed preview status
-- Preview banner activation state (Stage 17 already defines the three-state `getClaimBannerState()`; this stage supplies the real `'active'` input)
-- Welcome communication
-- Onboarding checklist
-- Customer dashboard
-- Website information view
-- Change-request submission (see note above — likely replaced by direct editing once this stage is finalized)
-- Billing link
-- Settings page
+- `/app/*` customer dashboard shell (`AppSidebar.tsx` + layout), modeled directly on `app/admin/(dashboard)/AdminSidebar.tsx`'s responsive pattern (`framer-motion` slide-in drawer below `md:`, fixed sidebar above)
+- Business switcher (for customers owning more than one business — `getBusinessesByOwnerUserId()`, already used by `/account/claim-status`)
+- `/app` portfolio/redirect page
+- `/app/businesses/[businessId]` dashboard home — status, live preview, setup checklist, notices
+- `/app/businesses/[businessId]/website` — tabbed content/section editor
+- `/app/businesses/[businessId]/design` — theme, photo slots, hero
+- `/app/businesses/[businessId]/billing` — plan/status summary + Stripe Customer Portal entry
+- `/app/businesses/[businessId]/settings` — business-level contact/visibility settings
+- New customer-scoped Server Actions (own module, own auth) that call the *same underlying lib functions* the admin actions call — never the admin actions themselves
+- `ensureDraftPreview(businessId)` — the copy-on-write helper described below; new, since nothing today needs it
+- Explicit draft/publish workflow reusing `publishSitePreview()`
+- Extend `app/b/[slug]/page.tsx`'s `resolvePreview()` with an owning-customer branch, so "Preview draft" actually resolves (see "Small required changes" below)
+- A small shared plan-display catalog (`{ basic: { label, priceDisplay }, growth: { ... } }`) — extracted from `PlanSelectionForm.tsx`'s inline strings, reused by both it and the new Billing page
+- Small, additive changes to already-shipped Stage 8/17/18 surfaces (listed below) — required for `/app` to be reachable, linked to, and previewable at all
+- Responsive (desktop/tablet/mobile), themed loading/empty/error/read-only states
+
+## Non-goals (explicitly out of scope for this stage)
+
+- Anything Stage 17/18 already does: authentication, claim consumption, Checkout, webhook reconciliation, `Business.status` transitions (there is no `'customer'` status — paid entitlement is `subscriptionStatus === 'active'`, already true)
+- A support/change-request queue (`/app/requests`) — customers edit directly; this was the explicit product-direction reversal driving this rewrite
+- Domain connection/purchase, leads inbox, analytics, team members/shared editing, ownership transfer, AI-assisted whole-site rewriting, drag-and-drop building, custom HTML/CSS, `requirePlanCapability()` (no gated capability exists yet), account deletion, admin impersonation, SES/welcome-email infrastructure (a static in-dashboard notice is sufficient)
 
 ## Required routes
 
-- `/app`
-- `/app/website`
-- `/app/requests`
-- `/app/billing`
-- `/app/settings`
+```
+/app
+/app/businesses/[businessId]
+/app/businesses/[businessId]/website
+/app/businesses/[businessId]/design
+/app/businesses/[businessId]/billing
+/app/businesses/[businessId]/settings
+```
 
-## Implementation requirements
+`/app/account` (Cognito email/password/sign-out account-level settings, distinct from business settings) is explicitly deferred — but the sidebar's **Sign out** action itself ships now, reusing `customerSignOutAction`, the same way `AdminSidebar.tsx`'s `SignOutFooter` does today.
 
-After verified payment:
+## Route protection
 
-- mark the claim paid/activated
-- mark the business as customer (see note above — no `BusinessStatus` value exists for this yet)
-- mark the preview claimed
-- confirm dashboard entitlement for the already-existing owner (see note above — the identity itself was already created in Stage 17, before Checkout)
-- remove the public claim banner (via Stage 17's `getClaimBannerState()` reaching its `'active'` branch)
-- send a welcome message
-- collect final business details
-- request domain information
-- record content approval
-- record terms acceptance
+`proxy.ts` gains a third branch, parallel to the existing `/admin/:path*` and `/account/:path*` ones: unauthenticated requests to `/app/:path*` redirect to `/account/sign-in`. This is a session check only (mirrors the admin pattern) — per-business, per-mode authorization happens on the page/action, not the proxy, since a `billing_recovery` customer is a valid session that still needs to reach `/app` (read-only), not be turned away at the edge.
 
-Use Stripe Customer Portal for billing management where practical.
+`lib/auth/customer-actions.ts`'s `safeNextPath()` currently only allows redirect targets starting with `/account` — widen it to also allow `/app`, or sign-in-to-continue flows that should land a customer back in the dashboard will silently fall back to `/account`.
 
-Customers must only access records belonging to their organization.
+## Authorization model
+
+Every `/app/*` page and every new customer-scoped Server Action independently:
+
+1. Calls `requireCustomerSession()`.
+2. Calls `requireBusinessOwnership(userId, businessId)` (`notFound()` if the business doesn't exist or isn't owned by this session — never a 403 that confirms the business exists).
+3. Calls `requireBusinessAccess(userId, businessId)` and branches on `{ mode }`:
+
+| `mode` | Overview/Website/Design pages | Editing (Server Actions) | Billing |
+|---|---|---|---|
+| `full` | Full dashboard | Allowed | Full — plan summary + Portal |
+| `billing_recovery` | Rendered **read-only** (same pages, edit affordances hidden/disabled) | **Rejected server-side**, regardless of what the UI showed | Portal only (payment recovery) |
+| `none` | Not rendered — business home shows a minimal reactivation card instead | Rejected | Not applicable — reactivation happens via `/account/claim-status`'s existing plan selector, not a new Portal session |
+
+The client-side read-only rendering in `billing_recovery` is a UX convenience only; every mutating action re-checks `mode === 'full'` itself. `/app/businesses/[businessId]/website` and `/design` redirect to the business home when `mode !== 'full'` and `mode !== 'billing_recovery'` (i.e. only for `none`) — home is the single place that renders the tri-state (full / read-only / reactivate) so subpages don't each reimplement it.
+
+A `billing_recovery` customer may view **both** the live published site and their own existing draft (the preview card/iframe works identically to `full` mode, since viewing needs `mode ∈ {full, billing_recovery}` per the `/b/[slug]` change below) — they simply cannot create a new draft, edit it, or publish it. This mirrors the "restricted, non-destructive access" language Stage 18 already uses elsewhere; it does not restrict what a past-due customer can *see* of their own site, only what they can *change*.
+
+Every preview/business ID pairing used by a mutation is re-verified server-side (`preview.businessId === businessId` and `business.ownerUserId === userId`) — never trust a browser-supplied `businessId`/`previewId` combination.
+
+## Dashboard layout
+
+### `/app` — portfolio entry
+
+- One owned business: redirect straight to `/app/businesses/{id}` — no selection step.
+- Zero owned businesses: redirect to `/account/claim-status` (it already renders the correct empty state — no need for a second copy of that message).
+- Multiple owned businesses: cards (business name, thumbnail, plan, subscription state, website state, public link, "Manage website," a billing-recovery flag when applicable). Not an analytics dashboard — its only job is getting the customer to the right business.
+
+### `/app/businesses/[businessId]` — business home
+
+Answers, in order: is my site live, what does it look like, what's incomplete, what should I do next, is billing healthy.
+
+- **Header**: business name, plan badge, website-status badge (Live / Draft changes / No live site — see "Draft & publish model" below), "View website" (opens `/b/[slug]`), "Edit website."
+- **Website preview card**: an embedded, scaled `<iframe src="/b/[slug]">` (simplest MVP that's always current — no dependency on triggering a fresh Stage 14 screenshot capture; reusing Stage 14's existing `generated_preview` screenshots as a static thumbnail is a reasonable later optimization, not required here) with "Edit content" / "Edit design" buttons and a last-updated timestamp (`SitePreview.updatedAt` — already exists, no new field). Same-origin, so the customer's own httpOnly `webpresa_customer_session` cookie authenticates the framed request automatically — no capture-token-style query-string/cookie workaround needed, unlike Stage 14's cross-context Lambda case. Concretely:
+  - `Desktop | Mobile` viewport toggle above the frame (fixed-width container, not just CSS `transform: scale`, so text reflow is representative) plus an **"Open full preview"** link that opens `/b/[slug]` in a new tab for a true full-size look.
+  - `title` attribute on the `<iframe>` for accessibility.
+  - Loading skeleton while the frame loads; a failure fallback (not a blank white box) if `/b/[slug]` errors.
+  - No `sandbox` attribute — this is same-origin content from this app's own template, not third-party content, and the template's client-side pieces (the Request Service modal's `RequestServiceProvider` context, `CtaButton`'s `tel:`/`mailto:`/external-link handling) need to keep working exactly as they do on the real public page. Before shipping, manually verify none of those interactions unexpectedly navigate or break the parent dashboard frame.
+- **Setup checklist** — only items derivable from existing data, each linking into `/website` or `/design`; disappears once nothing's left:
+  - No logo (`!business.logoUrl`) → "Add your logo"
+  - No photos (`!business.photoUrls?.length`) → "Add photos of your business"
+  - No phone and no email → "Add a way for customers to reach you"
+  - No `theme` set → "Choose a look for your website"
+  - No `published` preview exists yet → "Publish your website"
+  - "Connect a domain" is explicitly **not** included — no domain stage exists yet to link to.
+- **Account notices** (banners, highest priority first): `billing_recovery` payment problem + Portal link; `cancelAtPeriodEnd && subscriptionStatus === 'active'` scheduled-cancellation notice; no published preview; draft changes waiting to publish.
+
+### `/app/businesses/[businessId]/website` — content editor
+
+Tabbed/segmented single page (not six route trees): **Content** (hero headline/subheadline, tagline, about text), **Services** (services list, differentiators), **Photos** (gallery + slot assignment, reusing `PhotoManager`/`PhotosForm` patterns), **Sections** (enable/disable/reorder via `persistWebsiteSections`, Reviews visibility/reorder via the existing Google-review hide/show + reorder logic — the former "Testimonials" section was merged into Reviews in 2026-07-26, per `architecture.md`; review author/rating/text stay hard read-only, matching the fact that admin never exposed editing them either), **Contact & CTAs** (CTA label/action-type/destination and section-level display toggles only — see split below), **SEO** (`content.seo.title`/`description`).
+
+**Contact & CTAs vs. Settings — deliberately not the same editor.** Canonical contact fields (`Business.phone`/`email`/`address`/`socialLinks`, notification destination) have exactly one edit surface: the Settings page. Website → Contact & CTAs shows the resolved values **read-only**, with an "Edit business information" link into Settings, and only edits things that are actually website/preview-specific: CTA label, CTA action type/destination, and whether the contact section is shown at all (already covered by the Sections tab's enable/disable, not a second toggle). Two independent editors writing the same underlying fields would invite "which one actually saved it" confusion and double the validation surface for no benefit.
+
+### `/app/businesses/[businessId]/design` — design editor
+
+**Theme** (preset picker, reusing `ThemeForm`'s picker UI), **Hero** (desktop/mobile hero photo slots, reusing `checkHeroPhotoDimensions`/`resolvePhotoSlot`), **Section images** (about/why-choose-us/services photo slots). A "preview" sub-view is optional — it can reuse the same preview card component from the business home rather than being a fourth distinct feature.
+
+### `/app/businesses/[businessId]/billing` — intentionally small
+
+Current plan, monthly price, subscription status, current period end, cancellation status, a payment-problem banner when applicable, and a single "Manage billing" button that calls the existing `createBillingPortalSessionAction(businessId)` (`app/account/checkout/actions.ts`) unchanged. No custom payment-method, invoice, or cancellation UI — Stripe Portal already owns that. Because one Stripe Customer can back several business subscriptions, the page states which business's subscription is being managed even though the Portal itself may show more. The displayed plan name/monthly price reads from the new shared plan-display catalog (an application-owned constant), never from browser input, `stripeRawStatus`, or any other raw webhook-derived text.
+
+### `/app/businesses/[businessId]/settings` — business-specific only
+
+The single canonical edit surface for display name, phone, email, address, social links, and notification destination (see "Contact & CTAs vs. Settings" above — Website only ever reads these, never writes them).
+
+**Publication summary — deliberately read-only, no new visibility model.** No customer-controlled "hide my site" toggle ships in this stage: introducing one now risks a fourth state alongside `draft`/`published`/`archived` with no defined interaction rules (does it override an active subscription? survive a re-publish?), and nothing in Stage 17/18 or the product direction defines those rules. Instead, a plain read-only summary, entirely derived from existing data:
+
+```
+Website status: Live
+Published: July 29, 2026
+Public address: /b/business-slug
+```
+
+(For "No live site," the last two lines are simply omitted — there's nothing to show yet.) Customer-controlled unpublish, maintenance mode, or suspension are explicitly deferred until their own rules are designed (see Deferred work). A domain-status line is added once a domain stage exists to source it from — not here.
+
+Account-level identity (Cognito email/password/sign-out) stays out of this page — deferred to `/app/account`.
+
+## Editing behavior
+
+Reuse, don't fork: new customer-scoped Server Actions call the **same auth-agnostic lib functions** the admin actions call (`persistWebsiteSections`, the content-patch logic behind `updateSectionContentAction`, `updateBusinessListFieldAction`, the photo-slot/theme dual-write behind `updatePhotosAction`/`updateThemeAction`) rather than duplicating validation logic. Where that logic is currently inline inside an admin-session-gated action in `app/admin/(dashboard)/businesses/[businessId]/actions.ts`, extract its auth-agnostic core into a shared `lib/` function first, so both admin and customer actions call the identical validated write path.
+
+**Direct patch** (updates the draft preview immediately, no AI call, exactly like the admin equivalents do today): phone/email/address/social links, CTA labels/action types, theme, photo slots, section enabled/order, existing section copy, services/service-area text.
+
+**Regeneration** (AI, creates a new `SitePreview` version): explicitly **not** offered in the customer dashboard for this stage — `generateWebsiteAction`'s AI regeneration path stays admin-only. Customers get direct patch editing only; broad AI-assisted rewriting is deferred (see Deferred work).
+
+## Draft & publish model
+
+Three customer-facing website states, derived from existing data (no new `Business`/`SitePreview` fields needed anywhere in this stage):
+
+- **Live** — a `published` preview exists and no newer draft sits on top of it.
+- **Draft changes** — the newest preview for the business has `status !== 'published'` while an older `published` sibling still exists.
+- **No live site** — no preview has ever been published.
+
+Workflow:
+
+1. Customer edits a field.
+2. The action calls `ensureDraftPreview(businessId)`: if the current newest preview's `status === 'published'`, clone it into a new draft version via `createSitePreview({ ...latest fields, previousVersion: latest.version })` (always lands as `status: 'draft'`); otherwise reuse the current newest preview as-is. This is a new copy-on-write step the admin side never needed — today's admin actions patch whichever preview is newest **in place**, even if it's already published (edits go live immediately, by design, for a trusted admin), which is exactly the "customer accidentally overwrites the live site" failure mode this stage must prevent.
+3. The action patches the returned draft in place — identical mechanics to the admin's existing patch-in-place actions, just always guaranteed to be a draft first.
+4. The dashboard shows "Draft changes saved" with **Preview draft** / **Publish changes**.
+5. Publishing calls the existing `publishSitePreview(previewId)` (archives the old published sibling, promotes the draft) + `updateBusiness(businessId, { currentPreviewId })` — after re-verifying session, ownership, `mode === 'full'`, and that `previewId` actually belongs to `businessId`.
+6. Previous preview versions are never deleted (already true — `publishSitePreview` archives, never deletes).
+7. `/b/[slug]` is already `force-dynamic` with no cache layer in front of it — publishing needs no explicit revalidation step.
+8. A failed publish leaves the currently-published preview untouched (the operation only ever promotes the target draft after validating it; it never mutates the live one first).
+
+## Small required changes to already-shipped code
+
+These are prerequisites for `/app` to exist, be reachable, and actually preview a draft — not a reopening of Stage 8/17/18's own scope:
+
+- **`app/b/[slug]/page.tsx`'s `resolvePreview()`** — today it only returns a `draft`/`ready` preview for an admin session (`getSession()`) or a Stage-14 capture-token request; there is no path for a customer at all. Add a third branch: after the admin check and before (or alongside) the capture-token loop, call `getCustomerSession()` (`lib/auth/customer-session.ts` — already exists, already non-throwing, returns `null` instead of redirecting) and, if present, resolve that preview's owning `Business` and check `business.ownerUserId === session.sub` and access mode ∈ `{full, billing_recovery}`. Extract the mode computation Stage 18 already has inside `requireBusinessAccess()` into a small pure helper (e.g. `computeBusinessAccessMode(business): BusinessAccessMode`) so both `requireBusinessAccess()` and this new branch share one implementation instead of two copies of the `subscriptionStatus` → mode mapping. Return `{ preview, isAdmin: false }` — `isAdmin` in this file only gates one thing (`GeneratedWebsite`'s admin-only draft banner in `template/index.tsx`), so `false` is correct and sufficient; no other admin-only UI leaks through this path. Unauthenticated visitors and customers who don't own the business continue to get `null` → `notFound()`, unchanged.
+- `proxy.ts` — add the `/app/:path*` branch (see "Route protection" above).
+- `lib/auth/customer-actions.ts` — widen `safeNextPath()` to allow `/app` targets.
+- `app/account/claim-status/page.tsx`'s `BusinessCard` — once `subscriptionStatus === 'active'` (or `billing_recovery`), show a primary **"Go to dashboard"** link to `/app/businesses/{id}` alongside/instead of the inline "Manage billing" button. `claim-status` otherwise keeps its existing Stage 17/18 job unchanged (pre-entitlement plan selection, reactivation for `canceled`) — no billing-management logic is duplicated into `/app`.
+- `app/account/claim-status/PlanSelectionForm.tsx` — read its price/label text from the new shared plan-display catalog instead of its current inline `"$39/month"`/`"$79/month"` literals, so the Billing page and the plan selector can never drift out of sync.
+
+## Security requirements
+
+- Every `/app/*` page and Server Action independently re-derives session → ownership → access mode; nothing is cached from a prior request or trusted from the client.
+- No admin-only data ever reaches a customer response: scan records, AI qualification/scores, Firecrawl artifacts, claim-token management, `Business.source`/internal status fields, Stripe/Cognito raw IDs, provider error text, cascade-delete or ownership-release actions.
+- Google-sourced review author/rating/text remain immutable; only visibility/order are customer-editable, matching what was ever possible in the admin UI.
+- `previewId`/`businessId` pairs are revalidated server-side on every mutation — never trusted from a form field alone.
+- **Photo uploads inherit today's actual state, not an idealized one**: there is no MIME-type or per-file-size validation on `putAsset()` today (only a key-prefix allowlist) — this is a pre-existing gap already tracked under Stage 25 (Security Hardening), and Stage 19 does not silently fix it. What Stage 19 *does* add, correctly: the uploaded S3 key is only ever written under a `businessId` the requesting customer was already proven to own by `requireBusinessOwnership()` — no new customer-specific path for an unowned business's asset prefix.
+- **CSRF/origin protection**: every Server Action in this app (admin's included) already gets Next.js's built-in same-origin verification for Server Action POSTs, and `next.config.ts` sets no `experimental.serverActions.allowedOrigins` override that would weaken it. The new customer-scoped actions are plain `'use server'` functions and inherit this automatically; no new CSRF mechanism is needed. Worth a one-line confirmation in `build_log.md` once implemented, not new code.
+- **Safe logging**: publish attempts and access-mode denials (`billing_recovery`/`none` hitting a `full`-only action) are logged with `userId`, `businessId`, `previewId`, and outcome only — never full form payloads or PII — matching the "log safely, never the full payload" convention Stage 16/18's webhook handler already establishes. No new audit table.
 
 ## Acceptance criteria
 
-- A paid, verified claim activates exactly once.
-- The customer can sign in. (Already true as of Stage 17 — this stage only needs to additionally *unlock the dashboard* for a subscription-entitled session.)
-- The dashboard shows website, domain, requests, billing, and settings information.
-- The customer cannot access another business.
-- A customer can submit a change request. (Pending the direct-editing reconsideration noted above.)
-- Billing management opens the correct Stripe portal.
-- The claimed site no longer displays the Webpresa claim banner.
-- Activation failures are recoverable without duplicate accounts.
+- An authenticated customer can view every business they own; a single-business customer reaches it with no selection step; a multi-business customer can switch.
+- A customer cannot view or mutate another customer's business via a crafted URL or payload.
+- A `full`-mode customer can edit approved content/design fields; edits land on a draft, never immediately overwrite a live published preview.
+- A customer can preview a draft and explicitly publish it; previous versions remain preserved.
+- Google-sourced review author/rating/text cannot be altered by a customer.
+- No admin-only field or operation is ever reachable from `/app/*`.
+- A `billing_recovery` customer sees a read-only dashboard, can view both their published site and their existing draft, and can reach Stripe Portal — but every edit/publish action rejects server-side regardless of UI state.
+- `/b/[slug]` correctly resolves an owning customer's own `draft`/`ready` preview (mode `full` or `billing_recovery`) while continuing to reject unauthenticated visitors and non-owning customers exactly as before.
+- A `none`-mode (canceled) customer sees a minimal reactivation path via `/account/claim-status`, never a bare 404 or full lockout.
+- "Manage billing" opens a real Stripe Customer Portal session scoped to the correct business's Stripe Customer.
+- The dashboard is usable on mobile, tablet, and desktop, following `AdminSidebar.tsx`'s responsive drawer pattern.
+- Loading, empty, validation-error, authorization-error, publish-error, and read-only states are all handled.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, and `npm run build` pass in `web/`.
+- `architecture.md`, `deployment.md`, and `build_log.md` are updated.
 
 ## Deferred work
 
-- Team members
-- Fine-grained customer permissions
-- Direct content editing
-- Advanced analytics
-- Lead history
-- Domain registrar automation
-- White-label dashboards
+Lead inbox/notification history (Stage 20), domain connection/purchase (dedicated stage), analytics/traffic reporting, Google Business Profile management, team members/shared editing, ownership transfer, `requirePlanCapability()` (no gated capability exists yet), AI-assisted whole-site rewriting/regeneration from the customer dashboard, drag-and-drop layout building, custom section variants, custom HTML/CSS, customer-visible scan history or AI scores, admin impersonation, SES/welcome-email infrastructure (a static in-dashboard notice suffices for now), `/app/account` (Cognito email/password/sign-out settings beyond the sidebar's sign-out action).
 
 ---
 

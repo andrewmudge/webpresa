@@ -4,6 +4,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// actions.ts transitively imports lib/website-sections/persist.ts (Stage 19
+// extraction), which imports the real 'server-only' package — must be
+// mocked in every test environment, same as every other file that imports
+// it (see lib/db/__tests__/site-previews.test.ts for the same pattern).
+vi.mock('server-only', () => ({}));
+
 // ---------------------------------------------------------------------------
 // Hoisted mock functions
 // ---------------------------------------------------------------------------

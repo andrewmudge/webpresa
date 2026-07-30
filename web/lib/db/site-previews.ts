@@ -2,6 +2,7 @@ import 'server-only';
 import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { SitePreview } from '@/domain/models/site-preview';
 import { SitePreviewSchema } from '@/domain/schemas/site-preview.schema';
+import { createSitePreview } from '@/domain/factories/site-preview.factory';
 import { getDynamoDBClient, TABLE_SITE_PREVIEWS } from './client';
 
 export async function getSitePreviewById(previewId: string): Promise<SitePreview | null> {
@@ -99,6 +100,41 @@ export async function publishSitePreview(previewId: string): Promise<SitePreview
   return published;
 }
 
+
+/**
+ * Copy-on-write draft resolution (Stage 19 — Customer Website Dashboard).
+ *
+ * The admin editing actions all patch whichever preview is currently newest
+ * **in place**, even when it's already `published` — edits go live
+ * immediately, by design, for a trusted admin. A customer must never get
+ * that behavior: their first edit on top of a live site needs to land on a
+ * fresh draft, not silently overwrite what's public. Returns the current
+ * newest preview unchanged when it's already a draft/ready (so a second
+ * edit in the same session keeps patching the same draft, exactly like the
+ * admin path already does), or clones it into a new `draft` version — same
+ * content, `version + 1` — when it's `published` or `archived`.
+ *
+ * Returns `null` only when the business has no preview at all yet (nothing
+ * to clone) — callers decide how to handle "no live site" themselves.
+ */
+export async function ensureDraftPreview(businessId: string): Promise<SitePreview | null> {
+  const previews = await listPreviewsForBusiness(businessId);
+  const latest = previews[0];
+  if (!latest) return null;
+  if (latest.status === 'draft' || latest.status === 'ready') return latest;
+
+  const draft = createSitePreview({
+    businessId: latest.businessId,
+    slug: latest.slug,
+    templateId: latest.templateId,
+    content: latest.content,
+    theme: latest.theme,
+    generationMetadata: latest.generationMetadata,
+    previousVersion: latest.version,
+  });
+  await putSitePreview(draft);
+  return draft;
+}
 
 export async function deletePreviewById(previewId: string): Promise<void> {
   const client = getDynamoDBClient();

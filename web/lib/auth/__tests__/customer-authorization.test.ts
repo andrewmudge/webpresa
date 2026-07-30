@@ -28,7 +28,12 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-import { requireBusinessOwnership, requireBusinessAccess, requireActiveSubscription } from '@/lib/auth/customer-authorization';
+import {
+  requireBusinessOwnership,
+  requireBusinessAccess,
+  requireActiveSubscription,
+  computeBusinessAccessMode,
+} from '@/lib/auth/customer-authorization';
 
 function makeBusiness(overrides: Record<string, unknown> = {}) {
   return {
@@ -99,6 +104,37 @@ describe('requireBusinessAccess', () => {
       makeBusiness({ ownerUserId: 'someone_else', subscriptionStatus: 'active' }),
     );
     await expect(requireBusinessAccess('user_1', 'biz_1')).rejects.toThrow('NOT_FOUND');
+  });
+});
+
+describe('computeBusinessAccessMode', () => {
+  it('is the exact pure mapping requireBusinessAccess delegates to — full for active', () => {
+    expect(computeBusinessAccessMode({ subscriptionStatus: 'active', plan: 'growth' })).toEqual({
+      mode: 'full',
+      plan: 'growth',
+    });
+  });
+
+  it('billing_recovery for past_due', () => {
+    expect(computeBusinessAccessMode({ subscriptionStatus: 'past_due', plan: 'basic' })).toEqual({
+      mode: 'billing_recovery',
+      plan: 'basic',
+    });
+  });
+
+  it('none for canceled', () => {
+    expect(computeBusinessAccessMode({ subscriptionStatus: 'canceled' })).toEqual({ mode: 'none' });
+  });
+
+  it('none when never subscribed', () => {
+    expect(computeBusinessAccessMode({})).toEqual({ mode: 'none' });
+  });
+
+  it('takes no DynamoDB or session dependency — a pure function, callable from app/b/[slug]/page.tsx without any auth boundary', () => {
+    // No mocks configured for this call at all — if this function reached
+    // out to getBusinessById/getCustomerSession, it would throw.
+    const result = computeBusinessAccessMode({ subscriptionStatus: 'active', plan: 'basic' });
+    expect(result.mode).toBe('full');
   });
 });
 

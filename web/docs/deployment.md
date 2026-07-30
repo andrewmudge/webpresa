@@ -701,6 +701,36 @@ Newly added/changed env vars only take effect on a new deployment — the alread
 
 ---
 
+## Stage 19 — Customer Website Dashboard deployment guidance
+
+**Application code implemented; not yet manually verified against a real dev customer session.** Unlike every prior stage, Stage 19 needs **no infrastructure deployment step at all** — no new DynamoDB table, no new GSI, no new Secrets Manager secret, no new Vercel environment variable, no new IAM grant. It's pure Next.js application code (new routes under `web/app/app/`, new `web/lib/customer-editing/` functions) sitting entirely on top of infrastructure Stage 17 (Cognito User Pool, customer session secrets) and Stage 18 (Stripe subscription fields, `webpresa-dev-customer-billing-profiles`) already deployed. Pushing to `dev`/`main` redeploys it exactly like every other plain-Server-Action stage (Stage 12/13/15, etc.).
+
+### Deploy sequence
+
+None beyond a normal `git push` to the branch Vercel tracks. If Stage 17/18 aren't already deployed and their environment variables aren't already set in Vercel, do those first — Stage 19 has nothing to add to that list.
+
+### Manual verification procedure (not yet run)
+
+1. Using a real claimed-and-subscribed dev Business (Stage 17 claim flow → Stage 18 test-mode Checkout with a Stripe test card), sign in at `/account/sign-in` and navigate to `/app`.
+2. Confirm a single-business account redirects straight to `/app/businesses/{id}`; a multi-business account (claim a second postcard-code business with the same account) shows the portfolio grid.
+3. Edit a field on the Website or Design tab, confirm the business home page shows "Draft changes" and the embedded preview iframe reflects the edit without needing a fresh publish.
+4. Click "Publish changes," confirm the live `/b/[slug]` page updates and the status flips back to "Live."
+5. In the Stripe test-mode Dashboard, mark the test Subscription `past_due` (or use `stripe trigger invoice.payment_failed`), confirm `/app/businesses/{id}` renders read-only with the payment banner and that submitting any edit form is rejected server-side (check the network response, not just that the button was disabled).
+6. Cancel the test Subscription, confirm `/app/businesses/{id}` shows the minimal reactivation card and links back to `/account/claim-status`.
+7. Confirm a second, unrelated dev customer account cannot reach the first customer's `/app/businesses/{id}` by pasting the URL directly (expect a 404, not a 403 that would confirm the business exists).
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| Customer session cookie missing/expired while on `/app/*` | `proxy.ts`'s new `/app/:path*` branch redirects to `/account/sign-in?next=/app/...` before the page ever renders |
+| A signed-in customer requests a `businessId` they don't own | `requireBusinessOwnership()` calls `notFound()` (404), never a 403 that would confirm the business exists |
+| A `billing_recovery` customer submits an edit form (e.g. via a replayed request, bypassing the disabled UI) | The Server Action's `requireActiveSubscription()` redirects before any write — client-side `disabled` attributes are a UX convenience only, never the real gate |
+| `ensureDraftPreview` is called for a business with zero previews | Returns `null`; every caller in `lib/customer-editing/` surfaces this as "No website exists yet to edit" rather than throwing |
+| A customer publishes a `previewId` that doesn't belong to their `businessId` (crafted form payload) | `publishCustomerDraft()` re-fetches the preview and compares `preview.businessId` before calling `publishSitePreview()` — rejects with a generic message, never publishes |
+
+---
+
 ## Deployment order
 
 Infrastructure must be deployed before application code that depends on it.

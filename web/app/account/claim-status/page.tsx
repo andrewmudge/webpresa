@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
@@ -25,7 +26,17 @@ function BusinessCard({ business }: { business: Business }) {
             {plan ? PLAN_LABELS[plan] : 'Your'} plan is active.
             {cancelAtPeriodEnd && renewsOrEndsOn ? ` Your plan ends on ${renewsOrEndsOn}.` : renewsOrEndsOn ? ` Renews on ${renewsOrEndsOn}.` : ''}
           </p>
-          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-4">
+          {/* Stage 19 — the real dashboard now lives at /app; claim-status
+              keeps its own "Manage billing" as a secondary action rather than
+              growing a second billing UI (see implementation.md, Stage 19,
+              "Small required changes to already-shipped code"). */}
+          <Link
+            href={`/app/businesses/${business.businessId}`}
+            className="mt-4 block w-full text-center rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
+          >
+            Go to dashboard
+          </Link>
+          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-2">
             <button
               type="submit"
               className="w-full rounded-lg border border-(--color-border) text-gray-700 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
@@ -41,10 +52,16 @@ function BusinessCard({ business }: { business: Business }) {
           <div role="alert" className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
             There was a problem with your last payment. Update your payment method to keep your website active.
           </div>
-          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-4">
+          <Link
+            href={`/app/businesses/${business.businessId}`}
+            className="mt-4 block w-full text-center rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
+          >
+            Go to dashboard
+          </Link>
+          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-2">
             <button
               type="submit"
-              className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
+              className="w-full rounded-lg border border-(--color-border) text-gray-700 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
               Update payment method
             </button>

@@ -6523,3 +6523,138 @@ web/.env.local.example                                                 MODIFIED 
 web/package.json                                                       MODIFIED — stripe dependency
 web/docs/build_log.md                                                  MODIFIED — this entry
 ```
+
+---
+
+# Stage 19 — Customer Website Dashboard and Self-Service Editing
+
+Implemented per the fully rewritten Stage 19 spec in `implementation.md` (renamed from "Customer Activation and Dashboard" — activation is Stage 17/18's job, not this stage's). No AWS infrastructure change at all — this stage is pure application code reusing Stage 17's Cognito session/ownership primitives, Stage 18's entitlement (`requireBusinessAccess`), and Stage 11.x's section/content data model. No new `Business`/`SitePreview` fields, no new DynamoDB table, no new secret, no new Vercel environment variable.
+
+## Two real gaps found and fixed before building the dashboard itself
+
+1. **Draft/publish safety gap.** Every existing admin content-edit action patches whichever `SitePreview` is currently newest **in place**, even when it's already `published` — correct for a trusted admin (edits go live immediately, by design) but exactly the "customer accidentally overwrites the live site" failure the customer dashboard must prevent. Fixed with a new `ensureDraftPreview(businessId)` (`lib/db/site-previews.ts`): returns the current newest preview unchanged if it's already `draft`/`ready`, or clones it into a new `draft` version (`createSitePreview({ ...latest, previousVersion: latest.version })`) if it's `published`/`archived`. Every customer-scoped content-editing lib function goes through this before patching; admin behavior is completely unchanged.
+2. **`/b/[slug]` had no customer branch at all.** `resolvePreview()` in `app/b/[slug]/page.tsx` only ever resolved a `draft`/`ready` preview for an admin session or a Stage-14 capture-token request — an owning customer previewing their own unpublished draft would have gotten a 404. Added a third branch: `getCustomerSession()` (already existed, non-throwing) → resolve the preview's `Business` → `business.ownerUserId === session.sub` → `computeBusinessAccessMode(business).mode ∈ {full, billing_recovery}`. Returns `{ preview, isAdmin: false }` — verified by grep that `isAdmin` in this file gates exactly one thing (the admin-only draft banner), so `false` is correct and nothing else leaks.
+
+`computeBusinessAccessMode(business)` (`lib/auth/customer-authorization.ts`) is the pure `subscriptionStatus → mode` mapping extracted out of `requireBusinessAccess` specifically so both call sites (the entitlement boundary and the new `/b/[slug]` branch) share one implementation.
+
+## Extracted rather than duplicated
+
+`persistWebsiteSections` (full 15-entry section-config reconstruct/validate/save) moved from a module-private function inside the admin's `actions.ts` to `lib/website-sections/persist.ts` — both the admin's `saveWebsiteSectionsAction`/`autoSaveWebsiteSectionsAction` and the new customer Sections tab call the identical function. `parseIndexedList` (`form-list.ts`) and `moveSection` (`section-order.ts`) moved to `lib/forms/indexed-list.ts`/`lib/forms/reorder.ts` for the same reason; both admin files now just re-export from the new location so no existing import path broke.
+
+Every other admin editing action (business details, theme, CTA, per-section content, business-list fields, Google-review visibility/reorder, photos) has a **new, separate** customer-scoped implementation under `lib/customer-editing/` — not a literal extraction, since the admin actions are wired to the admin session (`getSession()`) and can't be called from customer code at all. Each customer-editing function reuses the same domain schemas, repositories, and validation logic the admin action uses (same Zod schemas, same `putBusiness`/`putSitePreview` calls), just resolves its target preview via `ensureDraftPreview` instead of trusting whatever the admin page already had loaded.
+
+## Customer dashboard shell and pages
+
+- `app/app/layout.tsx` + `app/app/AppSidebar.tsx` — the first shared layout in the customer-facing tree (`/account/*` never had one). Modeled directly on `AdminSidebar.tsx`'s responsive pattern (fixed sidebar `md:`+, `framer-motion` slide-in drawer below it), with a business switcher instead of a flat admin nav list.
+- `app/app/page.tsx` — portfolio entry: single business → auto-redirect; zero businesses → redirect to `/account/claim-status` (reuses its existing empty state rather than duplicating it); multiple → card grid.
+- `app/app/businesses/[businessId]/page.tsx` — business home: status badges (Live/Draft changes/No live site, derived from preview status — no new field), embedded same-origin `<iframe>` preview (`WebsitePreviewCard.tsx`, Desktop/Mobile toggle, loading skeleton, failure fallback, no `sandbox` — same-origin content, must not break the Request Service modal/CTA links), a setup checklist derived entirely from existing `Business` fields (no new field for it either), and account notices (billing_recovery, scheduled cancellation, draft-changes-pending).
+- `app/app/businesses/[businessId]/website/` — tabbed editor (Content, Services, Photos, Sections, Contact & CTAs, SEO), each tab a separate server component reading `latest.content`/`business` and posting to a customer-scoped Server Action.
+- `app/app/businesses/[businessId]/design/page.tsx` — theme picker (reusing `THEME_OPTIONS` from `lib/themes.ts`), hero/section photo-slot assignment.
+- `app/app/businesses/[businessId]/billing/page.tsx` — intentionally small: plan/status/period summary + a single "Manage billing" button reusing the existing `createBillingPortalSessionAction` unchanged.
+- `app/app/businesses/[businessId]/settings/page.tsx` — the single canonical editor for name/phone/email/address/social links (Website → Contact & CTAs shows these read-only with a link here, rather than a second editor for the same fields), plus a read-only publication summary (status/published-date/public address) — deliberately no new customer-controlled visibility/unpublish toggle.
+
+## Authorization
+
+Every page and every action in `app/app/businesses/[businessId]/actions.ts` independently calls `requireCustomerSession()` → (`requireBusinessOwnership` via `requireBusinessAccess`/`requireActiveSubscription`) before doing anything. Mutations uniformly call `requireActiveSubscription(userId, businessId)` (redirects unless `mode === 'full'`) — the exact rule Stage 19 needs, since editing/publishing is `full`-only while viewing (Overview/Website/Design, read-only) is also allowed in `billing_recovery`. `proxy.ts` gained a third branch (`/app/:path*`, session-check only, mirroring `/account/*`) and `lib/auth/customer-actions.ts`'s `safeNextPath()` now allows `/app` redirect targets alongside `/account`.
+
+## Small changes to already-shipped Stage 17/18 surfaces
+
+- `app/account/claim-status/page.tsx`'s `BusinessCard` — an `active`/`past_due` business now shows a primary **"Go to dashboard"** link into `/app/businesses/{id}`, alongside (not instead of) its existing "Manage billing"/"Update payment method" button. `claim-status` otherwise keeps its exact Stage 17/18 job (pre-entitlement plan selection, `canceled` reactivation).
+- New `domain/constants/plan-catalog.ts` (`PLAN_CATALOG`) — extracted from `PlanSelectionForm.tsx`'s previously-inline `"$39/month"`/`"$79/month"` literals, now the single source both `PlanSelectionForm.tsx` and the new Billing page read from.
+
+## Test fallout from the `persistWebsiteSections` extraction
+
+Moving `persistWebsiteSections` into `lib/website-sections/persist.ts` (which, like every other `lib/db`-adjacent module, imports the real `server-only` package) broke four existing admin action test files that previously had no transitive dependency on `server-only` at all: `actions.test.ts`, `business-details-actions.test.ts`, `photos-actions.test.ts`, `website-sections-actions.test.ts`. Fixed the same way every other test file with this dependency already does — `vi.mock('server-only', () => ({}))` — no behavioral change, no test assertions altered.
+
+## Deliberate scope decisions (see implementation.md, Stage 19, for the full reasoning)
+
+- **No AI regeneration from the customer dashboard.** Customers get direct-patch editing only; `generateWebsiteAction`'s AI path stays admin-only.
+- **Gallery curation simplified.** Every uploaded photo (capped at 6, same as `MAX_BUSINESS_PHOTOS`) automatically appears in the Gallery section with an optional caption — no separate "include in gallery" toggle, since the two caps already coincide in practice.
+- **Sections reordering uses a plain number input**, not the admin's up/down-arrow drag UI — functionally equivalent (`persistWebsiteSections` reads the same `order_{type}` fields either way), simpler to implement without new client-side state.
+- **Reviews reordering action exists (`reorderTestimonialsActionCustomer`) but has no wired UI yet** — only hide/show shipped in the Sections tab; reordering is available for a follow-up pass.
+- **Test coverage focused on the highest-risk new logic**: `ensureDraftPreview` (copy-on-write correctness), `computeBusinessAccessMode` (the security-relevant mapping now shared by two call sites), `persistWebsiteSections` at its new location, `publishCustomerDraft` (the businessId/previewId ownership re-check), and `updateCustomerBusinessInfo` (validation + the social-links dual-write). The remaining `lib/customer-editing/*` functions (theme, CTA, section-content, business-list, photos, SEO) follow the identical tested `ensureDraftPreview` + schema-validation pattern but don't each have a dedicated test file — a reasonable place to add more before this stage is considered fully hardened, not a correctness gap found during review.
+
+## Verification
+
+```
+npm run lint         — passes
+npx tsc --noEmit     — passes (after removing a stale .next/dev/types cache
+                         that predated the new /app route and was failing
+                         typegen validation)
+npm test             — 81 files, 887 tests passed (24 new: 6 ensureDraftPreview,
+                         5 computeBusinessAccessMode, 5 persistWebsiteSections,
+                         3 publishCustomerDraft, 6 updateCustomerBusinessInfo;
+                         4 existing admin action test files updated with the
+                         server-only mock)
+npm run build        — succeeds; all new routes registered:
+                         /app, /app/businesses/[businessId],
+                         /app/businesses/[businessId]/website,
+                         /app/businesses/[businessId]/design,
+                         /app/businesses/[businessId]/billing,
+                         /app/businesses/[businessId]/settings
+```
+
+Not yet done: manual click-through against a real dev customer session (no real Cognito/claimed/subscribed test business was created in this pass), and `architecture.md`/`deployment.md` updates (see those files directly).
+
+## Files changed
+
+```
+web/docs/implementation.md                                             MODIFIED — Stage 19 rewrite (prior session)
+
+web/lib/auth/customer-authorization.ts                                 MODIFIED — computeBusinessAccessMode extracted
+web/lib/auth/__tests__/customer-authorization.test.ts                  MODIFIED — new tests
+web/lib/auth/customer-actions.ts                                       MODIFIED — safeNextPath allows /app
+web/proxy.ts                                                           MODIFIED — /app/:path* branch
+
+web/lib/db/site-previews.ts                                            MODIFIED — ensureDraftPreview
+web/lib/db/__tests__/site-previews.test.ts                             MODIFIED — new tests
+
+web/app/b/[slug]/page.tsx                                              MODIFIED — resolvePreview() customer branch
+
+web/domain/constants/plan-catalog.ts                                   NEW
+web/app/account/claim-status/PlanSelectionForm.tsx                     MODIFIED — reads PLAN_CATALOG
+web/app/account/claim-status/page.tsx                                  MODIFIED — "Go to dashboard" link
+
+web/lib/website-sections/persist.ts                                    NEW — extracted from admin actions.ts
+web/lib/website-sections/__tests__/persist.test.ts                     NEW
+web/lib/forms/indexed-list.ts                                          NEW — extracted from admin form-list.ts
+web/lib/forms/reorder.ts                                                NEW — extracted from admin section-order.ts
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts           MODIFIED — imports persistWebsiteSections
+web/app/admin/(dashboard)/businesses/[businessId]/form-list.ts         MODIFIED — re-exports lib/forms/indexed-list
+web/app/admin/(dashboard)/businesses/[businessId]/section-order.ts     MODIFIED — re-exports lib/forms/reorder
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/actions.test.ts                    MODIFIED — server-only mock
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/business-details-actions.test.ts   MODIFIED — server-only mock
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts             MODIFIED — server-only mock
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/website-sections-actions.test.ts   MODIFIED — server-only mock
+
+web/lib/customer-editing/business-info.ts                              NEW
+web/lib/customer-editing/theme.ts                                      NEW
+web/lib/customer-editing/cta.ts                                        NEW
+web/lib/customer-editing/section-content.ts                            NEW
+web/lib/customer-editing/business-list.ts                              NEW
+web/lib/customer-editing/photos.ts                                     NEW
+web/lib/customer-editing/seo.ts                                        NEW
+web/lib/customer-editing/publish.ts                                    NEW
+web/lib/customer-editing/__tests__/business-info.test.ts               NEW
+web/lib/customer-editing/__tests__/publish.test.ts                     NEW
+
+web/app/app/layout.tsx                                                 NEW
+web/app/app/AppSidebar.tsx                                             NEW
+web/app/app/page.tsx                                                   NEW
+web/app/app/businesses/[businessId]/actions.ts                         NEW
+web/app/app/businesses/[businessId]/FormBits.tsx                       NEW
+web/app/app/businesses/[businessId]/WebsitePreviewCard.tsx             NEW
+web/app/app/businesses/[businessId]/page.tsx                           NEW
+web/app/app/businesses/[businessId]/website/page.tsx                  NEW
+web/app/app/businesses/[businessId]/website/ContentTab.tsx             NEW
+web/app/app/businesses/[businessId]/website/ServicesTab.tsx            NEW
+web/app/app/businesses/[businessId]/website/PhotosTab.tsx              NEW
+web/app/app/businesses/[businessId]/website/SectionsTab.tsx            NEW
+web/app/app/businesses/[businessId]/website/ContactTab.tsx             NEW
+web/app/app/businesses/[businessId]/website/SeoTab.tsx                 NEW
+web/app/app/businesses/[businessId]/design/page.tsx                    NEW
+web/app/app/businesses/[businessId]/billing/page.tsx                   NEW
+web/app/app/businesses/[businessId]/settings/page.tsx                  NEW
+
+web/docs/build_log.md                                                  MODIFIED — this entry
+```

@@ -19,13 +19,18 @@ const SignInSchema = z.object({
 
 export type CustomerSignInState = { error?: string } | undefined;
 
-const ALLOWED_REDIRECT_PREFIX = '/account';
+/**
+ * Stage 19 adds `/app` as a second allowed prefix — a sign-in-to-continue
+ * flow from `/app/*` (proxy.ts) must be able to land the customer back in
+ * the dashboard, not just `/account/*`.
+ */
+const ALLOWED_REDIRECT_PREFIXES = ['/account', '/app'];
 const DEFAULT_REDIRECT = '/account/claim-status';
 
-/** No open redirect — only an internal `/account/*` path is ever honored. */
+/** No open redirect — only an internal `/account/*` or `/app/*` path is ever honored. */
 function safeNextPath(next: FormDataEntryValue | null): string {
   const value = typeof next === 'string' ? next : '';
-  return value.startsWith(ALLOWED_REDIRECT_PREFIX) ? value : DEFAULT_REDIRECT;
+  return ALLOWED_REDIRECT_PREFIXES.some((prefix) => value.startsWith(prefix)) ? value : DEFAULT_REDIRECT;
 }
 
 export async function customerSignInAction(

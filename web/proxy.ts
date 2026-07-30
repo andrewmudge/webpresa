@@ -16,6 +16,14 @@ import { decryptCustomerSession, CUSTOMER_SESSION_COOKIE } from '@/lib/auth/cust
  * signed claim-intent cookie at the page/route-handler level, not a full
  * customer session.
  *
+ * All /app/* routes (Stage 19 — customer dashboard) use the same customer
+ * session cookie as /account/*, but this is a session check only — whether
+ * a signed-in customer actually owns the business, and what access mode
+ * (full/billing_recovery/none) they get, is decided page-by-page via
+ * `requireBusinessOwnership()`/`requireBusinessAccess()`, not here. A
+ * `billing_recovery` customer is a perfectly valid session that still needs
+ * to reach `/app` (read-only), so this layer must not turn them away.
+ *
  * Note: Only the session cookie is read here — no DynamoDB calls.  Full session
  * validation happens server-side inside protected route handlers and actions.
  */
@@ -35,6 +43,10 @@ export default async function proxy(request: NextRequest) {
 
   if (pathname.startsWith('/account')) {
     return handleCustomerRoute(request, pathname);
+  }
+
+  if (pathname.startsWith('/app')) {
+    return handleAppRoute(request, pathname);
   }
 
   return NextResponse.next();
@@ -78,11 +90,26 @@ async function handleCustomerRoute(request: NextRequest, pathname: string) {
   return NextResponse.next();
 }
 
+/** Session check only — see the module-level comment above for why /app has no "mode" logic here. */
+async function handleAppRoute(request: NextRequest, pathname: string) {
+  const token = request.cookies.get(CUSTOMER_SESSION_COOKIE)?.value;
+  const session = await decryptCustomerSession(token);
+
+  if (!session) {
+    const signInUrl = new URL(CUSTOMER_SIGN_IN_PATH, request.url);
+    signInUrl.searchParams.set('next', pathname);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  return NextResponse.next();
+}
+
 export const config = {
   matcher: [
-    // Run on all /admin/* and /account/* paths; exclude static files and
-    // Next.js internals.
+    // Run on all /admin/*, /account/*, and /app/* paths; exclude static
+    // files and Next.js internals.
     '/admin/:path*',
     '/account/:path*',
+    '/app/:path*',
   ],
 };

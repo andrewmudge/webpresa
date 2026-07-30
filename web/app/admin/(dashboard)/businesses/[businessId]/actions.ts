@@ -25,13 +25,11 @@ import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { getSession } from '@/lib/auth/session';
-import type { WebsiteSectionsConfig } from '@/domain/models/website-sections';
-import { WEBSITE_SECTION_TYPES, REQUIRED_SECTION_TYPES, SECTION_CONFIG_VERSION } from '@/domain/constants/website-sections';
-import { WebsiteSectionsConfigSchema } from '@/domain/schemas/website-sections.schema';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
 import { recommendWebsiteSections } from '@/lib/website-sections/recommend';
 import { hasResolvableCta } from '@/lib/website-sections/availability';
 import { enableWebsiteSection } from '@/lib/website-sections/resolve';
+import { persistWebsiteSections } from '@/lib/website-sections/persist';
 import { fetchAndMapGoogleReviews } from '@/lib/google-places/reviews';
 import { mergeTestimonialsPreservingOrder } from '@/lib/testimonials/merge';
 import { INDUSTRIES } from '@/domain/constants/industries';
@@ -1553,58 +1551,15 @@ export async function releaseOwnershipAction(businessId: string): Promise<Releas
 
 export type SectionsFormState = { message?: string } | undefined;
 
-/**
- * Save an admin-edited section configuration. Every catalog section is
- * present in the submitted form (required sections render as a locked
- * "always on" row — see `SectionConfigForm`), so this reconstructs the full
- * 15-entry array from form fields rather than merging a partial update.
- * Required sections are force-enabled server-side regardless of what the
- * client sent, then the whole config is validated strictly — any violation
- * (bad order value, duplicate, unsupported variant) rejects the save
- * outright rather than silently repairing it.
- */
-/**
- * Shared by `saveWebsiteSectionsAction` (redirects — the wizard's "Finish
- * setup" step) and `autoSaveWebsiteSectionsAction` (no redirect — every
- * checkbox/reorder interaction on the business detail page persists
- * immediately). Reconstructs and validates the full config from form
- * fields; never partially saves.
- */
-async function persistWebsiteSections(
-  businessId: string,
-  formData: FormData,
-): Promise<{ message: string } | undefined> {
-  const business = await getBusinessById(businessId);
-  if (!business) return { message: 'Business not found' };
-
-  const sections = WEBSITE_SECTION_TYPES.map((type) => {
-    const required = (REQUIRED_SECTION_TYPES as readonly string[]).includes(type);
-    const orderRaw = formData.get(`order_${type}`);
-    const order = typeof orderRaw === 'string' && orderRaw.trim() !== '' ? Number(orderRaw) : NaN;
-    return {
-      component: type,
-      enabled: required || formData.get(`enabled_${type}`) === 'on',
-      order: Number.isFinite(order) ? Math.trunc(order) : 0,
-      variant: 'default',
-    };
-  });
-
-  const config: WebsiteSectionsConfig = { sectionConfigVersion: SECTION_CONFIG_VERSION, sections };
-
-  const parsed = WebsiteSectionsConfigSchema.safeParse(config);
-  if (!parsed.success) {
-    return { message: parsed.error.issues.map((i) => i.message).join('; ') };
-  }
-
-  try {
-    await updateBusiness(businessId, { websiteSections: parsed.data });
-  } catch (err) {
-    console.error('Failed to save website sections:', err instanceof Error ? err.message : err);
-    return { message: 'Failed to save section configuration. Please try again.' };
-  }
-
-  return undefined;
-}
+// `persistWebsiteSections` (reconstructs and validates the full 15-entry
+// config, force-enabling required sections, from `enabled_{type}`/
+// `order_{type}` form fields) now lives in `lib/website-sections/persist.ts`
+// — extracted (Stage 19) so the new customer-scoped sections action shares
+// the identical validated write path instead of a second copy of this
+// reconstruction logic. Shared here by `saveWebsiteSectionsAction`
+// (redirects — the wizard's "Finish setup" step) and
+// `autoSaveWebsiteSectionsAction` (no redirect — every checkbox/reorder
+// interaction on the business detail page persists immediately).
 
 export async function saveWebsiteSectionsAction(
   businessId: string,

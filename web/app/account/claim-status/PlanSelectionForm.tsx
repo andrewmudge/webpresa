@@ -2,20 +2,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createCheckoutSessionAction, type CheckoutActionState } from '@/app/account/checkout/actions';
-import { WEBPRESA_PLANS, type WebpresaPlan } from '@/domain/constants/plans';
-
-const PLAN_DETAILS: Record<WebpresaPlan, { label: string; price: string; description: string }> = {
-  basic: {
-    label: 'Basic',
-    price: '$39/month',
-    description: 'Single-page professionally designed website with city-specific SEO for your primary city.',
-  },
-  growth: {
-    label: 'Growth',
-    price: '$79/month',
-    description: 'Expanded website with multiple city-specific SEO pages and Growth-tier lead forms.',
-  },
-};
+import { WEBPRESA_PLANS, PLAN_CATALOG } from '@/domain/constants/plan-catalog';
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -53,9 +40,9 @@ export function PlanSelectionForm({ businessId }: Props) {
           <input type="radio" name="plan" value={plan} defaultChecked={plan === 'basic'} className="mt-1" />
           <span>
             <span className="block text-sm font-semibold text-gray-900">
-              {PLAN_DETAILS[plan].label} — {PLAN_DETAILS[plan].price}
+              {PLAN_CATALOG[plan].label} — {PLAN_CATALOG[plan].priceDisplay}
             </span>
-            <span className="block text-xs text-gray-500 mt-0.5">{PLAN_DETAILS[plan].description}</span>
+            <span className="block text-xs text-gray-500 mt-0.5">{PLAN_CATALOG[plan].description}</span>
           </span>
         </label>
       ))}
