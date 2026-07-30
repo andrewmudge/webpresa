@@ -65,7 +65,7 @@ export default function Navbar() {
         {/* Desktop CTA */}
         <div className="hidden md:flex items-center gap-3">
           <Link
-            href="#contact"
+            href="/app"
             className="text-sm font-medium text-gray-600 hover:text-gray-900 px-4 py-2 rounded-lg transition-colors duration-200"
           >
             Log In
@@ -114,7 +114,7 @@ export default function Navbar() {
           </ul>
           <div className="mt-4 flex flex-col gap-2">
             <Link
-              href="#contact"
+              href="/app"
               onClick={() => setMobileOpen(false)}
               className="block text-center py-2.5 px-4 rounded-xl text-sm font-medium text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors"
             >
