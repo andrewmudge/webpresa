@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { THEME_OPTIONS } from '@/lib/themes';
@@ -77,23 +76,14 @@ export default async function DesignEditorPage({ params, searchParams }: Props) 
               <PhotoSlotPicker label="About section" fieldName="aboutPhotoUrl" uploadFieldName="aboutPhotoFile" currentValue={business.aboutPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
               <PhotoSlotPicker label="Why Choose Us section" fieldName="whyChooseUsPhotoUrl" uploadFieldName="whyChooseUsPhotoFile" currentValue={business.whyChooseUsPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
               <PhotoSlotPicker label="Services section" fieldName="servicesPhotoUrl" uploadFieldName="servicesPhotoFile" currentValue={business.servicesPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
-              <div className="border border-gray-100 rounded-lg p-3 space-y-2">
-                <span className="block text-sm font-medium text-gray-700">Logo</span>
-                <select name="logoPhotoUrl" defaultValue="" disabled={isReadOnly} className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50">
-                  <option value="">Keep current</option>
-                  <option value="none">No logo</option>
-                  {photoUrls.map((url, i) => (
-                    <option key={url} value={url}>
-                      Photo {i + 1}
-                    </option>
-                  ))}
-                </select>
-                {business.logoUrl && (
-                  <div className="relative h-10 w-10 rounded border border-gray-200 overflow-hidden">
-                    <Image src={business.logoUrl} alt="Current logo" fill className="object-contain" unoptimized />
-                  </div>
-                )}
-              </div>
+              <PhotoSlotPicker
+                label="Logo"
+                fieldName="logoPhotoUrl"
+                currentValue={business.logoUrl}
+                photoUrls={photoUrls}
+                disabled={isReadOnly}
+                emptyLabel="Keep current"
+              />
             </div>
             <SaveButton disabled={isReadOnly} />
           </form>
