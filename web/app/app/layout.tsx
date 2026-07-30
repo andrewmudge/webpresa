@@ -19,7 +19,18 @@ export default async function AppLayout({ children }: AppLayoutProps) {
   const businesses = await getBusinessesByOwnerUserId(session.sub);
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#F0F4F8]">
+    // `h-screen` (a hard cap), not `min-h-screen` (only a floor) — with
+    // just a minimum, this wrapper grows past 100vh on any page taller than
+    // the viewport, so the *window* ends up doing the actual scrolling and
+    // <main>'s `overflow-auto` never truly engages as a scroll container,
+    // even though `overflow: auto` still makes browsers treat it as the
+    // nearest scrolling ancestor for `position: sticky` bookkeeping. The
+    // net effect: a sticky element inside <main> never sees any real scroll
+    // events (main itself never moves) and just scrolls away like anything
+    // else. Capping this wrapper to exactly the viewport height forces
+    // <main> to be the one that actually scrolls, which is what makes
+    // sticky work inside it (see the website editor's section nav).
+    <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-[#F0F4F8]">
       <AppSidebar
         businesses={businesses.map((b) => ({ businessId: b.businessId, name: b.name, slug: b.slug }))}
         signedInAs={session.email}
