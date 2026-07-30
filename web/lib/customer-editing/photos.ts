@@ -1,8 +1,9 @@
 import 'server-only';
 import { z } from 'zod';
+import type { Business } from '@/domain/models/business';
 import type { HeroStyle, PreviewTheme } from '@/domain/models/site-preview';
 import { PreviewThemeSchema } from '@/domain/schemas/site-preview.schema';
-import { getBusinessById, putBusiness } from '@/lib/db/businesses';
+import { getBusinessById, putBusiness, updateBusiness } from '@/lib/db/businesses';
 import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
 import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl, fileExtension } from '@/lib/s3/business-assets';
@@ -240,6 +241,149 @@ export async function updateCustomerPhotoSlots(businessId: string, formData: For
     return { photoUrls };
   } catch (err) {
     console.error('Failed to update customer photo slots:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Narrow, single-slot, partial-merge variants (Website page card merges).
+//
+// `updateCustomerPhotoSlots` above is safe only because /design always
+// submits all six slots in one form, so every field's `defaultValue`
+// round-trips correctly even when unchanged — a slot the customer didn't
+// touch is still resubmitted with its current value. Once photo slots move
+// into their own content card (Hero, About, Why Choose Us, Services), each
+// card's form only ever contains ITS OWN slot field(s); reusing the
+// all-in-one function with a FormData missing every other slot's key would
+// resolve those absent fields to `undefined` and silently clear them via
+// `putBusiness`'s full-record write. These functions use `updateBusiness()`
+// (a genuine partial merge) instead, and only ever include the one key they
+// actually resolved — a slot nothing changed on is simply left out of the
+// update, not explicitly nulled. `updateCustomerPhotoSlots` itself is left
+// completely untouched so /design keeps behaving exactly as it does today.
+// ---------------------------------------------------------------------------
+
+type SlotBusinessField = 'heroPhotoUrl' | 'heroPhotoUrlMobile' | 'aboutPhotoUrl' | 'whyChooseUsPhotoUrl' | 'servicesPhotoUrl';
+type SlotThemeField = 'heroImageUrl' | 'heroImageUrlMobile' | 'aboutSectionImageUrl' | 'aboutImageUrl' | 'servicesImageUrl';
+
+/**
+ * Resolves and applies exactly one photo slot from a FormData that may
+ * contain nothing else relevant. Returns without writing anything at all
+ * when the slot was left on "Auto" (nothing to change) — not even an empty
+ * `updateBusiness()` call.
+ */
+async function applySlotUpdate(
+  businessId: string,
+  formData: FormData,
+  formFieldName: string,
+  uploadFieldName: string,
+  businessField: SlotBusinessField,
+  themeField: SlotThemeField,
+  options?: { recomputeHeroStyle?: boolean },
+): Promise<CustomerPhotoState> {
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    let photoUrls = existing.photoUrls ?? [];
+    let resolvedUrl: string | undefined;
+    let changed = false;
+    let uploadedNew = false;
+
+    const file = formData.get(uploadFieldName);
+    if (file instanceof File && file.size > 0) {
+      if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
+        return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in Photos first.` };
+      }
+      const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
+      photoUrls = [...photoUrls, url];
+      resolvedUrl = url;
+      changed = true;
+      uploadedNew = true;
+    } else {
+      const picked = (formData.get(formFieldName) as string) || undefined;
+      if (picked === 'none') {
+        resolvedUrl = undefined;
+        changed = true;
+      } else if (picked) {
+        resolvedUrl = picked;
+        changed = true;
+      }
+      // picked is undefined (left on "Auto") — changed stays false, nothing to do.
+    }
+
+    if (!changed) return { photoUrls: existing.photoUrls ?? [] };
+
+    const businessUpdate: Partial<Business> = { [businessField]: resolvedUrl, ...(uploadedNew ? { photoUrls } : {}) };
+    await updateBusiness(businessId, businessUpdate);
+
+    const draft = await ensureDraftPreview(businessId);
+    if (draft) {
+      const themeUpdate: Partial<PreviewTheme> = { [themeField]: resolvedUrl };
+      if (options?.recomputeHeroStyle) {
+        if (!resolvedUrl) {
+          themeUpdate.heroStyle = 'illustration';
+        } else {
+          const dimensionCheck = await checkHeroPhotoDimensions(resolvedUrl);
+          themeUpdate.heroStyle = dimensionCheck?.isFullBleedEligible ? 'image' : 'imageSplit';
+        }
+      }
+      const theme: PreviewTheme = { ...draft.theme, ...themeUpdate };
+      PreviewThemeSchema.parse(theme);
+      await putSitePreview({ ...draft, theme, updatedAt: new Date().toISOString() });
+    }
+
+    return { photoUrls };
+  } catch (err) {
+    console.error(`Failed to update ${businessField}:`, err instanceof Error ? err.message : err);
+    return { message: 'Failed to save changes. Please try again.' };
+  }
+}
+
+/** Hero card — desktop and mobile hero photo slots (two independent, sequential slot updates). */
+export async function updateCustomerHeroPhotoSlots(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  const desktop = await applySlotUpdate(businessId, formData, 'heroPhotoUrl', 'heroPhotoFile', 'heroPhotoUrl', 'heroImageUrl', {
+    recomputeHeroStyle: true,
+  });
+  if (desktop?.message) return desktop;
+  return applySlotUpdate(businessId, formData, 'heroPhotoUrlMobile', 'heroPhotoFileMobile', 'heroPhotoUrlMobile', 'heroImageUrlMobile');
+}
+
+/** About card — About section photo slot. */
+export async function updateCustomerAboutPhotoSlot(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  return applySlotUpdate(businessId, formData, 'aboutPhotoUrl', 'aboutPhotoFile', 'aboutPhotoUrl', 'aboutSectionImageUrl');
+}
+
+/**
+ * "Why choose us" card — its photo slot. Note the existing, pre-established
+ * field-name mismatch this preserves rather than "fixes": `Business.whyChooseUsPhotoUrl`
+ * maps to `PreviewTheme.aboutImageUrl` (not `aboutSectionImageUrl`, which is
+ * the true About-section image) — that's the schema's existing naming from
+ * before this stage, unrelated to this change.
+ */
+export async function updateCustomerWhyChooseUsPhotoSlot(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  return applySlotUpdate(businessId, formData, 'whyChooseUsPhotoUrl', 'whyChooseUsPhotoFile', 'whyChooseUsPhotoUrl', 'aboutImageUrl');
+}
+
+/** Services card — Services section photo slot. */
+export async function updateCustomerServicesPhotoSlot(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  return applySlotUpdate(businessId, formData, 'servicesPhotoUrl', 'servicesPhotoFile', 'servicesPhotoUrl', 'servicesImageUrl');
+}
+
+/** Logo card — no theme dual-write (logo isn't a SitePreview.theme field), no direct-upload input (matches the original design). */
+export async function updateCustomerLogo(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  const picked = (formData.get('logoPhotoUrl') as string) || undefined;
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const logoUrl = resolveLogoUrl(picked, existing.logoUrl);
+    if (logoUrl === existing.logoUrl) return { logoUrl };
+
+    await updateBusiness(businessId, { logoUrl });
+    return { logoUrl };
+  } catch (err) {
+    console.error('Failed to update customer logo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }
 }

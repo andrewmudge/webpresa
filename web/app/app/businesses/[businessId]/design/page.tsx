@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { THEME_OPTIONS } from '@/lib/themes';
 import { Card, SaveButton } from '../FormBits';
+import { PhotoSlotPicker } from '../PhotoSlotPicker';
 import { updateThemeActionCustomer, updatePhotoSlotsAction } from '../actions';
 
 export const dynamic = 'force-dynamic';
@@ -10,43 +11,6 @@ export const dynamic = 'force-dynamic';
 interface Props {
   params: Promise<{ businessId: string }>;
   searchParams: Promise<{ error?: string; saved?: string }>;
-}
-
-function SlotPicker({
-  label,
-  fieldName,
-  uploadFieldName,
-  currentValue,
-  photoUrls,
-  disabled,
-}: {
-  label: string;
-  fieldName: string;
-  uploadFieldName: string;
-  currentValue?: string;
-  photoUrls: string[];
-  disabled: boolean;
-}) {
-  return (
-    <div className="border border-gray-100 rounded-lg p-3 space-y-2">
-      <span className="block text-sm font-medium text-gray-700">{label}</span>
-      <select
-        name={fieldName}
-        defaultValue={currentValue ?? ''}
-        disabled={disabled}
-        className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
-      >
-        <option value="">Auto</option>
-        <option value="none">No photo</option>
-        {photoUrls.map((url, i) => (
-          <option key={url} value={url}>
-            Photo {i + 1}
-          </option>
-        ))}
-      </select>
-      <input type="file" name={uploadFieldName} accept="image/*" disabled={disabled} className="text-xs text-gray-500" />
-    </div>
-  );
 }
 
 export default async function DesignEditorPage({ params, searchParams }: Props) {
@@ -108,11 +72,11 @@ export default async function DesignEditorPage({ params, searchParams }: Props) 
         <Card title="Hero &amp; section photos" description="Choose which uploaded photo appears in each spot on your website.">
           <form action={updatePhotoSlotsAction.bind(null, businessId)} className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <SlotPicker label="Hero (desktop)" fieldName="heroPhotoUrl" uploadFieldName="heroPhotoFile" currentValue={business.heroPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
-              <SlotPicker label="Hero (mobile)" fieldName="heroPhotoUrlMobile" uploadFieldName="heroPhotoFileMobile" currentValue={business.heroPhotoUrlMobile} photoUrls={photoUrls} disabled={isReadOnly} />
-              <SlotPicker label="About section" fieldName="aboutPhotoUrl" uploadFieldName="aboutPhotoFile" currentValue={business.aboutPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
-              <SlotPicker label="Why Choose Us section" fieldName="whyChooseUsPhotoUrl" uploadFieldName="whyChooseUsPhotoFile" currentValue={business.whyChooseUsPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
-              <SlotPicker label="Services section" fieldName="servicesPhotoUrl" uploadFieldName="servicesPhotoFile" currentValue={business.servicesPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
+              <PhotoSlotPicker label="Hero (desktop)" fieldName="heroPhotoUrl" uploadFieldName="heroPhotoFile" currentValue={business.heroPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
+              <PhotoSlotPicker label="Hero (mobile)" fieldName="heroPhotoUrlMobile" uploadFieldName="heroPhotoFileMobile" currentValue={business.heroPhotoUrlMobile} photoUrls={photoUrls} disabled={isReadOnly} />
+              <PhotoSlotPicker label="About section" fieldName="aboutPhotoUrl" uploadFieldName="aboutPhotoFile" currentValue={business.aboutPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
+              <PhotoSlotPicker label="Why Choose Us section" fieldName="whyChooseUsPhotoUrl" uploadFieldName="whyChooseUsPhotoFile" currentValue={business.whyChooseUsPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
+              <PhotoSlotPicker label="Services section" fieldName="servicesPhotoUrl" uploadFieldName="servicesPhotoFile" currentValue={business.servicesPhotoUrl} photoUrls={photoUrls} disabled={isReadOnly} />
               <div className="border border-gray-100 rounded-lg p-3 space-y-2">
                 <span className="block text-sm font-medium text-gray-700">Logo</span>
                 <select name="logoPhotoUrl" defaultValue="" disabled={isReadOnly} className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50">

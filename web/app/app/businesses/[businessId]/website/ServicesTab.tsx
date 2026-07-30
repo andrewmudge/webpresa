@@ -1,17 +1,21 @@
+import type { Business } from '@/domain/models/business';
 import { Card, TextField, SaveButton } from '../FormBits';
-import { updateSectionContentActionCustomer } from '../actions';
+import { PhotoSlotPicker } from '../PhotoSlotPicker';
+import { updateServicesCardActionCustomer, updateWhyChooseUsCardActionCustomer, updateSectionContentActionCustomer } from '../actions';
 import { getCachedPreviews } from './data';
 
 interface Props {
   businessId: string;
+  business: Business;
   isReadOnly: boolean;
 }
 
 const EXTRA_ROWS = 2;
 
-export async function ServicesTab({ businessId, isReadOnly }: Props) {
+export async function ServicesTab({ businessId, business, isReadOnly }: Props) {
   const previews = await getCachedPreviews(businessId);
   const content = previews[0]?.content;
+  const photoUrls = business.photoUrls ?? [];
 
   if (!content) {
     return (
@@ -33,7 +37,7 @@ export async function ServicesTab({ businessId, isReadOnly }: Props) {
   return (
     <div className="space-y-6">
       <Card title="Services" description="Up to 10 services you offer. Leave a row blank to skip it.">
-        <form action={updateSectionContentActionCustomer.bind(null, businessId, 'services')} className="space-y-4">
+        <form action={updateServicesCardActionCustomer.bind(null, businessId)} className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <TextField label="Section heading (optional)" name="sectionHeadline" defaultValue={content.servicesSection?.headline} disabled={isReadOnly} />
             <TextField label="Section subheading (optional)" name="sectionSubheadline" defaultValue={content.servicesSection?.subheadline} disabled={isReadOnly} />
@@ -46,12 +50,20 @@ export async function ServicesTab({ businessId, isReadOnly }: Props) {
               </div>
             ))}
           </div>
+          <PhotoSlotPicker
+            label="Services photo"
+            fieldName="servicesPhotoUrl"
+            uploadFieldName="servicesPhotoFile"
+            currentValue={business.servicesPhotoUrl}
+            photoUrls={photoUrls}
+            disabled={isReadOnly}
+          />
           <SaveButton disabled={isReadOnly} />
         </form>
       </Card>
 
       <Card title="Why choose us" description="Short differentiators shown in their own section.">
-        <form action={updateSectionContentActionCustomer.bind(null, businessId, 'whyChooseUs')} className="space-y-4">
+        <form action={updateWhyChooseUsCardActionCustomer.bind(null, businessId)} className="space-y-4">
           <TextField label="Section heading (optional)" name="sectionHeadline" defaultValue={content.whyChooseUsSection?.headline} disabled={isReadOnly} />
           <div className="space-y-3">
             {differentiatorRows.map((row, i) => (
@@ -61,6 +73,14 @@ export async function ServicesTab({ businessId, isReadOnly }: Props) {
               </div>
             ))}
           </div>
+          <PhotoSlotPicker
+            label="Why choose us photo"
+            fieldName="whyChooseUsPhotoUrl"
+            uploadFieldName="whyChooseUsPhotoFile"
+            currentValue={business.whyChooseUsPhotoUrl}
+            photoUrls={photoUrls}
+            disabled={isReadOnly}
+          />
           <SaveButton disabled={isReadOnly} />
         </form>
       </Card>

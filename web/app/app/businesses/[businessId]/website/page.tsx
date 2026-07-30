@@ -1,6 +1,8 @@
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
+import { ThemeTab } from './ThemeTab';
+import { LogoTab } from './LogoTab';
 import { ContentTab } from './ContentTab';
 import { ServicesTab } from './ServicesTab';
 import { PhotosTab } from './PhotosTab';
@@ -16,6 +18,8 @@ interface Props {
 }
 
 const SECTIONS = [
+  { id: 'theme', label: 'Theme' },
+  { id: 'logo', label: 'Logo' },
   { id: 'content', label: 'Content' },
   { id: 'services', label: 'Services' },
   { id: 'photos', label: 'Photos' },
@@ -101,15 +105,23 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
       </div>
 
       <div className="space-y-10">
+        <section id="theme" className="scroll-mt-20">
+          <ThemeTab businessId={businessId} currentTheme={business.theme} isReadOnly={isReadOnly} />
+        </section>
+
+        <section id="logo" className="scroll-mt-20">
+          <LogoTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+        </section>
+
         <section id="content" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
-            <ContentTab businessId={businessId} isReadOnly={isReadOnly} />
+            <ContentTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 
         <section id="services" className="scroll-mt-20">
           <Suspense fallback={<SectionSkeleton />}>
-            <ServicesTab businessId={businessId} isReadOnly={isReadOnly} />
+            <ServicesTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
           </Suspense>
         </section>
 

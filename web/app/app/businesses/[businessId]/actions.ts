@@ -17,6 +17,11 @@ import {
   addCustomerBusinessPhotos,
   deleteCustomerBusinessPhoto,
   updateCustomerPhotoSlots,
+  updateCustomerHeroPhotoSlots,
+  updateCustomerAboutPhotoSlot,
+  updateCustomerWhyChooseUsPhotoSlot,
+  updateCustomerServicesPhotoSlot,
+  updateCustomerLogo,
 } from '@/lib/customer-editing/photos';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import { persistWebsiteSections } from '@/lib/website-sections/persist';
@@ -113,6 +118,60 @@ export async function updateSectionContentActionCustomer(
   await requireEditAccess(businessId);
   const result = await updateCustomerSectionContent(businessId, section, formData);
   redirect(withError(`/app/businesses/${businessId}/website`, result?.message, SECTION_ANCHOR[section] ?? 'content'));
+}
+
+// ---------------------------------------------------------------------------
+// Merged Theme/Logo/photo-slot cards on the Website page — each of these
+// combines a text-content write and a photo-slot write into one action, so
+// a card that visually shows both (e.g. Hero's headline + hero photos) has
+// exactly one Save button. If the content half fails validation, the photo
+// half is never attempted (redirect happens immediately with that error);
+// the two writes are otherwise independent (different DynamoDB items), not
+// a single atomic transaction.
+// ---------------------------------------------------------------------------
+
+export async function updateThemeCardActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const result = await updateCustomerTheme(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'theme'));
+}
+
+export async function updateLogoActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const result = await updateCustomerLogo(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'logo'));
+}
+
+export async function updateHeroCardActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const contentResult = await updateCustomerSectionContent(businessId, 'hero', formData);
+  if (contentResult?.message) redirect(withError(`/app/businesses/${businessId}/website`, contentResult.message, 'content'));
+  const photoResult = await updateCustomerHeroPhotoSlots(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, photoResult?.message, 'content'));
+}
+
+export async function updateAboutCardActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const contentResult = await updateCustomerSectionContent(businessId, 'about', formData);
+  if (contentResult?.message) redirect(withError(`/app/businesses/${businessId}/website`, contentResult.message, 'content'));
+  const photoResult = await updateCustomerAboutPhotoSlot(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, photoResult?.message, 'content'));
+}
+
+export async function updateServicesCardActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const contentResult = await updateCustomerSectionContent(businessId, 'services', formData);
+  if (contentResult?.message) redirect(withError(`/app/businesses/${businessId}/website`, contentResult.message, 'services'));
+  const photoResult = await updateCustomerServicesPhotoSlot(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, photoResult?.message, 'services'));
+}
+
+export async function updateWhyChooseUsCardActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const contentResult = await updateCustomerSectionContent(businessId, 'whyChooseUs', formData);
+  if (contentResult?.message) redirect(withError(`/app/businesses/${businessId}/website`, contentResult.message, 'services'));
+  const photoResult = await updateCustomerWhyChooseUsPhotoSlot(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, photoResult?.message, 'services'));
 }
 
 export async function updateSeoActionCustomer(businessId: string, formData: FormData): Promise<void> {
