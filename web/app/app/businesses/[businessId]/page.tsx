@@ -71,7 +71,8 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
   if (!publishedPreview) checklist.push({ href: `/app/businesses/${businessId}`, label: 'Publish your website' });
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6">
+    <div className="py-8 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
       {error && (
         <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {decodeURIComponent(error)}
@@ -144,9 +145,17 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
           )}
         </div>
       </div>
+    </div>
 
+    {/* Breaks out of the max-w-4xl column above — 95% of whatever width
+        <main> actually has (the flex layout in app/app/layout.tsx already
+        excludes the sidebar from that), so the preview reads as the real
+        site rather than a small embedded thumbnail. */}
+    <div className="w-[95%] mx-auto">
       <WebsitePreviewCard slug={business.slug} lastUpdated={latest?.updatedAt} />
+    </div>
 
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
       {checklist.length > 0 && !isReadOnly && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-900">Finish setting up your website</h2>
@@ -157,6 +166,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

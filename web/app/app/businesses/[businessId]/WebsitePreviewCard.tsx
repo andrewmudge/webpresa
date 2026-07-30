@@ -58,10 +58,17 @@ export function WebsitePreviewCard({ slug, lastUpdated }: WebsitePreviewCardProp
         </a>
       </div>
 
-      <div className="bg-gray-100 flex justify-center p-3 sm:p-6">
+      <div className="bg-gray-100 flex justify-center p-4 sm:p-8">
         <div
-          className={`relative bg-white shadow-inner rounded-lg overflow-hidden transition-all ${
-            viewport === 'desktop' ? 'w-full aspect-16/10' : 'w-[300px] aspect-9/16'
+          className={`relative bg-white shadow-inner rounded-lg overflow-hidden transition-all mx-auto ${
+            // Desktop fills essentially the whole card so it reads as "your
+            // actual website," not a postage stamp. Mobile is sized to a
+            // real modern phone viewport (iPhone 12/14 standard: 390×844
+            // logical px) rather than an arbitrarily narrow box — capped by
+            // max-h/max-w so it still fits on shorter/narrower screens.
+            viewport === 'desktop'
+              ? 'w-full h-[80vh] min-h-[560px]'
+              : 'w-[390px] max-w-full h-[844px] max-h-[80vh]'
           }`}
         >
           {!loaded && !failed && (

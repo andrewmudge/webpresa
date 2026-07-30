@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X, ChevronDown, ExternalLink } from 'lucide-react';
@@ -44,8 +45,8 @@ function extractBusinessId(pathname: string): string | null {
 function Brand() {
   return (
     <Link href="/app" className="flex items-center gap-3">
-      <div className="h-8 w-8 rounded-lg bg-white/15 flex items-center justify-center text-white font-bold text-sm">
-        W
+      <div className="relative h-8 w-8 shrink-0 rounded-lg bg-white/15 overflow-hidden">
+        <Image src="/webpresa_w.png" alt="Webpresa" fill className="object-contain p-1" />
       </div>
       <div>
         <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
