@@ -6910,3 +6910,21 @@ web/docs/architecture.md             MODIFIED — corrected the stale "unreachab
 web/docs/implementation.md           MODIFIED — correction note under Stage 17's claim-banner section
 web/docs/build_log.md                MODIFIED — this entry
 ```
+
+---
+
+# Admin testing utility — disconnect a domain for reuse (2026-07-31)
+
+`DomainConnection` is deliberately keyed on `normalizedDomain` itself, not a generated ID (see Stage 19.x, Part 2's uniqueness rationale) — correct for real customers, but it meant a real test domain couldn't be reattached to a second test business without buying another one. Added an admin-only, explicitly-labeled "Disconnect domain (testing)" action next to the existing Domain card's "Refresh status" button: best-effort removes the domain from the Vercel project, then hard-deletes the `DomainConnection` record. Not a customer-facing capability — no changes to `startDomainConnection`'s conflict logic or the domain status model.
+
+## Files changed
+
+```
+web/lib/db/domain-connections.ts                                MODIFIED — deleteDomainConnectionRecord
+web/lib/domains/disconnect.ts                                    NEW — disconnectDomainConnectionForTesting
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts     MODIFIED — disconnectDomainForTestingAction
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx       MODIFIED — button on the Domain card
+web/docs/build_log.md                                             MODIFIED — this entry
+```
+
+Verification: `npx tsc --noEmit`, `npm run lint`, `npm test` (940 tests, all passing — no new automated tests, admin-only utility over already-tested primitives), `npm run build` all pass.
