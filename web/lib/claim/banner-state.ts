@@ -10,15 +10,17 @@ export const CLAIM_BANNER_STATES = ['unclaimed', 'claimed_pending', 'active'] as
 export type ClaimBannerState = (typeof CLAIM_BANNER_STATES)[number];
 
 /**
- * Derives the banner state from ownership alone — Stage 17 has no
- * subscription concept yet, so `'active'` is defined here but structurally
- * unreachable until Stage 18 supplies real subscription data into this same
- * function. The exactly-once claim guarantee itself is enforced
- * independently by the ownership-reservation transaction
+ * Derives the banner state from ownership plus Stage 18's real subscription
+ * status. `'active'` requires `subscriptionStatus === 'active'` specifically
+ * — a `past_due`/`billing_recovery` business stays `'claimed_pending'`
+ * rather than silently flipping back to a conversion-driving state, and a
+ * `canceled` business likewise. The exactly-once claim guarantee itself is
+ * enforced independently by the ownership-reservation transaction
  * (`lib/db/claims.ts`, `consumeClaim`), not by banner content — this
  * function only decides what the public page *says*.
  */
-export function getClaimBannerState(business: Pick<Business, 'ownerUserId'>): ClaimBannerState {
+export function getClaimBannerState(business: Pick<Business, 'ownerUserId' | 'subscriptionStatus'>): ClaimBannerState {
   if (!business.ownerUserId) return 'unclaimed';
+  if (business.subscriptionStatus === 'active') return 'active';
   return 'claimed_pending';
 }

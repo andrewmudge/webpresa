@@ -65,10 +65,22 @@ describe('Business ownership fields (additive)', () => {
 
 describe('getClaimBannerState', () => {
   it('returns "unclaimed" when ownerUserId is absent', () => {
-    expect(getClaimBannerState({ ownerUserId: undefined })).toBe('unclaimed');
+    expect(getClaimBannerState({ ownerUserId: undefined, subscriptionStatus: undefined })).toBe('unclaimed');
   });
 
-  it('returns "claimed_pending" when ownerUserId is set — the "active" branch is unreachable until Stage 18', () => {
-    expect(getClaimBannerState({ ownerUserId: 'cognito-sub-123' })).toBe('claimed_pending');
+  it('returns "claimed_pending" when claimed but not yet subscribed', () => {
+    expect(getClaimBannerState({ ownerUserId: 'cognito-sub-123', subscriptionStatus: undefined })).toBe('claimed_pending');
+  });
+
+  it('returns "claimed_pending" (not "active") for past_due — a billing_recovery business must not look fully active', () => {
+    expect(getClaimBannerState({ ownerUserId: 'cognito-sub-123', subscriptionStatus: 'past_due' })).toBe('claimed_pending');
+  });
+
+  it('returns "claimed_pending" for canceled', () => {
+    expect(getClaimBannerState({ ownerUserId: 'cognito-sub-123', subscriptionStatus: 'canceled' })).toBe('claimed_pending');
+  });
+
+  it('returns "active" once genuinely paid — subscriptionStatus === active', () => {
+    expect(getClaimBannerState({ ownerUserId: 'cognito-sub-123', subscriptionStatus: 'active' })).toBe('active');
   });
 });
