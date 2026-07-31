@@ -26,6 +26,7 @@ import {
   applyRecommendedSectionsAction,
   resetWebsiteSectionsAction,
   refreshDomainStatusAction,
+  disconnectDomainForTestingAction,
 } from './actions';
 import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
@@ -226,11 +227,18 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
             {domainConnection.failureCategory && (
               <DetailRow label="Failure" value={domainConnection.failureCategory} />
             )}
-            <form action={refreshDomainStatusAction.bind(null, businessId, domainConnection.normalizedDomain)} className="mt-3">
-              <button type="submit" className="text-xs font-medium text-(--color-brand) hover:underline">
-                Refresh status
-              </button>
-            </form>
+            <div className="mt-3 flex items-center gap-4">
+              <form action={refreshDomainStatusAction.bind(null, businessId, domainConnection.normalizedDomain)}>
+                <button type="submit" className="text-xs font-medium text-(--color-brand) hover:underline">
+                  Refresh status
+                </button>
+              </form>
+              <form action={disconnectDomainForTestingAction.bind(null, businessId)}>
+                <button type="submit" className="text-xs font-medium text-red-600 hover:underline">
+                  Disconnect domain (testing)
+                </button>
+              </form>
+            </div>
           </DetailCard>
         )}
       </div>

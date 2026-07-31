@@ -1,6 +1,6 @@
 import 'server-only';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { DomainConnection } from '@/domain/models/domain-connection';
 import { DomainConnectionSchema } from '@/domain/schemas/domain-connection.schema';
 import { getDynamoDBClient, TABLE_DOMAIN_CONNECTIONS } from './client';
@@ -30,6 +30,22 @@ export async function listDomainConnectionsForBusiness(businessId: string): Prom
     }),
   );
   return (result.Items ?? []).map((item) => DomainConnectionSchema.parse(item));
+}
+
+/**
+ * Admin-only hard delete — not a customer-facing status transition. Frees
+ * `normalizedDomain` up entirely, e.g. so a dev/test domain can be
+ * reattached to a different business without buying another one. See
+ * `lib/domains/disconnect.ts`.
+ */
+export async function deleteDomainConnectionRecord(normalizedDomain: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_DOMAIN_CONNECTIONS(),
+      Key: { normalizedDomain },
+    }),
+  );
 }
 
 export async function putDomainConnection(record: DomainConnection): Promise<void> {

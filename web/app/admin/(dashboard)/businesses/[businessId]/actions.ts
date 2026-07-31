@@ -24,6 +24,7 @@ import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@
 import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
 import { reconcileDomainConnection } from '@/lib/domains/reconcile';
+import { disconnectDomainConnectionForTesting } from '@/lib/domains/disconnect';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { getSession } from '@/lib/auth/session';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
@@ -1671,5 +1672,20 @@ export async function refreshDomainStatusAction(businessId: string, normalizedDo
   if (!session) throw new Error('Unauthorized');
 
   await reconcileDomainConnection(normalizedDomain);
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+/**
+ * Testing-only utility — fully tears down this business's domain connection
+ * (Vercel attachment + the DynamoDB record) so the same real domain can be
+ * reattached to a different business, e.g. for repeated dev walkthroughs
+ * without needing a fresh domain each time. Not a customer-facing
+ * capability; see `lib/domains/disconnect.ts`.
+ */
+export async function disconnectDomainForTestingAction(businessId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
+
+  await disconnectDomainConnectionForTesting(businessId);
   redirect(`/admin/businesses/${businessId}`);
 }
