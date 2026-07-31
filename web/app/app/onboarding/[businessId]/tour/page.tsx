@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { ensureCustomerOnboarding } from '@/lib/onboarding/ensure';
 import { canAccessOnboardingStep } from '@/lib/onboarding/steps';
+import { Card } from '@/app/app/businesses/[businessId]/FormBits';
 import { OnboardingProgress } from '../OnboardingProgress';
 import { completeTourAction } from '../actions';
 
@@ -32,12 +33,14 @@ export default async function OnboardingTourPage({ params }: Props) {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-16 text-center">
-      <OnboardingProgress current="tour" completed={onboarding.completedSteps} />
+      <OnboardingProgress businessId={businessId} current="tour" completed={onboarding.completedSteps} />
       <h1 className="text-xl font-bold text-gray-900">You&apos;re all set</h1>
-      <p className="mt-3 text-sm text-gray-600">
-        Your dashboard is where you&apos;ll edit your website, change its design, manage billing, and update your
-        business information.
-      </p>
+      <Card title="What's in your dashboard">
+        <p className="text-sm text-gray-600 text-left">
+          Your dashboard is where you&apos;ll edit your website, change its design, manage billing, and update your
+          business information.
+        </p>
+      </Card>
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
         <form action={completeTourAction.bind(null, businessId, 'completed')}>
           <button

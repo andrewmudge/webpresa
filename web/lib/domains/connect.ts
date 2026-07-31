@@ -73,7 +73,13 @@ export async function startDomainConnection(params: StartDomainConnectionParams)
 
   const now = new Date().toISOString();
   try {
-    const added = await addProjectDomain(record.primaryHostname);
+    // Unset in a real production environment; e.g. "dev" while this app's
+    // customer-facing pipeline (Stage 17+) still lives only on a non-
+    // production branch, so a real connected domain serves the right
+    // deployment instead of silently falling through to whatever old build
+    // Production happens to be running. See `lib/vercel/domains.ts`.
+    const gitBranch = process.env.WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH || undefined;
+    const added = await addProjectDomain(record.primaryHostname, { gitBranch });
     const routing = buildRoutingInstructions(record.primaryHostname, true);
     const updated: DomainConnection = {
       ...record,

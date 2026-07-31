@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import {
   ONBOARDING_COMPLETABLE_STEPS,
   type OnboardingCompletableStep,
@@ -12,23 +13,38 @@ const STEP_LABELS: Record<OnboardingCompletableStep, string> = {
   tour: 'Tour',
 };
 
-/** Shared step indicator across every onboarding page — purely presentational, no auth/data logic. */
+function stepHref(businessId: string, step: OnboardingCompletableStep): string {
+  return step === 'welcome' ? `/app/onboarding/${businessId}` : `/app/onboarding/${businessId}/${step}`;
+}
+
+/**
+ * Shared step indicator across every onboarding page — purely presentational,
+ * no auth/data logic. Completed steps (and the current one) are clickable —
+ * safe to do with no extra authorization here, since every step page
+ * independently re-validates `canAccessOnboardingStep` server-side on load,
+ * so this can only ever offer a shortcut backward, never actually skip
+ * anything ahead.
+ */
 export function OnboardingProgress({
+  businessId,
   current,
   completed,
 }: {
+  businessId: string;
   current: OnboardingStep;
   completed: OnboardingCompletableStep[];
 }) {
   return (
-    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-xs font-medium mb-8">
-      {ONBOARDING_COMPLETABLE_STEPS.map((step, i) => {
-        const isDone = completed.includes(step);
-        const isCurrent = step === current;
-        return (
-          <li key={step} className="flex items-center gap-1.5">
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5 mb-8">
+      <ol className="flex flex-wrap items-center gap-x-2 gap-y-3">
+        {ONBOARDING_COMPLETABLE_STEPS.map((step, i) => {
+          const isDone = completed.includes(step);
+          const isCurrent = step === current;
+          const isReachable = isDone || isCurrent;
+
+          const badge = (
             <span
-              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
                 isCurrent
                   ? 'bg-(--color-brand) text-white'
                   : isDone
@@ -38,13 +54,37 @@ export function OnboardingProgress({
             >
               {i + 1}
             </span>
-            <span className={isCurrent ? 'text-(--color-brand)' : isDone ? 'text-gray-600' : 'text-gray-400'}>
+          );
+          const label = (
+            <span
+              className={`text-sm sm:text-base font-semibold ${
+                isCurrent ? 'text-(--color-brand)' : isDone ? 'text-gray-700' : 'text-gray-400'
+              }`}
+            >
               {STEP_LABELS[step]}
             </span>
-            {i < ONBOARDING_COMPLETABLE_STEPS.length - 1 && <span className="mx-1 text-gray-300">→</span>}
-          </li>
-        );
-      })}
-    </ol>
+          );
+
+          return (
+            <li key={step} className="flex items-center gap-2">
+              {isDone && !isCurrent ? (
+                <Link href={stepHref(businessId, step)} className="flex items-center gap-2 hover:opacity-75 transition-opacity">
+                  {badge}
+                  {label}
+                </Link>
+              ) : (
+                <span className="flex items-center gap-2" aria-current={isCurrent ? 'step' : undefined}>
+                  {badge}
+                  {label}
+                </span>
+              )}
+              {i < ONBOARDING_COMPLETABLE_STEPS.length - 1 && (
+                <span className={`mx-1 ${isReachable ? 'text-gray-300' : 'text-gray-200'}`}>→</span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

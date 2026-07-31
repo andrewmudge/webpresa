@@ -76,14 +76,25 @@ export function buildRoutingInstructions(hostname: string, isApex: boolean): Dom
   return [{ recordType: 'CNAME', name: subdomain, value: VERCEL_CNAME_TARGET, purpose: 'routing', required: true }];
 }
 
-export async function addProjectDomain(hostname: string): Promise<AddDomainResult> {
+/**
+ * `opts.gitBranch`: when set, Vercel serves this domain from that branch's
+ * deployments instead of Production. Confirmed live against the real
+ * Project Domains API (`PATCH /v9/projects/{id}/domains/{domain}` accepts
+ * and persists `gitBranch` — verified 2026-07-31 against `fitreppro.com`).
+ * Used so real customer domains connected while this app's customer-facing
+ * pipeline (Stage 17+) still only exists on a non-production branch don't
+ * silently fall through to whatever old build Production is serving — see
+ * `lib/domains/connect.ts` for where the environment-driven value comes
+ * from.
+ */
+export async function addProjectDomain(hostname: string, opts: { gitBranch?: string } = {}): Promise<AddDomainResult> {
   const projectId = await getProjectId();
 
   let response: VercelProjectDomainResponse;
   try {
     response = await vercelFetch<VercelProjectDomainResponse>(`/v10/projects/${projectId}/domains`, {
       method: 'POST',
-      body: JSON.stringify({ name: hostname }),
+      body: JSON.stringify({ name: hostname, ...(opts.gitBranch ? { gitBranch: opts.gitBranch } : {}) }),
     });
   } catch (err) {
     if (err instanceof VercelApiError && err.httpStatus === 409) {

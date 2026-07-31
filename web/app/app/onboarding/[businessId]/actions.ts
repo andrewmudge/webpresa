@@ -4,6 +4,7 @@ import { requireCustomerSession, requireActiveSubscription } from '@/lib/auth/cu
 import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info';
+import { updateCustomerSectionContent } from '@/lib/customer-editing/section-content';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import {
   completeWelcomeStep,
@@ -14,7 +15,6 @@ import {
   completeTourStep,
 } from '@/lib/onboarding/complete-step';
 import { startDomainConnection } from '@/lib/domains/connect';
-import { reconcileDomainConnection } from '@/lib/domains/reconcile';
 import type { DomainRegistrarProvider } from '@/domain/models/domain-connection';
 import { DOMAIN_REGISTRAR_PROVIDERS } from '@/domain/models/domain-connection';
 
@@ -65,6 +65,24 @@ export async function completeReviewAction(businessId: string, formData: FormDat
 }
 
 /**
+ * Inline services save on the Review step — reuses the exact same
+ * auth-agnostic write path the real Website editor's Services tab uses
+ * (`updateCustomerSectionContent(businessId, 'services', formData)`),
+ * so a customer can add/edit services without leaving onboarding at all.
+ * Deliberately does not advance the onboarding step — saving is separate
+ * from the page's own "Continue" action.
+ */
+export async function updateReviewServicesAction(businessId: string, formData: FormData): Promise<void> {
+  await requireOnboardingAccess(businessId);
+  const result = await updateCustomerSectionContent(businessId, 'services', formData);
+  redirect(
+    result?.message
+      ? `/app/onboarding/${businessId}/review?error=${encodeURIComponent(result.message)}`
+      : `/app/onboarding/${businessId}/review`,
+  );
+}
+
+/**
  * Part 1: the Domain step's defer choice — the Webpresa address is an
  * application route, never a fabricated `DomainConnection`. Also reachable
  * after onboarding is already complete (the dashboard's persistent domain
@@ -106,16 +124,6 @@ export async function connectExistingDomainAction(businessId: string, formData: 
   if (result.outcome !== 'connected') {
     redirect(`/app/onboarding/${businessId}/domain?error=${encodeURIComponent(result.message)}`);
   }
-  redirect(`/app/onboarding/${businessId}/domain`);
-}
-
-export async function checkDomainStatusAction(
-  businessId: string,
-  normalizedDomain: string,
-  _formData: FormData,
-): Promise<void> {
-  await requireOnboardingAccess(businessId);
-  await reconcileDomainConnection(normalizedDomain);
   redirect(`/app/onboarding/${businessId}/domain`);
 }
 
