@@ -139,7 +139,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
           <span>You have unpublished draft changes.</span>
           <form action={publishDraftActionCustomer.bind(null, businessId)}>
             <input type="hidden" name="previewId" value={latest!.previewId} />
-            <button type="submit" className="shrink-0 rounded-md bg-(--color-brand) text-white px-3 py-1.5 text-xs font-semibold hover:bg-(--color-brand-dark) transition-colors">
+            <button type="submit" className="shrink-0 rounded-lg bg-(--color-brand) text-white px-4 py-2 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors">
               Publish changes
             </button>
           </form>
