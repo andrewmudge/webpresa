@@ -6791,3 +6791,13 @@ infra/test/vercel-access-stack.test.ts                                 MODIFIED 
 
 web/docs/build_log.md                                                  MODIFIED — this entry
 ```
+
+## Deployed to dev (2026-07-31)
+
+`WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` deployed via `cdk deploy` — both purely additive (`cdk diff` showed no deletions/replacements, confirmed before deploy per the standing gate in `AGENTS.md`). New resources live: `webpresa-dev-customer-onboarding` table, `webpresa-dev-domain-connections` table, `webpresa-dev-vercel-api` secret; `webpresa-vercel-dev`'s `DataAccessPolicy` extended with both tables + the new secret ARN.
+
+`CUSTOMER_ONBOARDING_TABLE_NAME`, `DOMAIN_CONNECTIONS_TABLE_NAME`, `VERCEL_API_SECRET_NAME` added to Vercel (Production + Preview) via `npx vercel env add`. Code committed and pushed to `dev` (`git push origin dev`), triggering a real Vercel build — succeeded (`Ready` status, verified via `vercel inspect`).
+
+`webpresa-dev-vercel-api` populated with a real Vercel personal access token (scoped to the `andrew-mudges-projects` team) plus `teamId`/`projectId` sourced from `web/.vercel/project.json`, via `aws secretsmanager put-secret-value`. **Token expires 2026-10-29** — see `deployment.md`'s `VERCEL_API_SECRET_NAME` row for the rotation command.
+
+Not yet done: a real end-to-end customer walkthrough (claim → Cognito sign-up → Stripe test-mode Checkout → onboarding → domain connection against the real Vercel API).
