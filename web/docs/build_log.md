@@ -6928,3 +6928,30 @@ web/docs/build_log.md                                             MODIFIED — t
 ```
 
 Verification: `npx tsc --noEmit`, `npm run lint`, `npm test` (940 tests, all passing — no new automated tests, admin-only utility over already-tested primitives), `npm run build` all pass.
+
+---
+
+# Guardrail: block claim-link generation for unpublished businesses (2026-07-31)
+
+## The bug report
+
+User followed a freshly-generated `/claim/[code]` link in an incognito window and got a real 404 at `/b/[slug]`; the same link worked fine in a normal browser session, and the business page loaded fine when navigated to directly from the admin portal.
+
+## Root cause
+
+Not a bug in `/b/[slug]` itself — `resolvePreview()` (`app/b/[slug]/page.tsx`) is working as designed: a `published` `SitePreview` is visible to anyone, but if none exists, only an authenticated admin session may view a `draft`/`ready` one; anonymous visitors correctly get `notFound()`. Confirmed directly against `webpresa-dev-site-previews`: all 5 previews for the business in question were `status: "draft"`, none `published`. The admin's normal browser still carried a `webpresa_admin_session` cookie from a prior `/admin` login, which bypassed the published-only check; the incognito window had no such cookie and was correctly blocked.
+
+The actual gap: `generateClaimLinkAction` (`app/admin/(dashboard)/businesses/[businessId]/actions.ts`) had no precondition that the business's site was published before minting a claim token — so a claim link could be handed to a real customer (who never has an admin session) for a business that would 404 for them every time.
+
+## The fix
+
+`generateClaimLinkAction` now calls `listPreviewsForBusiness` and returns `{ error: '...' }` if none of the business's previews has `status === 'published'`, before generating the token. No UI changes needed — `ClaimSection.tsx` already renders any `result.error` returned from this action in its existing alert box (the same path used for `Unauthorized`/`Business not found`). Only gates new claim-link generation going forward; does not touch already-issued claims, `/claim/[code]`, or `/b/[slug]`.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts   MODIFIED — generateClaimLinkAction guard
+web/docs/build_log.md                                          MODIFIED — this entry
+```
+
+Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 940 tests, all passing — no new automated tests, single-condition guard over an already-tested query), `npm run build` all pass.

@@ -32,7 +32,7 @@ import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
 import { CtaConfigForm } from './CtaConfigForm';
 import { GenerateWebsiteButton } from './GenerateWebsiteButton';
-import { PublishPreviewButton } from './PublishPreviewButton';
+import { PublishPreviewButton, HeaderPublishControl } from './PublishPreviewButton';
 import { WorkflowSection } from './WorkflowSection';
 import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
@@ -150,6 +150,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
         </div>
         <div className="flex items-center gap-3">
           <PreviewLink previews={previews} />
+          <HeaderPublishControl businessId={businessId} previews={previews} />
           <DeleteBusinessButton
             businessId={businessId}
             businessName={business.name}

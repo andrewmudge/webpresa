@@ -1504,6 +1504,11 @@ export async function generateClaimLinkAction(businessId: string): Promise<Claim
   const business = await getBusinessById(businessId);
   if (!business) return { error: 'Business not found' };
 
+  const previews = await listPreviewsForBusiness(businessId);
+  if (!previews.some((p) => p.status === 'published')) {
+    return { error: 'This business has no published preview yet. Publish a site preview before generating a claim link.' };
+  }
+
   const { rawToken, tokenHash } = await generateAndHashClaimToken();
   const claim = createClaim({ businessId, tokenHash });
   await putClaim(claim);
