@@ -7000,3 +7000,41 @@ web/docs/build_log.md                                                       MODI
 ```
 
 Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 941 tests, all passing), `npm run build` all pass.
+
+---
+
+# Claim banner and /account/claim-status visual redesign (2026-07-31)
+
+Two presentation-only fixes from real click-through testing of the claim flow — no business logic, routing, Stripe, or Cognito changes.
+
+## Claim banner (`app/b/[slug]/ClaimBanner.tsx`)
+
+Bigger, Webpresa-branded (`/webpresa_w.png`), blue theme (`--color-brand*` tokens) replacing amber/yellow, and a real button ("Claim My Website") replacing the old inline underlined text link. Same three states (`unclaimed`/`claimed_pending`/the `hasMatchingClaimIntent` post-claim-link redirect case) and dismiss behavior as before.
+
+## `/account/claim-status` activation redesign
+
+The no-active-subscription branch felt like an internal form rather than the "claimed → paid" conversion moment it actually is. `active`/`past_due` are unchanged in behavior (component renamed `BusinessCard` → `SubscribedBusinessCard` for clarity alongside the new one). New components, all in `app/account/claim-status/`:
+
+- `ActivationHero.tsx` — success pill, "Your Website Is Ready" headline, supporting copy, and the business itself rendered as a subtle info badge rather than the primary heading. A `canceled` business gets a reactivation-flavored variant instead (no "just claimed" framing) — same component, no duplicated markup.
+- `WebsiteHeroPreview.tsx` — a CSS laptop + phone device mockup embedding the business's own already-published site live, via the same same-origin `/b/[slug]` iframe technique `WebsitePreviewCard` (`app/app/businesses/[businessId]`) already uses. Deliberately a live embed, not a static screenshot — every business reaching this page already has a published preview (the claim-link-generation guardrail added earlier this session guarantees it), so there's no case where a screenshot would exist but a live embed wouldn't. Renders nothing on load failure — a celebratory hero degrades to no visual, not an error box.
+- `TrustRow.tsx` — small reusable icon/title/subtitle row component, used twice: directly under the hero (Secure Checkout / No Setup Fees / Cancel Anytime) and again at the page footer (already built / go live in minutes / edit anytime).
+- `PlanSelectionForm.tsx` rewritten — identical form fields and action (`businessId` hidden input, `plan` radio, `agreeToTerms` checkbox, `createCheckoutSessionAction`, unchanged), now rendered as larger comparison cards with a feature-bullet list, a "Most Popular" badge on Growth, a clear selected-card state, and the submit button renamed "Continue to checkout" → "Activate My Website".
+- `domain/constants/plan-catalog.ts` — `PlanCatalogEntry` gained `features: string[]` and optional `featuresIntro` (additive; the two other consumers — the dashboard and Billing page — only ever read `label`/`priceDisplay`, unaffected).
+
+Not yet manually verified in a browser — every business currently claimed in dev already has an active subscription, so the redesigned activation branch has no live test case without either mutating a live dev record or running a fresh business through claim → Cognito sign-up without paying. Left for the user to confirm visually per their stated preference this session.
+
+## Files changed
+
+```
+web/app/b/[slug]/ClaimBanner.tsx                          MODIFIED — bigger, blue theme, logo, button CTA
+web/app/account/claim-status/page.tsx                     MODIFIED — restructured around the new components
+web/app/account/claim-status/ActivationHero.tsx           NEW
+web/app/account/claim-status/WebsiteHeroPreview.tsx       NEW
+web/app/account/claim-status/TrustRow.tsx                 NEW
+web/app/account/claim-status/PlanSelectionForm.tsx        MODIFIED — full rewrite, same fields/action
+web/domain/constants/plan-catalog.ts                      MODIFIED — features/featuresIntro added
+web/docs/architecture.md                                  MODIFIED — claim banner + claim-status notes
+web/docs/build_log.md                                     MODIFIED — this entry
+```
+
+Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 941 tests, all passing — no test files touched by this presentation-only change), `npm run build` all pass.

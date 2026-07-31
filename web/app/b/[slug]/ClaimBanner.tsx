@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import type { ClaimBannerState } from '@/lib/claim/banner-state';
 
 interface Props {
@@ -12,48 +13,68 @@ interface Props {
   hasMatchingClaimIntent: boolean;
 }
 
+/**
+ * Redesigned 2026-07-31 (bigger, Webpresa-branded, blue theme instead of
+ * amber, a real button instead of an inline text link) — same three
+ * states/copy as before, presentation only.
+ */
 export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClaimIntent }: Props) {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
 
+  const claimHref = hasMatchingClaimIntent ? '/claim/continue' : `/claim?business=${businessSlug}`;
+
   return (
-    <div className="sticky top-0 z-[60] bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-4">
-      <p className="text-sm text-amber-800 text-center flex-1">
-        {state === 'claimed_pending' ? (
-          <>
-            <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
-            pending.
-          </>
-        ) : hasMatchingClaimIntent ? (
-          <>
-            Your website preview is ready. This site was prepared for{' '}
-            <span className="font-semibold">{businessName}</span>. Explore it, then{' '}
-            <Link href="/claim/continue" className="underline font-medium hover:text-amber-900 transition-colors">
-              claim my website →
-            </Link>
-          </>
-        ) : (
-          <>
-            <span className="font-semibold">{businessName}</span> — is this your business?{' '}
+    <div className="sticky top-0 z-[60] border-b border-(--color-brand-light)/30 bg-(--color-brand-muted) px-4 py-4 sm:px-6">
+      <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-4">
+        <div className="flex items-center gap-3 text-center sm:text-left">
+          <Image
+            src="/webpresa_w.png"
+            alt=""
+            width={692}
+            height={394}
+            className="hidden h-7 w-auto shrink-0 sm:block"
+          />
+          <p className="text-sm text-(--color-brand-dark) sm:text-base">
+            {state === 'claimed_pending' ? (
+              <>
+                <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
+                pending.
+              </>
+            ) : hasMatchingClaimIntent ? (
+              <>
+                Your website preview is ready. This site was prepared for{' '}
+                <span className="font-semibold">{businessName}</span>. Explore it, then claim your website below.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">{businessName}</span> — is this your business?
+              </>
+            )}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {state !== 'claimed_pending' && (
             <Link
-              href={`/claim?business=${businessSlug}`}
-              className="underline font-medium hover:text-amber-900 transition-colors"
+              href={claimHref}
+              className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"
             >
-              Claim my website →
+              Claim My Website
             </Link>
-          </>
-        )}
-      </p>
-      <button
-        onClick={() => setDismissed(true)}
-        aria-label="Dismiss"
-        className="text-amber-600 hover:text-amber-900 flex-shrink-0 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
+          )}
+          <button
+            onClick={() => setDismissed(true)}
+            aria-label="Dismiss"
+            className="text-(--color-brand)/60 hover:text-(--color-brand-dark) transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

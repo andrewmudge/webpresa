@@ -1,23 +1,35 @@
 import Link from 'next/link';
+import Image from 'next/image';
+import { LogOut, CheckSquare, Clock, Pencil } from 'lucide-react';
 import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 import { createBillingPortalSessionAction } from '@/app/account/checkout/actions';
+import { ActivationHero } from './ActivationHero';
+import { WebsiteHeroPreview } from './WebsiteHeroPreview';
 import { PlanSelectionForm } from './PlanSelectionForm';
+import { TrustRow } from './TrustRow';
 import type { Business } from '@/domain/models/business';
 
 export const dynamic = 'force-dynamic';
 
 const PLAN_LABELS = { basic: 'Basic', growth: 'Growth' } as const;
 
-function BusinessCard({ business }: { business: Business }) {
+const VALUE_TRUST_ITEMS = [
+  { icon: CheckSquare, title: 'Your website is already built', subtitle: "We've done the heavy lifting for you." },
+  { icon: Clock, title: 'Go live in minutes', subtitle: 'Instant access after checkout.' },
+  { icon: Pencil, title: 'Edit anytime', subtitle: 'Make changes whenever you need.' },
+];
+
+/** `active`/`past_due` — unchanged behavior from before this redesign, just restyled to match the new shell. */
+function SubscribedBusinessCard({ business }: { business: Business }) {
   const { subscriptionStatus, plan, cancelAtPeriodEnd, currentPeriodEnd } = business;
   const renewsOrEndsOn = currentPeriodEnd
     ? new Date(currentPeriodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-(--color-border) p-6">
+    <div className="rounded-2xl border border-(--color-border) bg-white p-6 shadow-sm">
       <h1 className="text-lg font-semibold text-gray-900">You&apos;ve claimed {business.name}</h1>
 
       {subscriptionStatus === 'active' && (
@@ -68,17 +80,32 @@ function BusinessCard({ business }: { business: Business }) {
           </form>
         </>
       )}
+    </div>
+  );
+}
 
-      {subscriptionStatus !== 'active' && subscriptionStatus !== 'past_due' && (
-        <>
-          <p className="mt-2 text-sm text-gray-600">
-            {subscriptionStatus === 'canceled'
-              ? 'Your subscription has ended. Choose a plan to reactivate your website.'
-              : 'Choose a plan to activate your dashboard and start managing your website.'}
-          </p>
-          <PlanSelectionForm businessId={business.businessId} />
-        </>
-      )}
+/**
+ * `undefined` (never subscribed) or `canceled` — the activation/reactivation
+ * moment this redesign (2026-07-31) targets: a celebratory hero with the
+ * business's own already-built site as the centerpiece, followed by the
+ * plan-activation form. Same underlying data/actions as before; only
+ * presentation and component structure changed (see `build_log.md`).
+ */
+function ActivationCard({ business }: { business: Business }) {
+  return (
+    <div className="rounded-3xl border border-(--color-border) bg-white p-6 shadow-sm sm:p-10">
+      <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+        <ActivationHero
+          businessName={business.name}
+          claimedAt={business.claimedAt}
+          justClaimed={business.subscriptionStatus !== 'canceled'}
+        />
+        <WebsiteHeroPreview slug={business.slug} />
+      </div>
+
+      <div className="mt-10 border-t border-(--color-border) pt-10">
+        <PlanSelectionForm businessId={business.businessId} />
+      </div>
     </div>
   );
 }
@@ -89,8 +116,10 @@ function BusinessCard({ business }: { business: Business }) {
  * `owner-user-id-index` rather than assuming a single owned business.
  *
  * Stage 17 shipped this as an informational-only "activate (coming soon)"
- * placeholder; Stage 18 replaces it with a real plan selector, live
- * subscription status, and a Customer Portal link.
+ * placeholder; Stage 18 replaced it with a real plan selector, live
+ * subscription status, and a Customer Portal link. Redesigned 2026-07-31
+ * into a premium activation experience for the no-active-subscription case
+ * (implementation.md, "Onboarding UI polish").
  */
 export default async function ClaimStatusPage() {
   const session = await requireCustomerSession();
@@ -111,18 +140,45 @@ export default async function ClaimStatusPage() {
     );
   }
 
+  const hasUnactivatedBusiness = businesses.some(
+    (b) => b.subscriptionStatus !== 'active' && b.subscriptionStatus !== 'past_due',
+  );
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] px-4 py-12">
-      <div className="w-full max-w-md space-y-4">
-        {businesses.map((business) => (
-          <BusinessCard key={business.businessId} business={business} />
-        ))}
-        <form action={customerSignOutAction} className="text-center">
-          <button type="submit" className="text-sm underline text-gray-500 hover:text-gray-700">
+    <div className="min-h-screen bg-gradient-to-b from-(--color-brand-muted)/50 via-white to-white">
+      <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
+        <div className="flex items-center gap-2">
+          <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto" />
+          <span className="text-base font-bold tracking-tight text-gray-900">Webpresa</span>
+        </div>
+        <form action={customerSignOutAction}>
+          <button
+            type="submit"
+            className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <LogOut size={15} />
             Sign out
           </button>
         </form>
-      </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
+        <div className="space-y-6">
+          {businesses.map((business) =>
+            business.subscriptionStatus === 'active' || business.subscriptionStatus === 'past_due' ? (
+              <SubscribedBusinessCard key={business.businessId} business={business} />
+            ) : (
+              <ActivationCard key={business.businessId} business={business} />
+            ),
+          )}
+        </div>
+
+        {hasUnactivatedBusiness && (
+          <div className="mt-12 border-t border-(--color-border) pt-8">
+            <TrustRow items={VALUE_TRUST_ITEMS} />
+          </div>
+        )}
+      </main>
     </div>
   );
 }

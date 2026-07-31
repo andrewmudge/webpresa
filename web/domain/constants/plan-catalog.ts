@@ -22,18 +22,37 @@ export interface PlanCatalogEntry {
   label: string;
   priceDisplay: string;
   description: string;
+  /** Short bullet list for plan-comparison UI (e.g. the claim-status activation cards). */
+  features: string[];
+  /** Shown above `features` for a plan that builds on a lower tier (e.g. "Everything in Basic, plus:") — omitted otherwise. */
+  featuresIntro?: string;
 }
 
 export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
   basic: {
     label: 'Basic',
     priceDisplay: '$39/month',
-    description: 'Single-page professionally designed website with city-specific SEO for your primary city.',
+    description: 'Everything you need to get online and be found in your primary city.',
+    features: [
+      'Professional single-page website',
+      'Hosting & SSL included',
+      'Mobile optimized',
+      'Local SEO for your city',
+      'Unlimited edits to your website',
+      'Email & phone support',
+    ],
   },
   growth: {
     label: 'Growth',
     priceDisplay: '$79/month',
-    description: 'Expanded website with multiple city-specific SEO pages and Growth-tier lead forms.',
+    description: 'Expand your visibility with multiple pages and lead generation tools.',
+    featuresIntro: 'Everything in Basic, plus:',
+    features: [
+      'Multiple city-specific SEO pages',
+      'Lead forms to capture new customers',
+      'Advanced on-page SEO',
+      'Priority support',
+    ],
   },
 };
 
