@@ -63,6 +63,8 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly postcardsTable: dynamodb.Table;
   public readonly claimsTable: dynamodb.Table;
   public readonly customerBillingProfilesTable: dynamodb.Table;
+  public readonly customerOnboardingTable: dynamodb.Table;
+  public readonly domainConnectionsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
@@ -72,6 +74,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly stripeSecret: secretsmanager.Secret;
   public readonly lobSecret: secretsmanager.Secret;
   public readonly claimTokenSecret: secretsmanager.Secret;
+  public readonly vercelApiSecret: secretsmanager.Secret;
   public readonly captureTokenSecret: secretsmanager.Secret;
   public readonly vercelProtectionBypassSecret: secretsmanager.Secret;
   public readonly internalApiSecret: secretsmanager.Secret;
@@ -329,6 +332,54 @@ export class WebpresaDataStack extends cdk.Stack {
     this.customerBillingProfilesTable = customerBillingProfiles.table;
 
     // ───────────────────────────────────────────────────────────────────────
+    // CustomerOnboarding (Stage 19.x, Part 1 — Customer Onboarding Framework)
+    //   PK: businessId
+    //   No GSI — one onboarding record per business, one-to-one; every
+    //   lookup already starts from an authorized `businessId` (the same
+    //   `/app` route already resolves businesses by owner). Keyed directly
+    //   on its natural one-to-one key, the same pattern
+    //   CustomerBillingProfiles above uses for `userId` — no separate
+    //   generated `onboardingId`.
+    // ───────────────────────────────────────────────────────────────────────
+    const customerOnboarding = new WebpresaTable(this, 'CustomerOnboarding', {
+      config,
+      tableName: 'customer-onboarding',
+      partitionKey: { name: 'businessId', type: S },
+    });
+    this.customerOnboardingTable = customerOnboarding.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // DomainConnections (Stage 19.x, Part 2 — Existing-Domain Connection)
+    //   PK: normalizedDomain (NOT a generated ID — see the construct-level
+    //     rationale in implementation.md, Stage 19.x, Part 2, "Why
+    //     normalizedDomain is the partition key, not a GSI": a generated ID
+    //     plus a uniqueness GSI cannot prevent two concurrent requests from
+    //     each creating a record for the same domain, since a GSI query and
+    //     a write under a different key are never atomic together. Keying
+    //     directly on the domain and using a conditional PutItem
+    //     (`attribute_not_exists(normalizedDomain)`) makes the reservation
+    //     atomic by construction — the same pattern CustomerBillingProfiles
+    //     above already uses for its own natural one-to-one key.
+    //   GSIs: business-id-index (SK: createdAt)
+    //   No status-index (low cardinality — see the pre-production note
+    //   above) and no separate uniqueness index (the partition key itself
+    //   is the uniqueness guarantee).
+    // ───────────────────────────────────────────────────────────────────────
+    const domainConnections = new WebpresaTable(this, 'DomainConnections', {
+      config,
+      tableName: 'domain-connections',
+      partitionKey: { name: 'normalizedDomain', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'business-id-index',
+          partitionKey: { name: 'businessId', type: S },
+          sortKey: createdAtSortKey,
+        },
+      ],
+    });
+    this.domainConnectionsTable = domainConnections.table;
+
+    // ───────────────────────────────────────────────────────────────────────
     // Customer identity (Stage 17 — Website Claim Flow)
     //
     // Amazon Cognito User Pool for customer accounts only — the admin auth
@@ -411,6 +462,19 @@ export class WebpresaDataStack extends cdk.Stack {
       jsonKeys: ['hmacSecret'],
     });
     this.claimTokenSecret = claimToken.secret;
+
+    // Stage 19.x, Part 2 — Vercel Project Domains API credentials (add/
+    // inspect/remove a custom domain on the Webpresa Vercel project — see
+    // web/lib/vercel/client.ts). A real, distinct capability from the
+    // AWS-credential-based "Vercel is the deployment host" relationship
+    // this app already has — no existing secret covers this.
+    const vercelApi = new WebpresaSecret(this, 'VercelApiSecret', {
+      config,
+      secretName: 'vercel-api',
+      description: 'Vercel Project Domains API credentials (Stage 19.x, Part 2 — custom domain connection)',
+      jsonKeys: ['accessToken', 'teamId', 'projectId'],
+    });
+    this.vercelApiSecret = vercelApi.secret;
 
     // Stage 14 — HMAC signing key for the screenshot Lambda's preview
     // capture token (see architecture.md, "Draft preview visibility"). Not

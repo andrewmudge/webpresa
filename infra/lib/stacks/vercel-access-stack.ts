@@ -18,6 +18,8 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly postcardsTable: dynamodb.ITable;
   readonly claimsTable: dynamodb.ITable;
   readonly customerBillingProfilesTable: dynamodb.ITable;
+  readonly customerOnboardingTable: dynamodb.ITable;
+  readonly domainConnectionsTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
@@ -27,6 +29,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly stripeSecret: secretsmanager.ISecret;
   readonly lobSecret: secretsmanager.ISecret;
   readonly claimTokenSecret: secretsmanager.ISecret;
+  readonly vercelApiSecret: secretsmanager.ISecret;
   readonly captureTokenSecret: secretsmanager.ISecret;
   readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly internalApiSecret: secretsmanager.ISecret;
@@ -87,6 +90,8 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.postcardsTable,
       props.claimsTable,
       props.customerBillingProfilesTable,
+      props.customerOnboardingTable,
+      props.domainConnectionsTable,
       props.stockImagesTable,
     ];
 
@@ -123,6 +128,7 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
             props.stripeSecret.secretArn,
             props.lobSecret.secretArn,
             props.claimTokenSecret.secretArn,
+            props.vercelApiSecret.secretArn,
             props.captureTokenSecret.secretArn,
             props.vercelProtectionBypassSecret.secretArn,
             props.internalApiSecret.secretArn,

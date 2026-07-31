@@ -6658,3 +6658,136 @@ web/app/app/businesses/[businessId]/settings/page.tsx                  NEW
 
 web/docs/build_log.md                                                  MODIFIED — this entry
 ```
+
+---
+
+# Stage 19.x, Parts 1–2 — Customer Onboarding Framework; Existing-Domain Connection
+
+Implemented per `implementation.md`, Stage 19.x. No AWS resource actually deployed — new DynamoDB tables/secret exist only in CDK source, verified via `cdk synth`/the infra test suite, per the standing deployment gate (`AGENTS.md`). Application code is complete and automatically tested; not yet manually verified against a real dev customer session or a real Vercel API credential.
+
+## Part 1 — Onboarding framework
+
+- `CustomerOnboarding` domain model/schema/factory (`domain/models/customer-onboarding.ts` etc.) — PK `businessId` directly, no separate generated `onboardingId`, the same pattern `CustomerBillingProfile` (Stage 18) already uses for its own natural one-to-one key.
+- `lib/db/customer-onboarding.ts` — repository, including a conditional-create (`attribute_not_exists(businessId)`) mirroring `revokeClaim`'s "return `false`, never throw" convention for an expected-to-sometimes-fail condition.
+- `lib/onboarding/{steps,ensure,complete-step}.ts` — pure step-order logic, a get-or-create helper (`ensureCustomerOnboarding`, naming mirrors `ensureDraftPreview`), and five step-completion functions. None of the completion functions decide *whether* a step's requirement was met — only the caller does; in particular, `completePublishStep` never itself checks preview state, so a customer who only ever calls "Enter my dashboard for now" (never publishes) leaves the record permanently `in_progress`, never falsely `completed`.
+- Route tree `app/app/onboarding/[businessId]/{,/review,/domain,/publish,/tour}` + `actions.ts` — renders inside the existing `AppLayout`/`AppSidebar` shell (no separate wizard-only chrome). Steps run `welcome → review → domain → publish → tour`; Review precedes Domain because the confirmed business name/city/state/service feeds Part 3's future domain-name suggestions.
+- Business-home page (`app/app/businesses/[businessId]/page.tsx`) force-routes a `full`-mode customer into onboarding only when no `CustomerOnboarding` record exists yet (the genuine first post-Checkout visit) — every later visit shows a "Finish setting up your website" notice instead of a repeated forced redirect.
+- CDK: `customer-onboarding` table (`WebpresaDataStack`), added to `WebpresaVercelAccessStack`'s data-access policy — no new IAM identity.
+
+## Part 2 — Existing-domain connection
+
+- `DomainConnection` domain model/schema/factory (`domain/models/domain-connection.ts` etc.) — PK `normalizedDomain` itself, not a generated ID plus a uniqueness GSI. A generated-ID design cannot prevent two concurrent requests from each creating a record for the same domain (a GSI query and a write under a different key are never atomic together); keying the table on the domain and creating with `ConditionExpression: attribute_not_exists(normalizedDomain)` makes the reservation atomic by construction. `Business.slug` is denormalized onto the record at connect time so host-based routing resolves in one lookup.
+- `lib/vercel/{client,domains,errors}.ts` — new server-only Vercel Project Domains API client, same shape as `lib/firecrawl/client.ts`/`lib/google-places/client.ts` (plain `fetch`, typed error-category enum, Secrets-Manager-sourced credentials, bounded timeouts). Endpoint paths (`/v9`, `/v10` project-domains, `/v6` domain-config) reflect Vercel's documented REST API as of this writing — flagged in-code to reconfirm against current Vercel docs before the first real deployment, the same discipline this codebase already applies to every third-party integration.
+- `lib/domains/{normalize,connect,reconcile,routing}.ts` — normalization/validation (pure), `startDomainConnection` (preflight → atomic reserve-or-resume → Vercel attach), `reconcileDomainConnection` (`draft → awaiting_dns → verifying → connected → certificate_pending → active`, server-derived from a live provider check on every call), `resolveActiveDomainRoute` (narrow host-routing lookup). No `'NS'` record type ever offered to a customer — nameserver delegation is out of scope for this stage.
+- `proxy.ts` — matcher widened from three explicit path prefixes (`/admin/:path*`, `/account/:path*`, `/app/:path*`) to effectively all paths (`/((?!_next/static|_next/image|favicon\.ico).*)`), since host-based routing needs to see the hostname on `/` too. `isReservedRoutingHost` short-circuits before any DynamoDB call for `webpresa.com`/`www.webpresa.com`/`localhost`/Vercel-preview-host traffic — the overwhelming majority — so normal requests gain no extra database round trip. On a genuine foreign host: `/admin`, `/account`, `/app`, `/claim` fail closed (404); everything else except `/` falls through unchanged (shared static/API assets — no per-business `robots.txt`/`sitemap.xml` yet, out of scope for domain *connection*); `/` rewrites internally to `/b/{slug}` when an `active` `DomainConnection` exists, or 404s.
+- Onboarding Domain route upgraded with a real "Use a domain I already own" form (domain input + optional registrar-for-display-only select), connection-status view with live DNS instructions and a "Check again" action, and completion into the wizard. Deliberately re-enterable after onboarding is already `'completed'` (unlike Review/Publish/Tour) — the dashboard's persistent "Connect your domain" checklist item and Settings' "Manage domain" link both route back here.
+- Business-home "View website" link now prefers an active custom domain over `/b/{slug}`; Settings gained a read-only domain-status summary; admin business-detail page gained a read-only Domain card (status/registrar/timestamps/failure category) + a "Refresh status" action — no domain-assignment/removal control there, since ownership stays a customer/onboarding-side operation.
+- CDK: `domain-connections` table (PK `normalizedDomain`, GSI `business-id-index`) and `webpresa-{env}-vercel-api` secret (`{ accessToken, teamId?, projectId }`, no real value populated), both added to `WebpresaVercelAccessStack` — no new IAM identity.
+
+## Verification
+
+```
+web/:
+npx tsc --noEmit     — passes
+npm run lint          — passes (3 expected `_formData` unused-arg warnings on
+                         form-action-bound functions whose trailing FormData
+                         param is required by the calling convention but
+                         unused by the function body — same pattern already
+                         accepted elsewhere in this codebase, e.g.
+                         completeTourAction)
+npm test              — 88 files, 937 tests passed (30 new: 8 steps, 4 ensure,
+                         8 complete-step, 9 normalize, 7 connect, 7 reconcile,
+                         7 routing — some overlap across files; see individual
+                         __tests__ directories for exact counts)
+npm run build          — succeeds; all new routes registered:
+                         /app/onboarding/[businessId],
+                         /app/onboarding/[businessId]/domain,
+                         /app/onboarding/[businessId]/publish,
+                         /app/onboarding/[businessId]/review,
+                         /app/onboarding/[businessId]/tour
+
+infra/:
+npx tsc -p . --noEmit  — passes
+npx vitest run          — 6 files, 161 tests passed (table count 8→9, output
+                          count 29→32, secret count 9→10, DynamoDbTables/
+                          SecretsManager resource counts updated accordingly
+                          in data-stack.test.ts and vercel-access-stack.test.ts)
+npx cdk synth --all     — succeeds for every stack
+```
+
+Not yet done: a real `cdk deploy` (no AWS deployment was performed — CDK changes exist only in source, verified via synth/tests, per the standing deployment gate); populating the real `webpresa-dev-vercel-api` secret value (Vercel API token + project ID); adding the three new environment variables to Vercel; a real end-to-end customer walkthrough (Checkout → onboarding → connecting a real domain → seeing it resolve via the widened `proxy.ts` matcher).
+
+## Files changed
+
+```
+web/docs/implementation.md                                             MODIFIED — Stage 19.x Status updated
+web/docs/architecture.md                                               MODIFIED — new Status entry, new
+                                                                          "Customer Onboarding and Domain
+                                                                          Connection" section, two new table
+                                                                          entries, one new secret entry
+web/docs/deployment.md                                                 MODIFIED — three new env var rows
+
+web/domain/models/customer-onboarding.ts                               NEW
+web/domain/schemas/customer-onboarding.schema.ts                       NEW
+web/domain/factories/customer-onboarding.factory.ts                    NEW
+web/lib/db/customer-onboarding.ts                                      NEW
+web/lib/onboarding/steps.ts                                            NEW
+web/lib/onboarding/ensure.ts                                           NEW
+web/lib/onboarding/complete-step.ts                                    NEW
+web/lib/onboarding/__tests__/steps.test.ts                             NEW
+web/lib/onboarding/__tests__/ensure.test.ts                            NEW
+web/lib/onboarding/__tests__/complete-step.test.ts                     NEW
+web/lib/db/client.ts                                                   MODIFIED — TABLE_CUSTOMER_ONBOARDING,
+                                                                          TABLE_DOMAIN_CONNECTIONS
+
+web/app/app/onboarding/[businessId]/OnboardingProgress.tsx             NEW
+web/app/app/onboarding/[businessId]/actions.ts                         NEW
+web/app/app/onboarding/[businessId]/page.tsx                           NEW
+web/app/app/onboarding/[businessId]/review/page.tsx                    NEW
+web/app/app/onboarding/[businessId]/domain/page.tsx                    NEW
+web/app/app/onboarding/[businessId]/publish/page.tsx                   NEW
+web/app/app/onboarding/[businessId]/tour/page.tsx                      NEW
+
+web/app/app/businesses/[businessId]/page.tsx                           MODIFIED — post-Checkout onboarding
+                                                                          redirect, resume notice, domain-
+                                                                          aware "View website" link, "Connect
+                                                                          your domain" checklist item
+web/app/app/businesses/[businessId]/settings/page.tsx                  MODIFIED — domain status summary +
+                                                                          "Manage domain" link
+
+web/domain/models/domain-connection.ts                                 NEW
+web/domain/schemas/domain-connection.schema.ts                         NEW
+web/domain/factories/domain-connection.factory.ts                      NEW
+web/lib/db/domain-connections.ts                                       NEW
+web/lib/secrets/client.ts                                              MODIFIED — SECRET_VERCEL_API
+web/lib/secrets/index.ts                                               MODIFIED — VercelApiSecret,
+                                                                          getVercelApiSecret
+web/lib/vercel/errors.ts                                               NEW
+web/lib/vercel/client.ts                                               NEW
+web/lib/vercel/domains.ts                                              NEW
+web/lib/domains/normalize.ts                                           NEW
+web/lib/domains/connect.ts                                             NEW
+web/lib/domains/reconcile.ts                                           NEW
+web/lib/domains/routing.ts                                             NEW
+web/lib/domains/__tests__/normalize.test.ts                            NEW
+web/lib/domains/__tests__/connect.test.ts                              NEW
+web/lib/domains/__tests__/reconcile.test.ts                            NEW
+web/lib/domains/__tests__/routing.test.ts                              NEW
+web/proxy.ts                                                           MODIFIED — host-based tenant routing,
+                                                                          widened matcher
+
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts           MODIFIED — refreshDomainStatusAction
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx             MODIFIED — read-only Domain card
+
+infra/lib/stacks/data-stack.ts                                         MODIFIED — customer-onboarding,
+                                                                          domain-connections tables;
+                                                                          vercel-api secret
+infra/lib/stacks/vercel-access-stack.ts                                MODIFIED — new table/secret props +
+                                                                          grants
+infra/bin/webpresa.ts                                                  MODIFIED — wires new props through
+infra/test/data-stack.test.ts                                          MODIFIED — updated counts, new
+                                                                          table-specific assertions
+infra/test/vercel-access-stack.test.ts                                 MODIFIED — updated fixture + counts
+
+web/docs/build_log.md                                                  MODIFIED — this entry
+```

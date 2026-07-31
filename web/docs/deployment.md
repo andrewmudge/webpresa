@@ -114,6 +114,9 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `STRIPE_PRICE_ID_BASIC` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjryHTxTryrfUCNCT4A9Yn`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
 | `STRIPE_PRICE_ID_GROWTH` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjsnHTxTryrfUCMeAT0q3K`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
 | `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet added to Vercel; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
+| `CUSTOMER_ONBOARDING_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-onboarding-name` | Stage 19.x, Part 1 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
+| `DOMAIN_CONNECTIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-domain-connections-name` | Stage 19.x, Part 2 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
+| `VERCEL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-vercel-api` | Secrets Manager (Stage 19.x, Part 2) — not yet deployed, no real `{ accessToken, teamId?, projectId }` populated. A real Vercel API token (Account Settings → Tokens) and the Webpresa project's ID (and team ID, if applicable) are required before domain connection can be exercised against the real Vercel API. |
 
 Never put these in client-side code or commit `.env` files that contain real values.
 

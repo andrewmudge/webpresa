@@ -2,9 +2,11 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { decryptSession, ADMIN_SESSION_COOKIE } from '@/lib/auth/session';
 import { decryptCustomerSession, CUSTOMER_SESSION_COOKIE } from '@/lib/auth/customer-session';
+import { isReservedRoutingHost, resolveActiveDomainRoute } from '@/lib/domains/routing';
 
 /**
- * Proxy (formerly middleware) for route-level authentication.
+ * Proxy (formerly middleware) for route-level authentication and (Stage
+ * 19.x, Part 2) multi-tenant custom-domain routing.
  *
  * All /admin/* routes are protected.  Unauthenticated requests are redirected
  * to /admin/sign-in.  Authenticated requests to the sign-in page are redirected
@@ -24,8 +26,16 @@ import { decryptCustomerSession, CUSTOMER_SESSION_COOKIE } from '@/lib/auth/cust
  * `billing_recovery` customer is a perfectly valid session that still needs
  * to reach `/app` (read-only), so this layer must not turn them away.
  *
- * Note: Only the session cookie is read here — no DynamoDB calls.  Full session
- * validation happens server-side inside protected route handlers and actions.
+ * Note: Only the session cookie is read here — no DynamoDB calls for the
+ * admin/account/app branches. Full session validation happens server-side
+ * inside protected route handlers and actions.
+ *
+ * A request arriving on a hostname other than `webpresa.com`/
+ * `www.webpresa.com`/`localhost`/a Vercel preview host is treated as a
+ * candidate customer custom domain — see `handleCustomDomainRoute` below.
+ * This is the one branch that does read DynamoDB (a single `GetItem` by
+ * `normalizedDomain` — see `lib/domains/routing.ts`), and only for traffic
+ * that isn't on a Webpresa-owned host to begin with.
  */
 
 const ADMIN_SIGN_IN_PATH = '/admin/sign-in';
@@ -36,6 +46,11 @@ const DEFAULT_CUSTOMER_PATH = '/account/claim-status';
 
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const hostname = request.headers.get('host')?.split(':')[0] ?? '';
+
+  if (hostname && !isReservedRoutingHost(hostname)) {
+    return handleCustomDomainRoute(request, hostname, pathname);
+  }
 
   if (pathname.startsWith('/admin')) {
     return handleAdminRoute(request, pathname);
@@ -50,6 +65,38 @@ export default async function proxy(request: NextRequest) {
   }
 
   return NextResponse.next();
+}
+
+/**
+ * On a foreign host, the admin/account/app/claim namespaces must never be
+ * reachable by path guess — that would mean Webpresa's own management
+ * surfaces are exposed under a customer's domain name. Everything except
+ * the public tenant root falls through to the app's existing shared
+ * static/API assets unchanged (no per-business robots.txt/sitemap.xml yet —
+ * that's new Stage 8 surface, out of scope for domain *connection* itself).
+ */
+async function handleCustomDomainRoute(request: NextRequest, hostname: string, pathname: string) {
+  if (
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/account') ||
+    pathname.startsWith('/app') ||
+    pathname.startsWith('/claim')
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  if (pathname !== '/') {
+    return NextResponse.next();
+  }
+
+  const route = await resolveActiveDomainRoute(hostname);
+  if (!route) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  const url = request.nextUrl.clone();
+  url.pathname = `/b/${route.slug}`;
+  return NextResponse.rewrite(url);
 }
 
 async function handleAdminRoute(request: NextRequest, pathname: string) {
@@ -106,10 +153,15 @@ async function handleAppRoute(request: NextRequest, pathname: string) {
 
 export const config = {
   matcher: [
-    // Run on all /admin/*, /account/*, and /app/* paths; exclude static
-    // files and Next.js internals.
-    '/admin/:path*',
-    '/account/:path*',
-    '/app/:path*',
+    // Stage 19.x, Part 2 widened this from three explicit path prefixes to
+    // effectively everything except static assets/Next internals — host-
+    // based tenant routing needs to see the request hostname on every path,
+    // including `/`, which none of the three original prefixes covered.
+    // `isReservedRoutingHost` short-circuits before any DynamoDB call for
+    // the overwhelming majority of requests (anything on
+    // webpresa.com/www.webpresa.com/localhost/a Vercel preview host), so
+    // this does not add a database round trip to normal traffic — it only
+    // adds one for requests already arriving on an unrecognized hostname.
+    '/((?!_next/static|_next/image|favicon\\.ico).*)',
   ],
 };

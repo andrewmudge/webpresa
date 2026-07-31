@@ -1,7 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
+import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
+import { getCustomerOnboardingByBusinessId } from '@/lib/db/customer-onboarding';
+import { ensureCustomerOnboarding } from '@/lib/onboarding/ensure';
 import { PLAN_CATALOG } from '@/domain/constants/plan-catalog';
 import { createBillingPortalSessionAction } from '@/app/account/checkout/actions';
 import { WebsitePreviewCard } from './WebsitePreviewCard';
@@ -55,6 +59,20 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
     );
   }
 
+  // Stage 19.x, Part 1 — post-Checkout onboarding routing. Only the very
+  // first `full`-mode visit (no onboarding record exists yet) is force-
+  // routed into the wizard; once a record exists the customer has already
+  // seen it at least once (whether they finished it or chose "Go to
+  // dashboard" early), so every later visit here just shows a resume notice
+  // instead of bouncing them back in — see implementation.md, Stage 19.x,
+  // Part 1, "Major deliverables" ("Stage 19 dashboard hook") vs.
+  // "Post-Checkout routing".
+  let onboarding = mode === 'full' ? await getCustomerOnboardingByBusinessId(businessId) : null;
+  if (mode === 'full' && !onboarding) {
+    onboarding = await ensureCustomerOnboarding(businessId, session.sub);
+    redirect(`/app/onboarding/${businessId}`);
+  }
+
   const previews = await listPreviewsForBusiness(businessId);
   const publishedPreview = previews.find((p) => p.status === 'published');
   const latest = previews[0];
@@ -63,12 +81,21 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
   const badge = STATUS_BADGE[websiteState];
   const isReadOnly = mode === 'billing_recovery';
 
+  // Stage 19.x, Part 2 — "View website" prefers an active custom domain over `/b/{slug}`.
+  const domainConnections = await listDomainConnectionsForBusiness(businessId);
+  const domainConnection = domainConnections.find((c) => c.status !== 'disconnected') ?? null;
+  const isDomainActive = domainConnection?.status === 'active';
+  const publicUrl = isDomainActive ? `https://${domainConnection!.primaryHostname}` : `/b/${business.slug}`;
+
   const checklist: { href: string; label: string }[] = [];
   if (!business.logoUrl) checklist.push({ href: `/app/businesses/${businessId}/design`, label: 'Add your logo' });
   if (!business.photoUrls?.length) checklist.push({ href: `/app/businesses/${businessId}/website?tab=photos`, label: 'Add photos of your business' });
   if (!business.phone && !business.email) checklist.push({ href: `/app/businesses/${businessId}/settings`, label: 'Add a way for customers to reach you' });
   if (!business.theme) checklist.push({ href: `/app/businesses/${businessId}/design`, label: 'Choose a look for your website' });
   if (!publishedPreview) checklist.push({ href: `/app/businesses/${businessId}`, label: 'Publish your website' });
+  if (!domainConnection || domainConnection.status === 'failed') {
+    checklist.push({ href: `/app/onboarding/${businessId}/domain`, label: 'Connect your domain' });
+  }
 
   return (
     <div className="py-8 space-y-6">
@@ -81,6 +108,15 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
       {published && (
         <div role="status" className="flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
           <CheckCircle2 size={16} /> Your changes are live.
+        </div>
+      )}
+
+      {onboarding && onboarding.status !== 'completed' && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+          <span>Finish setting up your website.</span>
+          <Link href={`/app/onboarding/${businessId}`} className="shrink-0 font-medium underline">
+            Continue onboarding
+          </Link>
         </div>
       )}
 
@@ -116,7 +152,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
         </div>
         <div className="flex gap-2">
           <a
-            href={`/b/${business.slug}`}
+            href={publicUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"

@@ -1,6 +1,8 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
+import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
 import { updateBusinessInfoAction } from '../actions';
 import { NotificationToggle } from './NotificationToggle';
@@ -27,6 +29,16 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   const latest = previews[0];
   const hasDraft = !!latest && latest.status !== 'published' && !!publishedPreview;
   const websiteState = publishedPreview ? (hasDraft ? 'Draft changes' : 'Live') : 'No live site';
+
+  const domainConnections = await listDomainConnectionsForBusiness(businessId);
+  const domainConnection = domainConnections.find((c) => c.status !== 'disconnected') ?? null;
+  const domainStatusLabel = !domainConnection
+    ? 'Not connected'
+    : domainConnection.status === 'active'
+      ? 'Connected'
+      : domainConnection.status === 'failed'
+        ? 'Needs attention'
+        : 'Connecting…';
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-6">
@@ -97,6 +109,27 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </>
           )}
         </dl>
+      </Card>
+
+      <Card title="Custom domain">
+        <dl className="grid gap-3 sm:grid-cols-2 text-sm">
+          <div>
+            <dt className="text-gray-500">Status</dt>
+            <dd className="text-gray-900 font-medium">{domainStatusLabel}</dd>
+          </div>
+          {domainConnection && (
+            <div>
+              <dt className="text-gray-500">Domain</dt>
+              <dd className="text-gray-900 font-medium">{domainConnection.domainName}</dd>
+            </div>
+          )}
+        </dl>
+        <Link
+          href={`/app/onboarding/${businessId}/domain`}
+          className="mt-3 inline-block text-xs font-medium text-(--color-brand) underline"
+        >
+          Manage domain →
+        </Link>
       </Card>
 
       <Card title="Notifications">

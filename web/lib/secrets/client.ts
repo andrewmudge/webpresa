@@ -71,6 +71,10 @@ export const SECRET_INTERNAL_API = () => getSecretName('INTERNAL_API_SECRET_NAME
 // capture-token above: a random placeholder at creation, a real value
 // populated out-of-band.
 export const SECRET_CLAIM_TOKEN = () => getSecretName('CLAIM_TOKEN_SECRET_NAME');
+// Stage 19.x, Part 2 — Vercel Project Domains API credentials (add/inspect/
+// remove a custom domain on the Webpresa Vercel project). Never sent to the
+// browser; read only from `lib/vercel/client.ts`.
+export const SECRET_VERCEL_API = () => getSecretName('VERCEL_API_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval

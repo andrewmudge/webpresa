@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly seven DynamoDB tables', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 7);
+  it('creates exactly nine DynamoDB tables', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 9);
   });
 });
 
@@ -123,6 +123,24 @@ describe('partition keys', () => {
       ]),
     });
   });
+
+  it('CustomerOnboarding table has businessId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-customer-onboarding',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'businessId', KeyType: 'HASH' },
+      ]),
+    });
+  });
+
+  it('DomainConnections table has normalizedDomain (not a generated ID) as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-domain-connections',
+      KeySchema: Match.arrayWith([
+        { AttributeName: 'normalizedDomain', KeyType: 'HASH' },
+      ]),
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -163,6 +181,31 @@ describe('GSI names', () => {
       Properties: { GlobalSecondaryIndexes?: unknown };
     };
     expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('CustomerOnboarding table has no GSI (direct GetItem by businessId only)', () => {
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-customer-onboarding' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes?: unknown };
+    };
+    expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('DomainConnections table has exactly one GSI: business-id-index (no separate uniqueness index — the partition key itself is the uniqueness guarantee)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-domain-connections',
+      GlobalSecondaryIndexes: [
+        Match.objectLike({
+          IndexName: 'business-id-index',
+          KeySchema: [
+            { AttributeName: 'businessId', KeyType: 'HASH' },
+            { AttributeName: 'createdAt', KeyType: 'RANGE' },
+          ],
+        }),
+      ],
+    });
   });
 
   it('Businesses owner-user-id-index is keyed on ownerUserId with claimedAt as sort key — not unique per user (Stage 17)', () => {
@@ -374,9 +417,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 27 outputs — 14 table outputs (Stage 18 adds CustomerBillingProfiles), 2 bucket outputs, 9 secret ARN outputs, 2 Cognito outputs', () => {
+  it('creates 32 outputs — 18 table outputs (Stage 19.x adds CustomerOnboarding and DomainConnections), 2 bucket outputs, 10 secret ARN outputs (Stage 19.x adds vercel-api), 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(27);
+    expect(Object.keys(outputs)).toHaveLength(32);
   });
 });
 
@@ -608,8 +651,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly nine secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 9);
+  it('creates exactly ten secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 10);
   });
 
   const devSecretNames = [
@@ -619,6 +662,7 @@ describe('secrets', () => {
     'webpresa-dev-stripe',
     'webpresa-dev-lob',
     'webpresa-dev-claim-token',
+    'webpresa-dev-vercel-api',
     'webpresa-dev-capture-token',
     'webpresa-dev-vercel-protection-bypass',
     'webpresa-dev-internal-api',

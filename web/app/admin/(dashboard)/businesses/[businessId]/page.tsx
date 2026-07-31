@@ -8,6 +8,7 @@ import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
 import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
 import { listClaimsForBusiness } from '@/lib/db/claims';
+import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { ClaimSection } from './ClaimSection';
 import {
@@ -24,6 +25,7 @@ import {
   autoSaveWebsiteSectionsAction,
   applyRecommendedSectionsAction,
   resetWebsiteSectionsAction,
+  refreshDomainStatusAction,
 } from './actions';
 import { buildDefaultCta } from './cta-defaults';
 import { DeleteBusinessButton } from './DeleteBusinessButton';
@@ -82,14 +84,16 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
 
-  const [business, previews, scans, postcards, scanExecutions, claims] = await Promise.all([
+  const [business, previews, scans, postcards, scanExecutions, claims, domainConnections] = await Promise.all([
     getBusinessById(businessId),
     listPreviewsForBusiness(businessId).catch(() => []),
     listScansForBusiness(businessId).catch(() => []),
     listPostcardsForBusiness(businessId).catch(() => []),
     listScanExecutionsForBusiness(businessId).catch(() => []),
     listClaimsForBusiness(businessId).catch(() => []),
+    listDomainConnectionsForBusiness(businessId).catch(() => []),
   ]);
+  const domainConnection = domainConnections.find((c) => c.status !== 'disconnected') ?? null;
 
   if (!business) notFound();
 
@@ -201,6 +205,34 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           claimedAt={business.claimedAt}
           claims={claims}
         />
+
+        {domainConnection && (
+          <DetailCard title="Domain">
+            <DetailRow label="Domain" value={domainConnection.domainName} mono />
+            <DetailRow label="Status" value={domainConnection.status} />
+            <DetailRow label="Source" value={domainConnection.source} />
+            {domainConnection.registrarProvider && (
+              <DetailRow label="Registrar" value={domainConnection.registrarProvider} />
+            )}
+            {domainConnection.lastCheckedAt && (
+              <DetailRow label="Last checked" value={new Date(domainConnection.lastCheckedAt).toLocaleString()} />
+            )}
+            {domainConnection.verifiedAt && (
+              <DetailRow label="Verified" value={new Date(domainConnection.verifiedAt).toLocaleString()} />
+            )}
+            {domainConnection.activatedAt && (
+              <DetailRow label="Active since" value={new Date(domainConnection.activatedAt).toLocaleString()} />
+            )}
+            {domainConnection.failureCategory && (
+              <DetailRow label="Failure" value={domainConnection.failureCategory} />
+            )}
+            <form action={refreshDomainStatusAction.bind(null, businessId, domainConnection.normalizedDomain)} className="mt-3">
+              <button type="submit" className="text-xs font-medium text-(--color-brand) hover:underline">
+                Refresh status
+              </button>
+            </form>
+          </DetailCard>
+        )}
       </div>
 
       {/* History */}

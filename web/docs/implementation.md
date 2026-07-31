@@ -2708,7 +2708,7 @@ Lead inbox/notification history (Stage 20), domain connection/purchase (dedicate
 
 ## Status
 
-Not started.
+**Parts 1 and 2 implemented, automatically tested, not yet manually verified end-to-end** (no real `webpresa-{env}-vercel-api` secret value populated yet, no real dev customer session exercised). Parts 3 (OpenSRS purchase) and 4 (final integration/dashboard orientation) — not started. See `architecture.md`, "Customer Onboarding and Domain Connection (Stage 19.x, Parts 1–2)", and `build_log.md` for the full implementation record.
 
 ## Objective
 

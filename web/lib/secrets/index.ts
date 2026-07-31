@@ -9,6 +9,7 @@ import {
   SECRET_CAPTURE_TOKEN,
   SECRET_INTERNAL_API,
   SECRET_CLAIM_TOKEN,
+  SECRET_VERCEL_API,
 } from './client';
 
 /**
@@ -55,6 +56,13 @@ export interface ClaimTokenSecret {
   hmacSecret: string;
 }
 
+/** Stage 19.x, Part 2 — Vercel Project Domains API credentials. `teamId`/`projectId` are only included when the project belongs to a Vercel team and the API requires that scope. */
+export interface VercelApiSecret {
+  accessToken: string;
+  teamId?: string;
+  projectId: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -85,4 +93,8 @@ export async function getInternalApiSecret(): Promise<InternalApiSecret> {
 
 export async function getClaimTokenSecret(): Promise<ClaimTokenSecret> {
   return (await getSecretJson(SECRET_CLAIM_TOKEN())) as unknown as ClaimTokenSecret;
+}
+
+export async function getVercelApiSecret(): Promise<VercelApiSecret> {
+  return (await getSecretJson(SECRET_VERCEL_API())) as unknown as VercelApiSecret;
 }

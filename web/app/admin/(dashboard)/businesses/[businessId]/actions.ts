@@ -23,6 +23,7 @@ import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness, relea
 import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@/lib/db/claims';
 import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
+import { reconcileDomainConnection } from '@/lib/domains/reconcile';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { getSession } from '@/lib/auth/session';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
@@ -1656,5 +1657,19 @@ export async function resetWebsiteSectionsAction(businessId: string): Promise<vo
   if (!business) throw new Error('Business not found');
 
   await updateBusiness(businessId, { websiteSections: createDefaultWebsiteSectionsConfig() });
+  redirect(`/admin/businesses/${businessId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Domain visibility (Stage 19.x, Part 2) — read-only status + a manual
+// refresh. Domain assignment/removal itself is a customer/onboarding-side
+// operation; admin does not casually change ownership here.
+// ---------------------------------------------------------------------------
+
+export async function refreshDomainStatusAction(businessId: string, normalizedDomain: string): Promise<void> {
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
+
+  await reconcileDomainConnection(normalizedDomain);
   redirect(`/admin/businesses/${businessId}`);
 }
