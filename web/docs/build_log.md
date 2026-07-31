@@ -6801,3 +6801,112 @@ web/docs/build_log.md                                                  MODIFIED 
 `webpresa-dev-vercel-api` populated with a real Vercel personal access token (scoped to the `andrew-mudges-projects` team) plus `teamId`/`projectId` sourced from `web/.vercel/project.json`, via `aws secretsmanager put-secret-value`. **Token expires 2026-10-29** — see `deployment.md`'s `VERCEL_API_SECRET_NAME` row for the rotation command.
 
 Not yet done: a real end-to-end customer walkthrough (claim → Cognito sign-up → Stripe test-mode Checkout → onboarding → domain connection against the real Vercel API).
+
+---
+
+# Stage 19.x — Onboarding UI polish + critical domain-routing fix (2026-07-31)
+
+Prompted by a real click-through of the deployed onboarding flow, which surfaced several UX gaps and one critical bug. All addressed in the same pass; deployed to dev.
+
+## UI polish
+
+- **Progress bar** (`OnboardingProgress.tsx`): own card shell, bigger text (`text-xs`→`text-sm sm:text-base`, badge `h-5 w-5`→`h-7 w-7`), and completed steps are now clickable `Link`s back to that step — safe with no new authorization, since every step page already independently re-validates `canAccessOnboardingStep` server-side on load, so this can only ever offer a legitimate shortcut backward.
+- **Cards**: every step page's body content now renders inside `FormBits`' `Card` (Welcome, Tour) or already did (Review); Domain's cards were restyled per below.
+- **Inline services editor** (Review step): replaced the read-only list + external link to the full Website editor with a real inline repeatable-row form, reusing `updateCustomerSectionContent(businessId, 'services', formData)` directly — the exact same write path the real Website editor's `ServicesTab.tsx` uses. New `updateReviewServicesAction` (saves without advancing the onboarding step — separate from the page's "Continue" action).
+- **Domain step redesign**: extracted the no-connection choice UI into a new client component, `DomainChoiceCards.tsx`. "Use my Webpresa address for now" is now the default, shown first, with bold/solid selected styling (`border-2 border-(--color-brand) bg-(--color-brand-muted) shadow-md`); "Use a domain I already own" starts collapsed to just a title + one-line subtitle and expands inline (domain input + registrar select) when clicked, deselecting the other card. Both cards use a `<button>` for the selection trigger with the expandable form as a sibling, not nested inside the button (buttons can't contain form elements).
+- **Publish-step preview width**: was constrained to `max-w-2xl`, far narrower than the same `WebsitePreviewCard` on the dashboard. Restructured the page so the preview breaks out to the dashboard's own `w-[95%] mx-auto` wrapper while the heading/buttons stay in the narrower reading column — no changes to `WebsitePreviewCard.tsx` itself.
+
+## Real-time domain verification
+
+Previously: "Check again" required two separate manual clicks minutes apart (`awaiting_dns`→`connected`, then `connected`→`active`), with no progress feedback in between. Now:
+
+- New Route Handler `POST /api/domains/status` (`web/app/api/domains/status/route.ts`) — the endpoint reserved for this in the original Part 2 spec. Independently: origin check (Route Handlers don't inherit Server Actions' same-origin protection), `getCustomerSession()` (non-throwing — a redirecting `requireCustomerSession()` would be wrong for a `fetch()`-consumed JSON endpoint), ownership check, and re-verifies the posted `businessId`/`normalizedDomain` pairing against `listDomainConnectionsForBusiness` before calling `reconcileDomainConnection`.
+- New client component `DomainStatusPanel.tsx` replaces the server-rendered connection-status block. "Check again" renamed to **"Record Updated"** (shown only in `awaiting_dns`, the one deliberate manual signal that DNS was actually changed) — clicking it does one immediate check, then starts a 7s `setInterval` poll automatically. No further manual clicks required; polling stops on `active`/`failed`/`expired`. The "Continue"/"Continue — I'll finish this later" action moved into this same component (calling `completeExistingDomainAction` directly as a function, not via `<form>`, so its label/behavior tracks live client-side status rather than the page's stale server-rendered initial state) with a `useTransition` for pending state.
+- `checkDomainStatusAction` (the old Server-Action-based "check again") removed — fully superseded by the Route Handler + polling.
+
+## Critical fix — domain-to-branch targeting
+
+A real domain (`fitreppro.com`) connected through the live onboarding flow, with DNS records correctly updated, still served the plain marketing homepage instead of the business's site. Root-caused by diffing `dev` against `main`: Vercel's plain "add domain to project" call (`POST /v10/projects/{id}/domains` with just `{ name }`) attaches a domain to serve **Production** by default, and `git show main:web/proxy.ts` confirmed Production predates Stage 17 entirely (only an `/admin` branch exists there — no `/account`, `/app`, or host routing at all). Every commit implementing Stage 17 through Stage 19.x has so far only ever been pushed to `dev`, so a real customer domain was structurally guaranteed to hit an unrelated old build no matter what was fixed in `lib/domains/routing.ts` — the routing code that's supposed to run was never being reached.
+
+**User decision**: target real domains at the `dev` branch specifically (not merge to `main` — a much bigger, separate decision). Verified live before implementing: `gitBranch` is a real, settable field on Vercel's Project Domains API — `GET /v9/projects/{id}/domains` showed it present (`null`) on existing domains, and `PATCH /v9/projects/{id}/domains/{domain}` with `{"gitBranch":"dev"}` against the real `fitreppro.com` domain both succeeded and changed its behavior (it started redirecting to Vercel's SSO protection page, same as the `dev` branch alias, confirming it now resolves against the `dev` deployment).
+
+- `addProjectDomain()` (`lib/vercel/domains.ts`) accepts an optional `{ gitBranch }` and includes it in the POST body.
+- `startDomainConnection` (`lib/domains/connect.ts`) reads `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` from the environment (unset in Production; `"dev"` in Preview) and passes it through — environment-driven, not hardcoded, so no application-code change is needed once this pipeline is genuinely promoted to Production.
+- `fitreppro.com`'s existing (mis-targeted) attachment corrected directly via the same PATCH call.
+- `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH=dev` added to Vercel's Preview environment only.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint          — passes (2 expected `_formData` unused-arg warnings, same pattern as before)
+npm test              — 88 files, 937 tests passed (no new automated tests this pass — all changes
+                         are UI/client-component/live-API-integration work; verified manually
+                         against the real deployed dev environment and the real Vercel API instead)
+npm run build          — succeeds; new route registered: /api/domains/status
+```
+
+Manual: `fitreppro.com` re-verified live after the fix — now redirects to Vercel's Deployment Protection (i.e. resolves against `dev`) instead of serving the plain marketing homepage.
+
+## Files changed
+
+```
+web/app/api/domains/status/route.ts                                    NEW
+web/app/app/onboarding/[businessId]/domain/DomainChoiceCards.tsx       NEW
+web/app/app/onboarding/[businessId]/domain/DomainStatusPanel.tsx       NEW
+web/app/app/onboarding/[businessId]/domain/page.tsx                    MODIFIED — uses both new components
+web/app/app/onboarding/[businessId]/OnboardingProgress.tsx             MODIFIED — card, bigger text, backward nav
+web/app/app/onboarding/[businessId]/page.tsx                           MODIFIED — Card wrap, businessId prop
+web/app/app/onboarding/[businessId]/review/page.tsx                    MODIFIED — inline services editor
+web/app/app/onboarding/[businessId]/publish/page.tsx                   MODIFIED — full-width preview breakout
+web/app/app/onboarding/[businessId]/tour/page.tsx                      MODIFIED — Card wrap, businessId prop
+web/app/app/onboarding/[businessId]/actions.ts                         MODIFIED — updateReviewServicesAction
+                                                                          added; checkDomainStatusAction removed
+web/lib/vercel/domains.ts                                              MODIFIED — addProjectDomain(hostname, opts)
+web/lib/domains/connect.ts                                             MODIFIED — reads
+                                                                          WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH
+
+web/docs/architecture.md                                               MODIFIED — new Status entries, Stage
+                                                                          19.x section additions
+web/docs/implementation.md                                             MODIFIED — Stage 19.x status, Part 2
+                                                                          domain-to-branch-targeting subsection,
+                                                                          verification-flow update
+web/docs/deployment.md                                                 MODIFIED — new env var, new Stage 19.x
+                                                                          deployment-guidance section
+web/docs/build_log.md                                                  MODIFIED — this entry
+```
+
+---
+
+# Fix claim banner never clearing after a real Stripe payment (2026-07-31)
+
+## The bug
+
+`lib/claim/banner-state.ts`'s `getClaimBannerState(business)` only ever checked `business.ownerUserId` — it could return `'unclaimed'` or `'claimed_pending'`, but never `'active'`, regardless of `subscriptionStatus`. Stage 17's own spec documented this exactly: the `'active'` branch was "defined now but unreachable until Stage 18 supplies real subscription data into the same function." Stage 18 added `subscriptionStatus` to `Business` but never actually finished that wiring — so the public preview's "claimed, activation pending" banner (and the footer's "Website by Webpresa" credit, which reads the identical signal) never cleared even after a real, successfully completed Stripe payment. Found via direct user report against the live dev site.
+
+## The fix
+
+`getClaimBannerState` now takes `Pick<Business, 'ownerUserId' | 'subscriptionStatus'>` and returns `'active'` only when `subscriptionStatus === 'active'` specifically — a `past_due` (`billing_recovery`) or `canceled` business correctly stays `'claimed_pending'` rather than looking fully active. No call-site changes needed: `app/b/[slug]/page.tsx` already fetches the full canonical `Business` record (which already carries `subscriptionStatus`) before calling this function.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint          — passes
+npm test              — 88 files, 940 tests passed (3 new: past_due stays claimed_pending, canceled
+                         stays claimed_pending, active genuinely returns 'active' — existing 2 tests
+                         updated to pass subscriptionStatus explicitly and drop the now-inaccurate
+                         "unreachable until Stage 18" comment)
+npm run build          — succeeds
+```
+
+## Files changed
+
+```
+web/lib/claim/banner-state.ts        MODIFIED — checks subscriptionStatus, not just ownerUserId
+domain/__tests__/stage17.test.ts     MODIFIED — 3 new test cases, 2 existing updated
+
+web/docs/architecture.md             MODIFIED — corrected the stale "unreachable until Stage 18" note
+web/docs/implementation.md           MODIFIED — correction note under Stage 17's claim-banner section
+web/docs/build_log.md                MODIFIED — this entry
+```

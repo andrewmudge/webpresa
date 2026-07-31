@@ -117,6 +117,7 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `CUSTOMER_ONBOARDING_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-onboarding-name` | Stage 19.x, Part 1 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
 | `DOMAIN_CONNECTIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-domain-connections-name` | Stage 19.x, Part 2 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
 | `VERCEL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-vercel-api` | Secrets Manager (Stage 19.x, Part 2) — deployed 2026-07-31, real `{ accessToken, teamId, projectId }` populated (`teamId`/`projectId` sourced from `web/.vercel/project.json`). **The `accessToken` is a personal access token scoped to the `andrew-mudges-projects` team and expires 2026-10-29** — rotate it before then (generate a new token at vercel.com/account/tokens, then `aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa`) or domain-connection calls in `lib/vercel/client.ts` will start failing with `VercelApiError('auth', ...)`. |
+| `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` | `dev` | Stage 19.x, Part 2 (added 2026-07-31) — added to Vercel's **Preview environment only** (left unset in Production). Passed as `gitBranch` on every `addProjectDomain()` call so a newly connected customer domain serves this app's `dev` branch instead of silently falling through to Vercel's Production default — see "Domain-to-branch targeting" below. Must be removed (or the whole mechanism revisited) once Stage 17+ is genuinely deployed to Production. |
 
 Never put these in client-side code or commit `.env` files that contain real values.
 
@@ -731,6 +732,56 @@ None beyond a normal `git push` to the branch Vercel tracks. If Stage 17/18 aren
 | A `billing_recovery` customer submits an edit form (e.g. via a replayed request, bypassing the disabled UI) | The Server Action's `requireActiveSubscription()` redirects before any write — client-side `disabled` attributes are a UX convenience only, never the real gate |
 | `ensureDraftPreview` is called for a business with zero previews | Returns `null`; every caller in `lib/customer-editing/` surfaces this as "No website exists yet to edit" rather than throwing |
 | A customer publishes a `previewId` that doesn't belong to their `businessId` (crafted form payload) | `publishCustomerDraft()` re-fetches the preview and compares `preview.businessId` before calling `publishSitePreview()` — rejects with a generic message, never publishes |
+
+---
+
+## Stage 19.x, Parts 1–2 — Customer Onboarding and Domain Connection deployment guidance
+
+**Deployed to dev 2026-07-31 (including a real Vercel API token and a live domain-routing fix).** Two new DynamoDB tables (`webpresa-dev-customer-onboarding`, `webpresa-dev-domain-connections`) and one new secret (`webpresa-dev-vercel-api`) via `WebpresaDevDataStack` — all purely additive (`cdk diff` confirmed no deletions/replacements before deploying, per the standing gate in `AGENTS.md`). `WebpresaDevVercelAccessStack` redeployed alongside it (`DataAccessPolicy` gained both tables + the new secret ARN). Four new Vercel environment variables added: `CUSTOMER_ONBOARDING_TABLE_NAME`, `DOMAIN_CONNECTIONS_TABLE_NAME`, `VERCEL_API_SECRET_NAME`, `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` (Preview only — see below).
+
+### Deploy sequence
+
+```
+1. cdk diff WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa   (review, purely additive)
+2. cdk deploy WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa
+3. npx vercel env add CUSTOMER_ONBOARDING_TABLE_NAME / DOMAIN_CONNECTIONS_TABLE_NAME /
+   VERCEL_API_SECRET_NAME  production,preview  (values are the CFN output table/secret names)
+4. npx vercel env add WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH  preview   (value: dev — Production left unset)
+5. aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api \
+     --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa
+   (teamId/projectId sourced from web/.vercel/project.json; accessToken is a personal access
+   token scoped to the andrew-mudges-projects team — expires 2026-10-29, see the env var table
+   above for the rotation command)
+6. git push origin dev   (rebuilds the app with the new env vars already in place — order matters:
+   env vars must be added *before* the triggering push, since a running deployment doesn't pick up
+   newly-added Vercel env vars without a fresh build)
+```
+
+### Domain-to-branch targeting — the incident and the fix
+
+A real domain (`fitreppro.com`) was connected through the live onboarding flow, its DNS records updated correctly, and it still served the plain marketing homepage instead of the business's site. Root cause: Vercel's plain "add domain to project" call (`POST /v10/projects/{id}/domains` with just `{ name }`) attaches a domain to serve **Production** by default — and `main` (Production) predates Stage 17 entirely (confirmed via `git show main:web/proxy.ts` — only an `/admin` branch exists there, no `/account`, `/app`, or host routing). Every commit implementing Stage 17 through Stage 19.x has so far only ever been pushed to `dev`.
+
+Fix, verified live against the real Vercel API before shipping:
+
+```
+# Confirmed gitBranch is a real, settable field:
+curl -X PATCH "https://api.vercel.com/v9/projects/{projectId}/domains/fitreppro.com?teamId={teamId}" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"gitBranch":"dev"}'
+# → response echoed back "gitBranch": "dev" — fitreppro.com then started redirecting to
+#   Vercel's SSO protection page (same as the dev branch alias), confirming it now resolves
+#   against the dev deployment instead of Production.
+```
+
+`addProjectDomain()` (`web/lib/vercel/domains.ts`) now passes `gitBranch` through on every call, sourced from `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` (`web/lib/domains/connect.ts`). **This environment variable must be removed (Production left unset is already correct; nothing to do there) once this pipeline is genuinely promoted to the `main`/Production branch** — at that point every newly connected domain should go back to Vercel's normal Production-by-default behavior.
+
+### Manual verification procedure (partially run — see below)
+
+1. ✅ CDK deploy completed, both stacks `UPDATE_COMPLETE`/purely additive (no manual review flags).
+2. ✅ Vercel env vars added and a fresh `dev` build succeeded (`vercel inspect` → `Ready`).
+3. ✅ `webpresa-dev-vercel-api` populated with a real token; confirmed live via the `gitBranch` PATCH call above.
+4. ✅ A real domain (`fitreppro.com`) was connected end-to-end through the onboarding UI, its DNS updated at the registrar, and verification progressed through to `active` — the domain-to-branch fix above was required to get this far.
+5. ⬜ Not yet done: a full fresh walkthrough (claim → Cognito sign-up → Stripe test-mode Checkout → onboarding → domain connection) run start-to-finish in one session against the current build, to confirm the UI-polish changes (real-time verification, inline services editor, backward navigation) all work together.
 
 ---
 
