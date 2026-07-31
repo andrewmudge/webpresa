@@ -2504,7 +2504,7 @@ No changes to `Claim` or `BusinessStatus`. `stripeSubscriptionId` (Stage 5/17 pl
 
 ## Status
 
-Not started. Customer identity and claim ownership are implemented in Stage 17. Subscription state, Checkout, Stripe webhook reconciliation, billing recovery, and the `requireBusinessAccess()`/`requireActiveSubscription()` authorization primitives are implemented in Stage 18 — deployed to dev, not yet manually verified end-to-end. This stage begins only once Stage 18 is verified; it does not perform activation, does not touch `Business.status`, and does not duplicate any Stage 17/18 work.
+Implemented (2026-07-29) — application code complete, automatically tested, not yet manually verified end-to-end against a real dev customer session (no real Cognito/claimed/subscribed test business exercised yet). See `architecture.md`, "Customer Website Dashboard (Stage 19)", and `build_log.md`, "Stage 19 — Customer Website Dashboard and Self-Service Editing", for the full implementation record. Customer identity and claim ownership are implemented in Stage 17; subscription state, Checkout, Stripe webhook reconciliation, billing recovery, and the `requireBusinessAccess()`/`requireActiveSubscription()` authorization primitives are implemented in Stage 18. This stage did not perform activation, did not touch `Business.status`, and did not duplicate any Stage 17/18 work.
 
 ## Objective
 
@@ -2701,6 +2701,554 @@ These are prerequisites for `/app` to exist, be reachable, and actually preview 
 ## Deferred work
 
 Lead inbox/notification history (Stage 20), domain connection/purchase (dedicated stage), analytics/traffic reporting, Google Business Profile management, team members/shared editing, ownership transfer, `requirePlanCapability()` (no gated capability exists yet), AI-assisted whole-site rewriting/regeneration from the customer dashboard, drag-and-drop layout building, custom section variants, custom HTML/CSS, customer-visible scan history or AI scores, admin impersonation, SES/welcome-email infrastructure (a static in-dashboard notice suffices for now), `/app/account` (Cognito email/password/sign-out settings beyond the sidebar's sign-out action).
+
+---
+
+# Stage 19.x — Customer Onboarding and Domain Connection
+
+## Status
+
+Not started.
+
+## Objective
+
+Guide a newly subscribed customer from successful Stripe payment to a live, published Webpresa website with a working custom domain — without requiring the customer to understand DNS, registrars, Vercel, or SSL — then hand them into Stage 19's dashboard already oriented. This stage does not recreate account creation, claim consumption, Checkout, subscription reconciliation, website editing, or publishing infrastructure. It is a one-time orchestration layer over Stage 19's existing capabilities, plus the domain-connection and domain-purchase capabilities Stage 19 never needed.
+
+This stage is delivered as four sequential parts, each independently shippable and independently verifiable against this document's standard completion checklist:
+
+```text
+Part 1 — Onboarding framework
+        ↓
+Part 2 — Existing-domain connection
+        ↓
+Part 3 — Domain purchasing via OpenSRS
+        ↓
+Part 4 — Final onboarding integration and dashboard orientation
+```
+
+Part 1 ships a complete, useful onboarding wizard on its own (welcome → business review → domain [Webpresa-address-only for now] → publish → a minimal tour placeholder). Each later part upgrades the same Domain route in place: Part 2 adds "connect a domain I already own," Part 3 adds "buy a new domain," Part 4 replaces the placeholder tour with the full illustrated orientation and performs the stage's final cross-flow integration pass. A customer who onboards after only Part 1 is shipped sees a complete, coherent flow — not a flow with a visibly missing feature.
+
+## Dependencies
+
+- Stage 8 — public generated website route and rendering
+- Stage 11.x — configurable website sections and reusable editing primitives
+- Stage 17 — Cognito customer authentication, ownership, and claim flow
+- Stage 18 — Stripe subscription entitlement, `CustomerBillingProfile`, and the reserved `billingPurpose` metadata boundary (`domain/constants/plans.ts` already reserves `'domain_purchase'`/`'domain_renewal'` for this stage)
+- Stage 19 — customer dashboard, customer-scoped editing, draft preview, and publishing (implemented — see Stage 19's Status above)
+- Existing Vercel deployment (project-domain attachment, automatic certificate issuance)
+- **Part 3 only**: an OpenSRS reseller account (business-side signup, prepaid balance, API credentials, IP allowlisting) — a prerequisite performed outside this codebase, the same way Stage 18's Stripe Products/Prices are created via Dashboard/CLI, not CDK. Exact OpenSRS API method names, request/response shapes, and sandbox vs. live endpoint hostnames must be verified against OpenSRS's current reseller API documentation before implementing Part 3 — none are hardcoded in this spec.
+
+## Non-goals (all four parts)
+
+- Anything Stage 17/18/19 already does: authentication, claim consumption, Checkout, webhook reconciliation for the recurring subscription, `Business.status` transitions, the customer dashboard shell/editing/publishing itself.
+- A support/change-request queue, domain analytics, leads inbox (Stage 20), team members/shared editing, ownership transfer, AI-assisted whole-site rewriting, drag-and-drop building, custom HTML/CSS, `requirePlanCapability()`, account deletion, admin impersonation.
+- Registrar transfer (moving a domain's registrar of record away from its current provider) — the existing-domain flow (Part 2) only ever points DNS at Vercel; the domain stays registered wherever the customer already has it.
+- A full domain-lifecycle management center (renewal-reminder emails, self-service transfer-out tooling) — the data model must not prevent building these later, but no UI ships for them in this stage.
+- A scheduled, always-on domain-status reconciliation job — Parts 2 and 3 reconcile on page load and on an explicit "check again" action only; a scheduled EventBridge job belongs to **Stage 23 — EventBridge Controlled Automation**, once that stage exists, not built ad hoc here.
+- Wildcard `{slug}.webpresa.com` subdomains — deferred until a later infrastructure decision explicitly implements them; the temporary public address stays `webpresa.com/b/{slug}`.
+- A pluggable multi-registrar provider interface — see Part 3's "Major deliverables."
+
+## Architectural position
+
+Stage 19 remains the reusable application; this stage is a one-time orchestration layer over it. The business-review step links into/reuses Stage 19's settings and content-editing primitives; the publish step calls Stage 19's existing `publishDraftActionCustomer`/`ensureDraftPreview` path unchanged; the tour explains Stage 19's navigation; domain status stays visible in Stage 19's dashboard after onboarding completes. No onboarding-only reimplementation of business editing, photo upload, theme selection, publication, or billing is created at any point in this stage.
+
+## Production launch gate
+
+Parts 1 and 2 may each be deployed to development and verified independently — Part 1 alone is a coherent, complete onboarding experience for internal/dev testing. **Production launch of the Webpresa MVP is explicitly gated on Parts 1–3 all being implemented and verified, plus Part 4's final integration pass** — domain purchasing is a required MVP capability, not a nice-to-have layered on afterward. "Part 1 ships a complete flow" describes development-verifiable scope, not launch-readiness.
+
+## Post-Checkout routing (added in Part 1, unchanged by later parts)
+
+Once Stage 18's webhook confirms `subscriptionStatus === 'active'` and `requireBusinessAccess()` resolves to `full`:
+
+```text
+Onboarding record missing or status !== 'completed'  →  /app/onboarding/{businessId}
+Onboarding record status === 'completed'              →  /app/businesses/{businessId}
+```
+
+The redirect decision reads the persisted `CustomerOnboarding` record — never a browser-controlled query parameter, and never the Stripe success-redirect alone. A `billing_recovery` customer may resume viewing a completed onboarding record read-only, but cannot start onboarding, connect/purchase a domain, edit, or publish until `full` access returns. A `none`-mode customer uses the existing `/account/claim-status` reactivation path; no onboarding route renders for them.
+
+## Authorization model (all parts)
+
+Every onboarding page and every onboarding Server Action independently:
+
+1. Calls `requireCustomerSession()`.
+2. Calls `requireBusinessOwnership(userId, businessId)` — `notFound()`, never a 403 that confirms the business exists.
+3. Calls `requireBusinessAccess(userId, businessId)` and requires `mode === 'full'` for every mutation (starting/advancing a step, connecting/purchasing a domain, publishing). `billing_recovery` may view an already-completed onboarding record read-only. `none` never reaches an onboarding route.
+4. Revalidates every `domainConnectionId`, and (Part 3) purchase-attempt ID against the authorized business — never trusts a browser-supplied pairing.
+5. Never trusts the Checkout success redirect, client-reported DNS status, or client-reported domain availability/pricing as proof of anything.
+
+---
+
+## Part 1 — Onboarding framework
+
+### Objective
+
+Ship a complete, working onboarding wizard: welcome, essential business review, a domain step that (for now) only offers "use my Webpresa address for now," preview-and-publish, and a minimal tour placeholder — wired into real persisted progress, real resume behavior, and real Stage 19 dashboard hooks.
+
+### Major deliverables
+
+- `CustomerOnboarding` domain model, Zod schema, factory, and repository (`web/lib/db/customer-onboarding.ts`)
+- New DynamoDB table `webpresa-{env}-customer-onboarding` — partition key `businessId` (one onboarding record per business; no GSI needed for the core route, since `/app` already resolves businesses by owner)
+- The full onboarding route group ships in this part: `/app/onboarding/[businessId]`, `/app/onboarding/[businessId]/domain`, `/app/onboarding/[businessId]/review`, `/app/onboarding/[businessId]/publish`, `/app/onboarding/[businessId]/tour`. Later parts upgrade what a route offers rather than introducing new routes mid-stage — the Domain route in this part offers only "Use my Webpresa address for now"; Part 2 adds "Use a domain I already own" to the same route; Part 3 adds "Buy a new domain" to the same route again.
+- Step-completion rules and resume logic (see below)
+- Stage 18 post-Checkout redirect updated to read the onboarding record (see "Post-Checkout routing" above)
+- Stage 19 dashboard hook: a "Finish setting up your website" notice + "Continue onboarding" link when onboarding is incomplete
+- Essential business-review step, reusing Stage 19's customer-scoped editing functions (`lib/customer-editing/*`) directly — never a second content model
+- Preview-and-publish step, reusing Stage 19's `publishDraftActionCustomer`/`ensureDraftPreview` unchanged
+- A minimal placeholder tour screen ("Go to my dashboard" / "Skip tour" — no illustrated cards yet; Part 4 replaces this)
+
+### `CustomerOnboarding` model
+
+```ts
+interface CustomerOnboarding extends MutableTimestampedRecord {
+  businessId: string; // partition key — one onboarding record per business
+  userId: string;
+
+  status: 'not_started' | 'in_progress' | 'completed';
+
+  currentStep: 'welcome' | 'review' | 'domain' | 'publish' | 'tour' | 'complete';
+
+  completedSteps: Array<'welcome' | 'review' | 'domain' | 'publish' | 'tour'>;
+
+  // Part 1 only ever writes 'defer'. Part 2 adds 'existing'; Part 3 adds
+  // 'purchase' — additive, same pattern Stage 17/18 used for Business fields.
+  domainDecision?: 'defer' | 'existing' | 'purchase';
+  domainConnectionId?: string; // set starting Part 2 — resolved via DomainConnection's
+                                // business-id-index, not a dedicated onboarding-side index
+
+  domainDeferredAt?: string;
+  tourCompletedAt?: string;
+  tourSkippedAt?: string;
+  completedAt?: string;
+}
+```
+
+No standalone `onboardingId`: the table's partition key is already `businessId`, and the relationship is strictly one-to-one, so a second generated identifier is redundant. This matches `CustomerBillingProfile` (Stage 18), which is likewise keyed directly on its natural one-to-one key (`userId`) with no extra ID field.
+
+**Ordering rationale**: Review runs before Domain because the business's corrected name, city, state, and primary service (captured during Review) feed Part 3's domain-name suggestions — suggesting domain names before the business's own facts are confirmed would mean suggesting names from stale or AI-guessed data.
+
+### Step-completion rules (not browser-trusted)
+
+A Server Action marks a step complete only after verifying its actual requirement — never from a client-supplied "done" flag:
+
+- `welcome` — completes once an authorized customer continues past it.
+- `review` — completes once required fields validate: business name; at least one of phone or email; at least one service. A public street address is **optional** — when entered it must pass full canonical address validation, but its absence never blocks completion (many home-service businesses intentionally don't publish a street address while still showing city/state/service areas). This is a data-completeness rule, independent of which theme happens to be selected — theme never gates field validity.
+- `domain` — in Part 1, completes only via explicit defer (`domainDecision = 'defer'`, `domainDeferredAt` set). Parts 2/3 add their own completion conditions on this same step without changing this one.
+- `publish` — the customer may **exit onboarding temporarily** with only a draft (entering the dashboard early, where a "Finish setting up your website — your site still needs to be published" notice shows). But the `publish` step, and therefore `CustomerOnboarding.status`, cannot reach `'completed'` until a `published` preview actually exists — a draft-only site keeps the record `'in_progress'` no matter how far into the tour the customer has gone. A narrow admin-only exception exists for the case where publishing is genuinely unavailable due to a platform failure (not a customer choice); that is an admin-operated recovery state, not a normal customer skip.
+- `tour` — completes (`tourCompletedAt`) or is explicitly skipped (`tourSkippedAt`); both are terminal for this step, recorded as distinct outcomes so "finished the tour" and "intentionally bypassed it" stay distinguishable (analytics, and Part 4's replay entry point).
+
+`CustomerOnboarding.status` becomes `'completed'` only through a single server-side completion function, once welcome + review + domain + publish (with a real published preview) + tour are all satisfied — keeping `'completed'` an honest signal that this stage's stated objective ("a live, published website") was actually met.
+
+### Resume behavior
+
+On every `/app/onboarding/{businessId}/*` request: authenticate → verify ownership → resolve access mode → load (or, on first visit, conditionally create) the onboarding record → determine the earliest incomplete required step (welcome → review → domain → publish → tour) → allow the requested step only if it doesn't skip ahead of that step. A customer closing the browser mid-review returns exactly to Review with whatever was already saved (review edits patch the draft directly via Stage 19's existing lib functions, so there's nothing onboarding-specific to persist there). A customer who finishes onboarding and revisits `/app/onboarding/{businessId}` sees a completion summary, not the wizard again.
+
+### Security requirements
+
+- Same as the stage-level authorization model above, scoped to `previewId` re-verification.
+- Publish attempts and step-completion transitions are logged with `userId`, `businessId`, and outcome only — never full form payloads — matching the Stage 16/18 safe-logging convention.
+
+### Testing requirements
+
+- Onboarding next-step resolution, including the review-before-domain ordering (unit).
+- Onboarding completion rules — in particular, that a draft-only site never yields `status: 'completed'`, and that address validation never depends on the active theme (unit).
+- Conditional onboarding-record creation, resume-from-any-step (repository + integration).
+- Authorization: unauthenticated → redirect; non-owner → `notFound()`; `billing_recovery` cannot start/advance a step; `none` never reaches an onboarding route.
+
+### Acceptance criteria
+
+- A customer redirected from Checkout success lands on `/app/onboarding/{businessId}` and can complete welcome → review → domain (defer) → publish → tour end to end.
+- A customer who leaves after only publishing a draft can still enter the dashboard early, but their onboarding record stays `in_progress` with a visible "still needs to be published" notice — never silently marked complete.
+- Progress persists across sessions; closing the browser mid-flow and returning resumes at the correct step.
+- Completing onboarding (with a real published preview) redirects to `/app/businesses/{businessId}` and the Stage 19 dashboard shows a one-time "Your Webpresa website is set up" message, not driven solely by a query parameter.
+- The dashboard shows "Finish setting up your website" whenever onboarding is incomplete, and the link resumes correctly.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, and `npm run build` pass in `web/`.
+
+---
+
+## Part 2 — Existing-domain connection
+
+### Objective
+
+Let a customer whose business already has a domain (at GoDaddy, Wix, Squarespace, Namecheap, Cloudflare, Hostinger, Network Solutions, or elsewhere) point it at their Webpresa website — DNS connection only, never a registrar transfer — with plain-language instructions and safe verification.
+
+### Major deliverables
+
+- `DomainConnection` canonical model, Zod schema, factory, and repository (`web/lib/db/domain-connections.ts`) — a standalone record, not fields bolted onto `Business`, since a business may eventually have an apex domain, a `www` alias, redirects, and domain history
+- New DynamoDB table `webpresa-{env}-domain-connections` — **partition key `normalizedDomain`** (see "Why `normalizedDomain` is the partition key" below); GSI `business-id-index` (PK `businessId`, SK `createdAt`). No `status-index` — low-cardinality status GSIs are exactly what `architecture.md`'s own GSI convention already warns against.
+- `domainConnectionId` remains a stable, generated, opaque field on every record (used in URLs/logs, and as the cross-reference stored on `CustomerOnboarding.domainConnectionId` and, in Part 3, `DomainPurchaseAttempt.domainConnectionId`) — but it is **not** the table key, and no dedicated GSI exists on it. A lookup by `domainConnectionId` resolves via `business-id-index` (fetch the business's connection, match the field) since a business has at most one active primary connection at a time; a third GSI purely for this isn't needed.
+- Server-only Vercel client: `web/lib/vercel/client.ts`, `domains.ts`, `errors.ts` — add a domain to the Webpresa Vercel project, inspect project-domain configuration, retrieve required DNS/verification records, check verification status, remove a failed/abandoned assignment
+- New Secrets Manager secret `webpresa-{env}-vercel-api` (`{ accessToken, teamId?, projectId? }`) via the existing `WebpresaSecret` construct; granted to `webpresa-vercel-{env}` through `vercel-access-stack.ts`'s existing `SecretsManager` statement — no new IAM identity
+- `/app/onboarding/[businessId]/domain` already exists from Part 1 — this part adds "Use a domain I already own" and its full connection flow to that same route
+- Multi-tenant custom-domain host routing (see architecture checkpoint below)
+- `reconcileDomainConnection(domainConnectionId)` — page-load and manual "check again" invocation only in this part
+- Domain status card + read-only domain summary on Stage 19's Settings page + "View website" preferring an active custom domain
+- Admin domain visibility on the business-detail page (read-only status, refresh, resend/regenerate instructions, mark disconnected, remove a failed Vercel assignment)
+
+### Why `normalizedDomain` is the partition key, not a GSI
+
+A generated `domainConnectionId` as the partition key with a `normalized-domain-index` GSI relied on to prevent double-assignment does not actually guarantee uniqueness: two concurrent requests can both query the GSI, both see no existing match, and each then `PutItem` a different item for the same domain — a check-then-act race, since a GSI query and a write under a different table key are never atomic together. Keying the table directly on `normalizedDomain` and creating the record with `ConditionExpression: attribute_not_exists(normalizedDomain)` makes the reservation atomic by construction — the same approach `CustomerBillingProfile` (Stage 18) already uses, keyed directly on its natural one-to-one key (`userId`) rather than a generated ID plus a uniqueness index. It's also simpler: one fewer GSI, no separate reservation/lock item needed.
+
+### `DomainConnection` model
+
+```ts
+interface DomainConnection extends MutableTimestampedRecord {
+  normalizedDomain: string; // partition key — the apex domain, normalized
+  domainConnectionId: string; // stable opaque reference field, not the table key
+  businessId: string;
+  ownerUserId: string;
+
+  domainName: string; // as originally entered, pre-normalization, for display
+
+  source: 'customer_owned' | 'webpresa_registered'; // no 'temporary_webpresa' — see below
+
+  registrarProvider?:
+    | 'godaddy' | 'wix' | 'squarespace' | 'namecheap' | 'cloudflare'
+    | 'hostinger' | 'network_solutions' | 'opensrs' | 'other' | 'unknown'; // 'opensrs' unused until Part 3
+
+  status:
+    | 'draft' | 'awaiting_dns' | 'verifying' | 'connected'
+    | 'certificate_pending' | 'active' | 'failed' | 'disconnected' | 'expired';
+
+  isPrimary: boolean;
+  desiredRedirect: 'apex_to_www' | 'www_to_apex' | 'none';
+
+  primaryHostname: string; // e.g. 'example.com' or 'www.example.com'
+  aliasHostnames: string[]; // apex and www are separate Vercel project-domain
+                             // objects with independent status — don't assume
+                             // they share one verification/certificate state
+  providerDomains?: Array<{
+    hostname: string;
+    vercelProjectDomainId?: string;
+    status: 'pending' | 'verified' | 'certificate_pending' | 'active' | 'failed';
+  }>;
+
+  verificationRecords?: DomainDnsInstruction[];
+
+  lastCheckedAt?: string;
+  verifiedAt?: string;
+  certificateReadyAt?: string;
+  activatedAt?: string;
+
+  failureCategory?: DomainFailureCategory;
+  failureMessage?: string;
+
+  // Part 3 adds a `registration` sub-object here, additively.
+}
+
+interface DomainDnsInstruction {
+  recordType: 'A' | 'AAAA' | 'CNAME' | 'TXT'; // no 'NS' — see below
+  name: string;
+  value: string;
+  purpose: 'routing' | 'ownership_verification' | 'redirect' | 'certificate';
+  required: boolean;
+}
+
+type DomainFailureCategory =
+  | 'invalid_domain' | 'domain_already_assigned' | 'domain_owned_by_another_customer'
+  | 'vercel_auth_failed' | 'vercel_project_not_found' | 'vercel_domain_add_failed'
+  | 'ownership_verification_required' | 'dns_not_configured' | 'dns_mismatch'
+  | 'dns_propagation_pending' | 'certificate_pending' | 'certificate_failed'
+  | 'domain_expired' | 'unknown';
+  // Part 3 adds purchase-specific values additively.
+```
+
+ID convention: `domain_<uuid>` for `domainConnectionId`. DNS values shown to the customer always come from the live Vercel project-domain response, never a hardcoded IP.
+
+No `'temporary_webpresa'` value on `source` — the deferred/Webpresa-address state is not a domain at all, so it must never produce a `DomainConnection` row. It's represented purely on `CustomerOnboarding` (`domainDecision = 'defer'`, `domainDeferredAt`); `/b/{slug}` is an application route, not a domain connection.
+
+No `'NS'` record type in the MVP instruction set: this stage never asks an existing-domain customer to delegate nameservers — that would hand Webpresa control over every DNS record on the domain, including unrelated email/verification records this plan already promises to leave untouched. If Vercel's response for a given domain ever *requires* full nameserver delegation to complete verification, Part 2 treats that as an explicitly unsupported case — fail closed with "this domain's setup isn't supported yet, please contact us," never silently ask for nameserver changes.
+
+### Existing-domain flow
+
+1. **Input**: ask for the bare domain (`coastalplumbing.com`), normalize server-side (lowercase, punycode, strip protocol/path/query/trailing dot, treat `www.` as an alias choice not a separate record), validate with a domain-specific parser (not a generic URL regex).
+2. **Registrar selection**: "Where do you manage this domain?" — display-only, tailors instructions, grants no registrar access.
+3. **Preflight**: confirm ownership + `mode === 'full'`; normalize/validate; attempt the conditional create on `normalizedDomain`; reject if it already exists for another business; allow resuming this business's own pending record; block reserved/Webpresa-owned/localhost/malformed/public-suffix-only names; add the domain (and its alias) to the Vercel project; save the returned DNS/verification instructions.
+4. **Customer instructions**: registrar-tailored steps, exact record cards populated from the live provider response (type/name/value), copy button, "I've updated these records," "I need help." Never ask the customer to touch unrelated MX/DKIM/SPF/other-subdomain records; warn before replacing a conflicting A/AAAA/CNAME.
+5. **Verification**: `status = 'verifying'`, immediate provider check. Outcomes: connected → proceed to certificate status; DNS pending → "still updating, we'll keep checking," never a trapped spinner; incorrect records → expected vs. detected value + retry; ownership-verification-required → show the exact TXT record.
+6. **Polling**: client polls every 15–30s while the page is open; provider calls stay server-side; stop on active/failed/hidden-tab/max-foreground-duration. No perpetual background polling in this part — see reconciliation, below.
+7. **Certificate status**: `connected → certificate_pending → active`. The domain is customer-facing "Live" only once HTTPS works, even though Vercel manages issuance automatically.
+
+### Multi-tenant custom-domain routing
+
+`proxy.ts` today matches exactly `/admin/:path*`, `/account/:path*`, `/app/:path*` (confirmed by reading the file) — a request to `bestplumber.com/` never reaches it. **Before writing the routing code**, produce a short design note (grounded in the actual `proxy.ts`, DynamoDB client, and Vercel deployment) covering runtime compatibility, per-request lookup count, cache behavior, matcher exclusions, and unknown-host behavior — a checkpoint, not a step to skip.
+
+Keep the routing layer thin. Do not import the full business/domain repositories into the proxy. Add a single narrow, purpose-built lookup:
+
+```ts
+function resolveActiveDomainRoute(hostname: string): {
+  businessId: string;
+  slug: string;
+  primaryHostname: string;
+  redirectToHostname?: string;
+} | null
+```
+
+so a tenant request resolves in one lookup rather than a domain-table query, then a business-table read, then a preview lookup in sequence. The routing-relevant `slug` is denormalized directly onto the `DomainConnection` record at connect/activation time for exactly this reason — the same "denormalized display copy" pattern Stage 18 already uses for `stripeCustomerId`.
+
+Explicitly exclude from tenant resolution: `/_next/*`, `/api/*`, `/admin/*`, `/account/*`, `/app/*`, `/claim/*`, plus the existing reserved-host allowlist (`webpresa.com`, `www.webpresa.com`, Vercel preview-deployment hosts, `localhost`, internal test hosts). Behavior must be host-aware and fail closed: on Webpresa hosts, existing routes work unchanged; on an active customer host, allowed public tenant routes resolve; on an unknown or inactive customer host, resolution fails closed — no host ever falls through to another customer's site.
+
+When an active custom domain exists, prefer it for metadata canonical URL, sitemap URLs, Open Graph URLs, and the dashboard's public link; otherwise use `/b/{slug}`. Support both apex and `www` per `desiredRedirect` (default `www → apex` unless Vercel's current guidance says otherwise).
+
+### `reconcileDomainConnection(domainConnectionId)`
+
+Load and validate the record → query Vercel project-domain status → update verification/DNS/certificate status and timestamps → map safe failures → avoid invalid backward transitions → return a customer-safe result. Called from: Domain page load (non-terminal status only), "Check again," and foreground polling. A scheduled background job is explicitly out of scope for this part (see Non-goals).
+
+### Status transitions (existing-domain path)
+
+```text
+draft → awaiting_dns → verifying → (dns pending → awaiting_dns | provider error → failed | verified → connected)
+connected → certificate_pending → active
+active → disconnected
+active → expired
+```
+
+No client-controlled transition is ever accepted directly — every transition is server-derived from a provider check.
+
+### Domain disconnection on subscription cancellation (customer-owned domain)
+
+Do not immediately remove the DNS/Vercel project-domain assignment when a subscription is canceled — retain service through `currentPeriodEnd` per Stage 18's entitlement rules; after entitlement ends the site may cease serving on that domain per cancellation policy; preserve the `DomainConnection` record and show clear reconnection guidance on reactivation.
+
+### Security requirements
+
+- Domain uniqueness/takeover protection: the conditional `PutItem` on `normalizedDomain` is the primary guarantee (see above); Vercel's own ownership-verification process (TXT record) remains required before a domain is ever marked `connected` — bare DNS resolution is never treated as ownership proof. When Vercel reports the domain attached elsewhere: store `ownership_verification_required`, show the exact provider-approved verification record, never expose the other project/owner.
+- **`POST /api/domains/status`** (not `GET` — a status check that also triggers a live provider call and a DynamoDB write must never look like a side-effect-free `GET`) independently verifies session, ownership, access mode, origin, that the target `domainConnectionId` belongs to the authorized business, and applies bounded rate limiting on top of the 15–30s foreground-polling cadence.
+- `previewId`/`businessId`/`domainConnectionId` triples re-verified server-side on every mutation.
+- Safe logging: operation, businessId, domainConnectionId, normalized domain (when operationally necessary), provider request ID, status transition, safe failure category — never the Vercel token or full provider response.
+
+### Testing requirements
+
+- Domain normalization, validation, reserved-host rejection (unit).
+- **Concurrent-create race**: two simultaneous connection attempts for the same normalized domain — exactly one succeeds via the conditional `PutItem`, the other gets a clean "already connected" rejection (integration).
+- Status-transition validity (unit) — no invalid backward transition accepted.
+- Host-to-business resolution via `resolveActiveDomainRoute` (unit) — reserved/unknown hosts never trigger tenant lookup or fall through to another business.
+- Authorization: non-owner cannot connect a domain to a business they don't own; `billing_recovery`/`none` cannot mutate; `GET` on the status endpoint never mutates state.
+
+### Acceptance criteria
+
+- A `full`-mode customer can connect an existing domain, see exact live DNS instructions, verify, and reach "Live" once HTTPS is ready — all without engineering support.
+- A domain-connection race (two simultaneous attempts for the same domain) never produces two records for one domain.
+- `bestplumber.com/` renders the correct business's website via internal rewrite; the browser URL bar shows the custom domain, not `/b/{slug}`.
+- A domain already active on another business is rejected with a generic, non-identifying message.
+- Unauthenticated visitors and non-owning customers are rejected exactly as before on both `webpresa.com/b/{slug}` and any connected custom domain.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` pass in `web/`; `cdk diff`/`cdk synth` pass in `infra/`.
+
+---
+
+## Part 3 — Domain purchasing via OpenSRS
+
+### Objective
+
+Let a customer without an existing domain search, price, and buy one directly during onboarding, using **OpenSRS** as the registrar/reseller backend — Webpresa purchases and manages the domain as reseller, with the customer's business as the registrant of record, and DNS is configured automatically (no manual customer step, unlike Part 2's existing-domain flow).
+
+### Part 3.0 — Prerequisites and architecture checkpoints (resolve before writing any client code)
+
+1. **OpenSRS reseller account** (business-side signup, prepaid balance, API username/key, IP-allowlisted access, sandbox/test environment) — provisioned outside this codebase, the same way Stage 18's Stripe Products/Prices are created via Dashboard/CLI, not CDK.
+2. **Fixed-egress compute decision.** OpenSRS's reseller API restricts access by source IP; ordinary Vercel Functions have no dedicated fixed outbound address by default. This must be resolved before the OpenSRS client is written — choose one:
+   - **A — Vercel Static IPs / Secure Compute**: simplest application architecture; currently a paid add-on.
+   - **B — a dedicated AWS Lambda with static egress (e.g. behind a NAT Gateway)**: most consistent with this repo's existing infra precedent — the screenshot-capture Lambda (Stage 14) and the Step Functions scan workflow (Stage 16) already establish "Vercel serves the app; a purpose-built AWS Lambda handles one constrained backend job" as this project's pattern.
+   - **C — a small dedicated fixed-egress service**: possible, but introduces a third hosting platform for a single integration; least consistent with existing infra.
+
+   This decision also answers the next checkpoint: if the purchase call already has to run through a Lambda for egress reasons, that same Lambda is the natural place to execute the purchase job asynchronously, decoupled from the Stripe webhook's request/response cycle (see "Stripe webhook changes," below).
+3. **OpenSRS DNS-hosting verification.** Confirm, against OpenSRS's current reseller documentation, before assuming: whether newly registered domains default to OpenSRS-hosted nameservers; which DNS API is enabled for the reseller account; whether DNS records can be created immediately after registration or only after an asynchronous activation delay; how default parking records are safely removed; whether apex and `www` records can be configured before Vercel issues a certificate.
+4. **Exact API surface.** Confirm current OpenSRS reseller API method names, request/response shapes, and sandbox-vs-live endpoint hosts before implementing — none are hardcoded in this spec.
+
+### Major deliverables
+
+- Server-only OpenSRS client: `web/lib/opensrs/client.ts`, `domains.ts`, `errors.ts` — same shape as this codebase's other third-party clients (Firecrawl/Google Places): plain `fetch`, a typed `OpensrsErrorCategory` enum, Zod-validated responses, bounded timeouts, idempotency identifiers where supported. **No pluggable multi-registrar interface ships in this stage** — only OpenSRS exists as a backend, and building an abstraction for a hypothetical second registrar with no concrete second implementation contradicts this project's own anti-premature-abstraction convention; extracting an interface later, if a second registrar is ever actually needed, is cheap. The canonical `DomainConnection`/`DomainPurchaseAttempt` models do keep provider-neutral *field names* (`registrarProvider`, `registrarOrderId`, `providerRequestId` — already generic, not OpenSRS-shaped), which costs nothing now and avoids a rename later.
+- A durable, asynchronous purchase-execution path (mechanism follows from the Part 3.0 egress decision — e.g. the same Lambda invoked via SQS or a Step Functions execution) — the Stripe webhook only validates the event and hands off; it never performs the OpenSRS call inline.
+- New Secrets Manager secret `webpresa-{env}-opensrs-api` (`{ username, apiKey, environment: 'test' | 'live' }`) via `WebpresaSecret`; granted to `webpresa-vercel-{env}` (or the Part 3.0 egress compute's own execution role, depending on the architecture decision) — no new IAM identity beyond what that decision requires.
+- `DomainPurchaseAttempt` model, Zod schema, factory, and repository — split payment/registration/configuration status (see below), since a single flat `status` can't distinguish failures that need very different recovery responses.
+- New DynamoDB table `webpresa-{env}-domain-purchase-attempts` — partition key `domainPurchaseAttemptId`; GSI `business-id-index` (PK `businessId`, SK `createdAt`).
+- The Domain step (same route since Part 1) gains its third choice: "Buy a new domain."
+- Domain search UI (deterministic name suggestions from the business's confirmed name/city/state/service — captured in Part 1's Review step, which is why Review runs before Domain).
+- Registrant-contact collection (`DomainRegistrantContact`) with explicit customer review before submission.
+- A new, separate one-time Stripe Checkout Session (`mode: 'payment'`, `billingPurpose: 'domain_purchase'`), with a Stripe idempotency key derived from the purchase-attempt ID.
+- The Stripe webhook's new `domain_purchase` branch (fast-ack + async handoff, detailed below).
+- `SUPPORTED_PURCHASE_TLDS` — an application-owned allowlist (`.com`, `.net`, `.org` to start; others added only after their eligibility/contact requirements are individually verified). No ccTLDs at launch unless their requirements are explicitly implemented.
+- A documented registrant/admin/tech/billing contact-role policy (see below).
+- `DomainConnection.source: 'webpresa_registered'`, `registrarProvider: 'opensrs'`, and a `registration` sub-object (additive to Part 2's shape).
+- Additional `DomainFailureCategory` values: `domain_unavailable`, `unsupported_tld`, `premium_domain`, `registrar_search_failed`, `purchase_payment_failed`, `purchase_provider_failed`, `registration_contact_required`.
+- Admin: view purchase-attempt status, begin refund recovery.
+
+### Additive model change to `DomainConnection`
+
+```ts
+registration?: {
+  provider: 'opensrs';
+  orderId?: string;
+  purchasedAt?: string;
+  expiresAt?: string;
+  autoRenew: boolean;
+  registrationPriceCents?: number;
+  registrationCurrency?: string;
+  renewalPriceCents?: number;
+  renewalCurrency?: string;
+};
+```
+
+### `DomainPurchaseAttempt` model
+
+A single flat `status` field can't distinguish "payment succeeded but registration definitively failed" (refund) from "payment succeeded, registration outcome unknown" (query and wait — never blindly refund or retry) from "domain registered fine, only Vercel/DNS configuration failed" (retry configuration, no refund at all). Splitting these into independent fields is what makes the compensation logic below actually correct:
+
+```ts
+interface DomainPurchaseAttempt extends MutableTimestampedRecord {
+  domainPurchaseAttemptId: string;
+  businessId: string;
+  userId: string;
+  domainName: string;
+
+  quote: {
+    quoteId: string;
+    registrationPriceCents: number;
+    renewalPriceCents?: number;
+    currency: string;
+    registrationYears: number;
+    retrievedAt: string;
+    expiresAt: string;
+  };
+
+  paymentStatus: 'not_started' | 'pending' | 'paid' | 'failed' | 'refund_required' | 'refunded';
+  registrationStatus: 'not_started' | 'pending' | 'registered' | 'failed' | 'uncertain';
+  configurationStatus: 'not_started' | 'pending' | 'completed' | 'failed';
+
+  stripeCheckoutSessionId?: string;
+  stripePaymentIntentId?: string;
+
+  registrarProvider: 'opensrs';
+  registrarOrderId?: string;
+  providerRequestId?: string;
+
+  domainConnectionId?: string;
+
+  // Lease-based claiming so a duplicate/retried Stripe webhook delivery, or a
+  // retried worker invocation, can never trigger two registrar purchases for
+  // the same attempt.
+  purchaseExecutionId?: string;
+  purchaseStartedAt?: string;
+  purchaseLeaseExpiresAt?: string;
+
+  acceptedTermsVersion: string;
+  acceptedTermsAt: string;
+
+  failureCategory?: DomainFailureCategory;
+  customerSafeMessage?: string; // never raw provider text — see Security requirements
+  providerErrorCode?: string;
+}
+```
+
+ID convention: `domainpurchase_<uuid>`. A worker transitions `registrationStatus` from `not_started`/expired-lease to `pending` only after first checking the registrar's own order status — never a blind retry after a timeout.
+
+Do not persist a registrar password, customer registrar session, raw payment credential, or full OpenSRS response anywhere. If `DomainRegistrantContact` must be persisted beyond the purchase transaction, treat it as sensitive PII: encrypt at rest, minimize fields, never log it, never return it outside authorized account/domain pages, document retention/deletion.
+
+### Domain search and purchase flow
+
+1. **Search**: suggested names derived from the business's confirmed Review-step data. Server queries OpenSRS for availability, registration price, renewal price, premium status, supported registration period, restricted to `SUPPORTED_PURCHASE_TLDS`. Display exact returned pricing — never a hardcoded assumption.
+2. **Premium domains**: not purchasable through the one-click path — shown as "additional review required."
+3. **Registrant contact**: collect only the fields the registrar/TLD requires; explicit review before submission. Default contact-role policy (confirm against OpenSRS's actual reseller policies before shipping): **registrant and admin contact = the customer's business**; **technical and billing contact = a Webpresa operational contact**. Never duplicate the same personal details into every role unless the registrar requires it. State plainly in the UI that ICANN may require the registrant to verify their contact email after registration, and what happens if they don't (a domain can be suspended for an unverified WHOIS contact).
+4. **Payment**: server rechecks availability/price immediately before creating the Checkout Session; customer explicitly accepts price/renewal terms (`acceptedTermsVersion`/`acceptedTermsAt`); one-time Stripe Checkout Session created with the purchase-attempt ID as the Stripe idempotency key.
+5. **Price/availability changes**: recheck immediately before payment and again immediately before the registrar call; reject if unavailable; require reconfirmation if price changed materially; never blindly retry an uncertain purchase result — query order status first.
+6. **Compensation**, expressed per split status:
+   - `paymentStatus = paid`, `registrationStatus = failed` (registrar definitively confirms unavailable/rejected) → `paymentStatus = refund_required`; never fabricate an active domain; notify the customer; offer another search; refund through a controlled admin/automated path. **Must be tested.**
+   - `paymentStatus = paid`, `registrationStatus = uncertain` (registrar timed out or returned an ambiguous result) → query the registrar's own order/domain status before doing anything else; never auto-refund or auto-retry while uncertain.
+   - `registrationStatus = registered`, `configurationStatus = failed` (domain registered fine, Vercel attach or DNS setup failed) → retry configuration; **no refund** — the customer already owns a valid domain.
+   - `registrationStatus = registered`, DNS configuration still `pending` → not a failure; the customer may continue onboarding while it finishes (mirrors Part 2's "don't block on DNS propagation" rule).
+7. **Post-purchase**: domain attached to the Vercel project and DNS configured automatically via the OpenSRS client — no manual DNS step for the customer, unlike Part 2. Certificate issuance proceeds exactly as Part 2's `connected → certificate_pending → active` path; `reconcileDomainConnection` is reused unchanged.
+
+### Stripe webhook changes
+
+`app/api/webhooks/stripe/route.ts` today checks `metadata.billingPurpose === 'website_subscription'` and explicitly ignores (`ignored_purpose`, logged) anything else; its reconciliation step re-fetches a Stripe *Subscription* object, meaningless for a one-time payment. This part adds a distinct, fast-acknowledging branch:
+
+```text
+Stripe webhook (domain_purchase)
+  → validate signature/event
+  → conditionally mark DomainPurchaseAttempt.paymentStatus = 'paid' (idempotent —
+    a webhook redelivery must not re-trigger anything)
+  → hand off one purchase execution (async — see Part 3.0's egress decision)
+  → return 2xx immediately
+
+Purchase worker (separate execution context)
+  → conditionally claim the attempt (lease fields, above)
+  → recheck availability/order state with OpenSRS
+  → call OpenSRS to register
+  → configure DNS, attach to Vercel
+  → persist the outcome (registrationStatus / configurationStatus)
+```
+
+The webhook request itself never stays open through OpenSRS registration, DNS setup, Vercel attachment, and certificate checks — that's why the split-status model and lease fields exist. `BILLING_PURPOSES` in `domain/constants/plans.ts` already reserves `'domain_purchase'`; no change needed there.
+
+### Registration ownership policy
+
+Recommended, to be confirmed with final legal terms (Stage 26) before this part ships: *"A customer-paid domain belongs to the customer's business. Webpresa manages it operationally through its OpenSRS reseller account while the account is active, and provides a reasonable transfer-out process after identity verification and settlement of outstanding domain charges."* The dashboard must state this plainly. Do not ship this part with ownership left ambiguous in either the UI or the terms.
+
+### Renewal — interim policy for this stage
+
+OpenSRS's own auto-renew, if enabled, draws from **Webpresa's reseller balance**, not the customer's payment method directly — enabling it without a separate customer-facing renewal charge means Webpresa silently absorbs every renewal indefinitely. Full automated recurring renewal billing through Stripe is **out of scope for this part** (a dedicated later implementation, since it needs its own price-recheck-then-charge workflow and grace-period handling). For this stage: store expiration/renewal state and next renewal price when available; explain annual renewal plainly to the customer; keep OpenSRS auto-renew under an explicit, documented interim policy decision rather than silently assuming the Stripe Customer on file funds it; do not ship automated customer-renewal-charging in this part.
+
+### Security requirements
+
+- Same domain-uniqueness/takeover protections as Part 2 (the `normalizedDomain` partition key + conditional write), applied to the purchased domain too.
+- OpenSRS credentials and raw registrant contact data are never sent to the browser, logged, or returned outside authorized pages.
+- Purchase-attempt/`domainConnectionId` pairs re-verified server-side on every mutation.
+- Safe logging: purchase-attempt ID, Stripe event/session ID, OpenSRS order ID, safe failure category, `customerSafeMessage` — never the OpenSRS API key, full registrant contact, or a raw provider response/error string (`providerErrorCode` only).
+
+### Testing requirements
+
+- Quote expiration; premium-domain blocking; `SUPPORTED_PURCHASE_TLDS` enforcement; safe-retry classification (unit).
+- Purchase-attempt persistence and conditional status transitions across all three split-status fields (repository).
+- All four compensation branches from step 6 above — paid+failed, paid+uncertain, registered+configuration-failed, registered+DNS-pending (integration — required, not optional).
+- Lease-based concurrent-worker safety: two overlapping purchase-execution attempts for the same `DomainPurchaseAttempt` never both call the registrar.
+- Webhook: `domain_purchase` events reconcile independently of `website_subscription` events; a duplicate Stripe webhook delivery is a no-op the second time.
+- Authorization: customer cannot purchase a domain for a business they don't own; `billing_recovery`/`none` cannot initiate a purchase.
+
+### Acceptance criteria
+
+- A `full`-mode customer can search (within `SUPPORTED_PURCHASE_TLDS`), price-check, pay for, and receive a fully DNS-configured, Vercel-attached domain with no manual DNS step.
+- Each of the four compensation scenarios above resolves to the correct, distinct outcome — a configuration-only failure never triggers a refund; a definitive registration failure never leaves a fake active domain.
+- A duplicate Stripe webhook delivery never results in two registrar purchase attempts.
+- The recurring website subscription's entitlement is never affected by a domain-purchase event, and vice versa.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` pass in `web/`; `cdk diff`/`cdk synth` pass in `infra/`.
+
+---
+
+## Part 4 — Final onboarding integration and dashboard orientation
+
+### Objective
+
+Beyond replacing Part 1's placeholder tour with the full illustrated orientation, this part is the stage's final integration pass: verify the complete flow end to end across every domain-decision branch now that Parts 1–3 all exist, before the stage is considered launch-ready (see "Production launch gate").
+
+### Major deliverables
+
+- `/app/onboarding/[businessId]/tour` upgraded to illustrated cards for Your website, Website, Design, Billing, Settings (one line of plain-language description each).
+- Full cross-flow verification across all three domain choices (existing/purchase/defer) and their sub-states (active, pending-DNS, pending-configuration, deferred), domain-aware publish messaging, public-URL preference, dashboard domain card, resume behavior — exercised together, not just per-part in isolation.
+- `tourCompletedAt` and `tourSkippedAt` recorded as distinct outcomes (already on the Part 1 model) — "finished the tour" and "intentionally skipped it" stay analytically distinguishable.
+- A persistent replay entry point: `/app/onboarding/[businessId]/tour?mode=replay`, server-validated, renders the same illustrated cards **without mutating onboarding state** — no new page/route tree, no onboarding reset.
+- A derived (not stored) `domainOutcome` used by the final completion check — `'active_existing' | 'active_purchased' | 'pending_existing' | 'pending_purchased' | 'deferred'`, computed from current `DomainConnection`/`DomainPurchaseAttempt` state rather than persisted redundantly, matching Stage 19's existing convention of deriving dashboard status (Live/Draft changes/No live site) rather than storing it. The customer is never blocked while DNS propagates or a certificate issues; but a purchase stuck at `paymentStatus = paid`, `registrationStatus = uncertain` shows a purchase-processing/recovery state, never a casually "complete" domain step.
+
+### Acceptance criteria
+
+- The tour renders once per business, is fully skippable, and completion/skip state is durable across sessions (not local-storage-only).
+- The replay link works from a completed dashboard without altering any onboarding record.
+- No dashboard interaction is blocked by the tour at any point.
+- All three domain-decision branches (and their sub-states) are exercised end to end in this part's own verification pass, not assumed correct because each part passed in isolation.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` pass in `web/`.
+
+---
+
+## Customer-facing language (all parts)
+
+Prefer: website address, connect your domain, buy a new domain, domain provider, checking your connection, securing your website, connected, needs attention. Avoid unless expanded in help text: apex, propagation, DNS zone, nameserver delegation, CNAME flattening, certificate challenge, tenant routing, Vercel project alias. Never say "transfer your domain" for the Part 2 flow — that flow only ever changes DNS, never registrar of record.
+
+## Deferred work
+
+- Registrar transfer (moving a domain's registrar of record to Webpresa/OpenSRS for an already-elsewhere-registered domain).
+- A scheduled EventBridge domain-reconciliation job (Stage 23, once it exists) — Parts 2/3 ship with page-load/manual reconciliation only.
+- A pluggable multi-registrar provider interface — only OpenSRS is implemented in this stage; revisit only if a second registrar backend is actually needed.
+- Automated recurring domain-renewal billing through Stripe (see Part 3's "Renewal — interim policy for this stage").
+- Automated renewal-reminder emails and self-service transfer-out tooling (the data model must not prevent them; no UI ships here).
+- Wildcard `{slug}.webpresa.com` subdomains.
+- A customer-facing full domain-lifecycle management center beyond the Settings summary + admin card.
+- `requirePlanCapability()`, analytics/traffic reporting, Google Business Profile management, team members/shared editing, ownership transfer, `/app/account` (Cognito email/password/sign-out beyond the sidebar's existing sign-out action).
 
 ---
 
@@ -3405,11 +3953,12 @@ Outcome:
 
 ## Milestone 5 — Sales conversion
 
-Stages 17–19.
+Stages 17–19, Stage 19.x.
 
 Outcome:
 
 - A business can securely claim a preview, pay, and become an active customer.
+- A newly paid customer is guided from checkout to a live, published website with a connected or purchased domain, and understands where to make future updates.
 
 At this point, Webpresa has a sellable managed-website MVP.
 
