@@ -3,6 +3,7 @@ import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
 import { updateBusinessInfoAction } from '../actions';
+import { NotificationToggle } from './NotificationToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,6 +97,14 @@ export default async function SettingsPage({ params, searchParams }: Props) {
             </>
           )}
         </dl>
+      </Card>
+
+      <Card title="Notifications">
+        <NotificationToggle
+          businessId={businessId}
+          defaultEnabled={business.draftChangesNoticeEnabled !== false}
+          disabled={isReadOnly}
+        />
       </Card>
     </div>
   );

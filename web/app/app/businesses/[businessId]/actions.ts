@@ -24,6 +24,7 @@ import {
   updateCustomerLogo,
 } from '@/lib/customer-editing/photos';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
+import { updateCustomerDraftNoticePreference } from '@/lib/customer-editing/notification-preference';
 import { persistWebsiteSections } from '@/lib/website-sections/persist';
 
 /**
@@ -237,6 +238,19 @@ export async function deletePhotoActionCustomer(businessId: string, formData: Fo
     await deleteCustomerBusinessPhoto(businessId, photoUrl);
   }
   redirect(`/app/businesses/${businessId}/website?saved=1#photos`);
+}
+
+// ---------------------------------------------------------------------------
+// Notification preference — the "draft changes" toast's durable, cross-
+// device opt-out (see `Business.draftChangesNoticeEnabled`). Deliberately
+// NOT FormData-based and never redirects: called directly as a plain
+// function from client components — the toast (mid-edit, must not disrupt
+// the page) and a small Settings toggle — both via the same call shape.
+// ---------------------------------------------------------------------------
+
+export async function updateDraftNoticePreferenceActionCustomer(businessId: string, enabled: boolean): Promise<void> {
+  await requireEditAccess(businessId);
+  await updateCustomerDraftNoticePreference(businessId, enabled);
 }
 
 // ---------------------------------------------------------------------------

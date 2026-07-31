@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { ThemeTab } from './ThemeTab';
@@ -9,6 +10,8 @@ import { PhotosTab } from './PhotosTab';
 import { SectionsTab } from './SectionsTab';
 import { ContactTab } from './ContactTab';
 import { SeoTab } from './SeoTab';
+import { DraftChangesNotice } from './DraftChangesNotice';
+import { getCachedPreviews } from './data';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +58,16 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
   if (mode === 'none') redirect(`/app/businesses/${businessId}`);
   const isReadOnly = mode === 'billing_recovery';
 
+  // Same "Live/Draft/None" computation Overview uses for its own badge —
+  // reused here for the new Live Site/Draft Preview nav row and to drive
+  // the draft-changes toast. `getCachedPreviews` is React `cache()`-deduped
+  // (see ./data.ts), so calling it again here doesn't add a second real
+  // DynamoDB query on top of whatever the sections below already trigger.
+  const previews = await getCachedPreviews(businessId);
+  const publishedPreview = previews.find((p) => p.status === 'published');
+  const latest = previews[0];
+  const hasDraft = !!latest && latest.status !== 'published' && !!publishedPreview;
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-gray-900">Website</h1>
@@ -88,7 +101,7 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
           element (as padding, with the page's own background color) rather
           than as an outer margin, so that gap stays visible even once the
           nav is pinned and content is scrolling up underneath it. */}
-      <div className="sticky top-14 md:top-0 z-20 pt-6 pb-6 bg-[#F0F4F8]">
+      <div className="sticky top-14 md:top-0 z-20 pt-6 pb-6 bg-[#F0F4F8] space-y-2">
         <nav className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-x-auto" aria-label="Jump to section">
           <div className="flex gap-1 min-w-max px-2">
             {SECTIONS.map((s) => (
@@ -102,7 +115,43 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
             ))}
           </div>
         </nav>
+
+        {/* Live Site always points at the real published site; Draft Preview
+            routes to Overview (where the preview iframe now resolves the
+            draft — see WebsitePreviewCard's hasDraft prop) only when there
+            actually is one, so this never links to a preview that's
+            identical to what's already live. */}
+        <div className="flex items-center gap-2 px-2">
+          {publishedPreview ? (
+            <a
+              href={`/b/${business.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-green-100 text-green-800 hover:bg-green-200 transition-colors"
+            >
+              Live Site
+            </a>
+          ) : (
+            <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">Live Site</span>
+          )}
+          {hasDraft ? (
+            <Link
+              href={`/app/businesses/${businessId}`}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+            >
+              Draft Preview
+            </Link>
+          ) : (
+            <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">No Preview Exists</span>
+          )}
+        </div>
       </div>
+
+      <DraftChangesNotice
+        businessId={businessId}
+        draftPreviewId={hasDraft ? latest?.previewId : undefined}
+        noticeEnabled={business.draftChangesNoticeEnabled !== false}
+      />
 
       <div className="space-y-10">
         <section id="theme" className="scroll-mt-20">

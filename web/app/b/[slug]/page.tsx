@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 
 interface Props {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ preview?: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,13 +49,42 @@ async function hasValidCaptureToken(previewId: string): Promise<boolean> {
   );
 }
 
-async function resolvePreview(slug: string) {
+async function resolvePreview(slug: string, previewMode?: string) {
   const [previews, session] = await Promise.all([
     getPreviewsBySlug(slug),
     getSession(),
   ]);
 
   const isAdmin = !!session;
+
+  // Stage 19 — `?preview=draft` lets the owning customer explicitly view
+  // their draft even once a published preview already exists (the "Draft
+  // Preview" link on the dashboard, and the Overview page's iframe when
+  // draft changes are pending). Without this, the branch below it (and the
+  // customer branch further down) can only ever fire for a business that
+  // has never published at all, since "published wins" always short-circuits
+  // first otherwise — there would be no way to ever preview a draft again
+  // after the first publish. Checked before the published-wins rule, but
+  // only actually returns the draft after re-verifying the same
+  // ownership/entitlement checks used everywhere else in this app; anyone
+  // not authorized falls straight through to the unchanged logic below.
+  if (previewMode === 'draft') {
+    const draftOrReady = previews.find((p) => p.status === 'draft' || p.status === 'ready');
+    if (draftOrReady) {
+      if (isAdmin) return { preview: draftOrReady, isAdmin: true };
+      const customerSession = await getCustomerSession();
+      if (customerSession) {
+        const business = await getBusinessById(draftOrReady.businessId);
+        if (business?.ownerUserId === customerSession.sub) {
+          const { mode } = computeBusinessAccessMode(business);
+          if (mode === 'full' || mode === 'billing_recovery') {
+            return { preview: draftOrReady, isAdmin: false };
+          }
+        }
+      }
+      // Not authorized for the draft view — fall through to normal resolution.
+    }
+  }
 
   // Published previews are visible to everyone, admin or not — check this
   // first regardless of session, so an admin session never has to fall
@@ -108,9 +138,10 @@ async function resolvePreview(slug: string) {
 // Metadata
 // ---------------------------------------------------------------------------
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const found = await resolvePreview(slug);
+  const { preview: previewMode } = await searchParams;
+  const found = await resolvePreview(slug, previewMode);
   if (!found) return {};
 
   const { preview } = found;
@@ -132,9 +163,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // Page
 // ---------------------------------------------------------------------------
 
-export default async function PreviewPage({ params }: Props) {
+export default async function PreviewPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const found = await resolvePreview(slug);
+  const { preview: previewMode } = await searchParams;
+  const found = await resolvePreview(slug, previewMode);
   if (!found) notFound();
 
   const { preview, isAdmin } = found;

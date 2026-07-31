@@ -6,6 +6,11 @@ import { Monitor, Smartphone, ExternalLink } from 'lucide-react';
 interface WebsitePreviewCardProps {
   slug: string;
   lastUpdated?: string;
+  /** When true, the preview shows the pending draft instead of the live
+   *  published site (see `/b/[slug]`'s `?preview=draft` override) — without
+   *  this, the iframe would silently keep showing stale published content
+   *  even while the dashboard says "Draft changes." */
+  hasDraft?: boolean;
 }
 
 /**
@@ -17,11 +22,11 @@ interface WebsitePreviewCardProps {
  * template, and the Request Service modal / CTA `tel:`/`mailto:` handling
  * need to keep working exactly as they do on the real public page.
  */
-export function WebsitePreviewCard({ slug, lastUpdated }: WebsitePreviewCardProps) {
+export function WebsitePreviewCard({ slug, lastUpdated, hasDraft }: WebsitePreviewCardProps) {
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const href = `/b/${slug}`;
+  const href = `/b/${slug}${hasDraft ? '?preview=draft' : ''}`;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

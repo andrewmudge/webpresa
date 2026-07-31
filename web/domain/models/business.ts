@@ -419,4 +419,17 @@ export interface Business extends MutableTimestampedRecord {
    *  versioning are Stage 26's responsibility. */
   termsVersion?: string;
   acceptedTermsAt?: string;
+
+  // -------------------------------------------------------------------------
+  // Customer dashboard preferences (Stage 19)
+  // -------------------------------------------------------------------------
+
+  /** Undefined/true = show the "you have unpublished draft changes" toast on
+   *  the customer Website editor; `false` = permanently dismissed via either
+   *  the toast's own "Don't show this again" control or the Settings page's
+   *  matching toggle. Deliberately NOT the same thing as the toast's
+   *  per-draft "already shown once" state, which is browser-local
+   *  (`localStorage`, keyed by draft `previewId`) and resets automatically on
+   *  publish — this field is the durable, cross-device opt-out. */
+  draftChangesNoticeEnabled?: boolean;
 }

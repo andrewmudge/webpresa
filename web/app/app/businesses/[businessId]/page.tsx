@@ -102,18 +102,6 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
           {new Date(business.currentPeriodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.
         </div>
       )}
-      {websiteState === 'draft' && !isReadOnly && (
-        <div className="flex items-center justify-between gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-          <span>You have unpublished draft changes.</span>
-          <form action={publishDraftActionCustomer.bind(null, businessId)}>
-            <input type="hidden" name="previewId" value={latest!.previewId} />
-            <button type="submit" className="shrink-0 rounded-md bg-(--color-brand) text-white px-3 py-1.5 text-xs font-semibold hover:bg-(--color-brand-dark) transition-colors">
-              Publish changes
-            </button>
-          </form>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{business.name}</h1>
@@ -133,7 +121,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
             rel="noopener noreferrer"
             className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
-            View website
+            View Live Site
           </a>
           {!isReadOnly && (
             <Link
@@ -145,6 +133,18 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
           )}
         </div>
       </div>
+
+      {websiteState === 'draft' && !isReadOnly && (
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+          <span>You have unpublished draft changes.</span>
+          <form action={publishDraftActionCustomer.bind(null, businessId)}>
+            <input type="hidden" name="previewId" value={latest!.previewId} />
+            <button type="submit" className="shrink-0 rounded-md bg-(--color-brand) text-white px-3 py-1.5 text-xs font-semibold hover:bg-(--color-brand-dark) transition-colors">
+              Publish changes
+            </button>
+          </form>
+        </div>
+      )}
     </div>
 
     {/* Breaks out of the max-w-4xl column above — 95% of whatever width
@@ -152,7 +152,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
         excludes the sidebar from that), so the preview reads as the real
         site rather than a small embedded thumbnail. */}
     <div className="w-[95%] mx-auto">
-      <WebsitePreviewCard slug={business.slug} lastUpdated={latest?.updatedAt} />
+      <WebsitePreviewCard slug={business.slug} lastUpdated={latest?.updatedAt} hasDraft={hasDraft} />
     </div>
 
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
