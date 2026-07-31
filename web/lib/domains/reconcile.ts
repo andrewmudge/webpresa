@@ -1,5 +1,5 @@
 import 'server-only';
-import type { DomainConnection } from '@/domain/models/domain-connection';
+import type { DomainConnection, DomainProviderDomain } from '@/domain/models/domain-connection';
 import { getDomainConnectionByNormalizedDomain, putDomainConnection } from '@/lib/db/domain-connections';
 import { getProjectDomainStatus } from '@/lib/vercel/domains';
 import { VercelApiError } from '@/lib/vercel/errors';
@@ -23,14 +23,29 @@ export async function reconcileDomainConnection(normalizedDomain: string): Promi
 
   const now = new Date().toISOString();
 
-  try {
-    const status = await getProjectDomainStatus(record.primaryHostname);
+  // Apex and `www` are separate Vercel project-domain objects with
+  // independent status (see `DomainProviderDomain`'s doc comment) — a record
+  // connected before `www` support existed only ever has the apex here, so
+  // this still checks exactly one hostname for it, unchanged.
+  const hostnames = record.providerDomains?.map((d) => d.hostname) ?? [record.primaryHostname];
 
-    if (!status.verified) {
+  try {
+    const statuses = await Promise.all(hostnames.map((hostname) => getProjectDomainStatus(hostname)));
+    const allVerified = statuses.every((s) => s.verified);
+    const anyMisconfigured = statuses.some((s) => s.misconfigured);
+    const mergedVerificationRecords = statuses.flatMap((s) => s.verificationRecords);
+    const providerDomains: DomainProviderDomain[] = hostnames.map((hostname, i) => ({
+      hostname,
+      vercelProjectDomainId: record.providerDomains?.[i]?.vercelProjectDomainId,
+      status: !statuses[i].verified ? 'pending' : statuses[i].misconfigured ? 'certificate_pending' : 'active',
+    }));
+
+    if (!allVerified) {
       const updated: DomainConnection = {
         ...record,
         status: 'awaiting_dns',
-        verificationRecords: status.verificationRecords.length > 0 ? status.verificationRecords : record.verificationRecords,
+        providerDomains,
+        verificationRecords: mergedVerificationRecords.length > 0 ? mergedVerificationRecords : record.verificationRecords,
         failureCategory: 'dns_not_configured',
         lastCheckedAt: now,
         updatedAt: now,
@@ -39,10 +54,11 @@ export async function reconcileDomainConnection(normalizedDomain: string): Promi
       return updated;
     }
 
-    if (status.misconfigured) {
+    if (anyMisconfigured) {
       const updated: DomainConnection = {
         ...record,
         status: 'verifying',
+        providerDomains,
         failureCategory: 'dns_propagation_pending',
         lastCheckedAt: now,
         updatedAt: now,
@@ -62,6 +78,7 @@ export async function reconcileDomainConnection(normalizedDomain: string): Promi
     const updated: DomainConnection = {
       ...record,
       status: nextStatus,
+      providerDomains,
       verifiedAt: record.verifiedAt ?? now,
       certificateReadyAt: nextStatus === 'active' ? (record.certificateReadyAt ?? now) : record.certificateReadyAt,
       activatedAt: nextStatus === 'active' ? (record.activatedAt ?? now) : record.activatedAt,

@@ -1,5 +1,10 @@
 import 'server-only';
-import type { DomainConnection, DomainRegistrarProvider } from '@/domain/models/domain-connection';
+import type {
+  DomainConnection,
+  DomainDnsInstruction,
+  DomainProviderDomain,
+  DomainRegistrarProvider,
+} from '@/domain/models/domain-connection';
 import { createDomainConnection } from '@/domain/factories/domain-connection.factory';
 import {
   getDomainConnectionByNormalizedDomain,
@@ -81,17 +86,43 @@ export async function startDomainConnection(params: StartDomainConnectionParams)
     const gitBranch = process.env.WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH || undefined;
     const added = await addProjectDomain(record.primaryHostname, { gitBranch });
     const routing = buildRoutingInstructions(record.primaryHostname, true);
+
+    const providerDomains: DomainProviderDomain[] = [
+      {
+        hostname: record.primaryHostname,
+        vercelProjectDomainId: added.vercelProjectDomainId,
+        status: added.verified ? 'verified' : 'pending',
+      },
+    ];
+    let aliasRecords: DomainDnsInstruction[] = [];
+
+    // Best-effort: `www` is a separate Vercel project-domain object from the
+    // apex (see `DomainProviderDomain`'s own doc comment) and was previously
+    // never registered at all, leaving `www.<domain>` resolving to Vercel's
+    // edge with no certificate for that hostname (ERR_CERT_COMMON_NAME_INVALID
+    // for real visitors). Registered here as a redirect to the apex, matching
+    // the only `desiredRedirect` value this flow ever actually produces
+    // ('www_to_apex') — a failure here must never block the apex connection
+    // that already succeeded above.
+    for (const alias of record.aliasHostnames) {
+      try {
+        const addedAlias = await addProjectDomain(alias, { gitBranch, redirect: record.primaryHostname });
+        providerDomains.push({
+          hostname: alias,
+          vercelProjectDomainId: addedAlias.vercelProjectDomainId,
+          status: addedAlias.verified ? 'verified' : 'pending',
+        });
+        aliasRecords = [...aliasRecords, ...buildRoutingInstructions(alias, false), ...addedAlias.verificationRecords];
+      } catch {
+        // Leave the alias untracked — the customer still gets a working apex site.
+      }
+    }
+
     const updated: DomainConnection = {
       ...record,
       status: 'awaiting_dns',
-      providerDomains: [
-        {
-          hostname: record.primaryHostname,
-          vercelProjectDomainId: added.vercelProjectDomainId,
-          status: added.verified ? 'verified' : 'pending',
-        },
-      ],
-      verificationRecords: [...routing, ...added.verificationRecords],
+      providerDomains,
+      verificationRecords: [...routing, ...added.verificationRecords, ...aliasRecords],
       lastCheckedAt: now,
       updatedAt: now,
     };

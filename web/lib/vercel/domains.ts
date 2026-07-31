@@ -86,15 +86,29 @@ export function buildRoutingInstructions(hostname: string, isApex: boolean): Dom
  * silently fall through to whatever old build Production is serving — see
  * `lib/domains/connect.ts` for where the environment-driven value comes
  * from.
+ *
+ * `opts.redirect`: registers this hostname as a redirect-only domain
+ * pointing at another hostname on the same project (e.g. `www.` redirecting
+ * to the apex) — Vercel's documented `redirect`/`redirectStatusCode` fields
+ * on this same endpoint. Vercel still needs DNS to resolve this hostname to
+ * it and issues it its own certificate before the redirect can serve, so
+ * this alone doesn't skip the normal DNS-instruction/verification flow.
  */
-export async function addProjectDomain(hostname: string, opts: { gitBranch?: string } = {}): Promise<AddDomainResult> {
+export async function addProjectDomain(
+  hostname: string,
+  opts: { gitBranch?: string; redirect?: string; redirectStatusCode?: number } = {},
+): Promise<AddDomainResult> {
   const projectId = await getProjectId();
 
   let response: VercelProjectDomainResponse;
   try {
     response = await vercelFetch<VercelProjectDomainResponse>(`/v10/projects/${projectId}/domains`, {
       method: 'POST',
-      body: JSON.stringify({ name: hostname, ...(opts.gitBranch ? { gitBranch: opts.gitBranch } : {}) }),
+      body: JSON.stringify({
+        name: hostname,
+        ...(opts.gitBranch ? { gitBranch: opts.gitBranch } : {}),
+        ...(opts.redirect ? { redirect: opts.redirect, redirectStatusCode: opts.redirectStatusCode ?? 308 } : {}),
+      }),
     });
   } catch (err) {
     if (err instanceof VercelApiError && err.httpStatus === 409) {

@@ -6955,3 +6955,48 @@ web/docs/build_log.md                                          MODIFIED — this
 ```
 
 Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 940 tests, all passing — no new automated tests, single-condition guard over an already-tested query), `npm run build` all pass.
+
+---
+
+# Onboarding UI polish: admin header Publish button, domain DNS instructions, publish-step button placement, and www domain support (2026-07-31)
+
+Four fixes from the same round of click-through testing.
+
+## Admin header Publish button
+
+The admin business-detail page's only Publish control lived in the bottom "Preview" card, requiring a scroll past Timestamps/Scores/Claim/Domain/History to find it. Added `HeaderPublishControl` (`PublishPreviewButton.tsx`) next to the existing "Review draft"/"Delete" buttons in the header row — reuses the same `publishPreviewAction` (now with a `compact` prop on `PublishPreviewButton` that omits the "Makes vX publicly visible..." caption for inline use) when a draft/ready preview is pending, or renders a disabled button (`title="No Pending Changes, Site is Live"`) once the newest preview is already published. The original bottom-card button is unchanged.
+
+## Domain DNS instructions (onboarding, Step 3)
+
+`DomainStatusPanel.tsx` showed "Checking your DNS records…" for the `awaiting_dns` status even before the customer had done anything — misleading, since nothing is actually being checked until they click "Record Updated" (polling only starts then). The idle `awaiting_dns` state now shows `AWAITING_DNS_IDLE_COPY` ("Update your DNS records at your domain registrar, then click 'Record Updated' below.") instead, and the DNS record block gained an explanatory sentence: log in to the registrar, match the record(s) exactly, expect a few minutes up to 48 hours.
+
+## Publish-step button placement (onboarding, Step 4)
+
+The Publish step's primary action sat below a full-width breakout preview card, well below the "Preview and publish" heading — real click-through testing found it unclear where to go to publish. Moved the `publishOnboardingAction` button up next to the heading itself (`flex items-start justify-between`); removed the now-duplicate copy from the bottom row, which now holds only the secondary "Enter my dashboard for now" skip link.
+
+## www domain support
+
+Real testing against `fitreppro.com` surfaced `ERR_CERT_COMMON_NAME_INVALID` on `www.fitreppro.com`. Unlike the same day's Vercel-login-wall observation (that one is inherent to this app's customer-facing pipeline only existing on a non-Production branch so far, and resolves itself once promoted to Production — see `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` above), this was a real gap that would hit production identically: `DomainConnection.aliasHostnames` (always `['www.<domain>']`) was persisted but never acted on — `startDomainConnection` only ever registered the apex with Vercel, so `www` had no certificate to serve.
+
+- `lib/vercel/domains.ts` — `addProjectDomain()` gained optional `redirect`/`redirectStatusCode` opts (Vercel's documented redirect-domain fields on the same `POST /v10/projects/{id}/domains` endpoint).
+- `lib/domains/connect.ts` — `startDomainConnection` now also registers every `aliasHostnames` entry as a redirect to `primaryHostname` (best-effort — a failure here never blocks the apex connection that already succeeded), and stores both apex and alias as separate `providerDomains` entries, each with its own DNS instructions (the apex's existing `A` record plus the alias's `CNAME`, via the already-existing but previously apex-only `buildRoutingInstructions`).
+- `lib/domains/reconcile.ts` — `reconcileDomainConnection` now checks every hostname in `providerDomains` (falling back to just `primaryHostname` for a record connected before this fix, like `fitreppro.com` itself), and only reports the connection verified/active once all of them are.
+
+Not yet manually verified against a live domain — `fitreppro.com` is already past `draft`, so re-testing this needs either a fresh test domain or disconnecting it first via the existing admin "Disconnect domain (testing)" action, then running a full onboarding pass on another business.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/PublishPreviewButton.tsx   MODIFIED — compact prop, HeaderPublishControl
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                  MODIFIED — header row wiring
+web/app/app/onboarding/[businessId]/domain/DomainStatusPanel.tsx            MODIFIED — idle-state copy, DNS instructions
+web/app/app/onboarding/[businessId]/publish/page.tsx                        MODIFIED — button moved next to heading
+web/lib/vercel/domains.ts                                                   MODIFIED — redirect/redirectStatusCode opts
+web/lib/domains/connect.ts                                                  MODIFIED — registers www alias
+web/lib/domains/reconcile.ts                                                MODIFIED — checks every providerDomains hostname
+web/lib/domains/__tests__/connect.test.ts                                   MODIFIED — 1 new test, 1 updated
+web/docs/architecture.md                                                    MODIFIED — Stage 19.x section updates
+web/docs/build_log.md                                                       MODIFIED — this entry
+```
+
+Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 941 tests, all passing), `npm run build` all pass.

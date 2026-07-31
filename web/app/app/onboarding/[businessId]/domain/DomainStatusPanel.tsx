@@ -7,6 +7,8 @@ import { completeExistingDomainAction } from '../actions';
 const POLL_INTERVAL_MS = 7000;
 const TERMINAL_STATUSES = new Set<DomainConnectionStatus>(['active', 'failed', 'disconnected', 'expired']);
 
+const AWAITING_DNS_IDLE_COPY = 'Update your DNS records at your domain registrar, then click "Record Updated" below.';
+
 const PROGRESS_COPY: Record<DomainConnectionStatus, string> = {
   draft: 'Getting started.',
   awaiting_dns: 'Checking your DNS records…',
@@ -104,12 +106,17 @@ export function DomainStatusPanel({
             <span className="h-2 w-2 rounded-full bg-(--color-brand) animate-pulse" aria-hidden="true" />
           )}
           <p className={`text-sm ${isLive ? 'text-green-700 font-medium' : isTerminalFailure ? 'text-red-700' : 'text-gray-600'}`}>
-            {PROGRESS_COPY[status]}
+            {showRecordUpdatedButton ? AWAITING_DNS_IDLE_COPY : PROGRESS_COPY[status]}
           </p>
         </div>
 
         {showRecords && (
           <div className="mt-4 space-y-2">
+            <p className="text-xs text-gray-500">
+              Log in to {domainName}&apos;s registrar (where you purchased or manage this domain — e.g. GoDaddy,
+              Namecheap, Google Domains) and add or edit its DNS records to match exactly what&apos;s shown below.
+              Changes usually take a few minutes but can take up to 48 hours to fully take effect.
+            </p>
             {records.map((rec, i) => (
               <div key={i} className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs font-mono text-gray-700">
                 <div>Type: {rec.recordType}</div>

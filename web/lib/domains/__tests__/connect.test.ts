@@ -65,11 +65,17 @@ describe('startDomainConnection', () => {
   it('creates and attaches a new domain on the happy path', async () => {
     mockGetByDomain.mockResolvedValueOnce(null);
     mockCreateRecord.mockResolvedValueOnce(true);
-    mockAddProjectDomain.mockResolvedValueOnce({
-      vercelProjectDomainId: 'coastalplumbing.com',
-      verified: false,
-      verificationRecords: [],
-    });
+    mockAddProjectDomain
+      .mockResolvedValueOnce({
+        vercelProjectDomainId: 'coastalplumbing.com',
+        verified: false,
+        verificationRecords: [],
+      })
+      .mockResolvedValueOnce({
+        vercelProjectDomainId: 'www.coastalplumbing.com',
+        verified: false,
+        verificationRecords: [],
+      });
 
     const result = await startDomainConnection(PARAMS);
 
@@ -77,8 +83,35 @@ describe('startDomainConnection', () => {
     if (result.outcome === 'connected') {
       expect(result.connection.status).toBe('awaiting_dns');
       expect(result.connection.normalizedDomain).toBe('coastalplumbing.com');
+      expect(result.connection.providerDomains).toEqual([
+        expect.objectContaining({ hostname: 'coastalplumbing.com' }),
+        expect.objectContaining({ hostname: 'www.coastalplumbing.com' }),
+      ]);
     }
+    expect(mockAddProjectDomain).toHaveBeenCalledWith('www.coastalplumbing.com', expect.objectContaining({ redirect: 'coastalplumbing.com' }));
     expect(mockPut).toHaveBeenCalled();
+  });
+
+  it('still connects the apex successfully even when registering the www alias fails', async () => {
+    mockGetByDomain.mockResolvedValueOnce(null);
+    mockCreateRecord.mockResolvedValueOnce(true);
+    mockAddProjectDomain
+      .mockResolvedValueOnce({
+        vercelProjectDomainId: 'coastalplumbing.com',
+        verified: false,
+        verificationRecords: [],
+      })
+      .mockRejectedValueOnce(new Error('www already in use elsewhere'));
+
+    const result = await startDomainConnection(PARAMS);
+
+    expect(result.outcome).toBe('connected');
+    if (result.outcome === 'connected') {
+      expect(result.connection.status).toBe('awaiting_dns');
+      expect(result.connection.providerDomains).toEqual([
+        expect.objectContaining({ hostname: 'coastalplumbing.com' }),
+      ]);
+    }
   });
 
   it('resolves a lost conditional-write race by re-reading the winner — same business resumes cleanly', async () => {
