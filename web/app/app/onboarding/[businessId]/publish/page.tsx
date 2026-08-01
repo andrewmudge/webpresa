@@ -1,11 +1,22 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
+import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { ensureCustomerOnboarding } from '@/lib/onboarding/ensure';
 import { canAccessOnboardingStep } from '@/lib/onboarding/steps';
-import { WebsitePreviewCard } from '@/app/app/businesses/[businessId]/WebsitePreviewCard';
+import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
+import { OnboardingShell } from '../OnboardingShell';
 import { OnboardingProgress } from '../OnboardingProgress';
+import { OnboardingStepLayout } from '../OnboardingStepLayout';
+import { OnboardingActionBar } from '../OnboardingActionBar';
+import { OnboardingPrimaryButton } from '../OnboardingPrimaryButton';
+import { SectionCard } from '../SectionCard';
+import { StatusChecklist } from '../StatusChecklist';
+import { WebsitePreviewPanel } from '../WebsitePreviewPanel';
 import { publishOnboardingAction, continueWithDraftAction } from '../actions';
+
+const PUBLISH_FORM_ID = 'publish-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,65 +39,104 @@ export default async function OnboardingPublishPage({ params, searchParams }: Pr
     redirect(`/app/onboarding/${businessId}/domain`);
   }
 
-  const previews = await listPreviewsForBusiness(businessId);
+  const [previews, connections] = await Promise.all([
+    listPreviewsForBusiness(businessId),
+    listDomainConnectionsForBusiness(businessId),
+  ]);
   const published = previews.find((p) => p.status === 'published');
   const latest = previews[0];
   const hasDraft = !!latest && latest.status !== 'published';
+  const connection = connections.find((c) => c.status !== 'disconnected') ?? null;
+  const domainReady = !connection || connection.status === 'active';
+
+  const displayUrl =
+    connection?.status === 'active'
+      ? connection.normalizedDomain
+      : `${resolveAppBaseUrl().replace(/^https?:\/\//, '')}/b/${business.slug}`;
+
+  const checklistItems = [
+    { label: 'Business information confirmed', done: !!business.name && !!(business.phone || business.email) },
+    { label: 'Subscription active', done: business.subscriptionStatus === 'active' },
+    { label: 'Domain ready', done: domainReady },
+    { label: 'Website preview available', done: !!latest },
+  ];
 
   return (
-    <div className="py-12">
-      <div className="max-w-2xl mx-auto px-4">
-        <OnboardingProgress businessId={businessId} current="publish" completed={onboarding.completedSteps} />
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Preview and publish</h1>
-            <p className="mt-2 text-sm text-gray-600">Take a look, then publish your website to make it live.</p>
-          </div>
-          {latest && (
-            <form action={publishOnboardingAction.bind(null, businessId)} className="shrink-0">
-              {hasDraft && <input type="hidden" name="previewId" value={latest.previewId} />}
-              <button
-                type="submit"
-                className="whitespace-nowrap rounded-lg bg-(--color-brand) text-white px-5 py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
-              >
-                {published && !hasDraft ? 'Continue' : 'Publish my website'}
-              </button>
-            </form>
-          )}
-        </div>
+    <OnboardingShell businessName={business.name}>
+      <OnboardingProgress businessId={businessId} current="publish" completed={onboarding.completedSteps} />
 
-        {error && (
-          <div role="alert" className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {decodeURIComponent(error)}
-          </div>
-        )}
-
-        {!latest && (
-          <div className="mt-6 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-            Your website isn&apos;t ready to preview yet. Contact support if this doesn&apos;t resolve shortly.
-          </div>
-        )}
+      <div className="mt-6">
+        <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Ready to launch?</h1>
+        <p className="mt-2 max-w-xl text-sm text-gray-600">
+          Review the final details below and publish your website when you&apos;re ready.
+        </p>
       </div>
 
-      {/* Breaks out of the max-w-2xl column above — same "w-[95%]" breakout
-          the dashboard home (`app/app/businesses/[businessId]/page.tsx`)
-          uses for the identical `WebsitePreviewCard`, so the preview reads
-          as the real site rather than a narrow, cramped thumbnail. */}
-      {latest && (
-        <div className="w-[95%] mx-auto mt-6">
-          <WebsitePreviewCard slug={business.slug} lastUpdated={latest.updatedAt} hasDraft={hasDraft} />
+      {error && (
+        <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {decodeURIComponent(error)}
         </div>
       )}
 
-      <div className="max-w-2xl mx-auto px-4">
-        <div className="mt-8">
-          <form action={continueWithDraftAction.bind(null, businessId)}>
-            <button type="submit" className="text-sm font-medium text-gray-600 underline">
-              Enter my dashboard for now
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
+      <OnboardingStepLayout
+        left={
+          <div className="space-y-5">
+            <SectionCard title="Launch checklist">
+              <StatusChecklist items={checklistItems} />
+            </SectionCard>
+
+            {!latest && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Your website isn&apos;t ready to preview yet. Contact support if this doesn&apos;t resolve shortly.
+              </div>
+            )}
+
+            {latest && (
+              <SectionCard
+                title={published && !hasDraft ? 'Your website is published' : 'Publishing makes your website public'}
+                description={
+                  published && !hasDraft
+                    ? 'Your site is already live at the address shown on the right. Continue when you’re ready.'
+                    : "Publishing takes your current draft live at the address shown on the right — visible to anyone, immediately."
+                }
+              >
+                <form id={PUBLISH_FORM_ID} action={publishOnboardingAction.bind(null, businessId)}>
+                  {hasDraft && <input type="hidden" name="previewId" value={latest.previewId} />}
+                </form>
+              </SectionCard>
+            )}
+
+            <form action={continueWithDraftAction.bind(null, businessId)}>
+              <button type="submit" className="text-sm font-medium text-gray-500 underline hover:text-gray-700">
+                Enter my dashboard for now
+              </button>
+            </form>
+          </div>
+        }
+        right={
+          <div className="lg:sticky lg:top-6">
+            <WebsitePreviewPanel slug={business.slug} displayUrl={displayUrl} hasDraft={hasDraft} lastUpdated={latest?.updatedAt} />
+          </div>
+        }
+      />
+
+      <OnboardingActionBar
+        back={
+          <Link href={`/app/onboarding/${businessId}/domain`} className="text-sm font-medium text-gray-500 hover:text-gray-700">
+            Back to domain
+          </Link>
+        }
+        primary={
+          latest && (
+            <OnboardingPrimaryButton
+              action={publishOnboardingAction.bind(null, businessId)}
+              externalFormId={PUBLISH_FORM_ID}
+              label={published && !hasDraft ? 'Continue' : 'Publish my website'}
+              pendingLabel="Publishing…"
+            />
+          )
+        }
+      />
+    </OnboardingShell>
   );
 }

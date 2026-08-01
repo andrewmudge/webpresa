@@ -24,8 +24,8 @@ const STATUS_TRUST_ITEMS = [
 ];
 
 const NEXT_STEPS = [
-  { title: 'Connect your domain', subtitle: 'Use your existing domain or purchase a new one.' },
   { title: 'Review & customize', subtitle: 'Edit your content, images, and details to make it your own.' },
+  { title: 'Connect your domain', subtitle: 'Use your existing domain or purchase a new one.' },
   { title: 'Publish your website', subtitle: 'Go live with your domain and start getting new customers.' },
 ];
 
@@ -150,7 +150,7 @@ async function ActivatedCelebration({ business }: { business: Business }) {
             href={dashboardHref}
             className="mt-4 w-full rounded-lg bg-(--color-brand) px-5 py-2.5 text-center text-sm font-medium text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"
           >
-            Go to My Dashboard
+            Finish Setup
           </Link>
           <p className="mt-2 text-xs text-gray-500">Start editing, connect your domain, and publish.</p>
         </div>

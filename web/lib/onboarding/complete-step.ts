@@ -35,13 +35,6 @@ async function requireExistingOnboarding(businessId: string): Promise<CustomerOn
   return existing;
 }
 
-export async function completeWelcomeStep(businessId: string): Promise<CustomerOnboarding> {
-  const existing = await requireExistingOnboarding(businessId);
-  const updated = addCompletedStep(existing, 'welcome');
-  await putCustomerOnboarding(updated);
-  return updated;
-}
-
 export async function completeReviewStep(businessId: string): Promise<CustomerOnboarding> {
   const existing = await requireExistingOnboarding(businessId);
   const updated = addCompletedStep(existing, 'review');

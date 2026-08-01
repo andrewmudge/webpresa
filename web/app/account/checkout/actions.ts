@@ -7,6 +7,7 @@ import { listClaimsForBusiness } from '@/lib/db/claims';
 import { getStripeClient } from '@/lib/stripe/client';
 import { resolvePriceId } from '@/lib/stripe/plans';
 import { buildTrustedMetadata, resolveRuntimeEnvironment } from '@/lib/stripe/metadata';
+import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
 import { WEBPRESA_PLANS, type WebpresaPlan } from '@/domain/constants/plans';
 
 /**
@@ -20,12 +21,6 @@ export type CheckoutActionState = { error?: string } | undefined;
 function parseWebpresaPlan(input: FormDataEntryValue | null): WebpresaPlan | null {
   const value = typeof input === 'string' ? input : '';
   return (WEBPRESA_PLANS as readonly string[]).includes(value) ? (value as WebpresaPlan) : null;
-}
-
-function resolveAppBaseUrl(): string {
-  const base = process.env.WEBPRESA_APP_BASE_URL;
-  if (!base) throw new Error('WEBPRESA_APP_BASE_URL environment variable is not set');
-  return base;
 }
 
 /**

@@ -21,6 +21,7 @@ These rules apply on every task, every session, without exception.
 - Do not deploy infrastructure unless explicitly instructed. Before any `cdk deploy`, show the account ID, region, resources to be created, stack name, and full `cdk diff` output, then stop and wait for approval.
 - Before creating any new AWS resource, inspect the existing infrastructure for resources that can be reused. Never create duplicates.
 - Reuse the established naming convention: `webpresa-{env}-{resource}` (e.g. `webpresa-dev-businesses`).
+- `WebpresaDevScreenshotStack` and `WebpresaDevScanWorkflowStack` depend on `WEBPRESA_APP_BASE_URL`. Always diff/deploy them via `npm run {diff,deploy}:screenshot` / `npm run {diff,deploy}:scan-workflow` (`infra/package.json`) — never a raw `cdk deploy` for these two. `infra/bin/webpresa.ts` hard-fails if the env var is unset (no placeholder fallback), but a deploy that skips the npm scripts loses the baked-in real URL. Immediately after any deploy touching either stack, run the post-deploy verification command from `web/docs/deployment.md` (Stage 14/16 sections) and show the result — a 2026-07-28 deploy that skipped this silently shipped a fake `.invalid` URL into both, breaking the scan workflow and generated-preview screenshots for days before anyone noticed.
 
 ## Code quality
 

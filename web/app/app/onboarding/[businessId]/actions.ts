@@ -7,7 +7,6 @@ import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info
 import { updateCustomerSectionContent } from '@/lib/customer-editing/section-content';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import {
-  completeWelcomeStep,
   completeReviewStep,
   deferDomainStep,
   completeExistingDomainStep,
@@ -28,12 +27,6 @@ async function requireOnboardingAccess(businessId: string): Promise<string> {
   const session = await requireCustomerSession();
   await requireActiveSubscription(session.sub, businessId);
   return session.sub;
-}
-
-export async function completeWelcomeAction(businessId: string): Promise<void> {
-  await requireOnboardingAccess(businessId);
-  await completeWelcomeStep(businessId);
-  redirect(`/app/onboarding/${businessId}/review`);
 }
 
 export async function completeReviewAction(businessId: string, formData: FormData): Promise<void> {
@@ -78,7 +71,7 @@ export async function updateReviewServicesAction(businessId: string, formData: F
   redirect(
     result?.message
       ? `/app/onboarding/${businessId}/review?error=${encodeURIComponent(result.message)}`
-      : `/app/onboarding/${businessId}/review`,
+      : `/app/onboarding/${businessId}/review?servicesSaved=1`,
   );
 }
 

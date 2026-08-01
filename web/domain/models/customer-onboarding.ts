@@ -22,8 +22,13 @@ export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
  * name/city/state/service (captured during Review) feed Part 3's future
  * domain-name suggestions — see implementation.md, Stage 19.x, Part 1,
  * "Ordering rationale".
+ *
+ * `'welcome'` was removed (2026-07-31, onboarding UI redesign) — the
+ * post-payment `/account/checkout/success` page now performs the
+ * celebrate/orient job a dedicated Welcome step used to, making it
+ * redundant. Review is the first real step a customer lands on now.
  */
-export const ONBOARDING_COMPLETABLE_STEPS = ['welcome', 'review', 'domain', 'publish', 'tour'] as const;
+export const ONBOARDING_COMPLETABLE_STEPS = ['review', 'domain', 'publish', 'tour'] as const;
 export type OnboardingCompletableStep = (typeof ONBOARDING_COMPLETABLE_STEPS)[number];
 
 export const ONBOARDING_STEPS = [...ONBOARDING_COMPLETABLE_STEPS, 'complete'] as const;

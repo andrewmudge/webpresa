@@ -7,7 +7,7 @@ export interface CreateCustomerOnboardingInput {
   userId: string;
 }
 
-/** Creates a fresh onboarding record in `'not_started'` status, `currentStep: 'welcome'`. */
+/** Creates a fresh onboarding record in `'not_started'` status, `currentStep: 'review'` (the first step — see `ONBOARDING_COMPLETABLE_STEPS`). */
 export function createCustomerOnboarding(input: CreateCustomerOnboardingInput): CustomerOnboarding {
   const now = nowIso();
 
@@ -15,7 +15,7 @@ export function createCustomerOnboarding(input: CreateCustomerOnboardingInput): 
     businessId: input.businessId,
     userId: input.userId,
     status: 'not_started',
-    currentStep: 'welcome',
+    currentStep: 'review',
     completedSteps: [],
     createdAt: now,
     updatedAt: now,

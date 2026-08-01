@@ -99,7 +99,7 @@ export function DomainStatusPanel({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="rounded-2xl border border-(--color-border) bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-gray-900">{domainName}</h2>
         <div className="mt-1 flex items-center gap-2">
           {!isLive && !isTerminalFailure && polling && (
@@ -118,7 +118,7 @@ export function DomainStatusPanel({
               Changes usually take a few minutes but can take up to 48 hours to fully take effect.
             </p>
             {records.map((rec, i) => (
-              <div key={i} className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs font-mono text-gray-700">
+              <div key={i} className="rounded-lg border border-(--color-border) bg-gray-50 p-3 font-mono text-xs text-gray-700">
                 <div>Type: {rec.recordType}</div>
                 <div>Name: {rec.name}</div>
                 <div>Value: {rec.value}</div>
@@ -132,7 +132,7 @@ export function DomainStatusPanel({
             type="button"
             onClick={handleRecordUpdated}
             disabled={checking}
-            className="mt-4 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="mt-4 rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
           >
             {checking ? 'Checking…' : isTerminalFailure ? 'Try again' : 'Record Updated'}
           </button>
@@ -145,11 +145,11 @@ export function DomainStatusPanel({
         onClick={() => startContinueTransition(() => completeExistingDomainAction(businessId, domainConnectionId, new FormData()))}
         className={
           isLive
-            ? 'w-full rounded-lg bg-(--color-brand) text-white px-5 py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-50'
-            : 'text-sm font-medium text-gray-600 underline disabled:opacity-50'
+            ? 'w-full rounded-lg bg-(--color-brand) px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50 sm:w-auto'
+            : 'text-sm font-medium text-gray-500 underline disabled:opacity-50'
         }
       >
-        {isLive ? 'Continue' : "Continue — I'll finish this later"}
+        {isLive ? 'Continue to publish' : "Continue — I'll finish this later"}
       </button>
     </div>
   );

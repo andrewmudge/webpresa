@@ -44,7 +44,7 @@ describe('ensureCustomerOnboarding', () => {
     expect(result.businessId).toBe('biz_1');
     expect(result.userId).toBe('user_1');
     expect(result.status).toBe('not_started');
-    expect(result.currentStep).toBe('welcome');
+    expect(result.currentStep).toBe('review');
     expect(result.completedSteps).toEqual([]);
   });
 

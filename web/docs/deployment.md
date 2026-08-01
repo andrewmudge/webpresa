@@ -404,15 +404,21 @@ npx cdk deploy WebpresaDevScreenshotRepositoryStack --profile webpresa
 #    find an image if this hasn't run yet):
 ./scripts/build-and-push-screenshot-lambda.sh dev webpresa
 
-# 5. Screenshot stack — Lambda, DLQ, IAM. Requires WEBPRESA_APP_BASE_URL set
-#    to the real deployed app URL first — see "Required environment
-#    variables" below.
-WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk diff WebpresaDevScreenshotStack --profile webpresa
-WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
+# 5. Screenshot stack — Lambda, DLQ, IAM. Always use these npm scripts
+#    (never a raw `cdk diff`/`cdk deploy` for this stack) — they bake in the
+#    real WEBPRESA_APP_BASE_URL so it can't be accidentally omitted (see
+#    "WEBPRESA_APP_BASE_URL" below for why that matters):
+npm run diff:screenshot
+npm run deploy:screenshot
 
 # 6. If the Lambda's imageTag prop pins a digest rather than 'latest',
 #    redeploy the screenshot stack so it picks up the new image:
-WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScreenshotStack --profile webpresa
+npm run deploy:screenshot
+
+# 7. Verify the deploy actually took the real URL, not a placeholder:
+aws lambda get-function-configuration --function-name webpresa-dev-screenshot-capture \
+  --profile webpresa --query "Environment.Variables.WEBPRESA_APP_BASE_URL"
+# Must NOT contain "REPLACE_WITH" or ".invalid" — see the 2026-07-28 incident below.
 ```
 
 ### Account-quota fixes (hit during the 2026-07-23 dev deploy)
@@ -445,7 +451,7 @@ aws lambda get-function --function-name webpresa-dev-screenshot-capture --profil
   --query 'Configuration.CodeSha256' --output text
 ```
 
-`WEBPRESA_APP_BASE_URL` is read directly from the shell environment by `infra/bin/webpresa.ts` — it is not (and should not be) stored in `.env.local`, since `infra/` is a separate CLI project from `web/`. Omitting it falls back to a synth-only placeholder (`https://REPLACE_WITH_..._APP_BASE_URL.invalid`) so `cdk synth`/`cdk diff` never hard-fail — but that placeholder must never actually be deployed, since the Lambda would construct unreachable preview URLs.
+`WEBPRESA_APP_BASE_URL` is read directly from the shell environment by `infra/bin/webpresa.ts` — it is not (and should not be) stored in `.env.local`, since `infra/` is a separate CLI project from `web/`. **`bin/webpresa.ts` hard-fails (throws before constructing any stack) if this is unset — there is no placeholder fallback.** This used to fall back silently to a fake `https://REPLACE_WITH_..._APP_BASE_URL.invalid` URL so `cdk synth`/`cdk diff` never hard-failed with no override — but that same silent fallback is exactly what let a `cdk deploy WebpresaDevScreenshotStack` on 2026-07-28 (run without the env var set) actually deploy the placeholder into the live Lambda, breaking every `generated_preview` capture with "Page failed to load" for days before anyone noticed, since CloudFormation has no way to know the URL is fake. Always use `npm run diff:screenshot`/`npm run deploy:screenshot` (or `diff:scan-workflow`/`deploy:scan-workflow` for Stage 16), which bake in the real dev URL, rather than a raw `cdk` command — and confirm with the verification command in step 7 above after every deploy.
 
 ### Vercel Deployment Protection bypass (hit during the first real browser-based test, 2026-07-23)
 
@@ -521,6 +527,8 @@ Unlike every other stage in this app (plain Vercel Server Actions — pushing to
 
 **Deployed to dev 2026-07-24.** Added one new table (`scan-executions`), one new secret (`internal-api`, real shared secret populated), and one new stack (`WebpresaDevScanWorkflowStack` — Step Functions Standard state machine + EventBridge Connection, no Lambda, no ECR repo, no container image to build/push — simpler to deploy than Stage 14 for exactly that reason). `webpresa-vercel-dev`'s permissions were extended the same day as part of a larger migration — see "Extending `webpresa-vercel-dev`" below, which now points at a CDK-managed stack rather than the raw CLI commands originally drafted here. Vercel environment variables not yet set (see below).
 
+**Regression, 2026-07-28 → fixed 2026-08-01:** a `cdk deploy WebpresaDevScanWorkflowStack` run without `WEBPRESA_APP_BASE_URL` set silently re-baked the old placeholder fallback (`https://REPLACE_WITH_DEV_APP_BASE_URL.invalid`) into all 7 `HttpInvoke` endpoints and the IAM role's `states:InvokeHTTPEndpoint` condition — every execution since then failed within ~45s with `States.Http.AccessDenied`, but the failure state itself couldn't call back to the app either, so the `ScanExecution` DynamoDB record stayed stuck at `queued` forever (admin UI showed a permanently "Running…" workflow, nothing populated under Scans). Fixed by redeploying with the real URL and manually correcting the two orphaned `ScanExecution` records to `failed`. `bin/webpresa.ts` no longer has a placeholder fallback at all (see "WEBPRESA_APP_BASE_URL" under Stage 14 above) — this exact failure mode can't recur silently.
+
 ### Deploy sequence (first time)
 
 ```bash
@@ -537,11 +545,19 @@ aws secretsmanager put-secret-value \
   --profile webpresa
 rm /tmp/internal-api-secret.txt
 
-# 3. Scan workflow stack — state machine + EventBridge Connection. Requires
-#    WEBPRESA_APP_BASE_URL set to the real deployed app URL (same variable Stage 14 already
-#    requires — see "Required environment variables" below):
-WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk diff WebpresaDevScanWorkflowStack --profile webpresa
-WEBPRESA_APP_BASE_URL=https://<real-app-domain> npx cdk deploy WebpresaDevScanWorkflowStack --profile webpresa
+# 3. Scan workflow stack — state machine + EventBridge Connection. Always use
+#    these npm scripts (never a raw `cdk diff`/`cdk deploy` for this stack) —
+#    they bake in the real WEBPRESA_APP_BASE_URL (same variable Stage 14
+#    needs — see "WEBPRESA_APP_BASE_URL" under Stage 14 above for why an
+#    unset value is dangerous, not just inconvenient):
+npm run diff:scan-workflow
+npm run deploy:scan-workflow
+
+# 4. Verify the deploy actually took the real URL, not a placeholder — every
+#    ApiEndpoint in the state machine definition must show the real host:
+aws stepfunctions describe-state-machine \
+  --state-machine-arn arn:aws:states:us-east-1:<account-id>:stateMachine:webpresa-dev-scan-workflow \
+  --profile webpresa --query definition --output text | grep -o "https://[^']*" | sort -u
 ```
 
 ### Extending `webpresa-vercel-dev`

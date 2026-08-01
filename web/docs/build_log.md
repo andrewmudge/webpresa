@@ -7039,3 +7039,135 @@ web/docs/build_log.md                                     MODIFIED — this entr
 ```
 
 Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 941 tests, all passing — no test files touched by this presentation-only change), `npm run build` all pass.
+
+---
+
+## Incident: `WEBPRESA_APP_BASE_URL` placeholder silently deployed, breaking Stage 16 scan workflow and Stage 14 generated-preview screenshots (found and fixed 2026-08-01)
+
+**Symptom, reported by the user:** "Run Full Scan" stuck showing "Queued... Attempt 1 Running…" forever with nothing populating under Scans; separately, two consecutive `generated_preview` screenshot captures failed with "Page failed to load."
+
+**Root cause (one bug, two symptoms):** `infra/bin/webpresa.ts` used to silently fall back to a fake placeholder (`https://REPLACE_WITH_${label}_APP_BASE_URL.invalid`) whenever `WEBPRESA_APP_BASE_URL` was unset — a deliberate synth/diff convenience. A `cdk deploy` on **2026-07-28** was run against both `WebpresaDevScanWorkflowStack` and `WebpresaDevScreenshotStack` (CloudFormation `UPDATE_COMPLETE` at 04:01:54 and 04:02:25 UTC respectively — 14 seconds apart, clearly one deploy session) without that env var set, and CloudFormation deployed the placeholder into both without any error:
+
+- The scan workflow state machine's 7 `HttpInvoke` `ApiEndpoint`s and its IAM role's `states:InvokeHTTPEndpoint` condition all pointed at the fake host. Every execution since then failed within ~45s with `States.Http.AccessDenied` (confirmed via `aws stepfunctions get-execution-history`) — including the very first state (`InitializeScanExecution`, which claims `queued → running`) and the failure-recording state (`RecordFailure`), so the `ScanExecution` DynamoDB record never got told the run failed and stayed at `status: "queued"` forever. Two businesses were wedged this way (`hasActiveExecution()` in `web/lib/workflow/run-scan-workflow.ts` blocks new runs while any execution is `queued`/`running`): `biz_e05de89a-3df7-4ab1-8414-ad496f1e1458` and `biz_1b44771a-278d-4310-a0fb-b798df22e5e5`.
+- The screenshot Lambda's `WEBPRESA_APP_BASE_URL` env var was the same placeholder, so every `generated_preview` capture navigated to an unreachable URL — "Page failed to load." `existing_site` captures were unaffected (they load the business's real external website, not the app's own URL).
+
+Three executions before 2026-07-28 (07-24, 07-26, 07-27) had succeeded against the real URL, confirming this was a regression from a specific bad deploy, not a design flaw that never worked.
+
+### Fix (live AWS state, 2026-08-01)
+
+1. `npx cdk deploy WebpresaDevScanWorkflowStack` and `WebpresaDevScreenshotStack`, both with `WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app` explicitly set — reviewed `cdk diff` for both first (state machine: 7 `ApiEndpoint`s + 1 IAM condition changed; Lambda: 1 env var changed; no resource replacement in either). Verified post-deploy: `aws stepfunctions describe-state-machine --query definition` shows only the real host; `aws lambda get-function-configuration --query Environment.Variables.WEBPRESA_APP_BASE_URL` shows the real URL.
+2. Manually corrected the two orphaned `ScanExecution` DynamoDB records to `status: "failed"` (with a `failure` object matching `ScanWorkflowFailureSchema`'s shape) via `aws dynamodb update-item`, conditioned on `status = "queued"` — their real Step Functions executions had already terminated (`ExecutionFailed`), so they would never self-correct and were permanently blocking reruns for those two businesses.
+
+### Prevention (this session, same day)
+
+The user asked how to stop this recurring, given Claude runs most deployments here. Removed the silent-fallback design entirely rather than relying on `cdk diff` review discipline (the exact step that was skipped):
+
+- `infra/bin/webpresa.ts` — `appBaseUrl` now throws immediately if `WEBPRESA_APP_BASE_URL` is unset, for **any** `cdk` command (synth/diff/deploy), not just deploy. No placeholder fallback exists anymore. `infra/test/*.test.ts` construct stacks directly with an `appBaseUrl` prop and don't go through `bin/webpresa.ts`, so the test suite is unaffected (confirmed: 161 tests still pass).
+- `infra/package.json` — added `diff:screenshot`/`deploy:screenshot`/`diff:scan-workflow`/`deploy:scan-workflow` npm scripts with the real dev URL baked in, so the normal workflow never requires remembering to export the env var by hand.
+- `web/docs/deployment.md` — Stage 14 and Stage 16 deploy sequences now reference the npm scripts instead of raw `cdk`-with-inline-env-var commands, each followed by a documented post-deploy verification command (the same ones used to confirm the fix above); added an incident note to both sections.
+- `web/AGENTS.md` — new standing rule under "AWS": these two stacks must always go through the npm scripts, and the post-deploy verification command must be run and shown to the user after any deploy touching either — so future sessions (including this one, next time) enforce this automatically rather than needing to be reminded.
+
+### Files changed
+
+```
+infra/bin/webpresa.ts            MODIFIED — removed placeholder fallback, hard-fail if
+                                    WEBPRESA_APP_BASE_URL is unset
+infra/package.json               MODIFIED — added diff/deploy:{screenshot,scan-workflow} scripts
+web/docs/deployment.md           MODIFIED — Stage 14/16 runbooks use the new npm scripts +
+                                    post-deploy verification; incident notes added
+web/AGENTS.md                    MODIFIED — standing rule for deploying these two stacks
+web/docs/build_log.md            MODIFIED — this entry
+```
+
+### Verification
+
+```
+infra:
+npx cdk synth (WEBPRESA_APP_BASE_URL unset)  — now throws immediately, as intended
+npm run diff:screenshot                       — zero differences (already fixed to real URL)
+npm run diff:scan-workflow                    — zero differences (already fixed to real URL)
+npm test                                      — 6 files, 161 tests passed
+npm run build (tsc)                           — passes
+```
+
+No `web/` application code changes were needed for either the fix or the prevention work — this was purely an infra deployment-drift bug plus the CDK app hardening to make that class of bug structurally impossible going forward.
+
+---
+
+# Onboarding redesign: cohesive shell, 4-step flow, Welcome removed (2026-07-31)
+
+Full redesign of the post-payment onboarding UI (`/app/onboarding/[businessId]/{review,domain,publish,tour}`) — a distraction-free shell replacing the inherited dashboard sidebar, a shared two-column workspace (form left, live website preview right), and the `welcome` step removed entirely (the recently-redesigned `/account/checkout/success` page now performs that celebrate/orient job). Business logic, validation, and server actions are unchanged everywhere except the one real gap this surfaced (Publish had zero duplicate-submission protection — fixed). Tour stays an intentional placeholder per explicit instruction, deferred until Stage 19.x Part 3.
+
+## Removing the Welcome step
+
+`ONBOARDING_COMPLETABLE_STEPS` (`domain/models/customer-onboarding.ts`) is now `['review', 'domain', 'publish', 'tour']`; `createCustomerOnboarding`'s default `currentStep` is now `'review'`; `completeWelcomeStep`/`completeWelcomeAction` are deleted. The bare `/app/onboarding/{businessId}` URL — previously the Welcome page itself — is now a pure server-side redirect router with no rendered UI: it forwards to `resolveEarliestIncompleteStep(...)` (or the dashboard, if already completed). Every existing inbound link (the business-home first-visit force-redirect, its "Continue onboarding" resume banner, the dashboard's "Connect your domain" checklist item) keeps working unchanged, since none of them needed to know the step order themselves.
+
+**Live-data cleanup required and done as part of this change**: `CustomerOnboardingSchema` derives its enums directly from `ONBOARDING_COMPLETABLE_STEPS`, and every read (`getCustomerOnboardingByBusinessId`) calls `.parse()` with no try/catch — any already-persisted row containing `'welcome'` would throw on next read the instant the enum changed. Scanned `webpresa-dev-customer-onboarding` before shipping the enum change: found 5 existing rows (3 `completed`, with `'welcome'` baked into `completedSteps`; 2 `not_started`, with `currentStep: 'welcome'`) — all 5 were this session's own test businesses. Deleted all 5 (confirmed with the user first) rather than patching in place, since re-entering onboarding at Review has no real cost for dev test data.
+
+## Shell (route-group split, mirrors `app/admin`)
+
+No dedicated onboarding layout existed before — `app/app/onboarding/[businessId]/**` inherited the full dashboard `AppSidebar` shell unconditionally via `app/app/layout.tsx`. Rather than a pathname-sniffing client wrapper, mirrored the pattern this repo already uses for the identical problem in `app/admin/(dashboard)/layout.tsx`: moved the sidebar shell, `AppSidebar.tsx`, the multi-business picker (`page.tsx`), and the whole `businesses/[businessId]/**` subtree into a new `app/app/(dashboard)/` route group (URL-transparent — `/app`, `/app/businesses/{id}/**` are unchanged); deleted the now-empty `app/app/layout.tsx`. `app/app/onboarding/[businessId]/**` was **not moved** — with no layout directly above it anymore, it falls straight through to the true root `app/layout.tsx` (plain `<html>/<body>`, confirmed by reading it directly, no sidebar logic to worry about), giving onboarding a genuinely clean slate. Only 4 import lines needed updating (`FormBits`/`WebsitePreviewCard` paths gaining `(dashboard)`) — confirmed via repo-wide grep that nothing else referenced the moved files.
+
+## New shared components (`app/app/onboarding/[businessId]/`)
+
+- `OnboardingShell.tsx` — logo, business name, `mailto:hello@webpresa.com` "Need help?", visually-secondary sign-out; owns the full page background/container now that nothing above it does.
+- `OnboardingProgress.tsx` (rewritten in place) — 4 steps, sublabels, checkmarks for completed, `aria-current="step"`, collapses to a compact "Step X of 4" below `sm`.
+- `OnboardingStepLayout.tsx` — the shared two-column grid (~42%/58% on `lg:`, stacks on mobile).
+- `OnboardingActionBar.tsx` — sticky bottom bar (Back / status / primary), pure layout; `primary` is optional since Domain's real actions live inline in its own cards, not a single external button.
+- `OnboardingPrimaryButton.tsx` — the shared primary-CTA button. **Real finding, not assumed**: `useFormStatus` only tracks a form the button is a React-tree descendant of — it does not follow the HTML `form="id"` attribute, which Review's Continue button already relies on to sit outside its own data form. Built on `useTransition` instead (reading the referenced form's fields via `document.getElementById` + `FormData`), the same pattern `DomainStatusPanel`'s existing Continue button already used — this is what closes Publish's previously-nonexistent duplicate-submission protection.
+- `SaveStatus.tsx` — "Saving…" / a real error, nothing else. Every onboarding action ends in a `redirect()` (forward on success, back with `?error=` on failure) — there's no resting point for a persistent "Saved ✓" anywhere except the Review page's separate Services inline-save, which now redirects with `?servicesSaved=1` for a real (not fabricated) transient confirmation.
+- `SectionCard.tsx` — titled card, scoped to onboarding rather than evolving `FormBits.tsx`'s `Card` in place (that one is shared with the Settings/Contact tab).
+- `StatusChecklist.tsx` — Publish's launch checklist; every item's `done` value comes from real already-fetched state, never a fabricated checkmark.
+- `WebsitePreviewPanel.tsx` — wraps the existing `WebsitePreviewCard` **unchanged** (zero risk to its dashboard call site) with a browser-chrome address-bar row showing the resolved real URL (the connected custom domain once `active`, otherwise the real `/b/{slug}` — confirmed by repo-wide grep that no `*.webpresa.io` subdomain concept exists anywhere, so the reference mockup's fabricated subdomain was not carried over). `WebsiteHeroPreview` (the static screenshot laptop-mockup built earlier this session for claim-status/checkout-success) was deliberately not reused here — the spec required a browser-frame treatment with a working Desktop/Mobile toggle, which only `WebsitePreviewCard`'s live iframe already has.
+- `lib/env/app-base-url.ts` — `resolveAppBaseUrl()` extracted from a private copy inside `app/account/checkout/actions.ts` (now imports the shared one), since onboarding needed the same canonical-base-URL resolution for its address-bar display.
+
+## Per-page changes
+
+- **Review**: same two forms/actions (`completeReviewAction`, `updateReviewServicesAction`), same `updateCustomerBusinessInfo` validation (phone-or-email re-check, all-or-nothing address, deduped social links) — reorganized into `SectionCard`s (Business details / Contact information / Address / Social links / Services) instead of one dense card. `FormBits.tsx`'s `TextField` gained an optional `autoComplete` prop (additive) so Review can use correct autocomplete hints. No Back button (first real step now).
+- **Domain**: same connection state/actions (`deferDomainAction`, `connectExistingDomainAction`, `completeExistingDomainAction`) — `DomainChoiceCards` restyled to selectable cards with a "Recommended" badge on the Webpresa-address option (now showing the real `/b/{slug}` URL, not a fabricated subdomain); "Buy a new domain" stays exactly as inert/coming-soon as before. `DomainStatusPanel`'s already-`isLive`-driven button relabeled to "Continue to publish" (was generic "Continue") — no logic changes.
+- **Publish**: `StatusChecklist` built from real state (business phone/email, `subscriptionStatus === 'active'`, domain connection status, preview existence); submit button moved into `OnboardingActionBar` via `OnboardingPrimaryButton` (closing the duplicate-submission gap above); success/failure unchanged (redirect to `/tour` / existing `?error=` banner).
+- **Tour**: wrapped in the new shell only, per explicit instruction to leave this deferred — `completeTourAction` wiring untouched.
+
+## Tests
+
+`lib/onboarding/__tests__/{steps,ensure,complete-step}.test.ts` updated: every `'welcome'` reference removed from array literals/expectations; the `completeWelcomeStep` test block deleted along with the function; the "throws when no record exists" test now calls `completeReviewStep`; added a new `completePublishStep` idempotency test (mirroring the existing `completeReviewStep`/`deferDomainStep` ones).
+
+**Explicit limitation**: this repo has zero component-rendering/RTL/jsdom/browser test infrastructure — every existing test is a pure Node-environment vitest test. Mobile/desktop overflow, keyboard navigation/focus, and the sticky-action-bar-vs-tall-iframe interaction are manual-verification items, left for the user to check directly (consistent with their stated preference this session) — not automated here.
+
+## Files changed
+
+```
+web/domain/models/customer-onboarding.ts                          MODIFIED — welcome removed from step enum
+web/domain/factories/customer-onboarding.factory.ts                MODIFIED — default currentStep 'review'
+web/lib/onboarding/complete-step.ts                                 MODIFIED — completeWelcomeStep deleted
+web/lib/onboarding/__tests__/{steps,ensure,complete-step}.test.ts   MODIFIED — welcome removed, +1 idempotency test
+web/lib/env/app-base-url.ts                                         NEW — resolveAppBaseUrl(), extracted from checkout/actions.ts
+web/app/account/checkout/actions.ts                                 MODIFIED — imports the shared resolveAppBaseUrl
+web/app/app/(dashboard)/**                                          MOVED from web/app/app/** (layout, AppSidebar, page, businesses/**)
+web/app/app/(dashboard)/businesses/[businessId]/FormBits.tsx        MODIFIED — TextField gained optional autoComplete
+web/app/app/onboarding/[businessId]/page.tsx                        MODIFIED — pure redirect router, Welcome UI removed
+web/app/app/onboarding/[businessId]/actions.ts                      MODIFIED — completeWelcomeAction removed,
+                                                                       servicesSaved=1 added to the services-save redirect
+web/app/app/onboarding/[businessId]/OnboardingProgress.tsx          MODIFIED — 4 steps, sublabels, checkmarks, responsive collapse
+web/app/app/onboarding/[businessId]/{Shell,StepLayout,ActionBar,    NEW — shared onboarding components (see above)
+  PrimaryButton,SaveStatus,SectionCard,StatusChecklist,
+  WebsitePreviewPanel}.tsx (actual file names OnboardingShell.tsx, etc.)
+web/app/app/onboarding/[businessId]/review/page.tsx                 MODIFIED — full restructure, same fields/actions
+web/app/app/onboarding/[businessId]/domain/{page,DomainChoiceCards, MODIFIED — full restructure, same actions
+  DomainStatusPanel}.tsx
+web/app/app/onboarding/[businessId]/publish/page.tsx                MODIFIED — full restructure, duplicate-submit fix
+web/app/app/onboarding/[businessId]/tour/page.tsx                   MODIFIED — shell wrap only, content unchanged
+web/docs/architecture.md                                            MODIFIED — onboarding redesign section
+web/docs/build_log.md                                               MODIFIED — this entry
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint          — 0 errors, 2 pre-existing unrelated warnings
+npm test              — 88 files, 942 tests passed (1 new: completePublishStep idempotency)
+npm run build         — succeeds, all routes resolve at their unchanged URLs
+```
+
+Not yet manually verified in a browser (dev-server verification in this sandbox hit unrelated environment issues — missing Chromium system libraries, and a stale `.next` directory from an intervening production build) — left for the user to confirm visually per their stated preference this session.

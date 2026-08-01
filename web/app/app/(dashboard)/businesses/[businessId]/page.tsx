@@ -184,9 +184,9 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
     </div>
 
     {/* Breaks out of the max-w-4xl column above — 95% of whatever width
-        <main> actually has (the flex layout in app/app/layout.tsx already
-        excludes the sidebar from that), so the preview reads as the real
-        site rather than a small embedded thumbnail. */}
+        <main> actually has (the flex layout in app/app/(dashboard)/layout.tsx
+        already excludes the sidebar from that), so the preview reads as the
+        real site rather than a small embedded thumbnail. */}
     <div className="w-[95%] mx-auto">
       <WebsitePreviewCard slug={business.slug} lastUpdated={latest?.updatedAt} hasDraft={hasDraft} />
     </div>

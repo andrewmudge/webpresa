@@ -13,6 +13,7 @@ export function TextField({
   disabled,
   maxLength,
   type = 'text',
+  autoComplete,
 }: {
   label: string;
   name: string;
@@ -22,6 +23,7 @@ export function TextField({
   disabled?: boolean;
   maxLength?: number;
   type?: string;
+  autoComplete?: string;
 }) {
   return (
     <label className="block">
@@ -34,6 +36,7 @@ export function TextField({
         required={required}
         disabled={disabled}
         maxLength={maxLength}
+        autoComplete={autoComplete}
         className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
       />
     </label>
