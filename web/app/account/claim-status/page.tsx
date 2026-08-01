@@ -5,10 +5,11 @@ import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 import { createBillingPortalSessionAction } from '@/app/account/checkout/actions';
+import { getLatestPreviewScreenshots } from '@/lib/screenshots/latest-preview-screenshot';
 import { ActivationHero } from './ActivationHero';
-import { WebsiteHeroPreview } from './WebsiteHeroPreview';
+import { WebsiteHeroPreview } from '../_components/WebsiteHeroPreview';
 import { PlanSelectionForm } from './PlanSelectionForm';
-import { TrustRow } from './TrustRow';
+import { TrustRow } from '../_components/TrustRow';
 import type { Business } from '@/domain/models/business';
 
 export const dynamic = 'force-dynamic';
@@ -91,7 +92,9 @@ function SubscribedBusinessCard({ business }: { business: Business }) {
  * plan-activation form. Same underlying data/actions as before; only
  * presentation and component structure changed (see `build_log.md`).
  */
-function ActivationCard({ business }: { business: Business }) {
+async function ActivationCard({ business }: { business: Business }) {
+  const { desktopSrc, mobileSrc } = await getLatestPreviewScreenshots(business.businessId);
+
   return (
     <div className="rounded-3xl border border-(--color-border) bg-white p-6 shadow-sm sm:p-10">
       <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -100,7 +103,7 @@ function ActivationCard({ business }: { business: Business }) {
           claimedAt={business.claimedAt}
           justClaimed={business.subscriptionStatus !== 'canceled'}
         />
-        <WebsiteHeroPreview slug={business.slug} />
+        <WebsiteHeroPreview slug={business.slug} desktopSrc={desktopSrc} mobileSrc={mobileSrc} />
       </div>
 
       <div className="mt-10 border-t border-(--color-border) pt-10">
@@ -127,7 +130,7 @@ export default async function ClaimStatusPage() {
 
   if (businesses.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] px-4">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-(--color-brand-muted) via-(--color-brand-muted)/40 to-white px-4">
         <div className="max-w-md text-center space-y-4">
           <p className="text-gray-700">Your account isn&apos;t currently associated with a claimed business.</p>
           <form action={customerSignOutAction}>
@@ -145,7 +148,7 @@ export default async function ClaimStatusPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-(--color-brand-muted)/50 via-white to-white">
+    <div className="min-h-screen bg-gradient-to-b from-(--color-brand-muted) via-(--color-brand-muted)/40 to-white">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
         <div className="flex items-center gap-2">
           <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto" />

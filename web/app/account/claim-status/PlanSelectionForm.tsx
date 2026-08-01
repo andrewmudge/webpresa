@@ -5,7 +5,7 @@ import { Check, Lock, ShieldCheck, Star, Tag, RefreshCw } from 'lucide-react';
 import { createCheckoutSessionAction, type CheckoutActionState } from '@/app/account/checkout/actions';
 import { WEBPRESA_PLANS, PLAN_CATALOG, type WebpresaPlan } from '@/domain/constants/plan-catalog';
 import { cn } from '@/lib/utils';
-import { TrustRow } from './TrustRow';
+import { TrustRow } from '../_components/TrustRow';
 
 const CHECKOUT_TRUST_ITEMS = [
   { icon: ShieldCheck, title: 'Secure Checkout', subtitle: 'Powered by Stripe' },

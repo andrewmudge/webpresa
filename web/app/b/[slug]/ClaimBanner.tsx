@@ -56,7 +56,14 @@ export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClai
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {state !== 'claimed_pending' && (
+          {state === 'claimed_pending' ? (
+            <Link
+              href="/account/claim-status"
+              className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"
+            >
+              Activate Now
+            </Link>
+          ) : (
             <Link
               href={claimHref}
               className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"

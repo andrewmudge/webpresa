@@ -7016,7 +7016,7 @@ Bigger, Webpresa-branded (`/webpresa_w.png`), blue theme (`--color-brand*` token
 The no-active-subscription branch felt like an internal form rather than the "claimed → paid" conversion moment it actually is. `active`/`past_due` are unchanged in behavior (component renamed `BusinessCard` → `SubscribedBusinessCard` for clarity alongside the new one). New components, all in `app/account/claim-status/`:
 
 - `ActivationHero.tsx` — success pill, "Your Website Is Ready" headline, supporting copy, and the business itself rendered as a subtle info badge rather than the primary heading. A `canceled` business gets a reactivation-flavored variant instead (no "just claimed" framing) — same component, no duplicated markup.
-- `WebsiteHeroPreview.tsx` — a CSS laptop + phone device mockup embedding the business's own already-published site live, via the same same-origin `/b/[slug]` iframe technique `WebsitePreviewCard` (`app/app/businesses/[businessId]`) already uses. Deliberately a live embed, not a static screenshot — every business reaching this page already has a published preview (the claim-link-generation guardrail added earlier this session guarantees it), so there's no case where a screenshot would exist but a live embed wouldn't. Renders nothing on load failure — a celebratory hero degrades to no visual, not an error box.
+- `WebsiteHeroPreview.tsx` — a CSS laptop + phone device mockup. Initially built as a live same-origin `/b/[slug]` iframe embed (`WebsitePreviewCard`'s technique), then changed same-day to instead display the business's already-captured Stage 14 Playwright `generated_preview` screenshot — a static `<img>`, no loading/failure state to manage at all, exactly like the admin Screenshots card's own thumbnails. `page.tsx`'s new `getLatestPreviewScreenshots()` finds the newest `completed`/`partial` `generated_preview` `ScanEvent` for the business and resolves whichever `desktop`/`mobile` `captureResults[...].storageKey` completed into a 1-hour signed S3 URL via the existing `getSignedAssetUrl()` (previously only used by the admin-only artifact-viewer route) — no new public route, no widening of `/api/assets`'s deliberately narrow allowed-key prefixes. Renders nothing if no capture has ever completed for this preview.
 - `TrustRow.tsx` — small reusable icon/title/subtitle row component, used twice: directly under the hero (Secure Checkout / No Setup Fees / Cancel Anytime) and again at the page footer (already built / go live in minutes / edit anytime).
 - `PlanSelectionForm.tsx` rewritten — identical form fields and action (`businessId` hidden input, `plan` radio, `agreeToTerms` checkbox, `createCheckoutSessionAction`, unchanged), now rendered as larger comparison cards with a feature-bullet list, a "Most Popular" badge on Growth, a clear selected-card state, and the submit button renamed "Continue to checkout" → "Activate My Website".
 - `domain/constants/plan-catalog.ts` — `PlanCatalogEntry` gained `features: string[]` and optional `featuresIntro` (additive; the two other consumers — the dashboard and Billing page — only ever read `label`/`priceDisplay`, unaffected).
@@ -7027,9 +7027,10 @@ Not yet manually verified in a browser — every business currently claimed in d
 
 ```
 web/app/b/[slug]/ClaimBanner.tsx                          MODIFIED — bigger, blue theme, logo, button CTA
-web/app/account/claim-status/page.tsx                     MODIFIED — restructured around the new components
+web/app/account/claim-status/page.tsx                     MODIFIED — restructured around the new components,
+                                                            getLatestPreviewScreenshots()
 web/app/account/claim-status/ActivationHero.tsx           NEW
-web/app/account/claim-status/WebsiteHeroPreview.tsx       NEW
+web/app/account/claim-status/WebsiteHeroPreview.tsx       NEW — screenshot-based, not a live iframe
 web/app/account/claim-status/TrustRow.tsx                 NEW
 web/app/account/claim-status/PlanSelectionForm.tsx        MODIFIED — full rewrite, same fields/action
 web/domain/constants/plan-catalog.ts                      MODIFIED — features/featuresIntro added
