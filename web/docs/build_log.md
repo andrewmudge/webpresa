@@ -7171,3 +7171,39 @@ npm run build         — succeeds, all routes resolve at their unchanged URLs
 ```
 
 Not yet manually verified in a browser (dev-server verification in this sandbox hit unrelated environment issues — missing Chromium system libraries, and a stale `.next` directory from an intervening production build) — left for the user to confirm visually per their stated preference this session.
+
+---
+
+# Three onboarding-redesign follow-up fixes (2026-07-31)
+
+Real click-through of the onboarding redesign above surfaced three issues, all fixed:
+
+## 1. Gradient looked gray, not blue
+
+`globals.css`'s page-background gradient used an alpha-transparent middle stop (`via-(--color-brand-muted)/40`), which blends with whatever's behind it — `body`'s own background switches to `#0a0a0a` under `prefers-color-scheme: dark`, so the "light blue" gradient was actually blending with near-black, producing the muddy gray reported. Added two new solid (no-alpha) tokens, `--color-page-gradient-start: #cfe6ff` / `--color-page-gradient-end: #006cf1` (the exact blue requested), and switched `claim-status/page.tsx`, `checkout/success/page.tsx`, and `OnboardingShell.tsx` to a plain two-stop `from`/`to` gradient using them — no `via`, nothing alpha-blended, so it can no longer pick up the body's background color underneath it.
+
+## 2. Onboarding two-column layout too narrow / iframe cramped
+
+Two changes: `OnboardingShell.tsx`'s container widened from `max-w-5xl` (1024px) to `max-w-[1800px]` (header, main, and `OnboardingActionBar`'s inner row all updated together so the sticky bottom bar still aligns with the content above it) — matches the explicit ask to use the whole display, unlike `claim-status`/`checkout/success`'s hero-card layout which stays at `max-w-5xl` (not part of this complaint). `OnboardingStepLayout`'s column split changed from `42%/58%` to a strict `1fr/2fr` (1/3 form, 2/3 preview).
+
+## 3. Preview didn't reflect edits without an extra Domain→Review round trip
+
+Real bug, not a caching issue — confirmed against this project's own vendored Next.js 16 docs (`node_modules/next/dist/docs`) before touching anything, per `AGENTS.md`'s standing instruction for this codebase: in dev, pages are always rendered fresh server-side (no Data/Route Cache involved), and this version's client Router Cache defaults `staleTimes.dynamic` to `0` (not cached) for ordinary navigations — so server/client caching was never the cause. The actual mechanism: `WebsitePreviewPanel`/`WebsitePreviewCard` renders in the same tree position across Review/Domain/Publish (all wrapped in the same `OnboardingShell`), and its iframe's `src` (`/b/{slug}`) is identical on every step. React's reconciliation treats this as "the same element, unchanged props" across a client-side navigation and reuses the existing DOM node — the browser therefore never issues a new request for it, so the iframe kept showing pre-edit content until some other, unrelated tree-shape change forced an incidental remount. Fixed by giving `<WebsitePreviewPanel>` a real React `key` at each of its three call sites, `key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}` — this forces a genuine remount (and therefore a fresh iframe fetch) exactly when the underlying business or preview data actually changed, with no polling or added complexity.
+
+## Files changed
+
+```
+web/app/globals.css                                                 MODIFIED — new gradient tokens
+web/app/account/claim-status/page.tsx                               MODIFIED — gradient only
+web/app/account/checkout/success/page.tsx                           MODIFIED — gradient only
+web/app/app/onboarding/[businessId]/OnboardingShell.tsx              MODIFIED — gradient, wider container
+web/app/app/onboarding/[businessId]/OnboardingActionBar.tsx          MODIFIED — matching wider container
+web/app/app/onboarding/[businessId]/OnboardingStepLayout.tsx         MODIFIED — 1fr/2fr column split
+web/app/app/onboarding/[businessId]/WebsitePreviewPanel.tsx          MODIFIED — doc comment on the key requirement
+web/app/app/onboarding/[businessId]/review/page.tsx                  MODIFIED — key added
+web/app/app/onboarding/[businessId]/domain/page.tsx                  MODIFIED — key added
+web/app/app/onboarding/[businessId]/publish/page.tsx                 MODIFIED — key added
+web/docs/build_log.md                                                MODIFIED — this entry
+```
+
+Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 942 tests passed), `npm run build` all pass.

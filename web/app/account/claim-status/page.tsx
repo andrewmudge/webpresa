@@ -130,7 +130,7 @@ export default async function ClaimStatusPage() {
 
   if (businesses.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-(--color-brand-muted) via-(--color-brand-muted)/40 to-white px-4">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-(--color-page-gradient-start) to-(--color-page-gradient-end) px-4">
         <div className="max-w-md text-center space-y-4">
           <p className="text-gray-700">Your account isn&apos;t currently associated with a claimed business.</p>
           <form action={customerSignOutAction}>
@@ -148,7 +148,7 @@ export default async function ClaimStatusPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-(--color-brand-muted) via-(--color-brand-muted)/40 to-white">
+    <div className="min-h-screen bg-gradient-to-b from-(--color-page-gradient-start) to-(--color-page-gradient-end)">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
         <div className="flex items-center gap-2">
           <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto" />

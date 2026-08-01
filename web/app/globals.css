@@ -19,6 +19,12 @@
   --color-accent: #CE9059;
   --color-accent-dark: #b87a45;
 
+  /* Page-background gradient (claim-status, checkout success, onboarding) —
+     solid stops (no alpha) so it never blends with body's dark-mode
+     background into a muddy gray. */
+  --color-page-gradient-start: #cfe6ff;
+  --color-page-gradient-end: #006cf1;
+
   /* Surfaces */
   --color-surface: #FAFAFA;
   --color-border: #e5e7eb;

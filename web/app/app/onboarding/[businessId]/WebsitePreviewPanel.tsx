@@ -15,6 +15,16 @@ interface Props {
  * the real resolved URL. Deliberately not a second preview mechanism:
  * `WebsitePreviewCard` still owns the actual iframe, Desktop/Mobile toggle,
  * loading/failed states, and "Open full preview" link.
+ *
+ * Every call site must pass `key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}`
+ * on the `<WebsitePreviewPanel>` element itself (not a prop here — a real
+ * React `key`). Without it, navigating between onboarding steps (e.g. Review
+ * → Domain after editing the business name) reconciles this same component
+ * in the same tree position and reuses the existing iframe DOM node — since
+ * its `src` string hasn't changed, the browser never re-fetches it, so the
+ * preview keeps showing pre-edit content even though the save already
+ * succeeded. Changing the key forces a real remount (and therefore a fresh
+ * request) exactly when the underlying data actually changed.
  */
 export function WebsitePreviewPanel({ slug, displayUrl, hasDraft, lastUpdated }: Props) {
   return (

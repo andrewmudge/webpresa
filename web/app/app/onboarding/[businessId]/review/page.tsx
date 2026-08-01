@@ -145,7 +145,13 @@ export default async function OnboardingReviewPage({ params, searchParams }: Pro
         }
         right={
           <div className="lg:sticky lg:top-6">
-            <WebsitePreviewPanel slug={business.slug} displayUrl={displayUrl} hasDraft={hasDraft} lastUpdated={latest?.updatedAt} />
+            <WebsitePreviewPanel
+              key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}
+              slug={business.slug}
+              displayUrl={displayUrl}
+              hasDraft={hasDraft}
+              lastUpdated={latest?.updatedAt}
+            />
           </div>
         }
       />
