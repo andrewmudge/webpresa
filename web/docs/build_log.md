@@ -7350,3 +7350,18 @@ web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx        
 web/app/app/(dashboard)/businesses/[businessId]/website/LogoTab.tsx                 MODIFIED — uploadFieldName wired to PhotoSlotPicker
 web/lib/customer-editing/photos.ts                                                  MODIFIED — updateCustomerLogo() accepts a direct file upload
 ```
+
+---
+
+# Stage 19.A follow-up: tab-bar spacing (2026-08-01)
+
+Direct feedback on the full-width tab bar from the previous follow-up: it sat flush against the sidebar with no horizontal margin, and abutted the panel content below it with no gap beyond its 1px border. `EditorTabNav.tsx`: horizontal padding changed from `px-2` to `px-4 sm:px-6`, matching the header/`SaveBanner` row above and the editor panel's own `p-4 sm:p-6` content padding, so the first tab now lines up with the page title and the "Theme" card instead of the sidebar edge; added `mb-3` (margin, not padding, so the border-bottom still hugs the tab row itself) for real breathing room before the scrollable panel content begins. Each tab button's own horizontal padding went from `px-4` (16px) to `px-5` (20px) — an exact 25% increase in inter-tab spacing, per the specific number requested.
+
+Verification: `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npx tsc --noEmit`, `npm test` (89 files, 947 tests), `npm run build` all pass. Manual: real dev server, Playwright screenshot confirms the tab row now aligns with the title/column padding and has visible space before the content below.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                               MODIFIED — this entry
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — padding/margin/gap spacing only
+```
