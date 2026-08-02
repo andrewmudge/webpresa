@@ -76,7 +76,7 @@ interface AppSidebarProps {
 const NAV_ITEMS = [
   { segment: '', label: 'Overview', icon: LayoutDashboard },
   { segment: 'website', label: 'Website', icon: Globe },
-  { segment: 'billing', label: 'Billing', icon: CreditCard },
+  { segment: 'billing', label: 'Subscription', icon: CreditCard },
   { segment: 'settings', label: 'Settings', icon: Settings },
 ];
 

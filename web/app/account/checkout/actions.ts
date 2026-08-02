@@ -159,8 +159,10 @@ export async function createCheckoutSessionAction(
 
 /**
  * Bound to a `businessId` and used directly as a form action (no
- * `useActionState` — a Stripe/lookup failure surfaces as a generic error
- * boundary, matching the low-stakes nature of "open my billing portal").
+ * `useActionState`). A Stripe portal-session failure redirects back to the
+ * calling business's billing page with `?error=portal_unavailable` instead
+ * of throwing to a generic error boundary, so the page can show a plain-
+ * language retry message.
  */
 export async function createBillingPortalSessionAction(businessId: string): Promise<void> {
   const session = await requireCustomerSession();
@@ -169,5 +171,13 @@ export async function createBillingPortalSessionAction(businessId: string): Prom
   const profile = await getCustomerBillingProfile(session.sub);
   if (!profile) redirect('/account/claim-status');
 
-  redirect(await createPortalSessionUrl(profile.stripeCustomerId));
+  let portalUrl: string;
+  try {
+    portalUrl = await createPortalSessionUrl(profile.stripeCustomerId);
+  } catch (err) {
+    console.error('[stripe] portal_session_creation_failed', { businessId, err });
+    redirect(`/app/businesses/${businessId}/billing?error=portal_unavailable`);
+  }
+
+  redirect(portalUrl);
 }
