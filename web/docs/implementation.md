@@ -3415,6 +3415,45 @@ Recommended first slice: Phases 1+2 together — the tab-switching shell with a 
 
 ---
 
+# Stage 19.B — Overview → Website Health Dashboard Redesign
+
+## Status
+
+**Implemented and verified 2026-08-02** — `npm run lint`, `npx tsc --noEmit`, `npm test` (996 tests, including 36 new tests for the view-model module), and `npm run build` all pass. The dev server was started and the route was confirmed to compile and redirect unauthenticated requests correctly with zero server errors; full authenticated, multi-data-state visual verification in a browser was not performed in this environment (no seeded dev-Cognito session/business fixtures for the live/draft/none/billing_recovery states were available) — the four card states, the health checklist, action-item visibility rules, and the recent-activity derivation are instead covered by the unit-test suite described below.
+
+## Objective
+
+Replace `/app/businesses/[businessId]` ("Overview")'s embedded live-preview iframe (`WebsitePreviewCard`) and setup checklist with a reassurance-focused "Website Health" dashboard: four top-level status cards (Website/Domain/SSL/Subscription), a truthful health checklist, a recent-activity feed synthesized from existing timestamps, and a real Action Required list — with no analytics, no editing actions, and no fabricated monitoring capabilities (uptime probing, contact-form-submission verification, certificate-expiry dates) this app does not actually have. `WebsitePreviewCard` itself is untouched and remains exclusively under `/website` (the editor).
+
+## Dependencies
+
+Stage 19 (authorization model, `deriveWebsiteStatus`, `publishDraftActionCustomer`, `createBillingPortalSessionAction` all reused unchanged) and Stage 19.x (`DomainConnection` model/statuses).
+
+## Major deliverables
+
+- `overview-status.ts` — a pure view-model module (no JSX, no fetching) housing every status/health/action/activity derivation, following this app's existing `billing/status.ts` pattern. Intentionally diverges from `billing/status.ts`'s `resolveWebsiteOverallStatus` for one case: the Overview page's top Website card stays "Live" while a newer draft is unpublished, instead of downgrading to "Draft changes" — a deliberate product decision, not a bug; `billing/status.ts` itself is unchanged.
+- `StatusCard`, `WebsiteHealthCard`, `RecentActivityCard`, `ActionRequiredCard`, `SupportCard` — new presentational components under `businesses/[businessId]/`, all server-renderable (no `'use client'`); only the existing publish/billing-portal forms carry interactivity, via the existing `SaveButton`.
+- Website Health checklist relabels the mockup's "Contact form working/configured" as **"Contact details published"** — this app has no submittable contact form at all (`ContactSection.tsx` renders only `tel:`/`mailto:` links from `business.phone`/`business.email`), so "form" language would misrepresent what exists.
+- SSL status has no dedicated field in this app: a Webpresa-hosted site (`/b/[slug]`) is treated as unconditionally "Secure" (a static, documented guarantee of the shared HTTPS deployment), and a custom domain reuses its existing `DomainConnection.status` — never a fabricated certificate-expiry date.
+- Recent Activity is synthesized entirely from existing record timestamps (published-preview `updatedAt`, draft `updatedAt`, `DomainConnection.createdAt`/`activatedAt`, `Business.claimedAt`) — there is no dedicated activity/event log in this app. Subscription events are deliberately excluded: `Business.lastStripeEventAt` is documented elsewhere as diagnostics-only and isn't tied to a specific event type, so labeling it "Subscription renewed" could misrepresent what actually happened.
+- Removed from Overview: the embedded `WebsitePreviewCard` iframe, the `w-[95%]` full-bleed wrapper, the "Finish setting up your website" logo/photos/contact/theme checklist (those links opened the editor — counts as an editing shortcut, which Overview must not contain), the "Edit website" header button, and the standalone `cancelAtPeriodEnd` banner (folded into the Subscription card's own text instead).
+- Retained unchanged: the onboarding force-redirect/resume banner, the `billing_recovery` read-only payment banner, the `mode === 'none'` reactivation screen, and `deriveWebsiteStatus`/`listDomainConnectionsForBusiness`/`PLAN_CATALOG`/`createBillingPortalSessionAction`.
+
+## Acceptance criteria
+
+- No analytics/traffic content anywhere on Overview.
+- No iframe, screenshot, or editing action (Edit Website/Content/Theme/etc.) anywhere on Overview.
+- The Action Required card never renders when no real actionable item exists (no empty-state panel).
+- A newer unpublished draft never downgrades the top Website status card away from "Live" while a published version is up.
+- A business with no custom domain shows a neutral/healthy Domain and SSL state, never implying the site is offline.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` all pass.
+
+## Deferred work
+
+Visitor/traffic analytics, CTA click tracking, live uptime monitoring, automated contact-form-delivery health checks, a real activity/event log (richer than timestamp-derived entries), publish-time screenshot capture.
+
+---
+
 # Stage 20 — Contact Forms and Lead Delivery
 
 ## Objective

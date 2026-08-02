@@ -976,6 +976,20 @@ Review/Domain/Publish were restructured around this shell with their existing fi
 
 ---
 
+## Overview → Website Health Dashboard Redesign (Stage 19.B)
+
+**Implemented and verified 2026-08-02** — see `implementation.md`, Stage 19.B, for the full spec. `/app/businesses/[businessId]` ("Overview") is no longer where the customer previews their site — `WebsitePreviewCard` was removed from this page entirely and now lives exclusively inside `/website` (Stage 19.A's editor panel). Overview is now a reassurance-focused **Website Health dashboard**: four top status cards (Website/Domain/SSL/Subscription), a truthful health checklist, a recent-activity feed, and a real Action Required list — deliberately no analytics/traffic content and no editing actions of any kind.
+
+**New view-model module**: `overview-status.ts` (co-located with `page.tsx`) — pure functions, no JSX, no fetching, mirroring the existing `billing/status.ts` pattern (`StatusDisplay`/tone types, `Pick<>`-narrowed parameter types for testability, same file houses every derivation the page needs). `page.tsx` loads `Business`/`SitePreview`/`DomainConnection` data once, at the page boundary, and passes typed props down to five new presentational components (`StatusCard`, `WebsiteHealthCard`, `RecentActivityCard`, `ActionRequiredCard`, `SupportCard`) — none of them fetch independently, and none need `'use client'`; only the existing `publishDraftActionCustomer`/`createBillingPortalSessionAction` forms (via the existing `SaveButton`) carry interactivity.
+
+**One deliberate divergence from `billing/status.ts`**: `resolveWebsiteOverallStatus` (Billing page) downgrades its badge to "Draft changes" whenever a newer preview sits unpublished on top of a live one. Overview's own `resolveWebsiteCardStatus` does not — the top Website card stays "Live" as long as anything has ever been published, and surfaces the pending draft separately (Website Health checklist + Action Required) instead of downgrading the headline status. `billing/status.ts` itself is untouched; its own tests and page are unaffected.
+
+**No new data model.** Every signal already existed: `deriveWebsiteStatus` (live/draft/none + `hasDraft`), `DomainConnection.status` (domain + a documented SSL-status heuristic — this app has no dedicated certificate field, so a Webpresa-hosted site is treated as unconditionally secure by the shared HTTPS deployment, and a custom domain's SSL state is read off its existing `DomainConnection.status`, never a fabricated expiry date), and `Business.subscriptionStatus`/`cancelAtPeriodEnd`/`currentPeriodEnd`. **Recent Activity has no backing event log** (none exists anywhere in this app) — it's synthesized from existing record timestamps (published/draft `updatedAt`, `DomainConnection.createdAt`/`activatedAt`, `Business.claimedAt`), capped at 5, newest first; `Business.lastStripeEventAt` is deliberately excluded since it's documented elsewhere as diagnostics-only and not tied to a specific event type.
+
+**Truthfulness correction versus the original mockup this stage was built from**: the mockup's "Contact form working"/"Contact form configured" checklist item does not describe anything that exists in this app — `app/b/[slug]/template/ContactSection.tsx` renders only `tel:`/`mailto:` links from `Business.phone`/`email`, never a submittable lead-capture form. The Website Health checklist instead shows **"Contact details published"**, gated on `phone || email` being present.
+
+---
+
 ## API boundaries
 
 Admin mutations use **Next.js Server Actions** (`'use server'` modules):

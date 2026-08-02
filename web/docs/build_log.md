@@ -7462,3 +7462,52 @@ Verification: `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npx
 web/docs/build_log.md                                                               MODIFIED — this entry
 web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — rounded-2xl/border/shadow-sm
 ```
+
+---
+
+# Stage 19.B — Overview → Website Health Dashboard Redesign (2026-08-02)
+
+## What changed
+
+`/app/businesses/[businessId]` ("Overview") was rebuilt from a page dominated by an embedded live-preview iframe (`WebsitePreviewCard`) plus a setup checklist into a reassurance-focused **Website Health dashboard**, per the attached mockup — cross-referenced against the real repo/data model before implementing, rather than matched pixel-for-pixel, since several mockup elements described capabilities this app doesn't actually have (a submittable contact form, uptime probing, certificate-expiry dates). `WebsitePreviewCard` itself was not touched — it's untouched and still used, unchanged, inside `/website`'s editor.
+
+Four research passes preceded implementation: the authoritative docs (`implementation.md`/`architecture.md`/`deployment.md`/`build_log.md`), the current Overview/dashboard/editor code, and the domain/SSL/subscription/activity data models — confirming, among other things, that there is no dedicated activity/event log, no dedicated SSL/certificate field, and no submittable contact form anywhere in this app (`ContactSection.tsx` renders only `tel:`/`mailto:` links). Four product decisions were confirmed with the user before coding: drop the old logo/photo/contact/theme setup checklist from Overview (those links open the editor — an editing shortcut, which Overview must not contain); omit subscription events from Recent Activity (`Business.lastStripeEventAt` is diagnostics-only, not tied to a specific event type); fold the scheduled-cancellation notice into the Subscription card's own text instead of a separate banner; and use a timezone-safe "Welcome back, {name}!" greeting instead of a server-clock-derived "Good afternoon."
+
+## New view-model module
+
+`overview-status.ts` — pure functions, no JSX, no fetching, modeled on the existing `billing/status.ts`. Houses every status/health/action/activity derivation as typed functions over `Pick<>`-narrowed parameter types (`DomainConnectionSummary`, `SitePreviewSummary`), so the module is cheap to unit-test without constructing full domain records. One deliberate, documented divergence from `billing/status.ts`'s `resolveWebsiteOverallStatus`: Overview's top Website card stays "Live" while a newer draft sits unpublished (that helper itself, and the Billing page that uses it, are untouched).
+
+## New components
+
+`StatusCard`, `WebsiteHealthCard`, `RecentActivityCard`, `ActionRequiredCard`, `SupportCard` — all server-renderable (no `'use client'`); only the existing `publishDraftActionCustomer`/`createBillingPortalSessionAction` forms (via the existing `SaveButton`) carry interactivity, same pattern the Billing page already uses.
+
+## Removed from Overview
+
+The embedded `WebsitePreviewCard` iframe and its `w-[95%]` full-bleed wrapper; the "Finish setting up your website" logo/photos/contact/theme checklist; the "Edit website" header button; the standalone `cancelAtPeriodEnd` banner (folded into the Subscription card's own text). Retained unchanged: the onboarding force-redirect/resume banner, the `billing_recovery` read-only payment banner, the `mode === 'none'` reactivation screen.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings
+npm test             — 91 files, 996 tests passed (36 new, including the pre-existing billing/status.test.ts unchanged and green)
+npm run build        — succeeds
+```
+
+Dev server started and `/app/businesses/[businessId]` confirmed to compile and correctly redirect an unauthenticated request to sign-in with zero server errors in the log. Full authenticated, multi-data-state browser verification (live/draft/none/billing_recovery) was not performed — no seeded dev-Cognito session or business fixtures for those states were available in this environment; those states are instead covered by the 36 new unit tests against `overview-status.ts`.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                                          MODIFIED — this entry
+web/docs/implementation.md                                                                      MODIFIED — new Stage 19.B section
+web/docs/architecture.md                                                                        MODIFIED — new Stage 19.B section
+web/app/app/(dashboard)/businesses/[businessId]/page.tsx                                        MODIFIED — rebuilt as the Website Health dashboard
+web/app/app/(dashboard)/businesses/[businessId]/overview-status.ts                              NEW — view-model module
+web/app/app/(dashboard)/businesses/[businessId]/StatusCard.tsx                                  NEW
+web/app/app/(dashboard)/businesses/[businessId]/WebsiteHealthCard.tsx                            NEW
+web/app/app/(dashboard)/businesses/[businessId]/RecentActivityCard.tsx                           NEW
+web/app/app/(dashboard)/businesses/[businessId]/ActionRequiredCard.tsx                           NEW
+web/app/app/(dashboard)/businesses/[businessId]/SupportCard.tsx                                  NEW
+web/app/app/(dashboard)/businesses/[businessId]/__tests__/overview-status.test.ts                NEW — 36 tests
+```
