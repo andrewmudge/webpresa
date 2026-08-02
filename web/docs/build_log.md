@@ -7407,3 +7407,43 @@ web/app/app/(dashboard)/AppSidebar.tsx                                          
 web/app/app/(dashboard)/businesses/[businessId]/WebsitePreviewCard.tsx              MODIFIED — status/URL bar, customDomainUrl prop
 web/app/app/(dashboard)/businesses/[businessId]/website/page.tsx                    MODIFIED — resolves customDomainUrl, try/catch
 ```
+
+---
+
+# Stage 19.A follow-up: desktop preview rendering as mobile in the narrow split-view panel (2026-08-02)
+
+## The bug
+
+The split-view editor's preview panel is often only ~700-950px wide — narrower than most of the public template's own responsive breakpoints (confirmed the header nav collapses at Tailwind's `md:`, 768px, in `GeneratedSiteHeader.tsx:49,94`). "Desktop" mode just set the iframe's wrapper to `w-full`, so the iframe's *true* CSS width equalled the panel's width, not a real desktop width — the embedded site has no concept of a "logical" viewport separate from its actual rendered size, so it picked its own mobile/tablet layout even while the toggle said "Desktop." Concretely: a customer who sets separate desktop and mobile hero photos would see the *mobile* one in "Desktop" mode, with no indication anything was wrong (clicking "Open full preview," a real full-width tab, showed the correct desktop hero) — a genuinely confusing, silent bug.
+
+## The fix
+
+The standard technique for "responsive content preview in a small panel": render the iframe at a fixed, true desktop width, then visually shrink the whole box with CSS `transform: scale()` — a paint-time-only transform that doesn't change the iframe's actual CSS layout viewport, so the embedded page's media queries still measure against the real width and pick its genuine desktop layout.
+
+Reference size: **1600×900** — not arbitrary. It's one of this app's own two existing canonical "desktop" dimensions (`lib/image/hero-dimensions.ts:14-15`'s hero-photo full-bleed-eligibility check already uses the same 1920×1080/1600×900 pair), comfortably clearing every Tailwind breakpoint the template uses.
+
+`WebsitePreviewCard.tsx`: the CSS-sized outer box (`w-full max-w-[1600px] h-[80vh] min-h-[560px]`, capped/centered beyond 1600px) is measured via a `ResizeObserver` (`useLayoutEffect`, so the correction lands before paint). From that measurement: `scale = measuredWidth / 1600`, and the native iframe height is back-derived (`measuredHeight / scale`) so the visually-scaled result still fills exactly the same `80vh`/560px-minimum box as before — the native iframe just renders more or less of the page vertically as needed. The iframe sits in an absolutely-positioned inner `<div>` fixed at the true `1600 × nativeHeight` size with `transform: scale(...)`/`origin-top-left`; the loading/"couldn't load" overlays stay in the *outer*, unscaled box so their text never shrinks to unreadable size at small scale factors.
+
+**Kept the DOM shape identical between Desktop and Mobile modes** (mobile is modeled as the same "native size, scaled" shape with a permanently fixed `scale = 1`) specifically so toggling the Desktop/Mobile buttons updates this element's size in place rather than unmounting and remounting it — the iframe doesn't reload just from switching viewports, matching the toggle's pre-existing instant-switch behavior. Mobile itself is otherwise untouched — it already rendered at a real, fixed 390×844 (iPhone) viewport, which was already accurate.
+
+## Lint fixes — same class of issue, two different rules this time
+
+First pass reset `desktopSize` to `null` inside the `useLayoutEffect` when leaving desktop mode (to avoid briefly showing a stale scale on returning to it) — flagged by `react-hooks/set-state-in-effect` (same rule hit twice already this session). Tried React's own documented "adjust state when a prop changes" workaround (a ref-based previous-value comparison, with the `setState` call moved out of the effect into the render body) — this repo's lint config also enables `react-hooks/refs`, which forbids reading or writing a ref's `.current` during render entirely (consistent with React Compiler's stricter assumptions, which this codebase's `eslint-config-next`/React 19 tooling appears to enable). Both attempted fixes were disallowed, so: **the reset was removed outright**, not worked around — the last-measured `desktopSize` is almost always still correct when returning to desktop mode (the panel usually hasn't resized in between), and in the rare case it has, the `ResizeObserver` corrects it within one tick regardless. Simpler code, no lint suppression needed.
+
+## Verification
+
+```
+npm run lint        — 0 errors, 2 pre-existing unrelated warnings
+npx tsc --noEmit     — passes
+npm test             — 89 files, 947 tests passed
+npm run build        — succeeds
+```
+
+Manual verification left to the user per their stated preference this session.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                               MODIFIED — this entry
+web/app/app/(dashboard)/businesses/[businessId]/WebsitePreviewCard.tsx              MODIFIED — desktop-mode scale-to-fit rendering
+```
