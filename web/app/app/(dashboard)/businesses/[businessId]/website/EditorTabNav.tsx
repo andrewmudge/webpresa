@@ -85,7 +85,10 @@ export function EditorTabNav({ activeTab, onSelect }: EditorTabNavProps) {
       // (the first-pass fix) only indented the button *text*, leaving the
       // bg-white/border-b rectangle itself full-bleed against both walls.
       // `mb-3` is the gap before the scrollable panel content below.
-      className="flex gap-1 overflow-x-auto bg-white border-b border-gray-200 mx-4 sm:mx-6 mb-3 sticky top-0 z-10"
+      // `rounded-2xl border ... shadow-sm` — the same treatment every other
+      // card on this page uses (`Card` in FormBits.tsx, `WebsitePreviewCard`)
+      // — a full border on all sides, not just the previous bottom-only one.
+      className="flex gap-1 overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm mx-4 sm:mx-6 mb-3 sticky top-0 z-10"
     >
       {TAB_IDS.map((id, index) => {
         const selected = activeTab === id;

@@ -7447,3 +7447,18 @@ Manual verification left to the user per their stated preference this session.
 web/docs/build_log.md                                                               MODIFIED — this entry
 web/app/app/(dashboard)/businesses/[businessId]/WebsitePreviewCard.tsx              MODIFIED — desktop-mode scale-to-fit rendering
 ```
+
+---
+
+# Stage 19.A follow-up: rounded corners on the tab bar (2026-08-02)
+
+`EditorTabNav.tsx`'s outer container had only a `border-b` (bottom-only, square) — every other card on this page (`Card` in `FormBits.tsx`, `WebsitePreviewCard`) uses `rounded-2xl border ... shadow-sm` (a full border on all sides). Switched the tab bar to the same treatment for visual consistency.
+
+Verification: `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npx tsc --noEmit`, `npm run build` all pass. Pure `className` change — no logic touched, so the existing test suite is unaffected.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                               MODIFIED — this entry
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — rounded-2xl/border/shadow-sm
+```
