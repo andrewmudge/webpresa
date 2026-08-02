@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 
 /**
@@ -82,7 +82,21 @@ function extractBusinessId(pathname: string): string | null {
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
     <Link href="/app" className="flex items-center gap-3" title="Webpresa">
-      <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-8 w-auto shrink-0" />
+      {/* Fully unconstrained-but-bounded on both axes when collapsed
+          (`h-auto max-h-8 max-w-8`, no fixed dimension) so the browser picks
+          the largest size that fits within both caps while preserving the
+          logo's real aspect ratio — a fixed `h-8` here (the expanded-only
+          treatment) combined with the collapsed rail's much narrower
+          available width let Tailwind's `max-width:100%` preflight reset
+          cap the rendered width while height stayed pinned, stretching the
+          mark out of proportion. */}
+      <Image
+        src="/webpresa_w.png"
+        alt="Webpresa"
+        width={692}
+        height={394}
+        className={`w-auto shrink-0 ${collapsed ? 'h-auto max-h-8 max-w-8' : 'h-8'}`}
+      />
       {!collapsed && (
         <div>
           <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
@@ -205,8 +219,19 @@ export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
           collapsed ? 'w-16' : 'w-60'
         }`}
       >
-        <div className={`px-5 py-5 border-b border-white/10 ${collapsed ? 'px-3' : ''}`}>
-          <Brand collapsed={collapsed} />
+        <div className={`border-b border-white/10 ${collapsed ? 'px-3 py-4' : 'px-5 py-5'}`}>
+          <div className={`flex items-center ${collapsed ? 'flex-col gap-3' : 'justify-between gap-2'}`}>
+            <Brand collapsed={collapsed} />
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="shrink-0 p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+          </div>
         </div>
         <BusinessSwitcher businesses={businesses} currentId={currentId} collapsed={collapsed} />
         <Nav currentId={currentId} collapsed={collapsed} />
@@ -228,19 +253,6 @@ export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
           </div>
         )}
         <Footer signedInAs={signedInAs} collapsed={collapsed} />
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-medium text-white/50 hover:text-white hover:bg-white/10 border-t border-white/10 transition-colors"
-        >
-          {collapsed ? <ChevronsRight size={16} /> : (
-            <>
-              <ChevronsLeft size={16} /> Collapse
-            </>
-          )}
-        </button>
       </aside>
 
       <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-brand px-4 py-3 shadow-lg">

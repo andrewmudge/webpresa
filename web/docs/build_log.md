@@ -7310,3 +7310,43 @@ web/app/app/(dashboard)/AppSidebar.tsx                                          
 web/domain/constants/website-sections.ts                                            MODIFIED — description field on WebsiteSectionCatalogEntry
 web/app/b/[slug]/template/index.tsx                                                 MODIFIED — data-editor-section attribute (Fragment → div)
 ```
+
+---
+
+# Stage 19.A follow-up: sidebar toggle placement, logo squish, full-width tab bar, tab icons, Logo upload (2026-08-01)
+
+Direct feedback on the just-shipped redesign, four fixes:
+
+1. **Sidebar collapse toggle moved to a small icon button in the header, next to the Webpresa mark** (`AppSidebar.tsx`) — was a full-width `Collapse`/`ChevronsLeft` text button pinned below the "Sign out" footer, easy to miss and inconsistent with the icon-only toggle pattern most dashboard apps use. Now `PanelLeftClose`/`PanelLeftOpen` (`lucide-react`, already a dependency), positioned in the same header row as `Brand`: side-by-side when expanded, stacked when collapsed (no room for both side-by-side at `w-16`). Same `toggleCollapsed()`/`useSyncExternalStore` state underneath, unchanged.
+2. **Webpresa logo no longer distorts when the sidebar is collapsed** — real bug, not cosmetic nitpicking: the old `h-8 w-auto` fixed the *height* while width was only bounded by Tailwind's Preflight `img { max-width: 100% }` reset. At `w-16` (64px, minus padding), the logo's natural aspect-ratio width (~56px at 32px tall) exceeded the available space, so the browser clamped *width* to fit while *height* stayed pinned at 32px — squishing it out of proportion. Fixed by never fixing both dimensions at once when collapsed: `h-auto max-h-8 max-w-8` (neither dimension fixed, both only capped) lets the browser pick the largest size satisfying both caps while preserving the real aspect ratio. Expanded state unchanged (`h-8`, ample horizontal room, was never actually broken).
+3. **`EditorTabNav` now spans the full workspace width**, sitting above both the editing panel and the preview panel, not scoped to the left column — moved one level up in `EditorShell.tsx`'s tree (was nested inside the `lg:w-[440px]` editor panel div; now a direct child of the outer `flex flex-col` shell, so it renders as a full-width block by default). Also gave each of the 8 tabs an icon (`Palette`/`ImageIcon`/`LayoutGrid`/`FileText`/`Wrench`/`Camera`/`Phone`/`Search`) next to its label, matching the reference design and the same icon-plus-label pattern `AppSidebar`'s own nav already uses.
+4. **Logo tab gained a direct upload option** — `PhotoSlotPicker` already supported one (`uploadFieldName`), but `LogoTab.tsx` never passed it and `updateCustomerLogo()` (`lib/customer-editing/photos.ts`) never read a file field at all ("no direct-upload input (matches the original design)," per its own prior doc comment). Now accepts `logoPhotoFile`, uploaded via the same `uploadBusinessAsset()` helper every other photo slot uses — deliberately under its own `logo/` key prefix rather than the shared `photos/` one, and deliberately **not** appended to `Business.photoUrls` the way a hero/about/etc. slot upload is (a logo isn't "a photo of your business" in the Gallery section's sense; adding it there would make it show up in the public Gallery, which nothing about this request asked for).
+
+## Verification
+
+```
+npm run lint        — 0 errors, 2 pre-existing unrelated warnings
+npx tsc --noEmit     — passes (after clearing a stale .next/dev/types cache — same
+                        known class of artifact as Stage 19's own build, unrelated
+                        to this change)
+npm test             — 89 files, 947 tests passed (no test changes needed — none of
+                        these four fixes touch tested lib-layer logic except
+                        updateCustomerLogo, whose existing picked-URL path is
+                        unchanged and whose new upload path mirrors the already-
+                        tested pattern in applySlotUpdate)
+npm run build        — succeeds
+```
+
+Manual: real dev server, real dev DynamoDB business, Playwright/headless Chromium screenshots (same setup as the initial Stage 19.A verification) — confirmed the full-width tab bar with icons, the top-of-sidebar collapse toggle, a correctly-proportioned collapsed logo (close-up crop inspected directly), and the Logo tab's new "Or upload a new photo" / "Choose File" control. Zero console errors.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                               MODIFIED — this entry
+
+web/app/app/(dashboard)/AppSidebar.tsx                                              MODIFIED — toggle repositioned to header, logo aspect-ratio fix
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorShell.tsx             MODIFIED — EditorTabNav hoisted above the two-column row
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — per-tab icons
+web/app/app/(dashboard)/businesses/[businessId]/website/LogoTab.tsx                 MODIFIED — uploadFieldName wired to PhotoSlotPicker
+web/lib/customer-editing/photos.ts                                                  MODIFIED — updateCustomerLogo() accepts a direct file upload
+```

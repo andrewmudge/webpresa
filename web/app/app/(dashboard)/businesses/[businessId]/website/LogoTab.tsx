@@ -18,6 +18,7 @@ export function LogoTab({ businessId, business, isReadOnly }: Props) {
         <PhotoSlotPicker
           label="Logo"
           fieldName="logoPhotoUrl"
+          uploadFieldName="logoPhotoFile"
           currentValue={business.logoUrl}
           photoUrls={photoUrls}
           disabled={isReadOnly}

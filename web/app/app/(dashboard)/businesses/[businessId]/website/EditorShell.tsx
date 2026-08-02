@@ -66,6 +66,11 @@ export function EditorShell({ tabs, preview }: EditorShellProps) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      {/* Spans the full width of the workspace — above both the editing
+          panel and the preview panel — rather than being scoped to just the
+          left column. */}
+      <EditorTabNav activeTab={activeTab} onSelect={selectTab} />
+
       <div className="lg:hidden flex border-b border-gray-200 bg-white">
         <button
           type="button"
@@ -93,7 +98,6 @@ export function EditorShell({ tabs, preview }: EditorShellProps) {
         <div
           className={`${mobileView === 'edit' ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 lg:w-[440px] lg:shrink-0 lg:border-r lg:border-gray-200 bg-[#F0F4F8] lg:bg-transparent`}
         >
-          <EditorTabNav activeTab={activeTab} onSelect={selectTab} />
           <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-6">
             {TAB_IDS.map((id) => (
               <div

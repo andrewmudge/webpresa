@@ -374,14 +374,29 @@ export async function updateCustomerServicesPhotoSlot(businessId: string, formDa
   return applySlotUpdate(businessId, formData, 'servicesPhotoUrl', 'servicesPhotoFile', 'servicesPhotoUrl', 'servicesImageUrl');
 }
 
-/** Logo card — no theme dual-write (logo isn't a SitePreview.theme field), no direct-upload input (matches the original design). */
+/**
+ * Logo card — no theme dual-write (logo isn't a `SitePreview.theme` field).
+ * Stage 19.A added a direct-upload option (`logoPhotoFile`), uploaded under
+ * its own `logo/` prefix rather than the shared `photos/` one `photoUrls`
+ * pulls from — a logo isn't "a photo of your business" in the Gallery
+ * section's sense, so a freshly uploaded logo intentionally does NOT get
+ * appended to `Business.photoUrls` the way a hero/about/etc. slot upload
+ * does in `applySlotUpdate` above.
+ */
 export async function updateCustomerLogo(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
-  const picked = (formData.get('logoPhotoUrl') as string) || undefined;
   try {
     const existing = await getBusinessById(businessId);
     if (!existing) return { message: 'Business not found' };
 
-    const logoUrl = resolveLogoUrl(picked, existing.logoUrl);
+    const file = formData.get('logoPhotoFile');
+    let logoUrl: string | undefined;
+    if (file instanceof File && file.size > 0) {
+      logoUrl = await uploadBusinessAsset(businessId, file, `logo/${crypto.randomUUID()}.${fileExtension(file)}`);
+    } else {
+      const picked = (formData.get('logoPhotoUrl') as string) || undefined;
+      logoUrl = resolveLogoUrl(picked, existing.logoUrl);
+    }
+
     if (logoUrl === existing.logoUrl) return { logoUrl };
 
     await updateBusiness(businessId, { logoUrl });

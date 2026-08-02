@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import { Palette, Image as ImageIcon, LayoutGrid, FileText, Wrench, Camera, Phone, Search, type LucideIcon } from 'lucide-react';
 
 /**
  * The 8 editor categories, unchanged from the prior anchor-scroll page (see
@@ -21,6 +22,17 @@ const TAB_LABELS: Record<TabId, string> = {
   photos: 'Photos',
   contact: 'Contact & CTAs',
   seo: 'SEO',
+};
+
+const TAB_ICONS: Record<TabId, LucideIcon> = {
+  theme: Palette,
+  logo: ImageIcon,
+  sections: LayoutGrid,
+  content: FileText,
+  services: Wrench,
+  photos: Camera,
+  contact: Phone,
+  seo: Search,
 };
 
 export function isTabId(value: string): value is TabId {
@@ -68,6 +80,7 @@ export function EditorTabNav({ activeTab, onSelect }: EditorTabNavProps) {
     >
       {TAB_IDS.map((id, index) => {
         const selected = activeTab === id;
+        const Icon = TAB_ICONS[id];
         return (
           <button
             key={id}
@@ -82,12 +95,13 @@ export function EditorTabNav({ activeTab, onSelect }: EditorTabNavProps) {
             tabIndex={selected ? 0 : -1}
             onClick={() => onSelect(id)}
             onKeyDown={(event) => handleKeyDown(event, index)}
-            className={`shrink-0 px-4 py-3 text-sm font-semibold border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-brand) focus-visible:ring-offset-1 rounded-t-md ${
+            className={`flex items-center gap-1.5 shrink-0 px-4 py-3 text-sm font-semibold border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-brand) focus-visible:ring-offset-1 rounded-t-md ${
               selected
                 ? 'border-(--color-brand) text-(--color-brand)'
                 : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
             }`}
           >
+            <Icon size={15} aria-hidden="true" />
             {TAB_LABELS[id]}
           </button>
         );
