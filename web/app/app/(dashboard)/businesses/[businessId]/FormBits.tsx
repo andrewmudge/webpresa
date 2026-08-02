@@ -1,7 +1,6 @@
 'use client';
 
 import { useFormStatus } from 'react-dom';
-import type { LucideIcon } from 'lucide-react';
 
 /** Small shared form primitives reused across every customer editor tab. */
 
@@ -89,7 +88,7 @@ export function SaveButton({
   label = 'Save',
   pendingLabel = 'Saving…',
   disabled,
-  icon: Icon,
+  icon,
   variant = 'primary',
   fullWidthOnMobile,
 }: {
@@ -97,8 +96,10 @@ export function SaveButton({
   /** Shown in place of `label` while the form submission is pending. */
   pendingLabel?: string;
   disabled?: boolean;
-  /** Rendered after the label — e.g. `ExternalLink` for actions that hand off to Stripe. */
-  icon?: LucideIcon;
+  /** A pre-rendered icon element (e.g. `<ExternalLink size={16} />`) shown
+   *  after the label — must be an element, not a component reference, since
+   *  this is a Client Component that a Server Component page renders. */
+  icon?: React.ReactNode;
   variant?: keyof typeof SAVE_BUTTON_VARIANT_CLASSES;
   fullWidthOnMobile?: boolean;
 }) {
@@ -110,7 +111,7 @@ export function SaveButton({
       className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${SAVE_BUTTON_VARIANT_CLASSES[variant]} ${fullWidthOnMobile ? 'w-full sm:w-auto' : ''}`}
     >
       {pending ? pendingLabel : label}
-      {!pending && Icon && <Icon size={16} className="shrink-0" aria-hidden="true" />}
+      {!pending && icon}
     </button>
   );
 }

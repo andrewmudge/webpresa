@@ -118,7 +118,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
               <SaveButton
                 label="Manage Payment & Subscription"
                 pendingLabel="Opening Stripe…"
-                icon={ExternalLink}
+                icon={<ExternalLink size={16} className="shrink-0" aria-hidden="true" />}
                 fullWidthOnMobile
               />
             </form>
@@ -235,7 +235,13 @@ export default async function BillingPage({ params, searchParams }: Props) {
       <Card title="Billing history">
         <p className="text-sm text-gray-600">Your invoices and receipts are available in the Stripe billing portal.</p>
         <form action={createBillingPortalSessionAction.bind(null, businessId)} className="mt-4">
-          <SaveButton label="View invoices in Stripe" pendingLabel="Opening Stripe…" icon={ExternalLink} variant="secondary" fullWidthOnMobile />
+          <SaveButton
+            label="View invoices in Stripe"
+            pendingLabel="Opening Stripe…"
+            icon={<ExternalLink size={16} className="shrink-0" aria-hidden="true" />}
+            variant="secondary"
+            fullWidthOnMobile
+          />
         </form>
       </Card>
     </div>
