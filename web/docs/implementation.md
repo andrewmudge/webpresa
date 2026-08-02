@@ -3260,6 +3260,150 @@ Prefer: website address, connect your domain, buy a new domain, domain provider,
 
 ---
 
+# Stage 19.A — Website Editor Redesign
+
+## Status
+
+**Implemented and manually verified 2026-08-01** — all 6 phases shipped in one pass; `npm run lint`/`npx tsc --noEmit`/`npm test`/`npm run build` all pass, and the redesigned editor was click-tested in a real browser (Playwright, headless Chromium) against real dev DynamoDB data using a locally-minted customer session JWT for a genuine claimed/subscribed business — tab switching, the persistent preview panel, sidebar collapse/expand, the `/design` → `/website#theme` redirect, and the mobile Edit/Preview toggle were all confirmed working with zero browser console errors. This spec is the product of exhaustively re-inspecting the real, shipped Stage 19/19.x code (not just the docs describing it) — several things `architecture.md` described as already true were found not to match the actual code (see "Corrections to prior documentation" below). Overview page's own preview card was not click-tested end-to-end — it independently depends on the `CUSTOMER_ONBOARDING_TABLE_NAME` DynamoDB table, which is genuinely not yet deployed in this environment (confirmed via `aws dynamodb list-tables`, matching `deployment.md`'s documented status), a pre-existing gap unrelated to this stage; the identical `WebsitePreviewCard`/staleness-guard code path was verified instead via the new editor panel, which doesn't depend on that table.
+
+## Objective
+
+Redesign `/app/businesses/[businessId]/website` from a form-first, single-column scrolling page into a **preview-first** editor: a persistent, always-visible representation of the customer's website next to compact editing controls, so a customer always knows what their site looks like, what they're changing, and whether it's saved/live — without turning Webpresa into an unrestricted page builder. No drag-and-drop layout design, no custom HTML/CSS, no AI regeneration from the dashboard, no multi-page editing.
+
+## Dependencies
+
+Stage 19 (this redesign reuses its authorization model, editing actions, and draft/publish primitives unchanged) and Stage 19.x (reuses `WebsitePreviewCard`/`WebsitePreviewPanel`'s iframe pattern and the recently-fixed preview-staleness technique).
+
+## Corrections to prior documentation
+
+- **`architecture.md`'s Stage 19 entry claims the Live/Draft/None website-state derivation is a single shared computation "at render time."** The real code independently re-implements the identical 4-line computation in at least 6 files (`page.tsx`, `website/page.tsx`, `settings/page.tsx`, and 3 onboarding pages) — a duplicated pattern, not a shared function. This stage centralizes it (see "Major deliverables").
+- **A `/design` route still exists and is still live**, despite a git commit titled "move design into website" suggesting it was retired. It duplicates Theme editing and all 6 photo-slot pickers, which are already independently present inside `website/`'s own tabs (`ThemeTab`, `LogoTab`, `ContentTab`, `ServicesTab`), writing through the same `lib/customer-editing/*` functions via a different action name. This is dead, redundant UI, not a partial migration — this stage removes it.
+- **`WebsitePreviewCard` on the Overview page (`page.tsx`) has the exact unfixed "iframe shows stale content after a save" bug** that was found and fixed in the onboarding wizard's `WebsitePreviewPanel` on 2026-07-31 (`key={`${business.updatedAt}:${latest?.updatedAt}`}`). It hasn't surfaced yet only because Overview is a single fixed route, not a multi-step wizard reusing the same tree position across navigations — but the same root cause (an iframe whose `src` doesn't change across a client-side navigation gets reused by React with no refetch) applies identically. This stage fixes it in both the new shell and the pre-existing Overview instance.
+
+## Major deliverables
+
+- `EditorShell` + `EditorTabNav` (new, `website/`) — a two-pane, preview-first layout replacing the anchor-scroll single column. All 8 existing tabs (Theme, Logo, Sections, Content, Services, Photos, Contact & CTAs, SEO) reused completely unmodified, kept simultaneously mounted with CSS-only visibility toggling (never conditionally unmounted — see "Tab-switching" below for why this is a hard requirement, not a convenience).
+- `WebsitePreviewPanel` inside the new shell, reusing `WebsitePreviewCard` unmodified, plus the `key`-based staleness-guard applied there **and** retrofitted onto the pre-existing Overview call site.
+- `AppSidebar` gains collapse/expand-to-icon-rail (genuinely new — no precedent anywhere in this codebase, admin sidebar included): `localStorage`-persisted collapsed state, icon-only nav when collapsed (`lucide-react`, already a dependency), full nav restored on expand. Collapse only applies to the `md:+` fixed sidebar; the mobile drawer is unaffected.
+- Deletion of the redundant `/design` route, its two now-fully-duplicate Server Actions (`updateThemeActionCustomer`, `updatePhotoSlotsAction`), and its sidebar nav entry, plus a redirect from the old URL.
+- One-line descriptions added to `WEBSITE_SECTION_CATALOG` (compile-time constant, no persistence change) so the Sections tab reads less like raw identifiers.
+- `data-editor-section={type}` DOM attribute added to every section's root element in `app/b/[slug]/template/section-registry.tsx`'s render functions — foundational metadata only, for a possible future click-to-edit stage; no interactive behavior ships in this stage.
+- Centralized `lib/customer-editing/site-status.ts` (`deriveWebsiteState(previews)`) replacing the 6 independent copies of the Live/Draft/None computation named above.
+- One shared save/error/read-only banner component replacing the 3x-copy-pasted JSX in `website/page.tsx`/`design/page.tsx`(removed)/`settings/page.tsx`.
+- Real ARIA tablist semantics (`role="tablist"`/`role="tab"`/`aria-selected`/`aria-controls`, roving tabindex, arrow-key navigation) on `EditorTabNav` — the anchor bar it replaces had none.
+- `useReducedMotion()` applied to the sidebar's `framer-motion` drawer/collapse animations (a real, previously-unaddressed gap — no `prefers-reduced-motion` handling existed anywhere in this app).
+
+## Non-goals (explicitly out of scope)
+
+Drag-and-drop section reordering (no DnD library exists in this repo today; the current up/down buttons are already keyboard-accessible and were already a deliberate choice over drag-and-drop per this file's Stage 11.x/19 history — see `architecture.md:913`), interactive click-to-edit (`postMessage`, hover overlays, selection sync — only the foundational DOM attribute ships), inline-rendering the public template's React components directly inside the editor's own tree (rejected — see "Preview architecture decision" below), a customer-facing unpublish/hide-site toggle, `SitePreview` write concurrency hardening (a real, pre-existing gap, but orthogonal to this UI redesign — see "Deferred work"), regrouping the 8 editor categories into a different taxonomy, per-field `aria-describedby` error relationships, app-wide clickjacking header hardening (`frame-ancestors`/`X-Frame-Options`) — a genuine, pre-existing gap this research surfaced, but touching every route in the app, not just the editor, so out of scope here.
+
+## Implementation requirements
+
+### Target component tree
+
+```
+website/page.tsx (Server Component — unchanged data-fetching)
+└── EditorShell ('use client' — owns only `activeTab` state, read from
+    `window.location.hash` on mount, falling back to 'theme')
+    ├── shared banner row (saved/error/read-only)
+    ├── flex-1 flex flex-col lg:flex-row min-h-0
+    │   ├── EditorPanel (flex flex-col min-h-0, lg:w-[440px] shrink-0)
+    │   │   ├── EditorTabNav (role="tablist", replaces the <a href="#..."> bar)
+    │   │   └── overflow-y-auto flex-1 → all 8 tab components, unchanged,
+    │   │       ALL simultaneously mounted, visibility toggled via CSS only
+    │   └── WebsitePreviewPanel (hidden lg:flex flex-1)
+    │       └── WebsitePreviewCard — unchanged internals + staleness-guard key
+    └── mobile (<lg): EditorPanel/WebsitePreviewPanel become two views toggled
+        by an "Edit / Preview" segmented control — same CSS-visibility
+        mechanism as tab-switching, not a route change
+```
+
+### Tab-switching — client state, not routing, with a hard mounting rule
+
+Client-side tab state, not per-tab routes: every existing save action's `redirect(withError(path, message, anchor))` already targets one of the 8 existing ids (`actions.ts`'s `SECTION_ANCHOR` map) — reading the initial tab from `window.location.hash` means **zero lines of `actions.ts` change**.
+
+**Hard requirement**: `EditorPanel` must keep all 8 tab subtrees mounted simultaneously and switch via CSS visibility (`hidden`/`block`), never by conditionally rendering only the active one. Every tab form is a native, uncontrolled `<form>` with no client-side dirty-state tracking; if switching tabs unmounted the inactive one, a customer who typed into a field and then clicked a different tab would silently lose that input. CSS-based show/hide costs nothing extra (today's page already mounts and fetches all 8 sections' data simultaneously — they're just stacked, not switched) and requires no new "discard unsaved changes?" confirmation UI, since there is nothing to discard.
+
+### Editing-panel behavior rule
+
+All 8 tabs stay in the side panel — none need to escalate to a full workspace, since each is already 1-3 small `Card`s with a handful of fields or a compact list (max ~10 service rows, max 6 photos, a 15-row section list). Settings and Billing correctly stay outside the tabbed editor (an intentional Stage 19 split — "Contact & CTAs vs. Settings," different concerns). No modal is introduced — the only modal precedent in this codebase (`RequestServiceModal`) lives on the public site, not the editor, and nothing here needs focus-interrupting treatment.
+
+### Preview architecture decision — iframe (existing `WebsitePreviewCard`), not inline rendering
+
+Firm decision: keep the iframe-embedded approach. The blocking reason to reject inline-rendering the public template's own components directly inside the editor's React tree: `app/b/[slug]/template/index.tsx`'s `RequestServiceProvider` does `document.body.style.overflow = 'hidden'` when its CTA modal opens — a page-**global** mutation, not scoped to its own modal. Mounted inline, previewing the Request Service CTA would lock scroll on the entire dashboard, including whatever field the customer is mid-edit in. The template also has no CSS Modules/scoping (its `--site-*` theme tokens are inline `style` on its own root `<div>`, safe only because of DOM-position isolation, not a real boundary) — an iframe's document boundary avoids this risk entirely. `WebsitePreviewCard` is already production-proven (Overview page), same-origin (customer's own httpOnly session cookie authenticates automatically, no `sandbox` needed), and the `?preview=draft` mechanism it already uses for draft-vs-live resolution is exactly what a persistent preview needs — nothing new to build there.
+
+### Information architecture decision — preserve the 8 categories
+
+Keep Theme, Logo, Sections, Content, Services, Photos, Contact & CTAs, SEO unrenamed and unregrouped. Every existing `actions.ts` redirect target maps to these exact 8 ids already — regrouping (e.g. Brand/Structure/Content/Media/Contact/SEO) is mechanically possible but would touch ~15 redirect call sites for a taxonomy change with no evidence it improves task completion, and bundling it into this redesign would make any resulting regression harder to attribute. A plausible, comparatively cheap fast-follow once `EditorTabNav` exists — not part of this stage.
+
+### Desktop & mobile preview
+
+Keep `WebsitePreviewCard`'s existing fixed-size-container approach (desktop fluid full-width, mobile a real `390×844` iPhone-logical-px box) — not CSS `transform: scale` — so text reflow is representative of the real device. No decorative phone-shell chrome beyond the existing plain rounded/shadowed frame. Desktop and mobile always resolve the identical underlying page (`/b/[slug]{?preview=draft}`), just at a different container size, so they can never show materially different content.
+
+### Responsive editor behavior
+
+- **Desktop (`lg:+`)**: persistent split, `EditorPanel` fixed `440px`, preview filling the remainder; sidebar collapse (above) reclaims ~180px on demand.
+- **Tablet (`md:`–`lg:`)**: falls through to the mobile pattern rather than forcing a cramped split — `WebsitePreviewCard`'s mobile container alone is 390px wide, so a true side-by-side split doesn't fit usefully before `lg:`.
+- **Mobile (`<md`)**: no shrunk split-screen. A segmented "Edit / Preview" control toggles full-width views via the same CSS-visibility mechanism as tab-switching, so switching to Preview and back never discards in-progress input.
+
+### Save & status model
+
+No new draft/publish primitives — reuse `ensureDraftPreview`/`publishSitePreview`/`?preview=draft` exactly as they exist. "Save changes" never means "publish": every edit already lands on a draft; publishing stays the separate, explicit `publishDraftActionCustomer` action, now also reachable from the new shell's top bar. Status vocabulary maps honestly onto what's real — no invented autosave, no fabricated "Saved ✓" toast that fires before the actual round trip completes:
+
+| Status | Source of truth |
+|---|---|
+| Live / Draft changes / No live site | centralized `deriveWebsiteState(previews)` |
+| Saving… | `useFormStatus().pending` on `SaveButton` (unchanged) |
+| Saved / Save failed | full-page `redirect(...&saved=1\|error=...)`, banner rendered server-side (unchanged) |
+| Preview unavailable | `WebsitePreviewCard`'s existing iframe `onError` fallback (unchanged) |
+
+No "unsaved changes" indicator is added to the preview panel — there is no client-side dirty-tracking to derive one from honestly.
+
+### Contextual click-to-edit — foundation only
+
+No `postMessage` infrastructure exists anywhere in this repo today, and full click-to-edit needs a real, non-trivial amount of it (bidirectional messaging, origin validation, hover/selection UX, distinguishing editable content from real `tel:`/`mailto:`/external links, nested-element resolution). This stage ships only the mechanical, additive half: `data-editor-section={type}` on each section's root DOM element, via `section-registry.tsx`'s already-stable `WebsiteSectionType` → render-function mapping. No interaction, no messaging, no hover state ships here.
+
+### Accessibility
+
+Real ARIA tablist pattern on `EditorTabNav`; `useReducedMotion()` on the sidebar's animations (previously entirely unhandled — confirmed zero `prefers-reduced-motion` references anywhere in the app); verify/adjust mobile text-input font size against iOS Safari's ~16px auto-zoom threshold (`FormBits.tsx` currently renders at `text-sm`/14px); confirm the sidebar collapse toggle has an explicit `aria-label`, not an icon alone; the "keep all tabs mounted" rule (above) is the accessibility answer to "confirm before discarding unsaved work" — nothing is ever silently discarded, so no confirmation dialog is built. Per-field error-message association (`aria-describedby`) is a pre-existing gap this stage does not fix (would require touching every tab form's internals).
+
+### Performance
+
+No new cost from embedding the preview (reuses what Overview already pays today); no new cost from keeping all 8 tabs mounted (today's page already mounts and fetches all 8 simultaneously — this redesign only changes CSS visibility, not data-fetching); every tab component stays a Server/async Component — the only new client code is thin UI-state wrappers (`EditorShell`'s tab index, sidebar collapsed flag). The `key`-based preview remount causes exactly one fresh iframe load per save, which is correct (content genuinely changed), not wasteful.
+
+### Security
+
+No change to any authorization check (`requireCustomerSession`/`requireBusinessOwnership`/`requireActiveSubscription`), no new Route Handler, no new cross-origin surface (this stage stops short of `postMessage`), no change to iframe sandboxing (still deliberately no `sandbox` attribute — same-origin, authenticated, customer's own content). `putAsset()`'s pre-existing lack of MIME/size validation (tracked under Stage 25) is untouched and not claimed to be fixed here.
+
+## Proposed phases
+
+1. **Shared editor shell** — `EditorShell`/`EditorTabNav`, sidebar collapse. No preview panel yet.
+2. **Persistent preview + staleness fix** — add `WebsitePreviewPanel`; apply the `key` guard to it and to the pre-existing Overview call site.
+3. **Migrate tabs in / delete `/design`** — confirm all 8 tabs render correctly in the new panel; remove the redundant route, its two dead actions, its nav entry; add a redirect.
+4. **Sections/media polish** — catalog descriptions, tidy `SectionsOrderEditor` for the narrower panel.
+5. **Contextual-preview foundation** — `data-editor-section` attributes only.
+6. **Cleanup, accessibility, docs** — extract the shared banner and `deriveWebsiteState`, reduced-motion, mobile font-size check, finish ARIA tablist if needed, update `architecture.md`/`build_log.md`.
+
+Recommended first slice: Phases 1+2 together — the tab-switching shell with a live, always-current preview is the change a customer actually feels, shipped with zero action/redirect changes and no deletions. `/design`'s removal (Phase 3) is invisible correctness cleanup and can trail without blocking the shell's value.
+
+## Acceptance criteria
+
+- Editor tabs switch instantly with no navigation and no lost input when switching away and back mid-edit.
+- A save-redirect still lands on the correct tab.
+- Editing a field, saving, and returning to the editor shows the updated preview with no manual refresh — same check on Overview.
+- Sidebar collapses/expands and persists across reloads; mobile drawer unaffected.
+- `/design` redirects to `/website#theme`; no dangling imports of its removed actions.
+- `data-editor-section` present in `/b/[slug]`'s rendered HTML with zero visual/behavioral change to the public site.
+- Keyboard-only navigation reaches every tab and the sidebar toggle.
+- `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` all pass.
+- `architecture.md` and `build_log.md` updated.
+
+## Deferred work
+
+`SitePreview` write concurrency hardening (conditional writes / version check — a real gap, pairs naturally with the already-tracked Stage 25 upload-validation gap as a future hardening pass), app-wide clickjacking header hardening (`frame-ancestors`/`X-Frame-Options` via `next.config.ts`), full interactive click-to-edit (`postMessage`, hover/selection sync — foundation only ships here), regrouped information architecture (Approach B), drag-and-drop section reordering, per-field `aria-describedby` error relationships.
+
+---
+
 # Stage 20 — Contact Forms and Lead Delivery
 
 ## Objective

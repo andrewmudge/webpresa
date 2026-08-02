@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
+import { deriveWebsiteStatus } from '@/lib/customer-editing/site-status';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
+import { SaveBanner } from '../SaveBanner';
 import { updateBusinessInfoAction } from '../actions';
 import { NotificationToggle } from './NotificationToggle';
 
@@ -25,10 +27,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   const isReadOnly = mode === 'billing_recovery';
 
   const previews = await listPreviewsForBusiness(businessId);
-  const publishedPreview = previews.find((p) => p.status === 'published');
-  const latest = previews[0];
-  const hasDraft = !!latest && latest.status !== 'published' && !!publishedPreview;
-  const websiteState = publishedPreview ? (hasDraft ? 'Draft changes' : 'Live') : 'No live site';
+  const { state, publishedPreview } = deriveWebsiteStatus(previews);
+  const websiteStateLabel = { live: 'Live', draft: 'Draft changes', none: 'No live site' }[state];
 
   const domainConnections = await listDomainConnectionsForBusiness(businessId);
   const domainConnection = domainConnections.find((c) => c.status !== 'disconnected') ?? null;
@@ -47,21 +47,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         <p className="mt-1 text-sm text-gray-500">Business information and website status.</p>
       </div>
 
-      {isReadOnly && (
-        <div role="alert" className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-          Editing is paused until your billing issue is resolved.
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {decodeURIComponent(error)}
-        </div>
-      )}
-      {saved && !error && (
-        <div role="status" className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-          Saved.
-        </div>
-      )}
+      <SaveBanner isReadOnly={isReadOnly} error={error} saved={saved} />
 
       <Card title="Business information">
         <form action={updateBusinessInfoAction.bind(null, businessId)} className="space-y-4">
@@ -92,7 +78,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         <dl className="grid gap-3 sm:grid-cols-2 text-sm">
           <div>
             <dt className="text-gray-500">Status</dt>
-            <dd className="text-gray-900 font-medium">{websiteState}</dd>
+            <dd className="text-gray-900 font-medium">{websiteStateLabel}</dd>
           </div>
           {publishedPreview && (
             <>

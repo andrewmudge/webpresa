@@ -117,23 +117,26 @@ function SectionRow({
 }) {
   const catalog = WEBSITE_SECTION_CATALOG[type];
   return (
-    <div className="flex items-center gap-4 px-4 py-3 bg-white">
+    <div className="flex items-start gap-3 px-3 py-3 bg-white">
       <input
         type="checkbox"
         checked={enabled}
         onChange={(e) => onToggleEnabled(e.target.checked)}
         disabled={catalog.required || disabled}
-        className="h-4 w-4 rounded border-gray-300 text-(--color-brand) focus:ring-(--color-brand) disabled:opacity-50"
+        className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-(--color-brand) focus:ring-(--color-brand) disabled:opacity-50"
       />
       <div className="flex-1 min-w-0">
-        {href ? (
-          <Link href={href} className="text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors">
-            {catalog.label}
-          </Link>
-        ) : (
-          <span className="text-sm font-medium text-gray-800">{catalog.label}</span>
-        )}
-        {catalog.required && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">Required</span>}
+        <div className="flex items-center gap-2 flex-wrap">
+          {href ? (
+            <Link href={href} className="text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors">
+              {catalog.label}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium text-gray-800">{catalog.label}</span>
+          )}
+          {catalog.required && <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">Required</span>}
+        </div>
+        <p className="mt-0.5 text-xs text-gray-400 leading-snug">{catalog.description}</p>
       </div>
       {moveButtons ?? <div className="w-6 shrink-0" />}
     </div>

@@ -248,11 +248,13 @@ export async function updateCustomerPhotoSlots(businessId: string, formData: For
 // ---------------------------------------------------------------------------
 // Narrow, single-slot, partial-merge variants (Website page card merges).
 //
-// `updateCustomerPhotoSlots` above is safe only because /design always
-// submits all six slots in one form, so every field's `defaultValue`
-// round-trips correctly even when unchanged — a slot the customer didn't
-// touch is still resubmitted with its current value. Once photo slots move
-// into their own content card (Hero, About, Why Choose Us, Services), each
+// `updateCustomerPhotoSlots` above was safe only because its one caller (the
+// standalone `/design` route, submitting all six slots in one form) always
+// round-tripped every field's `defaultValue` correctly even when unchanged —
+// a slot the customer didn't touch was still resubmitted with its current
+// value. Photo slots moved into their own content card (Hero, About, Why
+// Choose Us, Services) in Stage 19.A, and `/design` itself now just
+// redirects into `/website` — see implementation.md, Stage 19.A. Each
 // card's form only ever contains ITS OWN slot field(s); reusing the
 // all-in-one function with a FormData missing every other slot's key would
 // resolve those absent fields to `undefined` and silently clear them via
@@ -260,7 +262,9 @@ export async function updateCustomerPhotoSlots(businessId: string, formData: For
 // (a genuine partial merge) instead, and only ever include the one key they
 // actually resolved — a slot nothing changed on is simply left out of the
 // update, not explicitly nulled. `updateCustomerPhotoSlots` itself is left
-// completely untouched so /design keeps behaving exactly as it does today.
+// completely untouched — it has no remaining caller in the UI after the
+// `/design` removal, but stays in place rather than being deleted alongside
+// it, out of scope for this stage's cleanup.
 // ---------------------------------------------------------------------------
 
 type SlotBusinessField = 'heroPhotoUrl' | 'heroPhotoUrlMobile' | 'aboutPhotoUrl' | 'whyChooseUsPhotoUrl' | 'servicesPhotoUrl';

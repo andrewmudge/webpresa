@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 import type { SitePreview } from '@/domain/models/site-preview';
 import type { Business } from '@/domain/models/business';
 import type { Industry } from '@/domain/constants/industries';
@@ -96,9 +95,18 @@ export function GeneratedWebsite({
           />
         )}
 
-        {/* Configured sections, rendered in order through the controlled registry */}
+        {/* Configured sections, rendered in order through the controlled
+            registry. Each is wrapped in a bare, unstyled `div` carrying
+            `data-editor-section` (Stage 19.A) — foundational metadata only,
+            for a possible future click-to-edit stage in the customer
+            dashboard; no interactive behavior reads it yet. A plain `div`
+            with no className/style is presentation-neutral, so this changes
+            no layout — it replaces the previous `Fragment`, which couldn't
+            carry an attribute at all. */}
         {sections.map((section) => (
-          <Fragment key={section.component}>{sectionRegistry[section.component](ctx)}</Fragment>
+          <div key={section.component} data-editor-section={section.component}>
+            {sectionRegistry[section.component](ctx)}
+          </div>
         ))}
 
         {/* Mobile sticky CTA bar — not a configurable page section */}

@@ -58,6 +58,12 @@ export const SECTION_CONFIG_VERSION = 1;
 export interface WebsiteSectionCatalogEntry {
   /** Human-readable label for admin UI. */
   label: string;
+  /**
+   * One-line description shown in the Sections list (Stage 19.A) so it
+   * reads as a description of what customers will see, not a raw
+   * identifier. Presentation-only — never persisted, never sent to AI.
+   */
+  description: string;
   /** Required sections always render and cannot be disabled. */
   required: boolean;
   /** Enabled state used when generating a default configuration. */
@@ -81,24 +87,24 @@ export interface WebsiteSectionCatalogEntry {
  * future variants without another breaking schema change.
  */
 export const WEBSITE_SECTION_CATALOG: Record<WebsiteSectionType, WebsiteSectionCatalogEntry> = {
-  header: { label: 'Header', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 10 },
-  hero: { label: 'Hero', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 20 },
-  trustStrip: { label: 'Trust Strip', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 30 },
-  services: { label: 'Services', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 40 },
-  whyChooseUs: { label: 'Why Choose Us', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 50 },
-  about: { label: 'About', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 60 },
+  header: { label: 'Header', description: 'Logo, navigation, and call button shown at the top of every page.', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 10 },
+  hero: { label: 'Hero', description: 'The large headline and photo visitors see first.', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 20 },
+  trustStrip: { label: 'Trust Strip', description: 'A row of short trust badges (licensed, insured, guaranteed, etc.).', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 30 },
+  services: { label: 'Services', description: 'The list of services you offer, shown as cards.', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 40 },
+  whyChooseUs: { label: 'Why Choose Us', description: 'A short list of reasons customers should pick your business.', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 50 },
+  about: { label: 'About', description: 'A short story about your business and its photo.', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 60 },
   // Also renders the business's testimonials (Google reviews and/or manual
   // entries) directly underneath the rating summary — see
   // app/b/[slug]/template/ReviewsSection.tsx. The standalone `testimonials`
   // section type that used to own that content was removed once this merge
   // was confirmed; see build_log.md.
-  reviews: { label: 'Reviews', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 70 },
-  serviceAreas: { label: 'Service Areas', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 90 },
-  gallery: { label: 'Gallery', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 100 },
-  process: { label: 'Process / How It Works', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 110 },
-  faq: { label: 'FAQ', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 120 },
-  ctaBanner: { label: 'CTA Banner', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 80 },
-  socialLinks: { label: 'Social Links', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 135 },
-  contact: { label: 'Contact', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 140 },
-  footer: { label: 'Footer', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 150 },
+  reviews: { label: 'Reviews', description: 'Customer reviews and star ratings, including any imported from Google.', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 70 },
+  serviceAreas: { label: 'Service Areas', description: 'The cities or neighborhoods you serve.', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 90 },
+  gallery: { label: 'Gallery', description: 'A photo grid of your work, team, or location.', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 100 },
+  process: { label: 'Process / How It Works', description: 'A short step-by-step explanation of how you work with a new customer.', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 110 },
+  faq: { label: 'FAQ', description: 'Answers to common customer questions.', required: false, defaultEnabled: false, defaultVariant: 'default', variants: ['default'], defaultOrder: 120 },
+  ctaBanner: { label: 'CTA Banner', description: 'A full-width band prompting visitors to call or request service.', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 80 },
+  socialLinks: { label: 'Social Links', description: 'Icons linking to your Facebook, Instagram, and other social profiles.', required: false, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 135 },
+  contact: { label: 'Contact', description: 'Your phone, email, address, and a contact form.', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 140 },
+  footer: { label: 'Footer', description: 'Legal links and business info shown at the bottom of every page.', required: true, defaultEnabled: true, defaultVariant: 'default', variants: ['default'], defaultOrder: 150 },
 };

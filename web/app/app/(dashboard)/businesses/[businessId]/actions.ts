@@ -16,7 +16,6 @@ import {
 import {
   addCustomerBusinessPhotos,
   deleteCustomerBusinessPhoto,
-  updateCustomerPhotoSlots,
   updateCustomerHeroPhotoSlots,
   updateCustomerAboutPhotoSlot,
   updateCustomerWhyChooseUsPhotoSlot,
@@ -83,22 +82,6 @@ export async function updateBusinessInfoAction(businessId: string, formData: For
   await requireEditAccess(businessId);
   const result = await updateCustomerBusinessInfo(businessId, formData);
   redirect(withError(`/app/businesses/${businessId}/settings`, result?.message ?? (result?.errors ? 'Please fix the highlighted fields.' : undefined)));
-}
-
-// ---------------------------------------------------------------------------
-// Design — theme, hero/section photo slots
-// ---------------------------------------------------------------------------
-
-export async function updateThemeActionCustomer(businessId: string, formData: FormData): Promise<void> {
-  await requireEditAccess(businessId);
-  const result = await updateCustomerTheme(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/design`, result?.message));
-}
-
-export async function updatePhotoSlotsAction(businessId: string, formData: FormData): Promise<void> {
-  await requireEditAccess(businessId);
-  const result = await updateCustomerPhotoSlots(businessId, formData);
-  redirect(withError(`/app/businesses/${businessId}/design`, result?.message));
 }
 
 // ---------------------------------------------------------------------------

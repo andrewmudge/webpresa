@@ -37,7 +37,7 @@ export function TextField({
         disabled={disabled}
         maxLength={maxLength}
         autoComplete={autoComplete}
-        className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
+        className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
       />
     </label>
   );
@@ -73,7 +73,7 @@ export function TextAreaField({
         disabled={disabled}
         rows={rows}
         maxLength={maxLength}
-        className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
+        className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
       />
     </label>
   );

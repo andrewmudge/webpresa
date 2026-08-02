@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
+import { deriveWebsiteStatus } from '@/lib/customer-editing/site-status';
 import { ThemeTab } from './ThemeTab';
 import { LogoTab } from './LogoTab';
 import { ContentTab } from './ContentTab';
@@ -12,6 +12,11 @@ import { ContactTab } from './ContactTab';
 import { SeoTab } from './SeoTab';
 import { DraftChangesNotice } from './DraftChangesNotice';
 import { getCachedPreviews } from './data';
+import { EditorShell } from './EditorShell';
+import type { TabId } from './EditorTabNav';
+import { WebsitePreviewCard } from '../WebsitePreviewCard';
+import { SaveBanner } from '../SaveBanner';
+import { publishDraftActionCustomer } from '../actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,23 +25,20 @@ interface Props {
   searchParams: Promise<{ error?: string; saved?: string }>;
 }
 
-const SECTIONS = [
-  { id: 'theme', label: 'Theme' },
-  { id: 'logo', label: 'Logo' },
-  { id: 'sections', label: 'Sections' },
-  { id: 'content', label: 'Content' },
-  { id: 'services', label: 'Services' },
-  { id: 'photos', label: 'Photos' },
-  { id: 'contact', label: 'Contact & CTAs' },
-  { id: 'seo', label: 'SEO' },
-] as const;
+const STATUS_BADGE: Record<'live' | 'draft' | 'none', { label: string; className: string }> = {
+  live: { label: 'Live', className: 'bg-green-100 text-green-800' },
+  draft: { label: 'Draft changes', className: 'bg-amber-100 text-amber-800' },
+  none: { label: 'No live site', className: 'bg-gray-100 text-gray-600' },
+};
 
 /**
  * Shown while a section's own data fetch (`getCachedPreviews`, see
- * `./data.ts`) is still in flight — each section is an independently
- * `<Suspense>`-wrapped async component below, so the page shell and nav
- * render immediately and sections stream in as their (deduped, shared)
- * data resolves, rather than the whole page blocking on all six at once.
+ * `./data.ts`) is still in flight — each tab is an independently
+ * `<Suspense>`-wrapped async component below, so the shell and nav render
+ * immediately and tabs stream in as their (deduped, shared) data resolves,
+ * rather than the whole page blocking on all eight at once. Every tab stays
+ * mounted at all times (see `EditorShell`'s doc comment), so this fallback
+ * is only ever visible on first load, never when switching tabs.
  */
 function SectionSkeleton() {
   return (
@@ -58,93 +60,74 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
   if (mode === 'none') redirect(`/app/businesses/${businessId}`);
   const isReadOnly = mode === 'billing_recovery';
 
-  // Same "Live/Draft/None" computation Overview uses for its own badge —
-  // reused here for the new Live Site/Draft Preview nav row and to drive
-  // the draft-changes toast. `getCachedPreviews` is React `cache()`-deduped
-  // (see ./data.ts), so calling it again here doesn't add a second real
-  // DynamoDB query on top of whatever the sections below already trigger.
   const previews = await getCachedPreviews(businessId);
-  const publishedPreview = previews.find((p) => p.status === 'published');
-  const latest = previews[0];
-  const hasDraft = !!latest && latest.status !== 'published' && !!publishedPreview;
+  const { state, hasDraft, latest } = deriveWebsiteStatus(previews);
+  const badge = STATUS_BADGE[state];
+
+  const tabs: Record<TabId, React.ReactNode> = {
+    theme: <ThemeTab businessId={businessId} currentTheme={business.theme} isReadOnly={isReadOnly} />,
+    logo: <LogoTab businessId={businessId} business={business} isReadOnly={isReadOnly} />,
+    sections: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+    content: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <ContentTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+    services: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <ServicesTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+    photos: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <PhotosTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+    contact: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <ContactTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+    seo: (
+      <Suspense fallback={<SectionSkeleton />}>
+        <SeoTab businessId={businessId} isReadOnly={isReadOnly} />
+      </Suspense>
+    ),
+  };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold text-gray-900">Website</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Scroll through everything below, or jump straight to a section.
-      </p>
-
-      {isReadOnly && (
-        <div role="alert" className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-          Editing is paused until your billing issue is resolved. You can still view your current content below.
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {decodeURIComponent(error)}
-        </div>
-      )}
-      {saved && !error && (
-        <div role="status" className="mt-4 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-          Saved.
-        </div>
-      )}
-
-      {/* Sticky once scrolled past its natural position, so the customer can
-          always jump between sections without scrolling back to the top.
-          `top-14` on mobile clears AppSidebar's own sticky hamburger bar
-          (md:hidden); at md:+ that bar doesn't exist, so the nav sticks
-          right under the very top of the screen instead. The visible gap
-          above/below the nav card — matching the gap every other card on
-          this page gets from `space-y-10` — lives INSIDE this sticky
-          element (as padding, with the page's own background color) rather
-          than as an outer margin, so that gap stays visible even once the
-          nav is pinned and content is scrolling up underneath it. */}
-      <div className="sticky top-14 md:top-0 z-20 pt-6 pb-6 bg-[#F0F4F8] space-y-2">
-        <nav className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-x-auto" aria-label="Jump to section">
-          <div className="flex gap-1 min-w-max px-2">
-            {SECTIONS.map((s) => (
-              <a
-                key={s.id}
-                href={`#${s.id}`}
-                className="px-4 py-3 text-base font-semibold text-(--color-brand) border-b-2 border-transparent hover:border-(--color-brand) transition-colors"
-              >
-                {s.label}
-              </a>
-            ))}
+    <div className="h-full flex flex-col min-h-0">
+      <div className="px-4 sm:px-6 pt-6 pb-4 space-y-3 shrink-0">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900">Edit your website</h1>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${badge.className}`}>{badge.label}</span>
+            </div>
+            <p className="mt-1 text-sm text-gray-500">Make changes to your content and see them live.</p>
           </div>
-        </nav>
-
-        {/* Live Site always points at the real published site; Draft Preview
-            routes to Overview (where the preview iframe now resolves the
-            draft — see WebsitePreviewCard's hasDraft prop) only when there
-            actually is one, so this never links to a preview that's
-            identical to what's already live. */}
-        <div className="flex items-center gap-2 px-2">
-          {publishedPreview ? (
-            <a
-              href={`/b/${business.slug}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-green-100 text-green-800 hover:bg-green-200 transition-colors"
-            >
-              Live Site
-            </a>
-          ) : (
-            <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">Live Site</span>
-          )}
-          {hasDraft ? (
-            <Link
-              href={`/app/businesses/${businessId}`}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
-            >
-              Draft Preview
-            </Link>
-          ) : (
-            <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">No Preview Exists</span>
+          {!isReadOnly && hasDraft && latest && (
+            <form action={publishDraftActionCustomer.bind(null, businessId)}>
+              <input type="hidden" name="previewId" value={latest.previewId} />
+              <button
+                type="submit"
+                className="rounded-lg bg-(--color-brand) text-white px-4 py-2 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors"
+              >
+                Publish changes
+              </button>
+            </form>
           )}
         </div>
+        <SaveBanner
+          isReadOnly={isReadOnly}
+          error={error}
+          saved={saved}
+          readOnlyMessage="Editing is paused until your billing issue is resolved. You can still view your current content below."
+        />
       </div>
 
       <DraftChangesNotice
@@ -153,51 +136,17 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
         noticeEnabled={business.draftChangesNoticeEnabled !== false}
       />
 
-      <div className="space-y-10">
-        <section id="theme" className="scroll-mt-20">
-          <ThemeTab businessId={businessId} currentTheme={business.theme} isReadOnly={isReadOnly} />
-        </section>
-
-        <section id="logo" className="scroll-mt-20">
-          <LogoTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-        </section>
-
-        <section id="sections" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <SectionsTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="content" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <ContentTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="services" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <ServicesTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="photos" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <PhotosTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="contact" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <ContactTab businessId={businessId} business={business} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-
-        <section id="seo" className="scroll-mt-20">
-          <Suspense fallback={<SectionSkeleton />}>
-            <SeoTab businessId={businessId} isReadOnly={isReadOnly} />
-          </Suspense>
-        </section>
-      </div>
+      <EditorShell
+        tabs={tabs}
+        preview={
+          <WebsitePreviewCard
+            key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}
+            slug={business.slug}
+            lastUpdated={latest?.updatedAt}
+            hasDraft={hasDraft}
+          />
+        }
+      />
     </div>
   );
 }

@@ -7207,3 +7207,106 @@ web/docs/build_log.md                                                MODIFIED �
 ```
 
 Verification: `npx tsc --noEmit`, `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npm test` (88 files, 942 tests passed), `npm run build` all pass.
+
+---
+
+# Stage 19.A — Website Editor Redesign (2026-08-01)
+
+## What changed
+
+Replaced `/app/businesses/[businessId]/website` — a single-column page with a sticky `<a href="#anchor">` jump-nav and 8 sections stacked and scrolled through, no live preview anywhere on the page — with a preview-first, two-pane editor: a persistent `WebsitePreviewCard` (the same iframe-embedded `/b/[slug]` component already proven on the Overview page) now sits beside a compact tab panel. All 8 existing tab components (`ThemeTab`, `LogoTab`, `SectionsTab`, `ContentTab`, `ServicesTab`, `PhotosTab`, `ContactTab`, `SeoTab`) are reused completely unmodified.
+
+Full plan (research + architecture decisions + 6-phase breakdown) is `implementation.md`, Stage 19.A — this entry is the implementation record, not a restatement of the plan.
+
+## Research corrections found before writing any code
+
+Three deep-dive explorations of the real shipped code (not the docs describing it) found `architecture.md`/`implementation.md` didn't match reality in ways that changed the plan:
+
+1. **The Live/Draft/None website-status derivation was never actually centralized**, despite `architecture.md` describing it as one shared computation "at render time" — the identical 4-line calculation was independently re-implemented in the business-home page, the website editor, Settings, and three onboarding pages. Now genuinely centralized in `lib/customer-editing/site-status.ts`'s `deriveWebsiteStatus(previews)`.
+2. **`/app/businesses/[businessId]/design` was still live and fully redundant** — its Theme picker called the identical `updateCustomerTheme()` lib function `/website`'s own `ThemeTab` already called (via a different action name), and every one of its 6 photo-slot fields was already independently editable inside `/website`'s `ContentTab`/`ServicesTab`/`LogoTab`. A prior commit titled "move design into website" had in fact already finished the real migration — only deleting the now-dead route was left undone.
+3. **The Overview page's `WebsitePreviewCard` had the exact "preview shows stale content after a save" bug** already found and fixed once, in the onboarding wizard's `WebsitePreviewPanel`, on 2026-07-31 (root cause: an iframe whose `src` string doesn't change across a client-side navigation gets reused by React with no fresh fetch). The Overview instance was simply lucky not to have surfaced it yet, since Overview is a single fixed route rather than a multi-step wizard reusing the same tree position across navigations.
+
+## New files
+
+- `app/app/(dashboard)/businesses/[businessId]/website/EditorShell.tsx` — owns `activeTab` (client) and, on mobile, `mobileView` ('edit'/'preview'). All 8 tabs and both mobile views stay mounted at all times; switching is CSS `hidden`-attribute visibility only, never conditional rendering — every tab is a native uncontrolled `<form>` with no dirty-state tracking, so unmounting one on every switch would silently discard unsaved input. Initial tab is read from `window.location.hash` via `useSyncExternalStore` (not `useEffect`+`setState` — see "Lint fixes" below).
+- `app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx` — real ARIA tablist (`role="tablist"`/`"tab"`, `aria-selected`, `aria-controls`, roving `tabindex`, Left/Right/Home/End keyboard nav). Exports the canonical `TAB_IDS`/`TabId` — identical 8 ids `actions.ts` already redirects to, so zero action changes were needed.
+- `app/app/(dashboard)/businesses/[businessId]/SaveBanner.tsx` — the read-only/error/saved banner trio, previously copy-pasted verbatim across `website/page.tsx`, `design/page.tsx`, and `settings/page.tsx`. One shared component now (`design/page.tsx` no longer exists to need it).
+- `lib/customer-editing/site-status.ts` (+ `__tests__/site-status.test.ts`, 5 tests) — `deriveWebsiteStatus(previews)`, extracted verbatim from the business-home page (the highest-traffic call site) so behavior doesn't change; now the single source for `page.tsx`, `website/page.tsx`, and `settings/page.tsx`.
+
+## Modified files
+
+- `website/page.tsx` — rewritten around `EditorShell` + the centralized `deriveWebsiteStatus`; adds a status pill (Live/Draft changes/No live site) next to the "Edit your website" heading and a "Publish changes" button in the header when a draft exists — both new, small additions, not present on the old page. `WebsitePreviewCard` gets the staleness-guard `key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}`.
+- `page.tsx` (business home / Overview) — same `key` fix applied to its own `WebsitePreviewCard`; its inline tri-state computation replaced with a call to `deriveWebsiteStatus`; three checklist links that pointed at the now-removed `/design` route (or, in one case, a `?tab=photos` query param the old page never actually read) fixed to point at `/website#logo`, `/website#photos`, `/website#theme` — genuine latent bugs found and fixed along the way, not something this stage set out to touch.
+- `settings/page.tsx` — same centralization; its 3-branch banner JSX replaced with `<SaveBanner>`.
+- `design/page.tsx` — replaced entirely with a 10-line redirect to `/website#theme`, for old links/bookmarks.
+- `actions.ts` — removed `updateThemeActionCustomer` and `updatePhotoSlotsAction` (design page's actions; both had a surviving equivalent already wired to `/website`'s own tabs) and the now-unused `updateCustomerPhotoSlots` import. `updateCustomerPhotoSlots` itself (`lib/customer-editing/photos.ts`) was deliberately left in place, out of scope for this stage's cleanup, even though it has no remaining UI caller — its doc comment updated to say so accurately instead of still claiming `/design` uses it.
+- `AppSidebar.tsx` — collapse/expand-to-icon-rail (new `collapsed` state via a small custom `useSyncExternalStore`-backed store over `localStorage`, since plain `localStorage` has no same-tab change notification the way the cross-tab `storage` event does); `NAV_ITEMS` gained `icon` fields (`lucide-react`, already a dependency) and dropped the `design` entry (5→4 items); `useReducedMotion()` now guards the mobile drawer's slide/fade animation and the new collapse-width transition.
+- `SectionsOrderEditor.tsx` — each row now shows `WEBSITE_SECTION_CATALOG[type].description` under its label; minor spacing/alignment tidy for the narrower panel width.
+- `domain/constants/website-sections.ts` — `WebsiteSectionCatalogEntry` gained a required `description: string` field; all 15 catalog entries given a real one-line description. Compile-time constant only — never persisted, never sent to AI. Verified via grep that no other file constructs a `WebsiteSectionCatalogEntry` object literal, so making the field required broke nothing.
+- `app/b/[slug]/template/index.tsx` — the `<Fragment key={section.component}>` wrapping each rendered section replaced with a bare, unstyled `<div key={section.component} data-editor-section={section.component}>` — foundational metadata for a possible future click-to-edit stage (see "Contextual click-to-edit" below), zero visual/behavioral change. Confirmed safe: `RequestServiceProvider` (the only thing wrapping these sections) does a plain `{children}` passthrough with no `React.Children` inspection that could be affected by the extra DOM level.
+- `FormBits.tsx` — `TextField`/`TextAreaField` render at `text-base` (16px) below `sm:`, `text-sm` (14px) at `sm:`+ — below 16px, iOS Safari auto-zooms on input focus; the root layout has no viewport-meta override disabling that, so this was a real, fixable gap, fixed only for mobile widths to leave desktop sizing untouched.
+
+## Contextual click-to-edit — foundation only, by design
+
+Per the plan's explicit recommendation (avoid unnecessary complexity unless clearly safe): only the mechanical `data-editor-section` DOM attribute shipped. No `postMessage` (none exists anywhere in this repo today), no hover/selection UI, no interactivity. This is deliberately incomplete — a future stage would still need to build the entire interactive half from scratch.
+
+## Lint fixes — `react-hooks/set-state-in-effect`
+
+The first-pass implementation read `window.location.hash` (in `EditorShell`) and `localStorage` (in `AppSidebar`) via a plain `useEffect` + `setState` on mount — both flagged by this repo's `react-hooks/set-state-in-effect` lint rule (2 errors). Fixed using the same `useSyncExternalStore` technique `DraftChangesNotice.tsx` already established for exactly this problem (reading a browser-only value safely across SSR/hydration): `EditorShell` now subscribes to the real `hashchange` event; `AppSidebar` now reads/writes through a tiny module-level pub-sub store over `localStorage`, since `localStorage` alone has no same-tab notification mechanism the way the cross-tab `storage` event does.
+
+## Manual browser verification
+
+No component/browser test infrastructure exists in this repo (`vitest.config.ts` runs in a plain `node` environment) — followed the project's established convention of automated lib-level tests plus real manual verification instead of adding new test infrastructure for this stage.
+
+Booted `npm run dev` locally against the real dev DynamoDB tables (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in `.env.local` — the SSO profile's token had expired, but the static Vercel-style keys already in `.env.local` worked). Found a real, genuinely active, claimed, subscribed business via `aws dynamodb scan` (McCullough Air Conditioning and Heating) and minted a valid `webpresa_customer_session` JWT locally with `jose` and the real `CUSTOMER_SESSION_SECRET`, matching `lib/auth/customer-session.ts`'s exact payload shape — no code changes needed to do this, just the same signing recipe the app itself uses. Drove the app with Playwright/headless Chromium (installed standalone in the scratchpad directory, not added to this project's `package.json`; the sandbox had no `libnspr4`/`libnss3`/`libasound2` system libraries and no `sudo` — worked around by `apt-get download`-ing the `.deb`s, `dpkg -x`-extracting them locally with no root needed, and pointing `LD_LIBRARY_PATH` at the extracted `.so` files).
+
+Confirmed working, screenshots inspected directly:
+- The new two-pane layout: tab nav + editing panel on the left, live rendered preview (Desktop/Mobile toggle, "Open full preview" link) on the right, exactly per plan.
+- Clicking Theme → Photos → Sections switches instantly with no page navigation (URL hash updates via `history.replaceState`; the preview panel never re-fetches on a pure tab switch).
+- The Sections tab shows the new one-line descriptions, required badges, and up/down reorder controls correctly.
+- Sidebar collapse/expand — collapses to an icon rail, all nav icons + tooltips intact, preview/editor content unaffected.
+- `/app/businesses/{id}/design` redirects to `/website#theme`.
+- Mobile viewport (390×844): the "Edit / Preview" segmented toggle correctly swaps between the full-width editing panel and full-width preview panel.
+- Zero browser console errors across the whole pass.
+
+**Not independently click-tested**: the Overview page's own preview card. It crashes today on `CUSTOMER_ONBOARDING_TABLE_NAME environment variable is not set` — confirmed via `aws dynamodb list-tables` that this table genuinely doesn't exist yet in the dev account, matching `deployment.md`'s already-documented "not yet a real `cdk deploy`" status for Stage 19.x's onboarding tables. Entirely pre-existing, unrelated to this stage; not fixed here (would mean deploying infrastructure, which requires explicit approval per `AGENTS.md`, and is out of this stage's scope regardless). The identical `WebsitePreviewCard` + staleness-guard `key` code path was exercised instead via the new editor panel, which has no dependency on that table.
+
+Hit and fixed one unrelated dev-environment snag along the way: a stale Turbopack incremental-compilation cache (from hot-reloading through the large `website/page.tsx` restructure across many edits while the dev server stayed running) served a spurious 404 for `/website` even after the code was correct. `rm -rf .next` + restart resolved it; not a real bug, confirmed by the route working immediately after.
+
+## Verification
+
+```
+npm run lint        — 0 errors, 2 pre-existing unrelated warnings (onboarding actions.ts)
+npx tsc --noEmit     — passes
+npm test             — 89 files, 947 tests passed (5 new: site-status.test.ts)
+npm run build        — succeeds; /app/businesses/[businessId]/{design,website} both
+                        register correctly (design as the redirect target)
+```
+
+Manual browser verification: see above — real dev data, real customer session, Playwright screenshots inspected directly, zero console errors.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                          MODIFIED — Stage 19.A spec inserted + Status updated to implemented
+web/docs/architecture.md                                                            MODIFIED — new "Website Editor Redesign (Stage 19.A)" section + top Status entry
+web/docs/build_log.md                                                               MODIFIED — this entry
+
+web/lib/customer-editing/site-status.ts                                             NEW — centralized deriveWebsiteStatus()
+web/lib/customer-editing/__tests__/site-status.test.ts                              NEW — 5 tests
+web/lib/customer-editing/photos.ts                                                  MODIFIED — doc comment accuracy only, no behavior change
+
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorShell.tsx             NEW
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            NEW
+web/app/app/(dashboard)/businesses/[businessId]/SaveBanner.tsx                      NEW
+web/app/app/(dashboard)/businesses/[businessId]/website/page.tsx                    REWRITTEN — new shell, centralized status, publish button
+web/app/app/(dashboard)/businesses/[businessId]/website/SectionsOrderEditor.tsx     MODIFIED — section descriptions, narrower-panel spacing
+web/app/app/(dashboard)/businesses/[businessId]/page.tsx                            MODIFIED — key fix, centralized status, fixed 3 stale checklist links
+web/app/app/(dashboard)/businesses/[businessId]/settings/page.tsx                   MODIFIED — centralized status, SaveBanner
+web/app/app/(dashboard)/businesses/[businessId]/design/page.tsx                     REWRITTEN — now a pure redirect to /website#theme
+web/app/app/(dashboard)/businesses/[businessId]/actions.ts                          MODIFIED — removed 2 dead actions + unused import
+web/app/app/(dashboard)/AppSidebar.tsx                                              MODIFIED — collapse/expand, icons, reduced-motion, design nav item removed
+
+web/domain/constants/website-sections.ts                                            MODIFIED — description field on WebsiteSectionCatalogEntry
+web/app/b/[slug]/template/index.tsx                                                 MODIFIED — data-editor-section attribute (Fragment → div)
+```

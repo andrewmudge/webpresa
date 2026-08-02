@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, X, ChevronDown, ExternalLink } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 
 /**
@@ -16,7 +16,45 @@ import { customerSignOutAction } from '@/lib/auth/customer-actions';
  * technical/provider language, a business switcher instead of a flat nav
  * list, and one dominant "View live site" action rather than an admin's
  * operational link list.
+ *
+ * Collapse/expand-to-icon-rail (Stage 19.A) is genuinely new — no
+ * precedent existed anywhere in this codebase, admin included — added so a
+ * customer can reclaim horizontal space for the preview-first website
+ * editor. Only applies to the fixed `md:`+ sidebar; the mobile drawer is a
+ * full off-canvas overlay regardless and has nothing to collapse.
  */
+
+const COLLAPSED_STORAGE_KEY = 'webpresa:app-sidebar-collapsed';
+
+/**
+ * `localStorage` isn't available during SSR, and reading it via a plain
+ * `useEffect`+`setState` (the first-pass approach) trips this repo's
+ * `react-hooks/set-state-in-effect` lint rule — same fix as
+ * `DraftChangesNotice.tsx` already uses for its own `localStorage` read:
+ * `useSyncExternalStore` returns the server snapshot (`false`, i.e.
+ * expanded) during hydration's first pass with no mismatch, then re-renders
+ * with the real persisted value immediately after. `setCollapsedPreference`
+ * is this store's only writer; it notifies subscribers itself rather than
+ * relying on the browser's cross-tab `storage` event (which never fires in
+ * the same tab that made the write).
+ */
+const collapsedListeners = new Set<() => void>();
+function getCollapsedSnapshot(): boolean {
+  return window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1';
+}
+function getCollapsedServerSnapshot(): boolean {
+  return false;
+}
+function subscribeToCollapsed(onChange: () => void): () => void {
+  collapsedListeners.add(onChange);
+  return () => {
+    collapsedListeners.delete(onChange);
+  };
+}
+function setCollapsedPreference(value: boolean): void {
+  window.localStorage.setItem(COLLAPSED_STORAGE_KEY, value ? '1' : '0');
+  collapsedListeners.forEach((listener) => listener());
+}
 
 interface BusinessSummary {
   businessId: string;
@@ -30,11 +68,10 @@ interface AppSidebarProps {
 }
 
 const NAV_ITEMS = [
-  { segment: '', label: 'Overview' },
-  { segment: 'website', label: 'Website' },
-  { segment: 'design', label: 'Design' },
-  { segment: 'billing', label: 'Billing' },
-  { segment: 'settings', label: 'Settings' },
+  { segment: '', label: 'Overview', icon: LayoutDashboard },
+  { segment: 'website', label: 'Website', icon: Globe },
+  { segment: 'billing', label: 'Billing', icon: CreditCard },
+  { segment: 'settings', label: 'Settings', icon: Settings },
 ];
 
 function extractBusinessId(pathname: string): string | null {
@@ -42,21 +79,23 @@ function extractBusinessId(pathname: string): string | null {
   return match ? match[1] : null;
 }
 
-function Brand() {
+function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
-    <Link href="/app" className="flex items-center gap-3">
+    <Link href="/app" className="flex items-center gap-3" title="Webpresa">
       <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-8 w-auto shrink-0" />
-      <div>
-        <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
-        <p className="text-xs text-white/50 leading-none mt-0.5">My Website</p>
-      </div>
+      {!collapsed && (
+        <div>
+          <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
+          <p className="text-xs text-white/50 leading-none mt-0.5">My Website</p>
+        </div>
+      )}
     </Link>
   );
 }
 
-function BusinessSwitcher({ businesses, currentId }: { businesses: BusinessSummary[]; currentId: string | null }) {
+function BusinessSwitcher({ businesses, currentId, collapsed }: { businesses: BusinessSummary[]; currentId: string | null; collapsed?: boolean }) {
   const [open, setOpen] = useState(false);
-  if (businesses.length === 0) return null;
+  if (businesses.length === 0 || collapsed) return null;
   const current = businesses.find((b) => b.businessId === currentId);
 
   if (businesses.length === 1 || !currentId) {
@@ -97,7 +136,7 @@ function BusinessSwitcher({ businesses, currentId }: { businesses: BusinessSumma
   );
 }
 
-function Nav({ currentId, onNavigate }: { currentId: string | null; onNavigate?: () => void }) {
+function Nav({ currentId, onNavigate, collapsed }: { currentId: string | null; onNavigate?: () => void; collapsed?: boolean }) {
   const pathname = usePathname();
   if (!currentId) return null;
 
@@ -106,16 +145,20 @@ function Nav({ currentId, onNavigate }: { currentId: string | null; onNavigate?:
       {NAV_ITEMS.map((item) => {
         const href = `/app/businesses/${currentId}${item.segment ? `/${item.segment}` : ''}`;
         const isActive = item.segment ? pathname.startsWith(href) : pathname === href;
+        const Icon = item.icon;
         return (
           <Link
             key={item.segment}
             href={href}
             onClick={onNavigate}
-            className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'
-            }`}
+            title={collapsed ? item.label : undefined}
+            aria-label={collapsed ? item.label : undefined}
+            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              collapsed ? 'justify-center' : ''
+            } ${isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
           >
-            {item.label}
+            <Icon size={18} className="shrink-0" aria-hidden="true" />
+            {!collapsed && <span>{item.label}</span>}
           </Link>
         );
       })}
@@ -123,14 +166,18 @@ function Nav({ currentId, onNavigate }: { currentId: string | null; onNavigate?:
   );
 }
 
-function Footer({ signedInAs }: { signedInAs: string }) {
+function Footer({ signedInAs, collapsed }: { signedInAs: string; collapsed?: boolean }) {
   return (
     <div className="px-3 py-4 border-t border-white/10 space-y-1">
-      <p className="text-xs text-white/40 px-2 mb-2 truncate">Signed in as {signedInAs}</p>
+      {!collapsed && <p className="text-xs text-white/40 px-2 mb-2 truncate">Signed in as {signedInAs}</p>}
       <form action={customerSignOutAction}>
         <button
           type="submit"
-          className="w-full text-left text-sm text-white/50 hover:text-white px-2 py-1.5 rounded transition-colors hover:bg-white/10"
+          title={collapsed ? 'Sign out' : undefined}
+          aria-label={collapsed ? 'Sign out' : undefined}
+          className={`w-full text-sm text-white/50 hover:text-white px-2 py-1.5 rounded transition-colors hover:bg-white/10 ${
+            collapsed ? 'text-center' : 'text-left'
+          }`}
         >
           Sign out
         </button>
@@ -141,31 +188,59 @@ function Footer({ signedInAs }: { signedInAs: string }) {
 
 export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const collapsed = useSyncExternalStore(subscribeToCollapsed, getCollapsedSnapshot, getCollapsedServerSnapshot);
+  const shouldReduceMotion = useReducedMotion();
   const pathname = usePathname();
   const currentId = extractBusinessId(pathname);
   const currentBusiness = businesses.find((b) => b.businessId === currentId);
 
+  function toggleCollapsed() {
+    setCollapsedPreference(!collapsed);
+  }
+
   return (
     <>
-      <aside className="hidden md:flex w-60 flex-shrink-0 flex-col bg-brand shadow-lg">
-        <div className="px-5 py-5 border-b border-white/10">
-          <Brand />
+      <aside
+        className={`hidden md:flex flex-shrink-0 flex-col bg-brand shadow-lg transition-[width] motion-reduce:transition-none duration-150 ${
+          collapsed ? 'w-16' : 'w-60'
+        }`}
+      >
+        <div className={`px-5 py-5 border-b border-white/10 ${collapsed ? 'px-3' : ''}`}>
+          <Brand collapsed={collapsed} />
         </div>
-        <BusinessSwitcher businesses={businesses} currentId={currentId} />
-        <Nav currentId={currentId} />
+        <BusinessSwitcher businesses={businesses} currentId={currentId} collapsed={collapsed} />
+        <Nav currentId={currentId} collapsed={collapsed} />
         {currentBusiness && (
           <div className="px-3 pb-2">
             <a
               href={`/b/${currentBusiness.slug}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+              title={collapsed ? 'View live site' : undefined}
+              aria-label={collapsed ? 'View live site' : undefined}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-colors ${
+                collapsed ? 'justify-center' : ''
+              }`}
             >
-              View live site <ExternalLink size={13} />
+              <ExternalLink size={13} className="shrink-0" aria-hidden="true" />
+              {!collapsed && <span>View live site</span>}
             </a>
           </div>
         )}
-        <Footer signedInAs={signedInAs} />
+        <Footer signedInAs={signedInAs} collapsed={collapsed} />
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-medium text-white/50 hover:text-white hover:bg-white/10 border-t border-white/10 transition-colors"
+        >
+          {collapsed ? <ChevronsRight size={16} /> : (
+            <>
+              <ChevronsLeft size={16} /> Collapse
+            </>
+          )}
+        </button>
       </aside>
 
       <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-brand px-4 py-3 shadow-lg">
@@ -189,15 +264,16 @@ export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
               className="md:hidden fixed inset-0 z-40 bg-black/40"
               onClick={() => setMobileOpen(false)}
             />
             <motion.div
               key="drawer"
-              initial={{ x: '-100%' }}
+              initial={{ x: shouldReduceMotion ? 0 : '-100%' }}
               animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'tween', duration: 0.2 }}
+              exit={{ x: shouldReduceMotion ? 0 : '-100%' }}
+              transition={{ type: shouldReduceMotion ? false : 'tween', duration: shouldReduceMotion ? 0 : 0.2 }}
               className="md:hidden fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-brand shadow-lg"
             >
               <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">

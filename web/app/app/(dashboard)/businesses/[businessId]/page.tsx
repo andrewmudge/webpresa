@@ -6,6 +6,7 @@ import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { getCustomerOnboardingByBusinessId } from '@/lib/db/customer-onboarding';
 import { ensureCustomerOnboarding } from '@/lib/onboarding/ensure';
+import { deriveWebsiteStatus } from '@/lib/customer-editing/site-status';
 import { PLAN_CATALOG } from '@/domain/constants/plan-catalog';
 import { createBillingPortalSessionAction } from '@/app/account/checkout/actions';
 import { WebsitePreviewCard } from './WebsitePreviewCard';
@@ -74,10 +75,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
   }
 
   const previews = await listPreviewsForBusiness(businessId);
-  const publishedPreview = previews.find((p) => p.status === 'published');
-  const latest = previews[0];
-  const hasDraft = !!latest && latest.status !== 'published' && !!publishedPreview;
-  const websiteState: 'live' | 'draft' | 'none' = publishedPreview ? (hasDraft ? 'draft' : 'live') : 'none';
+  const { state: websiteState, hasDraft, latest, publishedPreview } = deriveWebsiteStatus(previews);
   const badge = STATUS_BADGE[websiteState];
   const isReadOnly = mode === 'billing_recovery';
 
@@ -88,10 +86,10 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
   const publicUrl = isDomainActive ? `https://${domainConnection!.primaryHostname}` : `/b/${business.slug}`;
 
   const checklist: { href: string; label: string }[] = [];
-  if (!business.logoUrl) checklist.push({ href: `/app/businesses/${businessId}/design`, label: 'Add your logo' });
-  if (!business.photoUrls?.length) checklist.push({ href: `/app/businesses/${businessId}/website?tab=photos`, label: 'Add photos of your business' });
+  if (!business.logoUrl) checklist.push({ href: `/app/businesses/${businessId}/website#logo`, label: 'Add your logo' });
+  if (!business.photoUrls?.length) checklist.push({ href: `/app/businesses/${businessId}/website#photos`, label: 'Add photos of your business' });
   if (!business.phone && !business.email) checklist.push({ href: `/app/businesses/${businessId}/settings`, label: 'Add a way for customers to reach you' });
-  if (!business.theme) checklist.push({ href: `/app/businesses/${businessId}/design`, label: 'Choose a look for your website' });
+  if (!business.theme) checklist.push({ href: `/app/businesses/${businessId}/website#theme`, label: 'Choose a look for your website' });
   if (!publishedPreview) checklist.push({ href: `/app/businesses/${businessId}`, label: 'Publish your website' });
   if (!domainConnection || domainConnection.status === 'failed') {
     checklist.push({ href: `/app/onboarding/${businessId}/domain`, label: 'Connect your domain' });
@@ -188,7 +186,19 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
         already excludes the sidebar from that), so the preview reads as the
         real site rather than a small embedded thumbnail. */}
     <div className="w-[95%] mx-auto">
-      <WebsitePreviewCard slug={business.slug} lastUpdated={latest?.updatedAt} hasDraft={hasDraft} />
+      {/* `key` forces a remount (and therefore a fresh iframe fetch) exactly
+          when the underlying business/preview data actually changed — same
+          staleness fix already proven in the onboarding wizard's
+          `WebsitePreviewPanel` (implementation.md, Stage 19.A). Without it,
+          a save that redirects back to this exact route can leave the
+          iframe's `src` string unchanged, and React reuses the existing DOM
+          node instead of issuing a fresh request — silently stale preview. */}
+      <WebsitePreviewCard
+        key={`${business.updatedAt}:${latest?.updatedAt ?? ''}`}
+        slug={business.slug}
+        lastUpdated={latest?.updatedAt}
+        hasDraft={hasDraft}
+      />
     </div>
 
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
