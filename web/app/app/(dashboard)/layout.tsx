@@ -1,5 +1,6 @@
 import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
+import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { AppSidebar } from './AppSidebar';
 
 interface AppLayoutProps {
@@ -17,6 +18,14 @@ interface AppLayoutProps {
 export default async function AppLayout({ children }: AppLayoutProps) {
   const session = await requireCustomerSession();
   const businesses = await getBusinessesByOwnerUserId(session.sub);
+  // Despite its name (its only caller before this was an admin surface —
+  // see its doc comment), `adminGetCustomerProfileBySub` does no
+  // authorization of its own; it's just a Cognito `ListUsers` lookup by
+  // `sub`. Safe to call for the signed-in customer's own `sub` here — a
+  // customer looking up their own name, not anyone else's. Returns `null`
+  // gracefully (never throws) for an account created before `given_name`
+  // was collected at signup, or if the Cognito lookup itself fails.
+  const profile = await adminGetCustomerProfileBySub(session.sub);
 
   return (
     // `h-screen` (a hard cap), not `min-h-screen` (only a floor) — with
@@ -34,6 +43,8 @@ export default async function AppLayout({ children }: AppLayoutProps) {
       <AppSidebar
         businesses={businesses.map((b) => ({ businessId: b.businessId, name: b.name, slug: b.slug }))}
         signedInAs={session.email}
+        firstName={profile?.firstName}
+        lastName={profile?.lastName}
       />
       <main className="flex-1 min-w-0 overflow-auto">{children}</main>
     </div>

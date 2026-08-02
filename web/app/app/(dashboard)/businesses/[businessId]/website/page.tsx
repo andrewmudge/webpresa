@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { deriveWebsiteStatus } from '@/lib/customer-editing/site-status';
+import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { ThemeTab } from './ThemeTab';
 import { LogoTab } from './LogoTab';
 import { ContentTab } from './ContentTab';
@@ -63,6 +64,25 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
   const previews = await getCachedPreviews(businessId);
   const { state, hasDraft, latest } = deriveWebsiteStatus(previews);
   const badge = STATUS_BADGE[state];
+
+  // Same "prefer the active connected custom domain, else the real /b/[slug]
+  // path" resolution business-home's own preview card doesn't currently do
+  // but Stage 19.x's onboarding wizard already established as the honest
+  // pattern (never fabricate a *.webpresa.io-style address) — see
+  // WebsitePreviewCard's `customDomainUrl` doc comment. Deliberately
+  // tolerant of this lookup failing outright (unlike every other read on
+  // this page) — Stage 19.x's domain-connections table isn't deployed in
+  // every environment yet (see deployment.md), and a business's public URL
+  // is a nice-to-have enhancement to the preview's status bar, not
+  // something the whole editor should go down over.
+  let customDomainUrl: string | undefined;
+  try {
+    const domainConnections = await listDomainConnectionsForBusiness(businessId);
+    const activeDomainConnection = domainConnections.find((c) => c.status === 'active');
+    customDomainUrl = activeDomainConnection ? `https://${activeDomainConnection.primaryHostname}` : undefined;
+  } catch (err) {
+    console.error('Failed to resolve a custom domain for the preview status bar:', err instanceof Error ? err.message : err);
+  }
 
   const tabs: Record<TabId, React.ReactNode> = {
     theme: <ThemeTab businessId={businessId} currentTheme={business.theme} isReadOnly={isReadOnly} />,
@@ -144,6 +164,7 @@ export default async function WebsiteEditorPage({ params, searchParams }: Props)
             slug={business.slug}
             lastUpdated={latest?.updatedAt}
             hasDraft={hasDraft}
+            customDomainUrl={customDomainUrl}
           />
         }
       />

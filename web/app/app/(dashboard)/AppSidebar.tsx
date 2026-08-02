@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 
 /**
@@ -65,6 +65,12 @@ interface BusinessSummary {
 interface AppSidebarProps {
   businesses: BusinessSummary[];
   signedInAs: string;
+  /** From the customer's Cognito profile (`given_name`/`family_name`) —
+   *  undefined for an account created before these were collected at
+   *  signup, or if the lookup itself failed; `Footer` falls back to
+   *  deriving something from `signedInAs` (the email) in that case. */
+  firstName?: string;
+  lastName?: string;
 }
 
 const NAV_ITEMS = [
@@ -180,27 +186,61 @@ function Nav({ currentId, onNavigate, collapsed }: { currentId: string | null; o
   );
 }
 
-function Footer({ signedInAs, collapsed }: { signedInAs: string; collapsed?: boolean }) {
+/**
+ * Prefers the customer's real name (Cognito `given_name`/`family_name`,
+ * collected at signup); falls back to deriving something reasonable from
+ * their email for accounts that predate that collection or when the
+ * Cognito lookup fails — never blank, never the raw sub.
+ */
+function resolveDisplayIdentity(signedInAs: string, firstName?: string, lastName?: string): { name: string; initial: string } {
+  if (firstName) {
+    const name = lastName ? `${firstName} ${lastName}` : firstName;
+    return { name, initial: firstName[0].toUpperCase() };
+  }
+  const emailLocalPart = signedInAs.split('@')[0] || signedInAs;
+  return { name: emailLocalPart, initial: (emailLocalPart[0] ?? '?').toUpperCase() };
+}
+
+function Footer({ signedInAs, firstName, lastName, collapsed }: { signedInAs: string; firstName?: string; lastName?: string; collapsed?: boolean }) {
+  const { name, initial } = resolveDisplayIdentity(signedInAs, firstName, lastName);
+
   return (
-    <div className="px-3 py-4 border-t border-white/10 space-y-1">
-      {!collapsed && <p className="text-xs text-white/40 px-2 mb-2 truncate">Signed in as {signedInAs}</p>}
-      <form action={customerSignOutAction}>
-        <button
-          type="submit"
-          title={collapsed ? 'Sign out' : undefined}
-          aria-label={collapsed ? 'Sign out' : undefined}
-          className={`w-full text-sm text-white/50 hover:text-white px-2 py-1.5 rounded transition-colors hover:bg-white/10 ${
-            collapsed ? 'text-center' : 'text-left'
-          }`}
+    <div className="px-3 py-4 border-t border-white/10">
+      <div className={`flex items-center gap-2.5 ${collapsed ? 'justify-center' : ''}`} title={collapsed ? name : undefined}>
+        <div
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-sm font-semibold text-white"
+          aria-hidden="true"
         >
-          Sign out
-        </button>
-      </form>
+          {initial}
+        </div>
+        {!collapsed && (
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-white truncate">{name}</p>
+            <form action={customerSignOutAction}>
+              <button type="submit" className="text-xs text-white/50 hover:text-white transition-colors">
+                Sign out
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+      {collapsed && (
+        <form action={customerSignOutAction} className="mt-2">
+          <button
+            type="submit"
+            title="Sign out"
+            aria-label="Sign out"
+            className="flex w-full items-center justify-center rounded-lg p-1.5 text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
+        </form>
+      )}
     </div>
   );
 }
 
-export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
+export function AppSidebar({ businesses, signedInAs, firstName, lastName }: AppSidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const collapsed = useSyncExternalStore(subscribeToCollapsed, getCollapsedSnapshot, getCollapsedServerSnapshot);
   const shouldReduceMotion = useReducedMotion();
@@ -252,7 +292,7 @@ export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
             </a>
           </div>
         )}
-        <Footer signedInAs={signedInAs} collapsed={collapsed} />
+        <Footer signedInAs={signedInAs} firstName={firstName} lastName={lastName} collapsed={collapsed} />
       </aside>
 
       <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-brand px-4 py-3 shadow-lg">
@@ -313,7 +353,7 @@ export function AppSidebar({ businesses, signedInAs }: AppSidebarProps) {
                   </a>
                 </div>
               )}
-              <Footer signedInAs={signedInAs} />
+              <Footer signedInAs={signedInAs} firstName={firstName} lastName={lastName} />
             </motion.div>
           </>
         )}

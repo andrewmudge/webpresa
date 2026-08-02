@@ -7365,3 +7365,45 @@ Verification: `npm run lint` (0 errors, 2 pre-existing unrelated warnings), `npx
 web/docs/build_log.md                                                               MODIFIED — this entry
 web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — padding/margin/gap spacing only
 ```
+
+---
+
+# Stage 19.A follow-up: tab-bar container inset, sidebar avatar/name, live-preview status bar (2026-08-01)
+
+Three more items from direct feedback.
+
+## 1. Tab-bar container still touched the sidebar and right edge
+
+The previous spacing fix (`px-4 sm:px-6`) only indented the tab *text* — the bar's own `bg-white`/`border-b` box was still full-bleed against both walls, since padding is inside the box. Switched to `mx-4 sm:mx-6` (margin, outside the box) in `EditorTabNav.tsx` so the box itself is inset like every other card on the page, not just its content.
+
+## 2. Sidebar footer: avatar circle + real name
+
+Cognito already collects `given_name`/`family_name` at customer signup (`signUpCustomer()`, `lib/auth/customer-cognito.ts`) — just never surfaced anywhere in the dashboard, which only ever showed the raw email ("Signed in as x@y.com"). `AppLayout` now calls `adminGetCustomerProfileBySub(session.sub)` — an existing function (despite its "admin"-prefixed name, it does no authorization of its own; its only prior caller was an admin page, but it's just a Cognito `ListUsers`-by-`sub` lookup, safe here since we only ever pass the signed-in customer's own `sub`) — and passes `firstName`/`lastName` down to `AppSidebar`. `Footer`'s new `resolveDisplayIdentity()` prefers the real name; for an account created before `given_name` was collected (or if the Cognito lookup fails), it falls back to the email's local-part — never blank, never the raw email as a "name." Collapsed sidebar shows just the avatar circle (centered) plus a `LogOut`-icon sign-out button, replacing the previous bare centered text.
+
+## 3. Live-preview status/URL bar
+
+`WebsitePreviewCard` gained a status row above its existing Desktop/Mobile toggle bar: a colored dot (green "Live preview" / amber "Draft preview," matching `hasDraft`) plus the real resolved URL as a clickable link. New optional `customDomainUrl` prop — when the business has an `active` connected custom domain **and** isn't currently showing a draft, the bar shows and links to that; otherwise it shows the real `/b/[slug]{?preview=draft}` path, same one already in the iframe's own `src`. Deliberately never fabricates a `*.webpresa.io`-style address — same "never fabricate" precedent the onboarding wizard's `WebsitePreviewPanel` already established for this exact problem. `website/page.tsx` resolves `customDomainUrl` via `listDomainConnectionsForBusiness()`, the same call `page.tsx` (Overview) already makes for its own "View Live Site" link.
+
+**Real bug found and fixed while wiring this in**: `DOMAIN_CONNECTIONS_TABLE_NAME` isn't set in this dev environment (Stage 19.x's domain-connections table isn't deployed everywhere yet, per `deployment.md`) — an uncaught call crashed the entire editor page. Wrapped the lookup in a `try/catch` that logs and falls back to no custom domain, since a business's public URL is a nice-to-have enhancement to the status bar, not something the whole editor should go down over. (The **same** class of gap independently affects the Overview page's unrelated `CUSTOMER_ONBOARDING_TABLE_NAME` lookup — pre-existing, not touched here, out of scope for this fix.)
+
+## Verification
+
+```
+npm run lint        — 0 errors, 2 pre-existing unrelated warnings
+npx tsc --noEmit     — passes
+npm test             — 89 files, 947 tests passed
+npm run build        — succeeds
+```
+
+Manual: real dev server, curl with a locally-minted session JWT against the real dev business used throughout this stage — confirmed `/website` returns 200 (previously crashed before the `try/catch` fix) and the domain-connections failure logs cleanly instead of crashing. Full Playwright screenshot verification was not completed this round (the sandbox was unusually slow — cold Turbopack compiles of `/b/[slug]` and `/api/assets/[...key]` took 30-60s+ each under load) — visual confirmation left to the user, per their explicit preference this round.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                               MODIFIED — this entry
+web/app/app/(dashboard)/businesses/[businessId]/website/EditorTabNav.tsx            MODIFIED — px to mx
+web/app/app/(dashboard)/layout.tsx                                                  MODIFIED — Cognito profile lookup
+web/app/app/(dashboard)/AppSidebar.tsx                                              MODIFIED — avatar/name footer, LogOut icon
+web/app/app/(dashboard)/businesses/[businessId]/WebsitePreviewCard.tsx              MODIFIED — status/URL bar, customDomainUrl prop
+web/app/app/(dashboard)/businesses/[businessId]/website/page.tsx                    MODIFIED — resolves customDomainUrl, try/catch
+```

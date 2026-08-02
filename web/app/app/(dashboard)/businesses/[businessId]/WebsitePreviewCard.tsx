@@ -11,6 +11,13 @@ interface WebsitePreviewCardProps {
    *  this, the iframe would silently keep showing stale published content
    *  even while the dashboard says "Draft changes." */
   hasDraft?: boolean;
+  /** The business's active connected custom domain, e.g. `"https://example.com"`
+   *  — only shown/linked when NOT previewing a draft (a draft is never live
+   *  at the custom domain, so showing that address while displaying draft
+   *  content would misrepresent what's actually there). Omit if no custom
+   *  domain is connected — the status bar falls back to the real `/b/[slug]`
+   *  path, never a fabricated `*.webpresa.io`-style address. */
+  customDomainUrl?: string;
 }
 
 /**
@@ -22,14 +29,35 @@ interface WebsitePreviewCardProps {
  * template, and the Request Service modal / CTA `tel:`/`mailto:` handling
  * need to keep working exactly as they do on the real public page.
  */
-export function WebsitePreviewCard({ slug, lastUpdated, hasDraft }: WebsitePreviewCardProps) {
+export function WebsitePreviewCard({ slug, lastUpdated, hasDraft, customDomainUrl }: WebsitePreviewCardProps) {
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const href = `/b/${slug}${hasDraft ? '?preview=draft' : ''}`;
+  // Always exactly what the iframe below is showing — a draft never shows
+  // the custom domain (see the prop doc comment), so `href` (the same
+  // internal draft path) is deliberately still correct there.
+  const displayUrl = !hasDraft && customDomainUrl ? customDomainUrl : href;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-gray-100 text-xs">
+        <span className="flex shrink-0 items-center gap-1.5 font-medium text-gray-600">
+          <span className={`h-2 w-2 rounded-full ${hasDraft ? 'bg-amber-500' : 'bg-green-500'}`} aria-hidden="true" />
+          {hasDraft ? 'Draft preview' : 'Live preview'}
+        </span>
+        <span className="h-4 w-px shrink-0 bg-gray-200" aria-hidden="true" />
+        <a
+          href={displayUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex min-w-0 items-center gap-1 text-gray-500 hover:text-(--color-brand) transition-colors"
+        >
+          <span className="truncate">{displayUrl}</span>
+          <ExternalLink size={11} className="shrink-0" aria-hidden="true" />
+        </a>
+      </div>
+
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
           <button

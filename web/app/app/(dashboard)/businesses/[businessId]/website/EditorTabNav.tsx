@@ -76,14 +76,16 @@ export function EditorTabNav({ activeTab, onSelect }: EditorTabNavProps) {
     <div
       role="tablist"
       aria-label="Website editor sections"
-      // Horizontal padding matches the header/SaveBanner row above
-      // (`px-4 sm:px-6`) and the editor panel's own content padding below,
-      // so the first tab lines up with the page title and the "Theme" card
-      // instead of sitting flush against the sidebar. `mb-3` is the actual
-      // gap before the scrollable panel content below — kept as margin
-      // (outside the border) rather than padding inside this element, so
-      // the border-bottom still hugs the tab row itself.
-      className="flex gap-1 overflow-x-auto bg-white border-b border-gray-200 px-4 sm:px-6 mb-3 sticky top-0 z-10"
+      // Horizontal MARGIN (not padding) — matches the header/SaveBanner row
+      // above (`px-4 sm:px-6`) and the editor panel's own content padding,
+      // so the first tab lines up with the page title and the "Theme" card.
+      // Margin, specifically, so the white/bordered box itself is inset from
+      // the sidebar and the right edge (page background shows on both
+      // sides), matching every other card on this page — padding alone
+      // (the first-pass fix) only indented the button *text*, leaving the
+      // bg-white/border-b rectangle itself full-bleed against both walls.
+      // `mb-3` is the gap before the scrollable panel content below.
+      className="flex gap-1 overflow-x-auto bg-white border-b border-gray-200 mx-4 sm:mx-6 mb-3 sticky top-0 z-10"
     >
       {TAB_IDS.map((id, index) => {
         const selected = activeTab === id;
