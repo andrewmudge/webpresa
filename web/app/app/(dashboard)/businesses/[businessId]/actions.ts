@@ -1,7 +1,8 @@
 'use server';
 import { redirect } from 'next/navigation';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
-import { requireCustomerSession, requireActiveSubscription } from '@/lib/auth/customer-authorization';
+import { requireCustomerSession, requireActiveSubscription, requireBusinessOwnership } from '@/lib/auth/customer-authorization';
+import type { CustomerSessionPayload } from '@/lib/auth/customer-session';
 import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info';
 import { updateCustomerTheme } from '@/lib/customer-editing/theme';
 import { updateCustomerCta } from '@/lib/customer-editing/cta';
@@ -24,6 +25,10 @@ import {
 } from '@/lib/customer-editing/photos';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import { updateCustomerDraftNoticePreference } from '@/lib/customer-editing/notification-preference';
+import { updateCustomerBusinessHours } from '@/lib/customer-editing/hours';
+import { updateCustomerAccountProfile } from '@/lib/customer-editing/account';
+import { deleteCustomerWebsite } from '@/lib/customer-editing/delete-website';
+import { requestCustomerPasswordReset } from '@/lib/auth/customer-cognito';
 import { persistWebsiteSections } from '@/lib/website-sections/persist';
 
 /**
@@ -42,10 +47,10 @@ import { persistWebsiteSections } from '@/lib/website-sections/persist';
  * an admin session, not this one) — they call the same underlying,
  * auth-agnostic `lib/` functions those admin actions call instead.
  */
-async function requireEditAccess(businessId: string): Promise<string> {
+async function requireEditAccess(businessId: string): Promise<CustomerSessionPayload> {
   const session = await requireCustomerSession();
   await requireActiveSubscription(session.sub, businessId);
-  return session.sub;
+  return session;
 }
 
 /**
@@ -81,7 +86,68 @@ const SECTION_ANCHOR: Partial<Record<WebsiteSectionType, string>> = {
 export async function updateBusinessInfoAction(businessId: string, formData: FormData): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerBusinessInfo(businessId, formData);
+  if (!result?.message && !result?.errors) {
+    // Hours lives on the preview's content, not Business — a separate,
+    // narrower write (see `updateCustomerBusinessHours`'s doc comment for
+    // why this isn't folded into `updateCustomerSectionContent`'s generic
+    // 'contact' case). Only attempted once the Business-level fields above
+    // saved cleanly.
+    const hours = formData.get('hours');
+    if (typeof hours === 'string') {
+      await updateCustomerBusinessHours(businessId, hours);
+    }
+  }
   redirect(withError(`/app/businesses/${businessId}/settings`, result?.message ?? (result?.errors ? 'Please fix the highlighted fields.' : undefined)));
+}
+
+// ---------------------------------------------------------------------------
+// Settings — Account card (Cognito profile, password reset) and Danger Zone
+// ---------------------------------------------------------------------------
+
+export async function updateAccountProfileAction(businessId: string, formData: FormData): Promise<void> {
+  const session = await requireEditAccess(businessId);
+  const result = await updateCustomerAccountProfile(session.sub, formData);
+  redirect(withError(`/app/businesses/${businessId}/settings`, result?.message ?? (result?.errors ? 'Please fix the highlighted fields.' : undefined)));
+}
+
+/**
+ * "Send password reset email" — this app's only supported password-change
+ * flow, since the customer session carries no Cognito access token to
+ * support an in-session "current password → new password" form (see
+ * `implementation.md`'s Account card requirements: never fabricate a
+ * password form that can't securely update credentials). Wraps the
+ * existing `requestCustomerPasswordReset`, which never discloses whether
+ * the account exists — this action mirrors that by never surfacing an
+ * error either.
+ */
+export async function sendPasswordResetEmailAction(businessId: string): Promise<{ email: string }> {
+  const session = await requireEditAccess(businessId);
+  await requestCustomerPasswordReset(session.email);
+  return { email: session.email };
+}
+
+/**
+ * Called directly from a client component (`DeleteWebsiteModal`, via
+ * `useTransition`), not a `<form action>` — returns an error state instead
+ * of redirecting on failure, so the confirmation modal can show it inline
+ * without ambiguity over whether a thrown `redirect()` was a success
+ * navigation or an error one. Only redirects on genuine success.
+ */
+export async function deleteWebsiteActionCustomer(
+  businessId: string,
+  formData: FormData,
+): Promise<{ message?: string } | undefined> {
+  const session = await requireEditAccess(businessId);
+  const business = await requireBusinessOwnership(session.sub, businessId);
+  const typedName = formData.get('confirmName');
+  if (typeof typedName !== 'string' || typedName !== business.name) {
+    return { message: 'Business name did not match.' };
+  }
+  const result = await deleteCustomerWebsite(businessId, session.sub);
+  if (result?.message) {
+    return result;
+  }
+  redirect('/app?deleted=1');
 }
 
 // ---------------------------------------------------------------------------
@@ -231,9 +297,12 @@ export async function deletePhotoActionCustomer(businessId: string, formData: Fo
 // the page) and a small Settings toggle — both via the same call shape.
 // ---------------------------------------------------------------------------
 
-export async function updateDraftNoticePreferenceActionCustomer(businessId: string, enabled: boolean): Promise<void> {
+export async function updateDraftNoticePreferenceActionCustomer(
+  businessId: string,
+  enabled: boolean,
+): Promise<{ message?: string } | undefined> {
   await requireEditAccess(businessId);
-  await updateCustomerDraftNoticePreference(businessId, enabled);
+  return updateCustomerDraftNoticePreference(businessId, enabled);
 }
 
 // ---------------------------------------------------------------------------

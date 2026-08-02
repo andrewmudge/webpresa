@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Monitor, Globe, ShieldCheck, CreditCard } from 'lucide-react';
 import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess } from '@/lib/auth/customer-authorization';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
@@ -169,19 +169,26 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatusCard label="Website" status={websiteCardStatus} action={{ label: 'Visit Website', href: publicUrl, external: true }} />
+          <StatusCard
+            label="Website"
+            status={websiteCardStatus}
+            icon={Monitor}
+            action={{ label: 'Visit Website', href: publicUrl, external: true }}
+          />
           <StatusCard
             label="Domain"
             status={domainCardStatus}
+            icon={Globe}
             action={{
               label: domainConnection ? 'Manage Domain' : 'Connect Domain',
               href: `/app/onboarding/${businessId}/domain`,
             }}
           />
-          <StatusCard label="SSL" status={sslCardStatus} />
+          <StatusCard label="SSL" status={sslCardStatus} icon={ShieldCheck} />
           <StatusCard
             label="Subscription"
             status={subscriptionCardStatus}
+            icon={CreditCard}
             action={{ label: 'Manage Subscription', href: `/app/businesses/${businessId}/billing` }}
           />
         </div>

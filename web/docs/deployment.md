@@ -1008,3 +1008,24 @@ A genuinely new bucket (rather than a prefix) would instead follow the `Webpresa
 5. Extend the `webpresa-dev-secrets` IAM policy above with the new secret's ARN.
 6. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying.
 7. After deploy, populate the real value with `aws secretsmanager put-secret-value` (see above) once the owning stage actually needs it — not before.
+
+---
+
+## Settings Page Redesign — pending IAM deploy
+
+**Application code implemented 2026-08-02 (see `build_log.md`); the one infrastructure change it depends on is reviewed but not yet deployed.**
+
+The Settings page's Account card ("Edit Account," name/phone editing) calls Cognito's `AdminUpdateUserAttributes`, which `webpresa-vercel-dev` is not yet granted. `infra/lib/stacks/vercel-access-stack.ts`'s existing `CognitoCustomerAuth` statement now includes `cognito-idp:AdminUpdateUserAttributes` alongside its existing six actions — the same resource (`customerUserPool.userPoolArn`), no new resource, no replacement.
+
+```bash
+cd infra
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+# Reviewed 2026-08-02: a single additive IAM statement change (+1 action on
+# the existing DataAccessPolicy), no other stack affected. Not deployed —
+# awaiting explicit approval per AGENTS.md.
+npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+`WEBPRESA_APP_BASE_URL` must be set for any `cdk` command in this app (see `bin/webpresa.ts`'s hard-fail guard, Stage 14 above) even though this particular stack doesn't consume it — use the real deployed app URL, not a placeholder.
+
+Until deployed, "Edit Account" name/phone saves will fail with a generic error (the Cognito call throws `AccessDeniedException`, mapped to `updateCustomerProfile`'s existing `'unknown'` reason code) — every other Settings card is unaffected.

@@ -29,6 +29,7 @@ const CustomerBusinessInfoSchema = z.object({
   phone: z.string().max(40).optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   addressLine1: z.string().max(200).optional(),
+  addressLine2: z.string().max(200).optional(),
   addressCity: z.string().max(100).optional(),
   addressState: z.string().max(100).optional(),
   addressPostalCode: z.string().max(20).optional(),
@@ -61,6 +62,7 @@ export async function updateCustomerBusinessInfo(
     phone: coerceOptional(formData.get('phone') as string | null),
     email: coerceOptional(formData.get('email') as string | null),
     addressLine1: coerceOptional(formData.get('addressLine1') as string | null),
+    addressLine2: coerceOptional(formData.get('addressLine2') as string | null),
     addressCity: coerceOptional(formData.get('addressCity') as string | null),
     addressState: coerceOptional(formData.get('addressState') as string | null),
     addressPostalCode: coerceOptional(formData.get('addressPostalCode') as string | null),
@@ -88,6 +90,7 @@ export async function updateCustomerBusinessInfo(
       data.addressLine1 && data.addressCity && data.addressState && data.addressPostalCode
         ? {
             line1: data.addressLine1,
+            ...(data.addressLine2 ? { line2: data.addressLine2 } : {}),
             city: data.addressCity,
             state: data.addressState,
             postalCode: data.addressPostalCode,

@@ -990,6 +990,24 @@ Review/Domain/Publish were restructured around this shell with their existing fi
 
 ---
 
+## Settings Page Redesign
+
+**Implemented 2026-08-02.** `/app/businesses/[businessId]/settings` rebuilt from a single long form-heavy page into a responsive 6-card grid (Account, Business Information, Website, Domain, Notifications, Danger Zone). See `build_log.md`, "Settings Page Redesign," for the full record.
+
+**New shared primitive**: `Modal.tsx` (`businesses/[businessId]/`) — the first properly accessible dialog in the customer dashboard (focus trap, focus-return-on-close, `aria-modal`); `ConfirmDialog.tsx` builds a generic typed-confirmation destructive-action shell on top of it.
+
+**Account card is new** — the first account-management surface anywhere in the customer app. Name/phone editing calls a new `updateCustomerProfile()` (`lib/auth/customer-cognito.ts`) via `AdminUpdateUserAttributesCommand`, keyed on the session's `sub` (**not** `email`) — confirmed against real dev Cognito data that this pool's `signInAliases: { email: true }` with no `usernameAttributes` set makes Cognito auto-assign each account's real `Username` as its `sub`, with email stored only as an alias; `Admin*` APIs require the real username, unlike the unauthenticated-flow APIs (`InitiateAuth`/`ForgotPassword`/etc.) the rest of `customer-cognito.ts` already correctly keys on `email`. Requires a new IAM action, `cognito-idp:AdminUpdateUserAttributes`, added to `vercel-access-stack.ts`'s existing `CognitoCustomerAuth` statement — reviewed via `cdk diff` but **not yet deployed** (see `deployment.md`). Password is never editable inline — only "Send password reset email" (Cognito's pre-existing `requestCustomerPasswordReset`/`confirmCustomerPasswordReset`, implemented since Stage 17 but never wired to a UI until now) plus a new public `/account/reset-password` confirm-code page. Email itself stays read-only (a real change needs its own verification flow, not shipped). 2FA shown as "Coming soon."
+
+**Business Information card**: adds `Address.line2` (field already existed on the model, newly surfaced) and structured Platform+URL social-link rows (`SocialLinksEditor.tsx`) in place of the old one-URL-per-line textarea — `Business.socialLinks` itself stays a flat `string[]`, only the editing UI is structured. Adds business hours, wired to the pre-existing `PreviewContent.hours` field via a new narrow `lib/customer-editing/hours.ts` (`updateCustomerBusinessHours`) rather than the generic `updateCustomerSectionContent(..., 'contact', ...)` handler, which fully replaces `content.contact` (phone/email/address) on every call and would have silently dropped the preview's stored contact address.
+
+**Website/Domain cards**: read-only summaries only — no editing controls, no second domain-management surface (`Manage Domain` still links to the existing `/app/onboarding/{businessId}/domain`). No fabricated "Webpresa subdomain" — this app has no `*.webpresa.io` concept; the Webpresa-hosted address is shown truthfully as `/b/{slug}`.
+
+**Notifications card**: only `draftChangesNoticeEnabled` (the sole real, wired preference) — billing receipts (Stripe's own, via the Customer Portal), publish notifications, domain-renewal reminders, and security alerts are all omitted, since none has a backing notification system. `updateCustomerDraftNoticePreference`/`updateDraftNoticePreferenceActionCustomer` now return a state instead of `void` so a real Saved/Error/Loading cycle can render.
+
+**Danger Zone**: only Delete Website ships. Delete Account and Export Website Data are both omitted (not shown, not disabled) — audited and found genuinely unbuildable this round: no Cognito user-deletion path/cross-business handling exists for account deletion, and no export generator exists anywhere in this codebase. `deleteCustomerWebsite()` (`lib/customer-editing/delete-website.ts`) extends the admin's `deleteBusinessAction` cascade (which never touched `DomainConnection` or S3) with best-effort domain teardown (`removeProjectDomain` + `deleteDomainConnectionRecord`, same calls `lib/domains/disconnect.ts`'s admin testing utility makes) and S3 asset cleanup. **Deliberately does not gate on `subscriptionStatus`** — `requireActiveSubscription` already means only `mode === 'full'`/`'billing_recovery'` customers ever reach Settings (`'none'` redirects away before it renders), so an "active subscription blocks delete" rule would make the feature permanently unreachable; instead uses the same `mode === 'full'` gate every other mutation on this page uses, and the confirmation modal states plainly that deletion does not cancel Stripe billing (no subscription-cancellation call exists in this codebase yet).
+
+---
+
 ## API boundaries
 
 Admin mutations use **Next.js Server Actions** (`'use server'` modules):

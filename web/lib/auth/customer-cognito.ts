@@ -8,6 +8,7 @@ import {
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
   ListUsersCommand,
+  AdminUpdateUserAttributesCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
 /**
@@ -265,6 +266,67 @@ export async function confirmCustomerPasswordReset(
     if (name === 'CodeMismatchException' || name === 'ExpiredCodeException') {
       return { ok: false, reason: 'invalid_code' };
     }
+    return { ok: false, reason: 'unknown' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Profile update (Settings redesign — Account card)
+// ---------------------------------------------------------------------------
+
+export type UpdateProfileFailureReason = 'invalid_phone' | 'unknown';
+
+export interface UpdateCustomerProfileInput {
+  firstName: string;
+  lastName: string;
+  /** 10-digit US number — normalized to E.164 before reaching Cognito, same as sign-up. */
+  phone?: string;
+}
+
+/**
+ * Updates the signed-in customer's own `given_name`/`family_name`/
+ * `phone_number` attributes. Uses `AdminUpdateUserAttributesCommand`
+ * (IAM-authenticated, like every other Cognito call in this app — the
+ * customer session carries no Cognito access/ID token to make a
+ * user-scoped `UpdateUserAttributes` call instead) rather than a real
+ * "admin" action — callers must pass the *authenticated session's own*
+ * `sub`, never a client-supplied target.
+ *
+ * Takes `sub`, not `email` — confirmed against a real pool user that,
+ * because `signInAliases: { email: true }` makes email an alias rather
+ * than the username attribute (`webpresa-user-pool.ts` sets no
+ * `usernameAttributes`), Cognito auto-generates each account's real
+ * `Username` as its `sub` UUID, not the email passed to `SignUpCommand`.
+ * Unauthenticated-flow APIs (`InitiateAuth`/`ForgotPassword`/
+ * `ConfirmForgotPassword`/`SignUp`) accept an alias in place of `Username`
+ * — which is why every other function in this file correctly uses `email`
+ * — but `Admin*` APIs like this one do not; they require the real
+ * username, i.e. `sub`.
+ *
+ * Deliberately does not touch `email` itself — Cognito email changes
+ * require its own verification flow (`VerifyUserAttribute`), not shipped
+ * in this stage; the Account card keeps email read-only.
+ */
+export async function updateCustomerProfile(
+  sub: string,
+  profile: UpdateCustomerProfileInput,
+): Promise<{ ok: true } | { ok: false; reason: UpdateProfileFailureReason }> {
+  try {
+    await getCognitoClient().send(
+      new AdminUpdateUserAttributesCommand({
+        UserPoolId: getUserPoolId(),
+        Username: sub,
+        UserAttributes: [
+          { Name: 'given_name', Value: profile.firstName },
+          { Name: 'family_name', Value: profile.lastName },
+          ...(profile.phone ? [{ Name: 'phone_number', Value: toE164UsPhone(profile.phone) }] : []),
+        ],
+      }),
+    );
+    return { ok: true };
+  } catch (err) {
+    const name = errorName(err);
+    if (name === 'InvalidParameterException') return { ok: false, reason: 'invalid_phone' };
     return { ok: false, reason: 'unknown' };
   }
 }

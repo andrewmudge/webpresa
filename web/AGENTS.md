@@ -29,6 +29,11 @@ These rules apply on every task, every session, without exception.
 - Do not claim a task is complete if any of these steps fails.
 - Fix failures before reporting success. If a failure cannot be fixed in the current task scope, report it explicitly.
 
+## Verification
+
+- Do not start a dev server, open a browser, or take screenshots to visually verify UI/frontend changes. The user verifies visual/UI changes themselves.
+- Verification means: lint, type-check, tests, and build (see "Code quality" above). That is sufficient to report a task complete — do not additionally attempt to view the running app.
+
 ## Scope
 
 - Keep changes strictly limited to the work described in the current task. Do not refactor, rename, or "improve" adjacent code that was not mentioned.

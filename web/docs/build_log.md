@@ -7511,3 +7511,72 @@ web/app/app/(dashboard)/businesses/[businessId]/ActionRequiredCard.tsx          
 web/app/app/(dashboard)/businesses/[businessId]/SupportCard.tsx                                  NEW
 web/app/app/(dashboard)/businesses/[businessId]/__tests__/overview-status.test.ts                NEW — 36 tests
 ```
+
+---
+
+# Settings Page Redesign
+
+**Date:** 2026-08-02
+
+## Overview
+
+Replaced `/app/businesses/[businessId]/settings` — previously a single long, form-heavy page (one inline Business Information form plus three small read-only summary blocks) — with a responsive six-card dashboard: Account, Business Information, Website, Domain, Notifications, Danger Zone (`grid-cols-1 md:grid-cols-2 xl:grid-cols-3`). Each card shows a compact read-only summary; "Edit Account"/"Edit Business" open a new shared, accessible `Modal.tsx` (focus trap, focus-return-on-close, Escape/backdrop close) — nothing in the customer dashboard had a real modal before this (the admin's `StockPhotoPickerModal.tsx` was the closest precedent, with no focus trap).
+
+**Account card is new** — this app had no account-management surface anywhere before this (`/account/*` was only sign-in/checkout/claim-status). Displays name/email/phone (Cognito, via the already-existing `adminGetCustomerProfileBySub`); "Edit Account" updates first/last name and phone through a new `updateCustomerProfile()` (`lib/auth/customer-cognito.ts`, `AdminUpdateUserAttributesCommand`); password shown only as masked dots with a "Send password reset email" action (Cognito's existing `requestCustomerPasswordReset`/`confirmCustomerPasswordReset` — implemented since Stage 17 but never wired to any UI until now) plus a new public `/account/reset-password` confirm-code page; 2FA shown as "Coming soon."
+
+**Real bug caught and fixed before shipping, via real dev Cognito data, not assumption:** the first `updateCustomerProfile()` draft used `Username: email` for `AdminUpdateUserAttributesCommand`, based on the (wrong) assumption that `signUpCustomer`'s `Username: email` on `SignUpCommand` makes email the pool's real username. A live `aws cognito-idp list-users` lookup against a real dev customer showed `Username` is actually the account's `sub` UUID — because `signInAliases: { email: true }` with no `usernameAttributes` set (`webpresa-user-pool.ts`) makes Cognito auto-generate the real username as the `sub`, with email stored only as an alias. Unauthenticated-flow APIs (`InitiateAuth`/`ForgotPassword`/`ConfirmForgotPassword`/`SignUp`) accept an alias as `Username`, which is why every other function in `customer-cognito.ts` correctly uses `email` — but `Admin*` APIs require the real username. Fixed to take `sub` instead of `email` (both the function and its `lib/customer-editing/account.ts` wrapper); tests and doc comments updated accordingly.
+
+**Business Information card**: name/phone/email/address (line1 **and new line2** — `Address.line2` already existed on the model, just never surfaced in the customer form)/hours/social-link count. "Edit Business" adds repeatable Platform+URL social-link rows (`SocialLinksEditor.tsx`, client-side `classifySocialPlatform()` for live-detected platform display) instead of the old one-URL-per-line textarea, and a new hours field. `Business.socialLinks` stays a flat `string[]` server-side (no migration) — only the *editing* affordance is structured. Hours has no `Business`-level field; it's `PreviewContent.hours` (already existed, already had a full write path via `updateCustomerSectionContent(..., 'contact', ...)` — just never exposed to any customer UI). Reusing that generic handler directly would have clobbered `content.contact`'s phone/email/address on every save (it fully replaces, not merges), so a small dedicated `lib/customer-editing/hours.ts` (`updateCustomerBusinessHours`) patches only `content.hours`.
+
+**Website/Domain cards**: concise status summaries only, no editing controls (avoids duplicating `/website`'s editor or the onboarding domain flow). "Unpublished changes" shown as the real version-number gap between the latest and published preview (`SitePreview.version`), not a fabricated edit count — this app has no per-field change log. Domain reuses the existing `/app/onboarding/{businessId}/domain` route, not a second domain-management surface. No "Webpresa subdomain" is shown (confirmed no `*.webpresa.io` concept exists anywhere in this app) — the Webpresa-hosted address is presented truthfully as `/b/{slug}`.
+
+**Notifications card**: only `draftChangesNoticeEnabled` (the one real, wired preference — the "unpublished draft" toast). Billing receipts, publish notifications, domain-renewal reminders, and security alerts are all omitted — no backing notification system exists for any of them (billing receipts are Stripe's own, confirmed via the Billing page's full Customer Portal delegation). Rewritten with an explicit "Save Preferences" button and real Saved/Error/Loading states — `updateCustomerDraftNoticePreference`/`updateDraftNoticePreferenceActionCustomer` changed from `void` to a `{ message? }` return so a failure can actually surface (previously silent either way). `NotificationToggle.tsx` (the old auto-save-on-toggle component) is now dead code, deleted.
+
+**Danger Zone / Delete Website**: the only destructive action shipped. Delete Account and Export Website Data are deliberately not shown at all (not even disabled) — audited and confirmed unsafe/unbuildable this round: the admin's own `deleteBusinessAction` cascade (previews/scans/postcards/claims) never touched `DomainConnection` records or S3 assets either, and full account deletion would additionally need Cognito user deletion (no `AdminDeleteUser` call exists or is IAM-granted) and cross-business handling, neither of which exists; no export generator exists anywhere in this codebase. `deleteCustomerWebsite()` (`lib/customer-editing/delete-website.ts`) extends the admin cascade with domain teardown (`removeProjectDomain` best-effort + `deleteDomainConnectionRecord`, same calls `lib/domains/disconnect.ts`'s admin-only testing utility already makes) and S3 photo/logo cleanup (`deleteAsset`, best-effort, same precedent as `deleteCustomerBusinessPhoto`) before deleting the business record. **Deliberately does not check or block on `subscriptionStatus`** — an early draft gated deletion behind "no active subscription," but `requireActiveSubscription` means a customer can only ever reach Settings with `mode === 'full'` (active) or `'billing_recovery'` (past_due, already read-only) — `'none'` redirects away before Settings ever renders — so an "active-subscription blocks delete" rule would have made the feature permanently unreachable. Uses the same `mode === 'full'` gate as every other mutation on this page instead, with the confirmation modal warning plainly that deletion does not cancel Stripe billing (no subscription-cancellation call exists anywhere in this codebase; cancellation stays a separate Stripe Customer Portal action from the Billing page). Confirmation requires typing the business's exact name (`ConfirmDialog.tsx`, generic — built for reuse by any future destructive action), server-side re-verified, not just client-side.
+
+**Infrastructure**: one new IAM action, `cognito-idp:AdminUpdateUserAttributes`, added to the existing `CognitoCustomerAuth` statement in `infra/lib/stacks/vercel-access-stack.ts` (the statement's own prior comment specifically anticipated extending it "only when a feature actually needs it"). `cdk diff WebpresaDevVercelAccessStack --profile webpresa` reviewed — a single additive IAM statement change, no replacement, no other stack affected — and shown to the user; **not deployed**, per `AGENTS.md`'s deploy-approval gate. Name/phone editing will 403/error gracefully against the real pool until this is deployed.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings (app/app/onboarding/[businessId]/actions.ts)
+npm test             — 93 files, 1010 tests passed (38 new: delete-website.test.ts, account.test.ts, 4 new customer-cognito.test.ts cases)
+npm run build        — succeeds, /account/reset-password included in the route manifest
+```
+
+Per `AGENTS.md`'s verification policy, no dev server/browser check was performed for the UI itself. A real dev-Cognito lookup (`aws cognito-idp list-users`, read-only) was used mid-implementation to verify the `Admin*` API's `Username` assumption against live pool data — see the Cognito bug note above — not as a substitute for the lint/type-check/test/build verification gate.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                                                MODIFIED — this entry
+infra/lib/stacks/vercel-access-stack.ts                                                               MODIFIED — +1 IAM action (AdminUpdateUserAttributes), not yet deployed
+web/lib/auth/customer-cognito.ts                                                                      MODIFIED — new updateCustomerProfile()
+web/lib/auth/__tests__/customer-cognito.test.ts                                                       MODIFIED — 4 new tests
+web/lib/customer-editing/account.ts                                                                   NEW
+web/lib/customer-editing/__tests__/account.test.ts                                                    NEW
+web/lib/customer-editing/hours.ts                                                                     NEW
+web/lib/customer-editing/business-info.ts                                                             MODIFIED — addressLine2
+web/lib/customer-editing/notification-preference.ts                                                   MODIFIED — returns a state instead of void
+web/lib/customer-editing/delete-website.ts                                                             NEW
+web/lib/customer-editing/__tests__/delete-website.test.ts                                              NEW
+web/app/app/(dashboard)/businesses/[businessId]/actions.ts                                            MODIFIED — new Account/password-reset/delete actions, hours write, requireEditAccess now returns full session
+web/app/app/(dashboard)/businesses/[businessId]/Modal.tsx                                             NEW
+web/app/app/(dashboard)/businesses/[businessId]/ConfirmDialog.tsx                                     NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/page.tsx                                     MODIFIED — rebuilt as the 6-card grid
+web/app/app/(dashboard)/businesses/[businessId]/settings/AccountCard.tsx                              NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/EditAccountModal.tsx                         NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/BusinessInfoCard.tsx                         NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/EditBusinessModal.tsx                        NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/SocialLinksEditor.tsx                        NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/WebsiteCard.tsx                              NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/DomainCard.tsx                               NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/NotificationsCard.tsx                        NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/DangerZoneCard.tsx                           NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/DeleteWebsiteModal.tsx                       NEW
+web/app/app/(dashboard)/businesses/[businessId]/settings/NotificationToggle.tsx                       DELETED — superseded by NotificationsCard.tsx
+web/app/account/reset-password/page.tsx                                                               NEW
+web/app/account/reset-password/ResetPasswordForm.tsx                                                  NEW
+web/app/account/reset-password/actions.ts                                                             NEW
+```

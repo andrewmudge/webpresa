@@ -15,6 +15,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   ForgotPasswordCommand: vi.fn((input) => ({ input })),
   ConfirmForgotPasswordCommand: vi.fn((input) => ({ input })),
   ListUsersCommand: vi.fn((input) => ({ input })),
+  AdminUpdateUserAttributesCommand: vi.fn((input) => ({ input })),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -24,6 +25,7 @@ import {
   signInCustomer,
   confirmCustomerPasswordReset,
   adminGetCustomerProfileBySub,
+  updateCustomerProfile,
 } from '../customer-cognito';
 
 const testProfile = { firstName: 'Jane', lastName: 'Doe', phone: '555-123-4567' };
@@ -120,6 +122,36 @@ describe('confirmCustomerPasswordReset', () => {
     mockSend.mockRejectedValueOnce(namedError('InvalidPasswordException'));
     const result = await confirmCustomerPasswordReset('owner@example.com', '000000', 'weak');
     expect(result).toEqual({ ok: false, reason: 'weak_password' });
+  });
+});
+
+describe('updateCustomerProfile', () => {
+  it('returns ok on success and uses the sub as Username (not email — see doc comment)', async () => {
+    mockSend.mockResolvedValueOnce({});
+    const result = await updateCustomerProfile('cognito-sub-123', { firstName: 'Jane', lastName: 'Doe' });
+    expect(result).toEqual({ ok: true });
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.Username).toBe('cognito-sub-123');
+  });
+
+  it('normalizes a provided phone number to E.164', async () => {
+    mockSend.mockResolvedValueOnce({});
+    await updateCustomerProfile('cognito-sub-123', { firstName: 'Jane', lastName: 'Doe', phone: '5551234567' });
+    const command = mockSend.mock.calls[0][0];
+    const phoneAttr = command.input.UserAttributes.find((a: { Name: string }) => a.Name === 'phone_number');
+    expect(phoneAttr.Value).toBe('+15551234567');
+  });
+
+  it('maps InvalidParameterException to invalid_phone', async () => {
+    mockSend.mockRejectedValueOnce(namedError('InvalidParameterException'));
+    const result = await updateCustomerProfile('cognito-sub-123', { firstName: 'Jane', lastName: 'Doe' });
+    expect(result).toEqual({ ok: false, reason: 'invalid_phone' });
+  });
+
+  it('maps any other error to unknown — never leaks the raw Cognito error', async () => {
+    mockSend.mockRejectedValueOnce(namedError('SomeInternalCognitoDetail'));
+    const result = await updateCustomerProfile('cognito-sub-123', { firstName: 'Jane', lastName: 'Doe' });
+    expect(result).toEqual({ ok: false, reason: 'unknown' });
   });
 });
 
