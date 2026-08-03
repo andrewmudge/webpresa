@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/admin/previews', label: 'Previews' },
   { href: '/admin/scans', label: 'Scans' },
   { href: '/admin/postcards', label: 'Postcards' },
+  { href: '/admin/campaigns', label: 'Campaigns' },
 ];
 
 function Brand() {

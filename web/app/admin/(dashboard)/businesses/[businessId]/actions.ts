@@ -22,6 +22,8 @@ import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards
 import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness, releaseOwnership } from '@/lib/db/businesses';
 import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@/lib/db/claims';
 import { listLeadsForBusiness, deleteLeadById } from '@/lib/db/leads';
+import { listCampaignRecipientsForBusiness, deleteCampaignRecipientById } from '@/lib/db/campaign-recipients';
+import { deleteAllScanHitsForRecipient } from '@/lib/db/scan-hits';
 import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
 import { reconcileDomainConnection } from '@/lib/domains/reconcile';
@@ -1457,12 +1459,13 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   if (!business) return { error: 'Business not found' };
 
   // Fetch all downstream records concurrently
-  const [previews, scans, postcards, claims, leads] = await Promise.all([
+  const [previews, scans, postcards, claims, leads, campaignRecipients] = await Promise.all([
     listPreviewsForBusiness(businessId),
     listScansForBusiness(businessId),
     listPostcardsForBusiness(businessId),
     listClaimsForBusiness(businessId),
     listLeadsForBusiness(businessId),
+    listCampaignRecipientsForBusiness(businessId),
   ]);
 
   // Delete downstream records concurrently. Claims (and, since Stage 20,
@@ -1470,12 +1473,22 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   // (Stage 17) — this is an explicit admin-destructive action, not a
   // claim/lead-lifecycle event, so it does not conflict with "history is
   // preserved during normal operation."
+  //
+  // CampaignRecipients (Stage 21) are this business's own participation in
+  // campaigns — deleted here along with their ScanHit history. The parent
+  // Campaign record itself is never deleted, since it may still have
+  // recipients belonging to other businesses (see implementation.md, Stage
+  // 21, "Security and privacy").
   await Promise.all([
     ...previews.map((p) => deletePreviewById(p.previewId)),
     ...scans.map((s) => deleteScanEventById(s.scanId)),
     ...postcards.map((p) => deletePostcardById(p.postcardId)),
     ...claims.map((c) => deleteClaimById(c.claimId)),
     ...leads.map((l) => deleteLeadById(l.leadId)),
+    ...campaignRecipients.flatMap((r) => [
+      deleteAllScanHitsForRecipient(r.campaignRecipientId),
+      deleteCampaignRecipientById(r.campaignRecipientId),
+    ]),
   ]);
 
   // Delete the business record last

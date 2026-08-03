@@ -1051,10 +1051,11 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --pro
 WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
 
 # 2. Vercel access stack — grants the leads table + indexes, and the new
-#    SesSendLeadNotifications IAM statement. Set SES_FROM_DOMAIN if the
-#    sending domain isn't webpresa.com (the fallback baked into bin/webpresa.ts):
-SES_FROM_DOMAIN=webpresa.com WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-SES_FROM_DOMAIN=webpresa.com WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+#    SesSendLeadNotifications IAM statement (scoped to identity/* — every
+#    SES identity in the account/region; see architecture.md for why a
+#    single-identity scope didn't work in practice):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
 ```
 
 ### SES setup (manual — not CDK-managed)
@@ -1095,3 +1096,52 @@ This repo has no Route53-hosted-zone CDK construct, so unlike every other integr
 | A Basic-plan business's slug is submitted directly (bypassing the UI, which never renders the CTA) | `submitLeadAction` re-checks `hasPlanCapability` server-side and returns the generic success response without writing a `Lead` |
 | Same visitor submits the same form twice within the fingerprint window | The second submission's `reserveLeadFingerprint` conditional write fails; a generic success response is returned, no second `Lead` is created |
 | Vercel Cron's `CRON_SECRET` is unset or wrong in the deployed environment | `/api/internal/leads/retry-notifications` returns 401 for every scheduled invocation; failed leads accumulate unretried until fixed — visible via the Cron dashboard's invocation history and the admin Leads section's growing `notificationAttempts` staying flat |
+
+## Stage 21 — Campaign and QR Tracking deployment guidance
+
+**Infrastructure deployed to dev (2026-08-03); app code not yet deployed.** Three new DynamoDB tables and their IAM grants — no new secrets, no new Vercel Cron, no SES-style manual identity setup. `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` are live; `CAMPAIGNS_TABLE_NAME`/`CAMPAIGN_RECIPIENTS_TABLE_NAME`/`SCAN_HITS_TABLE_NAME` are set in Vercel (Production + Preview) — see `build_log.md`'s Stage 21 deploy log. The manual verification procedure below still needs a real app deployment to run against.
+
+### Deploy sequence
+
+```bash
+cd infra
+
+# 1. Data stack — adds campaigns, campaign-recipients, and scan-hits:
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Vercel access stack — grants the 3 new tables + their indexes on the
+#    existing DynamoDbTables IAM statement (no new statement, no new policy):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+### New Vercel environment variables
+
+| Variable | Value |
+|---|---|
+| `CAMPAIGNS_TABLE_NAME` | CloudFormation export `webpresa-dev-campaigns-name` |
+| `CAMPAIGN_RECIPIENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-campaign-recipients-name` |
+| `SCAN_HITS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-hits-name` |
+
+### Manual verification procedure (not yet run)
+
+1. In the admin app, open `/admin/campaigns`, create a campaign (name + channel), and confirm it redirects to the new campaign's detail page.
+2. Add one recipient: pick a real dev Business, set a destination URL (e.g. its `/b/[slug]` preview), confirm a `campaignCode` and QR image appear immediately.
+3. Scan the QR (or open its `/r/{campaignCode}` link directly) from a phone and from a desktop browser — confirm both redirect to the configured destination with `?campaign={code}` appended, and that any other query params on the original link (e.g. `?utm_source=test`) are preserved alongside it.
+4. Reload the campaign detail page — confirm `totalScans` incremented by 2 and `estimatedUniqueScans` by 2 (two distinct devices), and that "recent scans" shows both hits with a plausible device class/browser/OS.
+5. Scan the same QR again from the same device — confirm `totalScans` increments but `estimatedUniqueScans` does not.
+6. Edit the recipient's destination URL and confirm the same QR code (same `campaignCode`, same printed image) now redirects to the new destination without regenerating anything.
+7. Toggle the recipient to "disabled" and confirm its `/r/{code}` link now redirects to the homepage instead of the destination, with no new `ScanHit` recorded.
+8. Set the parent campaign's status to "paused" and confirm the (still-`active`) recipient's link also now redirects to the homepage — campaign-level status overrides recipient-level status.
+9. Delete the test Business from the admin business list and confirm (via DynamoDB, not just the UI) that its `CampaignRecipient` and all of its `ScanHit` rows are gone, but the parent `Campaign` record still exists.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| Unknown or malformed `campaignCode` in `/r/{code}` | Redirects to the homepage; no `ScanHit` is recorded |
+| A recipient's `status` is `'disabled'`, or its parent campaign's `status` is not `'active'` | Same homepage-redirect fallback as an unknown code — never distinguished |
+| The same IP exceeds the redirect route's rate limit (30 requests/minute) | Same homepage-redirect fallback; the code's 80-bit entropy, not this limit, is the real defense against guessing |
+| A request to `/r/{code}` includes its own `?campaign=SOMETHING` query param | Ignored — the server-resolved code always overwrites it in the final redirect URL |
+| `GET /api/campaigns/[campaignRecipientId]/qr` requested without an admin session | 401, no image returned |

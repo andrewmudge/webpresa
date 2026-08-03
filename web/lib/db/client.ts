@@ -70,3 +70,6 @@ export const TABLE_LEADS = () => getTableName('LEADS_TABLE_NAME');
 export const TABLE_CUSTOMER_BILLING_PROFILES = () => getTableName('CUSTOMER_BILLING_PROFILES_TABLE_NAME');
 export const TABLE_CUSTOMER_ONBOARDING = () => getTableName('CUSTOMER_ONBOARDING_TABLE_NAME');
 export const TABLE_DOMAIN_CONNECTIONS = () => getTableName('DOMAIN_CONNECTIONS_TABLE_NAME');
+export const TABLE_CAMPAIGNS = () => getTableName('CAMPAIGNS_TABLE_NAME');
+export const TABLE_CAMPAIGN_RECIPIENTS = () => getTableName('CAMPAIGN_RECIPIENTS_TABLE_NAME');
+export const TABLE_SCAN_HITS = () => getTableName('SCAN_HITS_TABLE_NAME');

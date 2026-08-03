@@ -7756,3 +7756,107 @@ infra/bin/webpresa.ts                                                           
 infra/test/data-stack.test.ts                                                                           MODIFIED — leads table assertions, updated table/output counts
 infra/test/vercel-access-stack.test.ts                                                                  MODIFIED — leadsTable/sesFromDomain in test setup, SES statement assertions, updated resource count
 ```
+
+---
+
+# Stage 21 — Campaign and QR Tracking
+
+**Date:** 2026-08-02
+
+## Overview
+
+Implemented Stage 21 against the rearchitected specification (`implementation.md`, Stage 21, rewritten earlier the same day) — `Campaign` → `CampaignRecipient` → `Business`, with a `ScanHit` record per scan, replacing the original single-record "campaign code on a Postcard" design so a manually created, single-recipient test campaign and a future automated many-recipient mail batch are the same data model.
+
+**Domain layer.** Three new records: `Campaign` (`domain/models/campaign.ts` — not tied to any business, owns `name`/`channel`/`status`/optional `expiresAt`), `CampaignRecipient` (`domain/models/campaign-recipient.ts` — the attribution unit, owns `campaignCode`/`destinationUrl`/a per-recipient `status` kill switch/scan rollups), `ScanHit` (`domain/models/scan-hit.ts` — one permanent record per valid redirect). `ScanHit` is deliberately **not** named `ScanEvent` — that name already belongs to the unrelated Firecrawl/Playwright/OpenAI scrape-and-score record; reusing it would make every future grep for either concept ambiguous. Confirmed the naming choice with the user before writing any code (`ScanHit` over `CampaignScanEvent`/`QrScan`).
+
+**Campaign codes** (`lib/campaign/code.ts`) follow Stage 17's claim-token approach (Crockford Base32, excludes ambiguous I/L/O/U) but sized for a URL/QR rather than manual entry — 80 bits (`crypto.randomBytes(10)`, 16 characters, no dash grouping). The Crockford encoder is a small, deliberate duplicate of `lib/claim/token.ts`'s rather than a shared extraction — this stage doesn't touch Stage 17 files for a ~15-line pure function.
+
+**Redirect route** (`app/r/[campaignCode]/route.ts`, logic in `lib/campaign/resolve-redirect.ts` — mirroring `/claim/[claimToken]`'s route/`lib/claim/validate-token.ts` split): rate-limits per IP-hash (reusing `hashIp()` from `lib/claim/validate-token.ts`), resolves the code via the new `campaign-code-index` GSI, requires both the recipient and its parent campaign to be `active`, computes a SHA-256 `visitorFingerprint` from `campaignRecipientId | ipHash | userAgent`, atomically reserves it to detect a new unique visitor, writes a permanent `ScanHit`, updates the recipient's denormalized rollups, and redirects — forwarding every incoming query parameter except a client-supplied `campaign` (always overwritten with the server-resolved code, so attribution can never be spoofed). Unknown/disabled/non-active-campaign/rate-limited codes all redirect to the homepage identically.
+
+**Data model reuses, not reinvents, existing conventions**: the `RATELIMIT#`/fingerprint-conditional-`PutItem` fold-in pattern `claims`/`leads` already established, `lib/db/rate-limit.ts`'s table-agnostic helper, and the "durable event record + denormalized rollup" split `Business.scanExecutionStatus` already uses. One deliberate deviation, called out explicitly in both `implementation.md` and here: the `FINGERPRINT#<visitorFingerprint>` reservation on the new `scan-hits` table is **never TTL'd** — unlike `claims`'/`leads`' own short-window `FINGERPRINT#`/`RATELIMIT#` items (abuse-prevention, meant to expire), this one backs a *lifetime* unique-visitor estimate and must persist for as long as the recipient does.
+
+**Infrastructure** — three new DynamoDB tables via the existing `WebpresaTable` construct (`campaigns`: PK only, no GSI, Scan-based admin list; `campaign-recipients`: PK + `campaign-code-index`/`campaign-id-index`/`business-id-index`, TTL for its `RATELIMIT#` item shape only; `scan-hits`: composite PK+SK (`sortKey`), no GSI needed since "recent scans for one recipient" is a single ordered Query, no TTL attribute at all since nothing on this table is meant to expire). Wired through `bin/webpresa.ts` into `WebpresaVercelAccessStack`'s existing `DynamoDbTables` IAM statement. Two new npm dependencies: `qrcode` (server-side QR PNG rendering, admin-gated `GET /api/campaigns/[campaignRecipientId]/qr`, regenerated on demand — no S3 storage) and `ua-parser-js` (device class/browser family/OS parsing, `lib/campaign/user-agent.ts` — heuristic, never presented as exact).
+
+**Admin UI** — `/admin/campaigns` (list + create), `/admin/campaigns/[campaignId]` (campaign status control, recipient list with an add-recipient form, per-recipient destination/status editing, QR preview + download, scan rollups, and an expandable recent-scans list). No charts, no funnels, per the stage's MVP scope. New Server Actions module `app/admin/(dashboard)/campaigns/actions.ts`; new "Campaigns" sidebar entry.
+
+**Cascade delete** — `deleteBusinessAction` now also deletes a deleted business's own `CampaignRecipient`s and their full `ScanHit` history (a new `deleteAllScanHitsForRecipient` paginated Query+Delete, since a recipient's items can't be deleted by partition key alone), but never the parent `Campaign` record, since a campaign may still have recipients belonging to other businesses.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes (web/)
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings (web/)
+npm test             — 102 files, 1,111 tests passed (web/) — 6 new test files, 49 new tests:
+                        lib/campaign/__tests__/{code,user-agent,resolve-redirect}.test.ts,
+                        lib/db/__tests__/{campaigns,campaign-recipients,scan-hits}.test.ts
+npm run build        — succeeds; /admin/campaigns, /admin/campaigns/[campaignId],
+                        /admin/campaigns/new, /api/campaigns/[campaignRecipientId]/qr, and
+                        /r/[campaignCode] all registered as routes
+cd infra && npx tsc --noEmit  — passes
+cd infra && npm test           — 6 files, 165 tests passed — new Campaigns/CampaignRecipients/
+                                  ScanHits table assertions in data-stack.test.ts, existing
+                                  table/output/IAM-resource-count assertions updated for the
+                                  3 new tables (10→13 tables, 34→40 CloudFormation outputs,
+                                  22→28 DynamoDB IAM resource entries)
+cd infra && npx tsc --noEmit && (cdk synth not run standalone — covered by the infra test
+                                  suite's Template.fromStack() synthesis above)
+```
+
+Per `AGENTS.md`'s verification policy, no dev server/browser check was performed.
+
+## Deploy log
+
+Deployed to dev the same day, after showing the full `cdk diff` for both stacks and getting explicit user approval (account `539898341083`, region `us-east-1`):
+
+1. **`WebpresaDevDataStack`** — purely additive: 3 new resources (`webpresa-dev-campaigns`, `webpresa-dev-campaign-recipients`, `webpresa-dev-scan-hits` tables + their CloudFormation outputs). Deployed successfully in 44s.
+2. **`WebpresaDevVercelAccessStack`** — in-place modification of the existing `webpresa-dev-vercel-data-access` managed policy: the `DynamoDbTables` statement's resource list grew by 6 entries (3 new table ARNs + their `/index/*` wildcards). No new statement, no new managed policy, no resource replacement. `cdk deploy` also passed through its (unchanged) dependency stacks — `WebpresaDevStockImagesStack`, `WebpresaDevScanWorkflowStack`, `WebpresaDevScreenshotStack` — all reported `(no changes)`. Deployed successfully in 23s.
+3. **Vercel env vars** — `CAMPAIGNS_TABLE_NAME`, `CAMPAIGN_RECIPIENTS_TABLE_NAME`, `SCAN_HITS_TABLE_NAME` added for both Production and Preview via `npx vercel env add <name> production,preview --value "..." --yes`, matching every existing table-name env var's Production+Preview convention. Confirmed via `vercel env ls`.
+
+**Not yet done:** the running Vercel deployment has not been redeployed, so these env vars are not yet live in the app process — per Stage 20's own precedent, newly added env vars only take effect on a fresh deployment. No code has been pushed/deployed for this stage yet either. The manual verification procedure in `deployment.md`'s Stage 21 section is still pending a real deploy.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                             MODIFIED — Stage 21 section rewritten (Campaign/CampaignRecipient/ScanHit architecture)
+web/docs/architecture.md                                                                                MODIFIED — 3 new table entries, new Stage 21 section, new env vars, updated status line
+web/docs/build_log.md                                                                                   MODIFIED — this entry
+web/.env.local.example                                                                                  MODIFIED — 3 new table-name env vars
+web/package.json                                                                                        MODIFIED — +qrcode, +ua-parser-js, +@types/qrcode
+web/domain/models/campaign.ts                                                                           NEW
+web/domain/models/campaign-recipient.ts                                                                 NEW
+web/domain/models/scan-hit.ts                                                                           NEW
+web/domain/schemas/campaign.schema.ts                                                                   NEW
+web/domain/schemas/campaign-recipient.schema.ts                                                         NEW
+web/domain/schemas/scan-hit.schema.ts                                                                   NEW
+web/domain/factories/campaign.factory.ts                                                                NEW
+web/domain/factories/campaign-recipient.factory.ts                                                      NEW
+web/domain/factories/scan-hit.factory.ts                                                                NEW
+web/lib/db/client.ts                                                                                     MODIFIED — TABLE_CAMPAIGNS/TABLE_CAMPAIGN_RECIPIENTS/TABLE_SCAN_HITS
+web/lib/db/campaigns.ts                                                                                  NEW
+web/lib/db/campaign-recipients.ts                                                                        NEW
+web/lib/db/scan-hits.ts                                                                                  NEW
+web/lib/db/__tests__/campaigns.test.ts                                                                   NEW
+web/lib/db/__tests__/campaign-recipients.test.ts                                                         NEW
+web/lib/db/__tests__/scan-hits.test.ts                                                                   NEW
+web/lib/campaign/code.ts                                                                                 NEW
+web/lib/campaign/user-agent.ts                                                                           NEW
+web/lib/campaign/resolve-redirect.ts                                                                     NEW
+web/lib/campaign/__tests__/code.test.ts                                                                  NEW
+web/lib/campaign/__tests__/user-agent.test.ts                                                            NEW
+web/lib/campaign/__tests__/resolve-redirect.test.ts                                                      NEW
+web/app/r/[campaignCode]/route.ts                                                                        NEW
+web/app/api/campaigns/[campaignRecipientId]/qr/route.ts                                                  NEW
+web/app/admin/(dashboard)/AdminSidebar.tsx                                                               MODIFIED — new Campaigns nav item
+web/app/admin/(dashboard)/campaigns/actions.ts                                                           NEW
+web/app/admin/(dashboard)/campaigns/page.tsx                                                             NEW
+web/app/admin/(dashboard)/campaigns/new/page.tsx                                                         NEW
+web/app/admin/(dashboard)/campaigns/new/NewCampaignForm.tsx                                              NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/page.tsx                                                NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                      NEW
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                                             MODIFIED — cascade delete includes CampaignRecipients + ScanHits
+infra/lib/stacks/data-stack.ts                                                                           MODIFIED — new campaigns/campaign-recipients/scan-hits tables
+infra/lib/stacks/vercel-access-stack.ts                                                                  MODIFIED — 3 new table props, added to DynamoDbTables statement
+infra/bin/webpresa.ts                                                                                    MODIFIED — wires the 3 new tables into WebpresaVercelAccessStack
+infra/test/data-stack.test.ts                                                                            MODIFIED — new table assertions, updated table/output counts
+infra/test/vercel-access-stack.test.ts                                                                   MODIFIED — 3 new tables in test setup, updated resource count
+```

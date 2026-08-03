@@ -1747,7 +1747,7 @@ Following the Stage 13/14 precedent of keeping scan-scoped derived data on `Scan
 - Industry-specific scoring weights
 - Score-change / historical tracking
 - Continuous rescoring
-- Outreach channel recommendation and campaign ordering (postcard / email / phone) — Stage 21 (QR and Campaign Tracking) and Stage 22 (Lob Postcard Integration)'s concern; those stages consume this stage's lead priority and qualification as an input, not the other way around
+- Outreach channel recommendation and campaign ordering (postcard / email / phone) — Stage 21 (Campaign and QR Tracking) and Stage 22 (Lob Postcard Integration)'s concern; those stages consume this stage's lead priority and qualification as an input, not the other way around
 - AI-driven writes to `WebsiteSectionsConfig` — the existing deterministic `recommendWebsiteSections()` remains the sole writer; this stage's missing-opportunities output is advisory only
 - Automatic campaign execution
 - Automatic template generation from recommendations
@@ -3744,73 +3744,403 @@ error code/message id — never the full request/response body.
 
 ---
 
-# Stage 21 — QR and Campaign Tracking
+# Stage 21 — Campaign and QR Tracking
+
+## Status
+
+Not started. This specification replaces the original Stage 21 draft, which
+modeled QR tracking as a single-recipient, single-record concept tied
+directly to an individual postcard. The revised design introduces
+`Campaign` and `CampaignRecipient` as first-class objects so the same data
+model supports both a manually created, single-recipient test campaign
+today and a fully automated, many-recipient mail campaign later, without
+restructuring.
 
 ## Objective
 
-Track postcard engagement through a redirect route rather than linking printed QR codes directly to previews.
+Track engagement with mailed (or otherwise distributed) QR codes through a
+redirect route, and attribute scans to a `Campaign` → `CampaignRecipient` →
+`Business` chain rather than to an individual postcard or preview URL
+directly.
 
 ## Dependencies
 
-Stages 8 and 17.
+Stages 8 and 17 — the public preview site (`/b/[slug]`) and existing
+business claim links, both common `CampaignRecipient` destinations.
 
-## Major deliverables
+## Non-goals
 
-- Campaign-code generation
-- `/r/[campaignCode]` redirect route
-- Scan-event recording
-- Destination resolution
-- Total and estimated-unique metrics
-- Admin campaign view
-- Privacy disclosure updates
+- Automated campaign creation, bulk business selection, batch QR/postcard
+  generation, or submission to a print/mail provider — the data model is
+  designed so none of this requires restructuring later (see "Future
+  automation" below), but no automation is built in this stage.
+- Lob or any postcard-provider integration (Stage 22). A `CampaignRecipient`
+  does not require a `Postcard` to exist.
+- A/B testing, multiple simultaneous destinations per recipient, or
+  campaign experiments.
+- Geographic reporting, device-precise fingerprinting, or cross-device
+  identity resolution.
+- Conversion funnels or attribution beyond "this code was scanned this many
+  times."
+- Charting/graphing UI — the admin view shows counts and a recent-scans
+  list, not a dashboard.
 
-## Implementation requirements
+## Design principles
 
-QR flow:
+1. **A Campaign is not tied to a single business.** It owns zero
+   application logic about any one business; that belongs to its
+   recipients.
+2. **CampaignRecipient is the attribution unit**, not Campaign and not
+   ScanHit directly:
+   ```
+   Campaign
+     └── CampaignRecipient   (owns: campaignCode, destination, scan rollups)
+           └── Business
+           └── ScanHit(s)
+   ```
+   `ScanHit` records reference their `CampaignRecipient`, never a `Campaign`
+   or `Business` directly (though `businessId`/`campaignCode` are
+   denormalized onto each `ScanHit` for query convenience — see "Domain
+   model" below).
+3. **QR codes only ever point at `/r/{campaignCode}`**, never directly at a
+   preview, claim link, or any other destination. The destination is
+   resolved server-side from the `CampaignRecipient`, so it can change
+   without reprinting anything.
+4. **A manually created campaign with one recipient is not a separate,
+   simpler architecture** — it's a `Campaign` row with exactly one
+   `CampaignRecipient` row. Nothing in the redirect route, scan recording,
+   or analytics code branches on recipient count.
 
-```text
+## Domain model
+
+### `Campaign` (`domain/models/campaign.ts`)
+
+- `campaignId` (`campaign_<uuid>`)
+- `name` — admin-facing label, free text, bounded length
+- `channel` — `'postcard' | 'other'`. MVP only ever creates `'postcard'`
+  campaigns; the field exists so a future channel doesn't require a schema
+  change.
+- `status` — `'active' | 'paused' | 'archived' | 'expired'`. Controls
+  whether *any* of this campaign's recipients' codes resolve (see
+  "Redirect behavior" below).
+- `expiresAt?` — optional, informational only in this stage. Stage 21 does
+  not enforce it automatically; an admin transitions `status` to
+  `'expired'` manually. Stored now so a future scheduled job can flip it
+  without a schema change.
+- `createdAt` / `updatedAt`
+
+### `CampaignRecipient` (`domain/models/campaign-recipient.ts`)
+
+- `campaignRecipientId` (`recipient_<uuid>`)
+- `campaignId`
+- `businessId`
+- `campaignCode` — opaque, unique, unguessable (see "Campaign code
+  generation")
+- `destinationUrl` — the full URL this recipient's QR code resolves to (a
+  preview, an existing claim link, a pricing page, or an external URL).
+  Admin-supplied at creation; editable at any time without changing
+  `campaignCode`.
+- `destinationLabel?` — optional free-text admin note on what the
+  destination is (e.g. "preview", "claim link") — display only, never
+  parsed or trusted.
+- `status` — `'active' | 'disabled'`. A per-recipient kill switch
+  independent of the parent campaign's status (e.g. one bad address in an
+  otherwise-active campaign).
+- `postcardId?` — optional forward-reference to a Stage 22 `Postcard` once
+  one exists for this recipient. Absent for the entire lifetime of Stage 21.
+- `totalScans` — rollup, default `0`
+- `estimatedUniqueScans` — rollup, default `0`, explicitly labeled
+  "estimated" everywhere displayed
+- `firstScanAt?`, `lastScanAt?`
+- `createdAt` / `updatedAt`
+
+### `ScanHit` (`domain/models/scan-hit.ts`)
+
+Deliberately **not** named `ScanEvent` — that name is already taken by the
+unrelated Firecrawl/Playwright/OpenAI scrape-and-score record
+(`domain/models/scan-event.ts`), and reusing it would make every future
+grep for either concept ambiguous.
+
+- `campaignRecipientId` (table partition key — see "Infrastructure")
+- `campaignCode` — denormalized, avoids a join when displaying a hit
+- `businessId` — denormalized
+- `destinationUrl` — the URL actually redirected to *at scan time* (captures
+  history even if the recipient's destination is changed later)
+- `visitorFingerprint` — SHA-256 hash used only for the uniqueness estimate
+  (see below); never the raw IP
+- `userAgent` — raw string, bounded length
+- `referrer?`
+- `deviceClass` — `'mobile' | 'tablet' | 'desktop' | 'unknown'`
+- `browserFamily?`, `operatingSystem?`
+- `createdAt`
+
+Every valid scan creates a new, permanent `ScanHit` row — never an update
+to a prior one, matching this repo's "never overwrite history" convention
+already established for `ScanEvent`/`ScanExecution`/`Claim`. Only the
+`CampaignRecipient` rollup fields (`totalScans`/`estimatedUniqueScans`/
+`lastScanAt`) are updated in place, the same "durable event record +
+denormalized rollup" split `Business.scanExecutionStatus` already uses.
+
+### Relationship to `Postcard` (Stage 22 — not changed by this stage)
+
+`Postcard` (`domain/models/postcard.ts`, modeled in Stage 5, not yet
+implemented) currently has its own `campaignCode` and `qrDestination`
+fields, added before this stage's model existed. When Stage 22 is
+implemented, `Postcard` should instead carry an optional
+`campaignRecipientId` and read its campaign code/destination from the
+referenced `CampaignRecipient` rather than duplicating them — a
+`CampaignRecipient` **is** "one mailed piece" in this model; `Postcard`
+becomes the record of its physical fulfillment (provider, `mailedAt`,
+`deliveredAt`), not a second source of truth for its destination. This
+stage does not modify `Postcard` or its schema; it's flagged here so
+Stage 22 doesn't need to rediscover it.
+
+## Campaign code generation
+
+`campaignCode` follows the same opaque-random-identifier approach as
+Stage 17's claim tokens, sized for embedding in a URL/QR rather than manual
+typing: `crypto.randomBytes(10)` (80 bits), Crockford Base32 encoded, **no
+dash-grouping** (never hand-typed). Looked up via the `campaign-code-index`
+GSI (see "Infrastructure"), never scanned. 80 bits of entropy makes a
+generation-time collision astronomically unlikely, so — matching the
+claim-token precedent — generation does not need an atomic uniqueness
+transaction, only the GSI for lookup.
+
+Campaign codes must never encode or be derivable from `businessId`,
+`claimId`, `postcardId`, `previewId`, `campaignId`, or
+`campaignRecipientId` — they are a pure random lookup key.
+
+## Infrastructure changes
+
+New tables in `infra/lib/stacks/data-stack.ts` (via the existing
+`WebpresaTable` construct):
+
+- **`webpresa-{env}-campaigns`** — PK `campaignId`. No GSIs: campaign count
+  stays small under manual creation, and an admin list can page a bounded
+  `Scan`; a `createdAt`-sortable GSI can be added later without
+  restructuring, matching the same YAGNI reasoning already applied to
+  `customer-billing-profiles`/`customer-onboarding`.
+- **`webpresa-{env}-campaign-recipients`** — PK `campaignRecipientId`; GSI
+  `campaign-code-index` (PK `campaignCode`, high-cardinality — the redirect
+  route's primary lookup); GSI `campaign-id-index` (PK `campaignId`, SK
+  `createdAt` — admin recipient list per campaign); GSI `business-id-index`
+  (PK `businessId`, SK `createdAt` — every campaign a business has ever
+  been part of). No `status-index` (two-value field, same reasoning already
+  documented for `claims`/`leads`).
+- **`webpresa-{env}-scan-hits`** — PK `campaignRecipientId`, SK a sortable
+  range key with two item shapes sharing the table (the same fold-in
+  pattern `claims`/`leads` already use for their own rate-limit/fingerprint
+  items):
+  - Real hits: `HIT#<isoTimestamp>#<random suffix>` — lets "recent scans
+    for this recipient" be a single ordered query with no GSI.
+  - Uniqueness reservations: `FINGERPRINT#<visitorFingerprint>` via a
+    conditional `PutItem` (`attribute_not_exists`). **Deliberately not
+    TTL'd**, unlike `leads`'/`claims`' own `FINGERPRINT#`/`RATELIMIT#`
+    items — those exist for short-window abuse prevention and are meant to
+    expire; this one backs a lifetime "estimated unique scans" count for
+    the recipient and must persist for as long as the recipient does.
+  - A separate `RATELIMIT#<ipHash>#<windowBucket>` item shape, TTL'd, on
+    the same table — the redirect route's own abuse/cost protection (see
+    "Security and privacy").
+
+`infra/lib/stacks/vercel-access-stack.ts` gains the three new table ARNs
+(+ indexes) on the existing Vercel-execution IAM policy. No new Secrets
+Manager entries, no new compute.
+
+New npm dependencies: `qrcode` (server-side QR PNG rendering — no QR
+library exists in this repo today) and `ua-parser-js` (device class /
+browser family / OS parsing — also net-new; hand-rolling reliable UA
+parsing was judged not worth avoiding a small, well-known dependency for
+this one field set).
+
+## Required routes
+
+- **`GET /r/[campaignCode]`** — public Route Handler (not a Server Action —
+  matches the existing `/claim/[claimToken]` precedent for a public
+  GET-and-redirect entrypoint, and `architecture.md`'s "API boundaries"
+  exception for endpoints that must be addressable as a plain URL).
+- **`GET /api/campaigns/[campaignRecipientId]/qr`** — admin-session-gated
+  Route Handler; renders a QR PNG on demand from
+  `https://webpresa.com/r/{campaignCode}` (via `qrcode`), for the admin
+  preview `<img>` and the download link. No S3 storage — regenerated on
+  every request, trivial compute cost.
+- **`/admin/campaigns`** — list + create.
+- **`/admin/campaigns/[campaignId]`** — detail: campaign info, recipient
+  list + add-recipient form, per-recipient rollups, recent scans, QR
+  preview/download.
+
+New admin Server Actions,
+`web/app/admin/(dashboard)/campaigns/actions.ts`: `createCampaignAction`,
+`updateCampaignStatusAction`, `addCampaignRecipientAction` (generates
+`campaignCode` server-side), `updateCampaignRecipientAction` (destination
+and/or status).
+
+## Redirect behavior
+
+```
 Scan QR
   ↓
-/r/{campaignCode}
+GET /r/{campaignCode}
   ↓
-Record event
+Resolve CampaignRecipient via campaign-code-index
   ↓
-Redirect to /b/{slug}?campaign={campaignCode}
+Valid, recipient.status='active', parent Campaign.status='active'?
+  ├─ No  → redirect to the homepage (generic, no distinguishing response,
+  │         no ScanHit recorded)
+  └─ Yes → record ScanHit + update CampaignRecipient rollups → redirect to
+            destinationUrl
 ```
 
-Record only useful analytics such as:
+1. Rate-limit the request per IP-hash (`RATELIMIT#` item on
+   `campaign-recipients`, same conditional-increment idiom as `claims`) —
+   abuse/cost protection, not the security boundary; the code's 80-bit
+   entropy is.
+2. Look up `campaignCode` via `campaign-code-index`. Not found, recipient
+   `status='disabled'`, or parent `Campaign.status` not `'active'` →
+   redirect to the homepage. Never distinguish "doesn't exist" from
+   "disabled" from "paused campaign" in the response.
+3. On a valid, active code: compute
+   `visitorFingerprint = sha256(campaignRecipientId | ipHash | userAgent)`.
+   Attempt the `FINGERPRINT#` conditional `PutItem` on `scan-hits`; success
+   means a new unique visitor.
+4. Write the `ScanHit` row (always, unconditionally, regardless of
+   uniqueness).
+5. Update `CampaignRecipient`: `totalScans += 1` always;
+   `estimatedUniqueScans += 1` only when the fingerprint reservation was
+   newly created; `lastScanAt = now`; `firstScanAt = now` only if unset.
+6. Forward all incoming query parameters to the destination, then ensure
+   `campaign={campaignCode}` is present (added if missing, never
+   duplicated):
+   ```
+   /r/ABC123XYZ?utm_source=email
+     ↓
+   {destinationUrl}?campaign=ABC123XYZ&utm_source=email
+   ```
+7. Redirect (302).
 
-- campaign code
-- business ID
-- postcard ID
-- timestamp
-- user agent
-- referrer
-- approximate device class
-- destination URL
+Server always re-resolves `campaignCode → CampaignRecipient → destination`
+itself; nothing about the destination is ever trusted from the request
+beyond the code.
 
-Avoid collecting precise location data unless clearly justified and disclosed.
+## Analytics
 
-Use a reasonable method to estimate unique scans without presenting the result as exact.
+Collected per `ScanHit`: campaign code, business ID, destination URL,
+timestamp, user agent, referrer, device class, browser family, operating
+system, and a hashed visitor fingerprint. No raw IP is ever persisted (only
+`hashIp()`'s SHA-256, reused from Stage 17). No precise location data is
+collected.
+
+Exposed on `CampaignRecipient`: `totalScans` (exact — one increment per
+recorded hit) and `estimatedUniqueScans` (a fingerprint-based estimate,
+always labeled "estimated" in any UI that shows it — an IP/UA-hash
+fingerprint undercounts shared devices behind the same NAT+browser and
+overcounts a visitor who changes network or browser, so it is a heuristic,
+never presented as exact).
+
+## Admin experience
+
+`/admin/campaigns/[campaignId]`:
+
+- **Campaign details** — name, channel, status, created date; status
+  editable inline.
+- **Recipient list** — business, campaign code, destination, total scans,
+  estimated unique scans; add-recipient form (select business, set
+  destination).
+- **Campaign analytics** — total scans and estimated unique scans (summed
+  across recipients), recent scans (per-recipient list, newest first — see
+  "Infrastructure" for why a cross-recipient feed is deferred).
+- **QR** — inline preview and download (PNG) per recipient, pointing at
+  `/r/{campaignCode}`.
+
+No charts, no funnels, no A/B comparison — counts and a recent-activity
+list only.
+
+## Manual MVP
+
+Stage 21 ships with no automated campaign or recipient creation. An admin
+creates a `Campaign`, then adds one `CampaignRecipient` to it (or,
+occasionally, a handful) by hand through `/admin/campaigns`. A
+single-recipient campaign is the primary way this entire stage gets tested
+end to end — it is not a separate code path, just a `Campaign` row with one
+`CampaignRecipient` row.
+
+## Future automation (architecture note only — not built in this stage)
+
+This model is shaped so that a later automation stage can, without
+restructuring: create one `Campaign`, select many businesses, generate a
+`CampaignRecipient` (and its `campaignCode`/QR) per business, render
+postcards, and submit the batch to a print/mail provider (Stage 22).
+Nothing in this stage assumes a 1:1 `Campaign`-to-`Business` relationship,
+and no `ScanHit`/analytics code branches on recipient count — so this is a
+documentation note for future stages, not a promise enforced by any test in
+this stage.
+
+## Security and privacy
+
+- Campaign codes are opaque, high-entropy, and never derived from or expose
+  any database identifier.
+- The redirect route never trusts anything from the request except the
+  code itself; destination, business, and status are always re-resolved
+  server-side.
+- Invalid, disabled, and non-active-campaign codes all produce the same
+  generic fail-safe redirect — no signal that distinguishes why.
+- Rate limiting on `/r/[campaignCode]` blunts code-guessing/enumeration.
+- No raw IP address is ever persisted or logged — only a keyed SHA-256
+  hash, reusing `hashIp()`.
+- No precise geolocation is collected.
+- `ScanHit` history is permanent under normal operation.
+  `deleteBusinessAction`'s existing cascade (SitePreviews, ScanEvents,
+  Postcards, Claims) is extended to also delete that business's
+  `CampaignRecipient`s and their `ScanHit`s — but never the parent
+  `Campaign` itself, since a `Campaign` may still have recipients belonging
+  to other businesses.
+- The QR-download route requires an authenticated admin session.
 
 ## Acceptance criteria
 
-- A valid campaign redirects to the intended preview.
-- A scan event is recorded.
-- Invalid or disabled campaign codes fail safely.
-- Repeated scans increment totals.
-- Estimated-unique metrics are clearly labeled.
-- QR destinations can be changed without reprinting the route structure.
-- Tracking does not expose private business or claim data.
+- A valid, active campaign code redirects to its `CampaignRecipient`'s
+  configured `destinationUrl`, forwarding existing query parameters and
+  including `campaign={code}`.
+- A `ScanHit` is durably recorded for every valid, active scan; existing
+  `ScanHit`/`CampaignRecipient` records are never edited or deleted by
+  normal operation.
+- Unknown, disabled-recipient, or non-active-campaign codes all redirect to
+  the same generic fallback, with no `ScanHit` recorded and no
+  distinguishing response.
+- `CampaignRecipient.totalScans` increments on every valid scan;
+  `estimatedUniqueScans` increments only for a new visitor fingerprint —
+  both are rollups derived from, and always consistent with, the
+  underlying `ScanHit` history.
+- Estimated-unique metrics are visibly labeled as estimates everywhere
+  they're shown.
+- A `CampaignRecipient`'s destination and status can be changed by an admin
+  without regenerating its `campaignCode` or QR image.
+- A `Campaign` can hold one `CampaignRecipient` (manual MVP testing) or
+  many, with no code path assuming exactly one.
+- Campaign codes never expose `businessId`, `claimId`, `postcardId`,
+  `previewId`, or any other database identifier.
+- No raw IP address or precise location is ever persisted.
+- The admin campaign view shows campaign details, its recipients, each
+  recipient's scan rollups and recent scans, and each recipient's QR
+  (preview + download).
 
 ## Deferred work
 
+- Automated campaign/recipient creation, bulk business selection, batch
+  QR/postcard generation, and print/mail-provider submission (a later
+  automation stage — see "Future automation")
+- Lob/postcard-provider integration (Stage 22)
 - Advanced attribution
 - Geographic reporting
-- Bot filtering
+- Bot filtering beyond basic rate limiting
 - Conversion funnels
 - Cross-device identity
-- Campaign experiments
+- Campaign experiments / A/B testing
+- Automatic time-based campaign expiry (`expiresAt` is stored but not
+  enforced by this stage)
+- Non-QR channels (`channel` is reserved for future values; only
+  `'postcard'` is supported)
+- Charting/dashboard UI, cross-recipient "recent scans" feed at scale
 
 ---
 
