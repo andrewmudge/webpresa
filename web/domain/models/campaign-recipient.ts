@@ -8,6 +8,19 @@ export const CAMPAIGN_RECIPIENT_STATUSES = ['active', 'disabled'] as const;
 export type CampaignRecipientStatus = (typeof CAMPAIGN_RECIPIENT_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
+// Destination discriminator
+// ---------------------------------------------------------------------------
+
+/**
+ * `'claim'` (the default) — resolved at scan time by `/r/[campaignCode]`
+ * through `claimId`, never a stored URL (the claim token itself is never
+ * persisted in recoverable form — see `lib/claim/token.ts`). `'custom'` —
+ * an explicit admin-supplied `destinationUrl`, the exception path.
+ */
+export const CAMPAIGN_RECIPIENT_DESTINATION_TYPES = ['claim', 'custom'] as const;
+export type CampaignRecipientDestinationType = (typeof CAMPAIGN_RECIPIENT_DESTINATION_TYPES)[number];
+
+// ---------------------------------------------------------------------------
 // CampaignRecipient record
 // ---------------------------------------------------------------------------
 
@@ -34,9 +47,19 @@ export interface CampaignRecipient extends MutableTimestampedRecord {
   businessId: string;
   /** Opaque, unique, unguessable — see `lib/campaign/code.ts`. Never derived from any database identifier. */
   campaignCode: string;
-  /** Full URL this recipient's QR code resolves to. Editable at any time without changing `campaignCode`. */
-  destinationUrl: string;
-  /** Free-text admin note on what the destination is (e.g. "preview", "claim link") — display only, never parsed or trusted. */
+  /** Default `'claim'` — see `CampaignRecipientDestinationType`. */
+  destinationType: CampaignRecipientDestinationType;
+  /**
+   * Set only when `destinationType === 'claim'` — a plain internal record
+   * reference (like `Claim.postcardId`), never a secret, never rendered
+   * into any URL or QR. Absent means the business was already claimed when
+   * this recipient was added (see `addCampaignRecipientAction`); the
+   * redirect route then just links to the business's live page.
+   */
+  claimId?: string;
+  /** Set only when `destinationType === 'custom'` — the full URL this recipient's QR code resolves to. Editable at any time without changing `campaignCode`. */
+  destinationUrl?: string;
+  /** Set only when `destinationType === 'custom'` — free-text admin note on what the destination is (e.g. "pricing page") — display only, never parsed or trusted. */
   destinationLabel?: string;
   status: CampaignRecipientStatus;
   postcardId?: string;

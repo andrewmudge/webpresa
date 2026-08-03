@@ -152,12 +152,13 @@ function RecipientCard({
   recentScans: ScanHit[];
 }) {
   const router = useRouter();
-  const [destinationUrl, setDestinationUrl] = useState(recipient.destinationUrl);
+  const [destinationUrl, setDestinationUrl] = useState(recipient.destinationUrl ?? '');
   const [destinationLabel, setDestinationLabel] = useState(recipient.destinationLabel ?? '');
   const [status, setStatus] = useState<CampaignRecipientStatus>(recipient.status);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showScans, setShowScans] = useState(false);
+  const [showOverride, setShowOverride] = useState(recipient.destinationType === 'custom');
   const [isPending, startTransition] = useTransition();
 
   const redirectUrl = `/r/${recipient.campaignCode}`;
@@ -222,6 +223,15 @@ function RecipientCard({
                 <span className="font-semibold text-gray-900">{recipient.estimatedUniqueScans}</span> est. unique
               </span>
             </div>
+            <p className="mt-1 text-xs text-gray-500">
+              {recipient.destinationType === 'custom' ? (
+                <>Destination: {recipient.destinationLabel || recipient.destinationUrl}</>
+              ) : recipient.claimId ? (
+                <>Destination: claim flow (scans lead straight to signup)</>
+              ) : (
+                <span className="text-amber-600">Already claimed — links to the live page</span>
+              )}
+            </p>
           </div>
         </div>
 
@@ -241,36 +251,47 @@ function RecipientCard({
 
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
 
-      <form onSubmit={handleSaveDestination} className="mt-4 flex flex-wrap items-end gap-2">
-        <div className="flex-1 min-w-[220px]">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Destination URL</label>
-          <input
-            type="text"
-            value={destinationUrl}
-            onChange={(e) => setDestinationUrl(e.target.value)}
-            required
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-          />
-        </div>
-        <div className="w-40">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Label (optional)</label>
-          <input
-            type="text"
-            value={destinationLabel}
-            onChange={(e) => setDestinationLabel(e.target.value)}
-            placeholder="e.g. preview"
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={isPending}
-          className="rounded-lg bg-gray-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-gray-700 transition-colors disabled:opacity-60"
-        >
-          Save
+      <div className="mt-3">
+        <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
+          {showOverride ? 'Hide destination override' : 'Override destination'}
         </button>
-        {savedAt && <span className="text-xs text-green-600">Saved</span>}
-      </form>
+        {showOverride && (
+          <form onSubmit={handleSaveDestination} className="mt-2 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Destination URL</label>
+              <input
+                type="text"
+                value={destinationUrl}
+                onChange={(e) => setDestinationUrl(e.target.value)}
+                placeholder="https://webpresa.com/b/joe-plumbing"
+                required
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+              />
+            </div>
+            <div className="w-40">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Label (optional)</label>
+              <input
+                type="text"
+                value={destinationLabel}
+                onChange={(e) => setDestinationLabel(e.target.value)}
+                placeholder="e.g. pricing"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-lg bg-gray-900 text-white px-3 py-1.5 text-xs font-medium hover:bg-gray-700 transition-colors disabled:opacity-60"
+            >
+              Save
+            </button>
+            {savedAt && <span className="text-xs text-green-600">Saved</span>}
+          </form>
+        )}
+        {showOverride && recipient.destinationType === 'claim' && (
+          <p className="mt-1 text-xs text-gray-400">Saving this switches the recipient away from the claim flow permanently.</p>
+        )}
+      </div>
 
       <div className="mt-3">
         <button type="button" onClick={() => setShowScans((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
@@ -301,21 +322,28 @@ function RecipientCard({
 function AddRecipientForm({ campaignId, businesses }: { campaignId: string; businesses: BusinessOption[] }) {
   const router = useRouter();
   const [businessId, setBusinessId] = useState('');
+  const [showOverride, setShowOverride] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState('');
   const [destinationLabel, setDestinationLabel] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await addCampaignRecipientAction(campaignId, { businessId, destinationUrl, destinationLabel });
+      const result = await addCampaignRecipientAction(campaignId, {
+        businessId,
+        ...(showOverride && destinationUrl ? { destinationUrl, destinationLabel } : {}),
+      });
       if (result.error) {
         setError(result.error);
         return;
       }
+      if (result.rawToken) setGeneratedToken(result.rawToken);
       setBusinessId('');
+      setShowOverride(false);
       setDestinationUrl('');
       setDestinationLabel('');
       router.refresh();
@@ -328,6 +356,14 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
       {error && (
         <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
           {error}
+        </div>
+      )}
+      {generatedToken && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+          <p className="text-xs font-semibold text-amber-800 mb-1">
+            A new claim code was generated for this recipient — copy it now, it won&apos;t be shown again:
+          </p>
+          <code className="block text-sm font-mono text-amber-900 break-all">{generatedToken}</code>
         </div>
       )}
       <div className="flex flex-wrap items-end gap-2">
@@ -349,27 +385,6 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
             ))}
           </select>
         </div>
-        <div className="flex-1 min-w-[220px]">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Destination URL</label>
-          <input
-            type="text"
-            value={destinationUrl}
-            onChange={(e) => setDestinationUrl(e.target.value)}
-            placeholder="https://webpresa.com/b/joe-plumbing"
-            required
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-          />
-        </div>
-        <div className="w-40">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Label (optional)</label>
-          <input
-            type="text"
-            value={destinationLabel}
-            onChange={(e) => setDestinationLabel(e.target.value)}
-            placeholder="e.g. preview"
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-          />
-        </div>
         <button
           type="submit"
           disabled={isPending}
@@ -379,10 +394,39 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
         </button>
       </div>
       <p className="text-xs text-gray-400">
-        Tip: for a campaign meant to drive claiming, use the business&apos;s claim link (Business →
-        Claim → Generate claim link), not just its preview URL — that way scanning the QR lands on
-        the preview already primed to claim, instead of requiring the visitor to type in a code first.
+        By default, the QR wires straight into this business&apos;s claim flow — reusing a usable claim
+        if one already exists, generating a new one otherwise. No manual code entry needed.
       </p>
+
+      <div>
+        <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
+          {showOverride ? 'Hide advanced' : 'Advanced: override destination'}
+        </button>
+        {showOverride && (
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Destination URL</label>
+              <input
+                type="text"
+                value={destinationUrl}
+                onChange={(e) => setDestinationUrl(e.target.value)}
+                placeholder="https://webpresa.com/pricing"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+              />
+            </div>
+            <div className="w-40">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Label (optional)</label>
+              <input
+                type="text"
+                value={destinationLabel}
+                onChange={(e) => setDestinationLabel(e.target.value)}
+                placeholder="e.g. pricing"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+              />
+            </div>
+          </div>
+        )}
+      </div>
     </form>
   );
 }

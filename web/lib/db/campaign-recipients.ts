@@ -83,23 +83,35 @@ export async function putCampaignRecipient(recipient: CampaignRecipient): Promis
   );
 }
 
+/**
+ * Overrides a recipient's destination with an explicit admin-supplied URL —
+ * the exception path (see `domain/models/campaign-recipient.ts`,
+ * `CampaignRecipientDestinationType`). Always switches `destinationType` to
+ * `'custom'` and clears any `claimId` reference, since the two are mutually
+ * exclusive going forward — a one-way action; there is no UI to switch a
+ * recipient back to the auto-managed `'claim'` path.
+ */
 export async function updateCampaignRecipientDestination(
   campaignRecipientId: string,
   input: { destinationUrl: string; destinationLabel?: string },
 ): Promise<void> {
   const client = getDynamoDBClient();
   const now = new Date().toISOString();
+  const hasLabel = input.destinationLabel !== undefined;
+  const setClause =
+    'SET destinationType = :custom, destinationUrl = :destinationUrl, updatedAt = :now' + (hasLabel ? ', destinationLabel = :destinationLabel' : '');
+  const removeClause = hasLabel ? 'REMOVE claimId' : 'REMOVE claimId, destinationLabel';
+
   await client.send(
     new UpdateCommand({
       TableName: TABLE_CAMPAIGN_RECIPIENTS(),
       Key: { campaignRecipientId },
-      UpdateExpression:
-        'SET destinationUrl = :destinationUrl, updatedAt = :now' +
-        (input.destinationLabel !== undefined ? ', destinationLabel = :destinationLabel' : ' REMOVE destinationLabel'),
+      UpdateExpression: `${setClause} ${removeClause}`,
       ExpressionAttributeValues: {
+        ':custom': 'custom',
         ':destinationUrl': input.destinationUrl,
         ':now': now,
-        ...(input.destinationLabel !== undefined ? { ':destinationLabel': input.destinationLabel } : {}),
+        ...(hasLabel ? { ':destinationLabel': input.destinationLabel } : {}),
       },
     }),
   );

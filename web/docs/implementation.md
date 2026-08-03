@@ -3836,13 +3836,25 @@ business claim links, both common `CampaignRecipient` destinations.
 - `businessId`
 - `campaignCode` — opaque, unique, unguessable (see "Campaign code
   generation")
-- `destinationUrl` — the full URL this recipient's QR code resolves to (a
-  preview, an existing claim link, a pricing page, or an external URL).
-  Admin-supplied at creation; editable at any time without changing
-  `campaignCode`.
-- `destinationLabel?` — optional free-text admin note on what the
-  destination is (e.g. "preview", "claim link") — display only, never
-  parsed or trusted.
+- `destinationType` — `'claim' | 'custom'`. `'claim'` is the default,
+  automatic path: `/r/[campaignCode]` resolves the recipient straight into
+  the business's claim flow at scan time, with zero manual code entry
+  (see "Destination resolution" below). `'custom'` is the exception —
+  an explicit admin-supplied `destinationUrl`.
+- `claimId?` — set only when `destinationType === 'claim'`. A plain
+  internal record reference (the same class of field as `Claim.postcardId`/
+  `previewId`) — never a secret, never rendered into any URL, QR, or
+  printed artifact. Absent means the business was already claimed when
+  this recipient was added; the redirect route then just links to the
+  business's live page.
+- `destinationUrl?` — set only when `destinationType === 'custom'` — the
+  full URL this recipient's QR code resolves to (a preview, a pricing
+  page, an external URL — anything other than the auto-managed claim
+  flow). Editable at any time without changing `campaignCode`; saving an
+  override is a one-way switch to `'custom'` (no UI to switch back).
+- `destinationLabel?` — set only when `destinationType === 'custom'` —
+  optional free-text admin note on what the destination is (e.g.
+  "pricing page") — display only, never parsed or trusted.
 - `status` — `'active' | 'disabled'`. A per-recipient kill switch
   independent of the parent campaign's status (e.g. one bad address in an
   otherwise-active campaign).
@@ -3853,6 +3865,11 @@ business claim links, both common `CampaignRecipient` destinations.
   "estimated" everywhere displayed
 - `firstScanAt?`, `lastScanAt?`
 - `createdAt` / `updatedAt`
+
+Recipients created before `destinationType` existed have no such field
+stored; the schema defaults a missing value to `'custom'` on read (they all
+carried an explicit `destinationUrl`), so they keep working unchanged with
+no migration.
 
 ### `ScanHit` (`domain/models/scan-hit.ts`)
 
@@ -3972,8 +3989,45 @@ this one field set).
 New admin Server Actions,
 `web/app/admin/(dashboard)/campaigns/actions.ts`: `createCampaignAction`,
 `updateCampaignStatusAction`, `addCampaignRecipientAction` (generates
-`campaignCode` server-side), `updateCampaignRecipientAction` (destination
-and/or status).
+`campaignCode` server-side; auto-provisions the claim-flow destination —
+see "Destination resolution" below), `updateCampaignRecipientDestinationAction`
+(the `'custom'` override), `updateCampaignRecipientStatusAction`.
+
+## Destination resolution
+
+**Adding a recipient never requires manual destination entry.**
+`addCampaignRecipientAction(campaignId, { businessId, destinationUrl? })`:
+if `destinationUrl` is supplied, the recipient is `'custom'` exactly as any
+other admin-chosen destination. Otherwise (the default):
+
+1. If the business is already claimed (`Business.ownerUserId` set): create
+   the recipient as `destinationType: 'claim'` with `claimId` left unset.
+   Nothing to offer — the redirect route already knows to just link to the
+   live page in that case.
+2. Otherwise, look up the business's claims (`listClaimsForBusiness`) and
+   reuse the newest one satisfying `isClaimUsable()` (issued, unexpired) if
+   one exists.
+3. If none is usable, issue a new one — the exact same
+   `generateAndHashClaimToken()` + `createClaim()` + `putClaim()` sequence
+   the admin's existing "Generate claim link" action
+   (`generateClaimLinkAction`, business detail page) already uses. The raw
+   token is returned once in the action's result (shown once in the admin
+   UI, same "copy this now" pattern) — but **only** when freshly generated,
+   never for a reused claim, since its raw token was never available to
+   begin with.
+
+**Why the destination isn't a stored claim link.** The raw claim token is
+never persisted in recoverable form after issuance, by Stage 17 design
+(see "Claim-token requirements" above) — so a literal `/claim/{rawToken}`
+URL can never be saved on a `CampaignRecipient` and reused later. Instead,
+`/r/[campaignCode]` performs the claim-intent step itself at scan time,
+keyed by the stored `claimId` (a plain, non-secret reference) rather than a
+stored secret URL — see "Redirect behavior" below. Net effect for whoever
+scans the QR is identical to today's manual `/claim/{token}` flow, just
+with the code-entry step removed. This is also what makes future postcard
+printing (Stage 22) straightforward: the printed QR/fallback text only ever
+needs `campaignCode` (already permanently stored, safely reprintable at
+any time), never the claim token.
 
 ## Redirect behavior
 
@@ -3987,8 +4041,8 @@ Resolve CampaignRecipient via campaign-code-index
 Valid, recipient.status='active', parent Campaign.status='active'?
   ├─ No  → redirect to the homepage (generic, no distinguishing response,
   │         no ScanHit recorded)
-  └─ Yes → record ScanHit + update CampaignRecipient rollups → redirect to
-            destinationUrl
+  └─ Yes → resolve destination (below) → record ScanHit + update
+            CampaignRecipient rollups → redirect
 ```
 
 1. Rate-limit the request per IP-hash (`RATELIMIT#` item on
@@ -3999,24 +4053,41 @@ Valid, recipient.status='active', parent Campaign.status='active'?
    `status='disabled'`, or parent `Campaign.status` not `'active'` →
    redirect to the homepage. Never distinguish "doesn't exist" from
    "disabled" from "paused campaign" in the response.
-3. On a valid, active code: compute
-   `visitorFingerprint = sha256(campaignRecipientId | ipHash | userAgent)`.
+3. **Resolve the destination**, re-checked live against the database every
+   time — nothing about claim/ownership state is ever trusted from the
+   stored recipient:
+   - `destinationType === 'custom'` → the stored `destinationUrl`, unchanged.
+   - `destinationType === 'claim'` → always `/b/{slug}` (the business's
+     live page). Additionally, when the business is not yet claimed and
+     `claimId` is set: look up the claim; if it's still `isClaimUsable()`
+     and belongs to this business, sign a claim-intent JWT
+     (`signClaimIntent()` — the exact function `GET /claim/[claimToken]`
+     already calls) and pair it with the redirect. Already claimed, no
+     `claimId`, or the claim is revoked/expired/consumed/mismatched →
+     same `/b/{slug}` destination with **no** cookie — graceful
+     degradation; whatever's genuinely true about the business renders
+     correctly on its own.
+4. Compute `visitorFingerprint = sha256(campaignRecipientId | ipHash | userAgent)`.
    Attempt the `FINGERPRINT#` conditional `PutItem` on `scan-hits`; success
    means a new unique visitor.
-4. Write the `ScanHit` row (always, unconditionally, regardless of
-   uniqueness).
-5. Update `CampaignRecipient`: `totalScans += 1` always;
+5. Write the `ScanHit` row (always, unconditionally, regardless of
+   uniqueness) — `destinationUrl` is the *resolved* URL from step 3, so
+   history reflects what the visitor was actually sent to, even for
+   `'claim'`-type recipients.
+6. Update `CampaignRecipient`: `totalScans += 1` always;
    `estimatedUniqueScans += 1` only when the fingerprint reservation was
    newly created; `lastScanAt = now`; `firstScanAt = now` only if unset.
-6. Forward all incoming query parameters to the destination, then ensure
-   `campaign={campaignCode}` is present (added if missing, never
+7. Forward all incoming query parameters to the resolved destination, then
+   ensure `campaign={campaignCode}` is present (added if missing, never
    duplicated):
    ```
    /r/ABC123XYZ?utm_source=email
      ↓
-   {destinationUrl}?campaign=ABC123XYZ&utm_source=email
+   {resolvedUrl}?campaign=ABC123XYZ&utm_source=email
    ```
-7. Redirect (302).
+8. Redirect (302), setting the signed `webpresa_claim_intent` cookie
+   (same options `GET /claim/[claimToken]` uses — `httpOnly`, `secure` in
+   production, `sameSite=lax`) when step 3 produced one.
 
 Server always re-resolves `campaignCode → CampaignRecipient → destination`
 itself; nothing about the destination is ever trusted from the request
@@ -4095,6 +4166,15 @@ this stage.
   `Campaign` itself, since a `Campaign` may still have recipients belonging
   to other businesses.
 - The QR-download route requires an authenticated admin session.
+- `'claim'`-type recipients reference a `Claim` only by `claimId` — a plain,
+  non-secret internal record ID, never a raw claim token. The raw token
+  (when a claim is freshly auto-generated for a recipient) is returned once
+  in the admin action's result and never stored, matching Stage 17's own
+  "never persisted in recoverable form" rule for claim tokens.
+- The claim-intent cookie set by `/r/[campaignCode]` is only ever set after
+  re-validating the claim live against the database (`isClaimUsable`,
+  business-ID cross-check) — identical validation to `GET
+  /claim/[claimToken]`, just triggered by `claimId` instead of a raw token.
 
 ## Acceptance criteria
 

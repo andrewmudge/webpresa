@@ -7946,3 +7946,52 @@ npm run build        — succeeds
 ```
 
 No infra change, no `cdk diff`/deploy needed — pure application-code change to a value-generation function. Already-issued claim tokens (any length) continue to validate unaffected.
+
+---
+
+# Campaign recipients auto-wire to the claim flow (no manual destination entry)
+
+**Date:** 2026-08-03
+
+The user asked why adding a campaign recipient required manually typing a destination URL at all, when the common case is always "wire this business into its claim flow" — and pointed out a real chicken-and-egg concern worth resolving before implementing: postcards (Stage 22, future) need to print a code, so how would that work if the claim code is never stored?
+
+**Resolved the storage question first.** The raw claim token is deliberately never persisted after issuance (Stage 17 design — only its HMAC hash is kept). So a `CampaignRecipient` can never store a literal `/claim/{rawToken}` URL and reuse it later. The answer: it doesn't need to. The QR (and any future printed fallback text) already encodes `campaignCode`, not a claim link — and `campaignCode` *is* permanently stored on the recipient, specifically so it survives destination edits and QR re-downloads. Stage 22 can retrieve it any time to render a postcard's QR/text; the claim token stays purely internal to the redirect route's own logic and is never printed or exposed again after the one-time admin reveal.
+
+**Domain model** — `CampaignRecipient` gained a `destinationType: 'claim' | 'custom'` discriminator (`'claim'` default, `'custom'` the admin-override exception) and a `claimId?` field (a plain internal reference, never a secret). `destinationUrl`/`destinationLabel` became optional, set only for `'custom'`. Schema refinement enforces the pairing (`'claim'` forbids `destinationUrl`, `'custom'` requires it); a missing `destinationType` on read defaults to `'custom'` so the handful of already-created test recipients (which all carry an explicit `destinationUrl`) keep working with no migration.
+
+**`addCampaignRecipientAction`** now takes an optional `destinationUrl` (the exception path). Default behavior: if the business is already claimed, skip claim logic entirely (`destinationType: 'claim'`, no `claimId` — the redirect route already knows to just link to the live page). Otherwise, reuse the business's newest `isClaimUsable()` claim if one exists, or generate a new one via the exact same calls `generateClaimLinkAction` (business detail page) already uses — returning the raw token once in the result only when freshly generated, never for a reused claim.
+
+**`/r/[campaignCode]` redirect** — for a `'claim'`-type recipient, always resolves to `/b/{slug}`, additionally paired with a signed `webpresa_claim_intent` cookie (`signClaimIntent()`, the same function `GET /claim/[claimToken]` calls) whenever the business isn't yet claimed and the referenced claim is still genuinely usable — re-checked live against the database on every scan, never trusted from the stored recipient. `resolveCampaignRedirect()` gained a `requestUrl` param (to build the same-origin `/b/{slug}` URL) and an optional `claimIntentCookie` result field; the route sets it with the identical cookie options `GET /claim/[claimToken]` already uses.
+
+**Admin UI** — "Add recipient" now only requires picking a business; the destination-URL fields moved into a collapsed "Advanced: override destination" section. A freshly auto-generated claim's raw code is shown once, matching `ClaimSection.tsx`'s existing "copy this now, it won't be shown again" pattern. `RecipientCard` shows "claim flow" vs. "already claimed — links to live page" vs. a custom destination/label as appropriate; its existing destination-edit form is now a collapsed override too, and saving it is a one-way switch to `'custom'` (clears `claimId`).
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                             MODIFIED — Stage 21 domain model + new "Destination resolution" section + redirect behavior + security notes
+web/docs/architecture.md                                                                                MODIFIED — Stage 21 section updated for destinationType/claimId model
+web/docs/build_log.md                                                                                   MODIFIED — this entry
+web/domain/models/campaign-recipient.ts                                                                 MODIFIED — destinationType, claimId, optional destinationUrl/destinationLabel
+web/domain/schemas/campaign-recipient.schema.ts                                                         MODIFIED — discriminated refinement, backward-compat default
+web/domain/factories/campaign-recipient.factory.ts                                                      MODIFIED — discriminated CreateCampaignRecipientInput
+web/lib/db/campaign-recipients.ts                                                                       MODIFIED — updateCampaignRecipientDestination now sets destinationType='custom' and clears claimId
+web/lib/campaign/resolve-redirect.ts                                                                    MODIFIED — claim-type destination resolution, requestUrl param, claimIntentCookie result field
+web/lib/campaign/__tests__/resolve-redirect.test.ts                                                     MODIFIED — requestUrl in fixtures, new claim-type destination test suite
+web/lib/db/__tests__/campaign-recipients.test.ts                                                        MODIFIED — destinationType in fixture, updated destination-update assertions
+web/app/r/[campaignCode]/route.ts                                                                       MODIFIED — sets the claim-intent cookie when resolveCampaignRedirect returns one
+web/app/admin/(dashboard)/campaigns/actions.ts                                                          MODIFIED — addCampaignRecipientAction auto-provision/reuse-claim logic
+web/app/admin/(dashboard)/campaigns/__tests__/actions.test.ts                                           NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                     MODIFIED — collapsed override sections, raw-code reveal, claim/custom destination display
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings
+npm test             — new/updated test files pass (57 tests across the 5 campaign-related files);
+                        full repo suite run after this and the CampaignDetail.tsx changes together
+npm run build        — succeeds
+```
+
+No infra/table changes — an existing table's item shape gained optional fields, still validated per-write, no new GSI, no migration.

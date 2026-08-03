@@ -34,6 +34,7 @@ function makeRecipient(overrides: Partial<ReturnType<typeof createCampaignRecipi
       campaignId: 'campaign_00000000-0000-0000-0000-000000000001',
       businessId: 'biz_00000000-0000-0000-0000-000000000001',
       campaignCode: 'AB23CD45EF67GH89',
+      destinationType: 'custom',
       destinationUrl: 'https://webpresa.com/b/acme-plumbing',
     }),
     ...overrides,
@@ -109,22 +110,23 @@ describe('putCampaignRecipient', () => {
 });
 
 describe('updateCampaignRecipientDestination', () => {
-  it('SETs destinationLabel when provided', async () => {
+  it('SETs destinationType to custom and destinationLabel when provided, and always clears claimId', async () => {
     mockSend.mockResolvedValueOnce({});
     await updateCampaignRecipientDestination('recipient_1', {
       destinationUrl: 'https://webpresa.com/b/new-slug',
       destinationLabel: 'preview',
     });
     const command = mockSend.mock.calls[0][0];
+    expect(command.input.UpdateExpression).toContain('destinationType = :custom');
     expect(command.input.UpdateExpression).toContain('destinationLabel = :destinationLabel');
-    expect(command.input.UpdateExpression).not.toContain('REMOVE');
+    expect(command.input.UpdateExpression).toContain('REMOVE claimId');
   });
 
-  it('REMOVEs destinationLabel when omitted', async () => {
+  it('REMOVEs destinationLabel (and claimId) when destinationLabel is omitted', async () => {
     mockSend.mockResolvedValueOnce({});
     await updateCampaignRecipientDestination('recipient_1', { destinationUrl: 'https://webpresa.com/b/new-slug' });
     const command = mockSend.mock.calls[0][0];
-    expect(command.input.UpdateExpression).toContain('REMOVE destinationLabel');
+    expect(command.input.UpdateExpression).toContain('REMOVE claimId, destinationLabel');
   });
 });
 

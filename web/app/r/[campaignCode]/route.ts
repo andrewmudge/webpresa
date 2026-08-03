@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { hashIp } from '@/lib/claim/validate-token';
 import { resolveCampaignRedirect } from '@/lib/campaign/resolve-redirect';
+import { CLAIM_INTENT_COOKIE_NAME } from '@/lib/auth/claim-intent';
 
 /**
  * Public QR-code entry point (Stage 21). A printed QR code never links
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     userAgent: request.headers.get('user-agent') ?? '',
     referrer: request.headers.get('referer') ?? undefined,
     incomingSearchParams: request.nextUrl.searchParams,
+    requestUrl: request.url,
   });
 
   // Unknown, disabled, non-active-campaign, and rate-limited codes all
@@ -35,6 +37,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     result.outcome === 'redirect'
       ? NextResponse.redirect(result.destinationUrl)
       : NextResponse.redirect(new URL('/', request.url));
+
+  // Set only for a 'claim'-type recipient whose claim is still genuinely
+  // usable — same cookie options GET /claim/[claimToken] already uses.
+  if (result.outcome === 'redirect' && result.claimIntentCookie) {
+    response.cookies.set(CLAIM_INTENT_COOKIE_NAME, result.claimIntentCookie.value, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: result.claimIntentCookie.maxAgeSeconds,
+      path: '/',
+    });
+  }
 
   response.headers.set('Referrer-Policy', 'no-referrer');
   return response;
