@@ -14,7 +14,7 @@ vi.mock('@/lib/db/client', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { getCustomerBillingProfile, createCustomerBillingProfile } from '@/lib/db/customer-billing';
+import { getCustomerBillingProfile, createCustomerBillingProfile, deleteCustomerBillingProfile } from '@/lib/db/customer-billing';
 
 beforeEach(() => {
   mockSend.mockReset();
@@ -66,5 +66,14 @@ describe('createCustomerBillingProfile', () => {
   it('rethrows unexpected errors', async () => {
     mockSend.mockRejectedValueOnce(new Error('boom'));
     await expect(createCustomerBillingProfile('user_1', 'cus_123')).rejects.toThrow('boom');
+  });
+});
+
+describe('deleteCustomerBillingProfile', () => {
+  it('sends a DeleteCommand keyed on userId', async () => {
+    mockSend.mockResolvedValueOnce({});
+    await deleteCustomerBillingProfile('user_1');
+    const arg = mockSend.mock.calls[0][0].input;
+    expect(arg.Key).toEqual({ userId: 'user_1' });
   });
 });

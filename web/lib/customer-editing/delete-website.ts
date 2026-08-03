@@ -4,6 +4,7 @@ import { listPreviewsForBusiness, deletePreviewById } from '@/lib/db/site-previe
 import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
 import { listClaimsForBusiness, deleteClaimById } from '@/lib/db/claims';
+import { listLeadsForBusiness, deleteLeadById } from '@/lib/db/leads';
 import { listDomainConnectionsForBusiness, deleteDomainConnectionRecord } from '@/lib/db/domain-connections';
 import { removeProjectDomain } from '@/lib/vercel/domains';
 import { deleteAsset } from '@/lib/s3/assets';
@@ -13,8 +14,9 @@ export type DeleteWebsiteState = { message?: string } | undefined;
 
 /**
  * Customer-initiated permanent delete (Settings, Danger Zone). Extends the
- * admin's `deleteBusinessAction` cascade (previews/scans/postcards/claims,
- * then the business record — see `app/admin/(dashboard)/businesses/[businessId]/actions.ts`)
+ * admin's `deleteBusinessAction` cascade (previews/scans/postcards/claims/
+ * leads, then the business record — see
+ * `app/admin/(dashboard)/businesses/[businessId]/actions.ts`)
  * with the two things that action never touched: the domain connection
  * (Vercel attachment + DynamoDB record, same calls
  * `lib/domains/disconnect.ts`'s admin-only `disconnectDomainConnectionForTesting`
@@ -43,12 +45,13 @@ export async function deleteCustomerWebsite(businessId: string, ownerUserId: str
       return { message: 'Website not found.' };
     }
 
-    const [previews, scans, postcards, claims, domainConnections] = await Promise.all([
+    const [previews, scans, postcards, claims, domainConnections, leads] = await Promise.all([
       listPreviewsForBusiness(businessId),
       listScansForBusiness(businessId),
       listPostcardsForBusiness(businessId),
       listClaimsForBusiness(businessId),
       listDomainConnectionsForBusiness(businessId),
+      listLeadsForBusiness(businessId),
     ]);
 
     await Promise.all(
@@ -85,6 +88,7 @@ export async function deleteCustomerWebsite(businessId: string, ownerUserId: str
       ...scans.map((s) => deleteScanEventById(s.scanId)),
       ...postcards.map((p) => deletePostcardById(p.postcardId)),
       ...claims.map((c) => deleteClaimById(c.claimId)),
+      ...leads.map((l) => deleteLeadById(l.leadId)),
     ]);
 
     await deleteBusinessById(businessId);

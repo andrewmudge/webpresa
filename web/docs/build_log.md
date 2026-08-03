@@ -7551,7 +7551,7 @@ Per `AGENTS.md`'s verification policy, no dev server/browser check was performed
 
 ```
 web/docs/build_log.md                                                                                MODIFIED — this entry
-infra/lib/stacks/vercel-access-stack.ts                                                               MODIFIED — +1 IAM action (AdminUpdateUserAttributes), not yet deployed
+infra/lib/stacks/vercel-access-stack.ts                                                               MODIFIED — +1 IAM action (AdminUpdateUserAttributes), deployed
 web/lib/auth/customer-cognito.ts                                                                      MODIFIED — new updateCustomerProfile()
 web/lib/auth/__tests__/customer-cognito.test.ts                                                       MODIFIED — 4 new tests
 web/lib/customer-editing/account.ts                                                                   NEW
@@ -7579,4 +7579,157 @@ web/app/app/(dashboard)/businesses/[businessId]/settings/NotificationToggle.tsx 
 web/app/account/reset-password/page.tsx                                                               NEW
 web/app/account/reset-password/ResetPasswordForm.tsx                                                  NEW
 web/app/account/reset-password/actions.ts                                                             NEW
+```
+
+---
+
+# Settings Page Redesign — Delete Account
+
+**Date:** 2026-08-02
+
+## Overview
+
+Follow-on to the Settings Page Redesign above: the `WebpresaDevVercelAccessStack` IAM change for the Account card (`cognito-idp:AdminUpdateUserAttributes`) was deployed (see "Deploy log" below), and Delete Account — previously scoped out as unbuildable — was built for real, per explicit instruction. Export Website Data remains out of scope (no export generator exists anywhere in this codebase, unchanged from the prior entry's finding).
+
+**Whole-account delete, not per-business.** A customer may own several businesses (Stage 17/18's "one Stripe Customer per Cognito customer" model), so `deleteCustomerAccount()` (`lib/customer-editing/delete-account.ts`) fetches every business the caller's `sub` owns (`getBusinessesByOwnerUserId`) and tears down all of them, not just the one Settings happened to be opened from.
+
+**Blocks entirely if any owned business has an `active` or `past_due` subscription** — a deliberate, stricter departure from Delete Website's rule. Delete Website allows removing one website even with an active subscription, because the customer keeps their login and can still reach the Stripe Customer Portal from Billing afterward. Delete Account destroys the Cognito login itself; if a subscription were still active, the customer would lose the only self-service way to stop future charges. No subscription-cancellation API call exists anywhere in this codebase (same gap noted for Delete Website) — cancellation must happen first, through the existing Portal, while they can still sign in. The block lists every business name that still needs canceling.
+
+**Cascade order**: per-business website cascade first (reuses `deleteCustomerWebsite()` unchanged, looped over every owned business — previews/scans/postcards/claims/domain/S3, same as Delete Website) → the `CustomerBillingProfile` DynamoDB row (`userId → stripeCustomerId` mapping) → the Cognito user itself, last, since it's the one irreversible step that can no longer be retried once the customer can no longer authenticate. The Stripe Customer object itself is deliberately left untouched — Stripe recommends against deleting customers with billing history, and every subscription is already confirmed canceled by the blocking check above, so nothing active is left orphaned; only this app's own foreign-key row is removed.
+
+**New**: `deleteCustomerBillingProfile()` (`lib/db/customer-billing.ts`, plain `DeleteCommand` — no new IAM grant needed, `dynamodb:DeleteItem` was already broadly granted). `deleteCustomerAccount()` (`lib/auth/customer-cognito.ts`, `AdminDeleteUserCommand`, keyed on `sub` — same `Username = sub` finding as `updateCustomerProfile`, not `email`).
+
+**UI**: `DeleteAccountModal.tsx`, built on the same `ConfirmDialog.tsx` used by Delete Website. Typed confirmation is the customer's own email (not a business name — this deletes every business they own), re-verified server-side against the session in `deleteAccountActionCustomer`, never the client-posted value alone. On success: clears the customer session cookie (`deleteCustomerSession()`) and redirects to `/account/sign-in?accountDeleted=1`, which now shows a confirmation banner. `DangerZoneCard.tsx` gained a second row (Delete Account) alongside the existing Delete Website row, with a business-count summary line.
+
+## Deploy log
+
+1. **`WebpresaDevVercelAccessStack` — `cognito-idp:AdminUpdateUserAttributes`** (from the prior Settings redesign entry): reviewed `cdk diff` (single additive IAM statement, no other changes), approved by the user, deployed successfully 2026-08-02 14:22 UTC. Verified live via `aws iam get-policy-version` — the `CognitoCustomerAuth` statement's `Action` list includes `AdminUpdateUserAttributes`.
+2. **`WebpresaDevVercelAccessStack` — `cognito-idp:AdminDeleteUser`**: first attempt hit an expired `webpresa` AWS SSO session — `aws sts get-caller-identity` (CLI, cached) still tolerated it but `cdk diff`/`cdk deploy` (SDK credential resolution) did not (`Unable to resolve AWS account to use`). User re-ran `aws sso login --profile webpresa` (interactive, their own browser); a fresh `cdk diff` then confirmed the expected single additive IAM statement change (`+ cognito-idp:AdminDeleteUser` on the same `CognitoCustomerAuth` statement, no other changes) and it was deployed successfully 2026-08-02 14:45 UTC. Verified live via `aws iam get-policy-version` — the `CognitoCustomerAuth` statement's `Action` list includes both `AdminDeleteUser` and `AdminUpdateUserAttributes`. Delete Account's full cascade, including the final Cognito step, is now fully functional — no known partial-failure gap remains.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings
+npm test             — 94 files, 1019 tests passed (9 new: delete-account.test.ts, deleteCustomerBillingProfile case, deleteCustomerAccount Cognito cases)
+npm run build         — succeeds
+```
+
+Per `AGENTS.md`'s verification policy, no dev server/browser check was performed.
+
+## Files changed
+
+```
+web/docs/build_log.md                                                                                MODIFIED — this entry
+infra/lib/stacks/vercel-access-stack.ts                                                               MODIFIED — +1 IAM action (AdminDeleteUser), deployed
+web/lib/auth/customer-cognito.ts                                                                      MODIFIED — new deleteCustomerAccount()
+web/lib/auth/__tests__/customer-cognito.test.ts                                                       MODIFIED — 2 new tests
+web/lib/db/customer-billing.ts                                                                        MODIFIED — new deleteCustomerBillingProfile()
+web/lib/db/__tests__/customer-billing.test.ts                                                         MODIFIED — 1 new test
+web/lib/customer-editing/delete-account.ts                                                            NEW
+web/lib/customer-editing/__tests__/delete-account.test.ts                                             NEW
+web/app/app/(dashboard)/businesses/[businessId]/actions.ts                                            MODIFIED — new deleteAccountActionCustomer
+web/app/app/(dashboard)/businesses/[businessId]/settings/page.tsx                                     MODIFIED — passes email/businessCount to DangerZoneCard
+web/app/app/(dashboard)/businesses/[businessId]/settings/DangerZoneCard.tsx                           MODIFIED — second Delete Account row
+web/app/app/(dashboard)/businesses/[businessId]/settings/DeleteAccountModal.tsx                       NEW
+web/app/account/sign-in/page.tsx                                                                      MODIFIED — accountDeleted confirmation banner
+```
+
+---
+
+# Stage 20 — Contact Forms and Lead Delivery
+
+**Date:** 2026-08-02
+
+## Overview
+
+Wired the "Request Service" modal — live on every published customer website already, but frontend-only (`RequestServiceForm.tsx` faked submission with a timeout and sent nothing anywhere) — to a real backend. Reviewed the user's proposed `implementation.md` draft against the actual repo first (see that file's Stage 20 section for the full corrected requirements record); the draft assumed infrastructure that didn't exist (no `leads` table, no email-sending code, no queue of any kind anywhere in this repo) and left the entitlement question vague. Four architectural decisions were confirmed with the user before implementation: Amazon SES (new to this repo) over a third-party email API; a lightweight persist-then-inline-send-then-cron-retry design over a full SQS+Lambda+DLQ pipeline; Cloudflare Turnstile deferred (no baseline for it exists yet); and `Business.email` reused as-is for the MVP notification destination rather than a new dedicated/verified field.
+
+**Entitlement — the real `requirePlanCapability` Stage 18 deferred.** `PLAN_CATALOG.growth.features` already advertised "Lead forms to capture new customers" as Growth-only, and `lib/auth/customer-authorization.ts` carried a standing comment reserving this exact boundary for whichever stage had a real Basic/Growth difference to gate. Added `hasPlanCapability(access, 'lead_capture')`, checked independently at both the public CTA-resolution layer (`cta.tsx`'s `request_service` case now returns `null`, not a dead button, when disabled) and inside the Server Action itself (re-resolves the business fresh from the submitted `slug`, never trusts the client).
+
+**Data model.** New `Lead` domain model/schema/factory and a new `leads` DynamoDB table (PK `leadId`, GSI `business-id-index`), following the `claims`-table precedent: rate-limit counters and duplicate-submission fingerprints are folded into the same table as two extra TTL'd item shapes rather than dedicated tables. Extracted `checkAndIncrementRateLimit`/`buildRateLimitKey`'s DynamoDB call out of `claims.ts` into a new table-agnostic `lib/db/rate-limit.ts` (small, deliberate refactor — `claims.ts` now delegates, no behavior change) so Leads' own rate limiting doesn't duplicate that logic.
+
+**Submission transport is a Server Action** (`app/b/[slug]/actions.ts`, `submitLeadAction` — the first mutation originating from `/b/[slug]`), following Stage 17's `submitClaimTokenAction` precedent down to the undifferentiated-outcome posture: every non-field-validation rejection (rate-limited, plan-gated, duplicate, honeypot/timing-tripped, unknown slug) returns the identical generic success response a real acceptance does. `RequestServiceForm.tsx` converted from its old fake-timeout simulation to `useActionState`, matching `ClaimTokenForm.tsx`. The form's field was renamed `service` → `serviceNeeded` (pre-launch rename — nothing was ever persisted under either name). `businessId`/`slug`/`leadCaptureEnabled` are now threaded from `page.tsx` → `GeneratedWebsite` → `RequestServiceProvider` → the form, closing a plumbing gap that didn't exist before this stage.
+
+**Spam/abuse pipeline** (`lib/leads/spam-guard.ts`): honeypot field, minimum-fill-time check (found and fixed a real bug while writing its own test — `Number('')` coerces to `0`, not `NaN`, which would have silently let a raw POST omitting the `renderedAt` field bypass the timing check entirely), per-IP and per-business rate limiting, atomic fingerprint-reservation duplicate suppression. Turnstile is explicitly deferred, with an extension-point comment left in `submitLeadAction` at the exact spot a token check would slot in.
+
+**Amazon SES — first use anywhere in this repo.** Authenticates via IAM only (`ses:SendEmail`), so unlike every other integration (OpenAI/Firecrawl/Stripe/Lob, each a `WebpresaSecret`), it deliberately gets no Secrets Manager entry — just a new least-privilege statement on the existing Vercel-execution role, scoped to a `sesFromDomain` identity ARN (new `vercel-access-stack.ts` prop, defaulted in `bin/webpresa.ts` to `webpresa.com`). No CDK-managed `ses.EmailIdentity` either — this repo has no Route53-hosted-zone construct to drive DNS verification, so the sending identity is verified manually via the AWS Console, same as the two SES-sandbox recipient addresses the user had already verified before this session (`andrew@webpresa.com`, `mudge.andrew+test@gmail.com`) — sandbox production access has been requested but is not yet approved.
+
+**Delivery is persist-then-inline-send, not a queue** — `lib/leads/notify.ts`'s `sendLeadNotificationAndRecordOutcome()` is the one shared implementation every caller uses (initial submission, the new Vercel Cron retry sweep, the admin's manual retry), bounded by a ~5s `AbortController` timeout, never risking the already-durable `Lead` row on failure. `web/vercel.json` is a new file — no `vercel.json` existed anywhere in this repo before this stage despite `architecture.md`'s layout diagram implying one — scheduling `GET /api/internal/leads/retry-notifications` every 15 minutes. Authenticated by a new, parallel `verifyVercelCronRequest()` (`lib/internal-auth.ts`) — Vercel Cron's `Authorization: Bearer <CRON_SECRET>` convention differs from the existing EventBridge Connection's custom header, but reuses the same `internal-api` secret value rather than provisioning a new one.
+
+**Customer lead inbox** (`/app/businesses/[businessId]/leads`, new "Leads" sidebar item) gated by `requireBusinessOwnership` + `hasPlanCapability` — deliberately not `requireActiveSubscription`, so a Basic-plan owner sees an upsell card instead of being redirected elsewhere. **Admin troubleshooting view** (`LeadsSection.tsx`, alongside `WorkflowSection`/`EnrichmentSection`/`ScoringSection`) shows notification status/attempts/error and a manual retry per failed lead, calling the identical shared `notify.ts` function. Both the admin's `deleteBusinessAction` and the customer's `deleteCustomerWebsite()` cascades were extended to include Leads.
+
+## Verification
+
+```
+npx tsc --noEmit     — passes (web/)
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings (web/)
+npm test             — 96 files, 1062 tests passed (web/) — 5 new/updated test files for Stage 20,
+                        plus 4 pre-existing delete-website.test.ts cases fixed to mock the new
+                        lib/db/leads dependency the cascade now pulls in
+npm run build        — succeeds; /app/businesses/[businessId]/leads and
+                        /api/internal/leads/retry-notifications both registered as routes
+cd infra && npx tsc --noEmit  — passes
+cd infra && npm test           — 6 files, 165 tests passed — new Leads-table assertions in
+                                  data-stack.test.ts, new SES-statement assertions in
+                                  vercel-access-stack.test.ts, existing table/output-count
+                                  assertions updated for the 10th table (9→10 tables, 32→34
+                                  CloudFormation outputs, 20→22 DynamoDB IAM resource entries)
+cd infra && cdk synth WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa
+                      — synthesizes cleanly, confirms the new leadsTable/sesFromDomain wiring
+                        through bin/webpresa.ts is well-formed
+```
+
+Per `AGENTS.md`'s verification policy, no dev server/browser check was performed. **Not yet deployed** — no `cdk deploy` was run (would create the real `leads` table and IAM grant); the SES sending identity also still needs manual console verification. See `deployment.md`, "Stage 20 — Contact Forms and Lead Delivery deployment guidance," for the full deploy sequence and manual-verification procedure, neither of which has been executed yet.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                            MODIFIED — Stage 20 section rewritten against actual repo state
+web/docs/architecture.md                                                                               MODIFIED — leads table entry, new env vars, new Stage 20 section
+web/docs/deployment.md                                                                                 MODIFIED — new Stage 20 deployment guidance section
+web/docs/build_log.md                                                                                  MODIFIED — this entry
+web/domain/models/lead.ts                                                                              NEW
+web/domain/schemas/lead.schema.ts                                                                      NEW
+web/domain/factories/lead.factory.ts                                                                   NEW
+web/lib/db/client.ts                                                                                   MODIFIED — TABLE_LEADS
+web/lib/db/rate-limit.ts                                                                                NEW — extracted, table-agnostic rate-limit helper
+web/lib/db/claims.ts                                                                                    MODIFIED — delegates to lib/db/rate-limit.ts, no behavior change
+web/lib/db/leads.ts                                                                                     NEW
+web/lib/db/__tests__/leads.test.ts                                                                      NEW
+web/lib/leads/spam-guard.ts                                                                             NEW
+web/lib/leads/__tests__/spam-guard.test.ts                                                              NEW
+web/lib/leads/notify.ts                                                                                 NEW
+web/lib/ses/client.ts                                                                                   NEW
+web/lib/ses/send-lead-notification.ts                                                                   NEW
+web/lib/auth/customer-authorization.ts                                                                 MODIFIED — hasPlanCapability, replaces Stage 18's stub comment
+web/lib/auth/__tests__/customer-authorization.test.ts                                                  MODIFIED — hasPlanCapability tests
+web/lib/internal-auth.ts                                                                                MODIFIED — verifyVercelCronRequest
+web/lib/__tests__/internal-auth.test.ts                                                                MODIFIED — verifyVercelCronRequest tests
+web/lib/customer-editing/lead-actions.ts                                                                NEW
+web/lib/customer-editing/delete-website.ts                                                              MODIFIED — cascade includes leads
+web/lib/customer-editing/__tests__/delete-website.test.ts                                              MODIFIED — mocks lib/db/leads, asserts lead cleanup
+web/app/b/[slug]/actions.ts                                                                             NEW — submitLeadAction
+web/app/b/[slug]/page.tsx                                                                               MODIFIED — computes leadCaptureEnabled
+web/app/b/[slug]/template/cta.tsx                                                                       MODIFIED — leadCaptureEnabled gating on request_service
+web/app/b/[slug]/template/__tests__/cta.test.ts                                                        MODIFIED — leadCaptureEnabled gating tests
+web/app/b/[slug]/template/index.tsx                                                                     MODIFIED — threads leadCaptureEnabled/slug
+web/app/b/[slug]/template/RequestServiceModal.tsx                                                       MODIFIED — slug/leadCaptureEnabled props, gated openRequestService
+web/app/b/[slug]/template/RequestServiceForm.tsx                                                        MODIFIED — real submission via useActionState, service→serviceNeeded rename
+web/app/api/internal/leads/retry-notifications/route.ts                                                NEW
+web/vercel.json                                                                                        NEW — first Vercel Cron config in this repo
+web/app/app/(dashboard)/AppSidebar.tsx                                                                  MODIFIED — new Leads nav item
+web/app/app/(dashboard)/businesses/[businessId]/leads/page.tsx                                          NEW
+web/app/app/(dashboard)/businesses/[businessId]/leads/LeadsList.tsx                                     NEW
+web/app/app/(dashboard)/businesses/[businessId]/leads/actions.ts                                        NEW
+web/app/admin/(dashboard)/businesses/[businessId]/page.tsx                                              MODIFIED — leads fetch + LeadsSection
+web/app/admin/(dashboard)/businesses/[businessId]/LeadsSection.tsx                                      NEW
+web/app/admin/(dashboard)/businesses/[businessId]/lead-actions.ts                                       NEW
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                                            MODIFIED — cascade delete includes leads
+web/package.json                                                                                        MODIFIED — +@aws-sdk/client-sesv2
+infra/lib/stacks/data-stack.ts                                                                          MODIFIED — new leads table
+infra/lib/stacks/vercel-access-stack.ts                                                                 MODIFIED — leadsTable + sesFromDomain props, new SES IAM statement
+infra/bin/webpresa.ts                                                                                   MODIFIED — wires leadsTable, sesFromDomain
+infra/test/data-stack.test.ts                                                                           MODIFIED — leads table assertions, updated table/output counts
+infra/test/vercel-access-stack.test.ts                                                                  MODIFIED — leadsTable/sesFromDomain in test setup, SES statement assertions, updated resource count
 ```

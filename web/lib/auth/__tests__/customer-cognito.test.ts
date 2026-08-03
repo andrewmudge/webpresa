@@ -16,6 +16,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   ConfirmForgotPasswordCommand: vi.fn((input) => ({ input })),
   ListUsersCommand: vi.fn((input) => ({ input })),
   AdminUpdateUserAttributesCommand: vi.fn((input) => ({ input })),
+  AdminDeleteUserCommand: vi.fn((input) => ({ input })),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -26,6 +27,7 @@ import {
   confirmCustomerPasswordReset,
   adminGetCustomerProfileBySub,
   updateCustomerProfile,
+  deleteCustomerAccount,
 } from '../customer-cognito';
 
 const testProfile = { firstName: 'Jane', lastName: 'Doe', phone: '555-123-4567' };
@@ -151,6 +153,22 @@ describe('updateCustomerProfile', () => {
   it('maps any other error to unknown — never leaks the raw Cognito error', async () => {
     mockSend.mockRejectedValueOnce(namedError('SomeInternalCognitoDetail'));
     const result = await updateCustomerProfile('cognito-sub-123', { firstName: 'Jane', lastName: 'Doe' });
+    expect(result).toEqual({ ok: false, reason: 'unknown' });
+  });
+});
+
+describe('deleteCustomerAccount', () => {
+  it('returns ok on success and uses the sub as Username', async () => {
+    mockSend.mockResolvedValueOnce({});
+    const result = await deleteCustomerAccount('cognito-sub-123');
+    expect(result).toEqual({ ok: true });
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.Username).toBe('cognito-sub-123');
+  });
+
+  it('maps any error to unknown — never leaks the raw Cognito error', async () => {
+    mockSend.mockRejectedValueOnce(namedError('SomeInternalCognitoDetail'));
+    const result = await deleteCustomerAccount('cognito-sub-123');
     expect(result).toEqual({ ok: false, reason: 'unknown' });
   });
 });

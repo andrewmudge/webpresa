@@ -2,6 +2,7 @@ import { requireCustomerSession, requireBusinessOwnership, requireBusinessAccess
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
+import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { deriveWebsiteStatus } from '@/lib/customer-editing/site-status';
 import { redirect } from 'next/navigation';
 import { SaveBanner } from '../SaveBanner';
@@ -29,10 +30,11 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   if (mode === 'none') redirect(`/app/businesses/${businessId}`);
   const isReadOnly = mode === 'billing_recovery';
 
-  const [profile, previews, domainConnections] = await Promise.all([
+  const [profile, previews, domainConnections, ownedBusinesses] = await Promise.all([
     adminGetCustomerProfileBySub(session.sub),
     listPreviewsForBusiness(businessId),
     listDomainConnectionsForBusiness(businessId),
+    getBusinessesByOwnerUserId(session.sub),
   ]);
 
   const websiteStatus = deriveWebsiteStatus(previews);
@@ -70,6 +72,8 @@ export default async function SettingsPage({ params, searchParams }: Props) {
           businessId={businessId}
           businessName={business.name}
           hasActiveSubscription={business.subscriptionStatus === 'active'}
+          email={session.email}
+          businessCount={ownedBusinesses.length}
           isReadOnly={isReadOnly}
         />
       </div>

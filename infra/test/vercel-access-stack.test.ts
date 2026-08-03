@@ -42,6 +42,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     scanExecutionsTable: dataStack.scanExecutionsTable,
     postcardsTable: dataStack.postcardsTable,
     claimsTable: dataStack.claimsTable,
+    leadsTable: dataStack.leadsTable,
     customerBillingProfilesTable: dataStack.customerBillingProfilesTable,
     customerOnboardingTable: dataStack.customerOnboardingTable,
     domainConnectionsTable: dataStack.domainConnectionsTable,
@@ -61,6 +62,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
     customerUserPool: dataStack.customerUserPool,
+    sesFromDomain: 'webpresa-test.invalid',
   });
   return Template.fromStack(vercelAccessStack);
 }
@@ -114,7 +116,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), and customer-onboarding/domain-connections (Stage 19.x)', () => {
+  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), and leads (Stage 20)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -124,8 +126,23 @@ describe('data-access policy statements', () => {
     expect(statement.Action).toEqual(
       expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
     );
-    // 10 tables × (table + index/*) = 20 resource entries.
-    expect(statement.Resource).toHaveLength(20);
+    // 11 tables × (table + index/*) = 22 resource entries.
+    expect(statement.Resource).toHaveLength(22);
+  });
+
+  it('grants ses:SendEmail scoped to the configured sending domain identity (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string | string[]; Resource: unknown }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SesSendLeadNotifications')!;
+
+    // CloudFormation collapses a single-action/single-resource statement's Action/Resource to a
+    // bare value, not a 1-element array — and the resource itself is a Fn::Join/Fn::Sub intrinsic
+    // (region/account are CDK tokens resolved at synth time), so inspect its serialized form
+    // rather than a plain string.
+    expect(statement.Action).toEqual('ses:SendEmail');
+    expect(JSON.stringify(statement.Resource)).toContain('webpresa-test.invalid');
   });
 
   it('grants S3 GetObject/PutObject/DeleteObject/ListBucket scoped to the assets bucket', () => {

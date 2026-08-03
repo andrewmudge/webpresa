@@ -3458,61 +3458,288 @@ Visitor/traffic analytics, CTA click tracking, live uptime monitoring, automated
 
 ## Objective
 
-Provide functioning lead forms on customer websites and reliably deliver submissions to the customer.
+Wire the existing "Request Service" modal — live on every published customer
+website today, but frontend-only (`RequestServiceForm.tsx` simulates
+submission with a timeout and sends nothing anywhere) — to a real backend:
+persist each submission reliably, notify the business by email, and let the
+business (and admin) view submissions.
 
 ## Dependencies
 
-Stages 8 and 19.
+Stages 8, 17, 18, and 19. Specifically: the `/b/[slug]` public preview
+resolution and host-based domain routing (Stage 8/19.x), customer
+authentication and business ownership (Stage 17), and `Business.plan`/
+`subscriptionStatus` entitlement (Stage 18) — lead capture is gated to the
+Growth plan (see "Entitlement" below), the first real Basic/Growth feature
+difference Stage 18's `requirePlanCapability` stub was deliberately left
+unbuilt for.
+
+## Starting state (confirmed against the repo, not assumed)
+
+- The public form already exists and already collects `name` (required),
+  `phone`, `email`, `service` (labeled "Service needed" — renamed to
+  `serviceNeeded` as part of this stage), and `message` ("Details"). No
+  `preferredContactMethod` field exists or is added — deferred, as it was in
+  the original draft of this stage.
+- No `leads` table, no email-sending infrastructure, and no queue/DLQ
+  infrastructure of any kind exists anywhere in this repo today. The only
+  SQS queue in the codebase is the Stage 14 screenshot-Lambda's
+  single-purpose dead-letter queue, not a reusable work queue. All of it is
+  net-new for this stage.
+- No customer-configurable lead-notification email exists. `Business.email`
+  — the one canonical, already-editable business contact email (edited only
+  on the Settings page) — is reused as the MVP notification destination.
+  This *does* mean a Google-Places/Firecrawl-sourced or otherwise unverified
+  address can receive lead notifications; a dedicated, customer-confirmed
+  lead-notification address is deferred, not solved here.
+- `businessId`/`previewId`/`slug` are not currently threaded from the public
+  page down into the form at all — that plumbing is part of this stage.
 
 ## Major deliverables
 
-- Public contact form
-- Lead data model and table
-- Server-side validation
-- Spam protection
-- Lead notification
-- Submission confirmation
-- Admin lead view
-- Customer lead history where enabled
+- Public contact form wired to a real submission path (Server Action, not a
+  new Route Handler — matching this repo's one existing precedent for a
+  public, unauthenticated form submission, Stage 17's claim-token flow)
+- `Lead` data model and a new `leads` DynamoDB table
+- Server-side validation, independent of and never trusting client state
+- Baseline spam/abuse protection (honeypot, timing check, rate limiting,
+  duplicate-submission detection) — Turnstile/CAPTCHA explicitly deferred
+- A real entitlement gate (`hasPlanCapability`) restricting lead capture to
+  the Growth plan, checked both at public-rendering time and independently
+  again inside the submission handler
+- Amazon SES lead-notification email — the first use of SES in this repo
+- Lightweight async delivery: persist-then-inline-send, with a scheduled
+  Vercel Cron retry sweep for anything left `pending`/`failed` — not a
+  SQS+Lambda+DLQ pipeline (considered and deliberately rejected as more
+  infrastructure than sending one email justifies)
+- Customer lead inbox (new `/leads` dashboard page + sidebar entry)
+- Admin troubleshooting view (notification status/attempts, manual retry)
 
-## Initial fields
+## Fields
 
-- name
-- phone
-- email
-- message
-- preferred contact method
+- `name` — required
+- `phone` — optional
+- `email` — optional
+- `serviceNeeded` — optional
+- `message` — optional
 
-## Implementation requirements
+At least one of `phone` or `email` is required (existing client-side rule,
+now also enforced server-side). `preferredContactMethod` remains deferred.
 
-- Validate every submission.
-- Collect only necessary information.
-- Store source page and campaign.
-- Protect against spam using a combination of honeypots, rate limits, CAPTCHA/Turnstile, throttling, and duplicate detection.
-- Do not expose private business email addresses unnecessarily.
-- Do not send sensitive data to logs.
-- Notify the business through an approved email service.
-- Provide a clear success state without exposing internal delivery results.
+## Data model
+
+`Lead` (`domain/models/lead.ts` / `domain/schemas/lead.schema.ts`):
+`leadId`, `businessId`, `previewId` (audit only), `name`, `phone`, `email`,
+`serviceNeeded`, `message`, `source` (`'request_service_form'`), `status`
+(`new | read | archived` — the owner's own inbox triage),
+`submitterIpHash` (SHA-256 of the IP, never the raw address — reuses
+`hashIp()` from Stage 17's claim-validation code), `fingerprint`
+(duplicate-submission signature), `notificationStatus`
+(`pending | sent | failed`), `notificationAttempts`,
+`lastNotificationAttemptAt`, `lastNotificationError` (diagnostics only,
+never shown to the business owner), `createdAt`/`updatedAt`/`archivedAt`.
+
+`status` and `notificationStatus` are two independent lifecycles on one
+record — an owner marking a lead read/archived has nothing to do with
+whether the notification email ever sent.
+
+New `leads` DynamoDB table: PK `leadId`; GSI `business-id-index` (PK
+`businessId`, SK `createdAt`), mirroring the existing `postcards`/
+`scan-events` per-business-history pattern; no `status-index` (low
+cardinality, same reasoning already documented for `claims`). Rate-limit
+counters and duplicate-submission fingerprints are folded into this same
+table as two additional item shapes (`RATELIMIT#...`/`FINGERPRINT#...`,
+both TTL'd) rather than a dedicated table — the same pattern the `claims`
+table already established for its own rate-limit counters, and the same
+atomic-conditional-write approach `domain-connections` uses for
+uniqueness (`ConditionExpression: attribute_not_exists(...)`, never a
+GSI-query-then-write).
+
+The server derives `businessId` fresh from the request's trusted `slug`
+(resolved the same way `/b/[slug]/page.tsx` already does) on every
+submission. The browser never selects the destination business, and a
+client-supplied `businessId`/`previewId` is never trusted for anything
+beyond a display hint.
+
+## Entitlement
+
+Lead capture is a Growth-plan feature (already advertised as such in
+`PLAN_CATALOG.growth.features`: "Lead forms to capture new customers").
+`hasPlanCapability(access, 'lead_capture')` — new, in
+`lib/auth/customer-authorization.ts`, replacing the "not yet built" stub
+comment left there in Stage 18 — returns true only when
+`access.mode === 'full' && access.plan === 'growth'`; a `past_due`
+(`billing_recovery`) Growth business does not pass. Checked twice,
+independently: once to decide whether the public page even renders the
+"Request Service" CTA as a live action, and again inside the submission
+handler itself, since a hidden form must never be the only thing stopping a
+Basic-plan submission.
+
+## Submission workflow
+
+1. Resolve the published site and business server-side from the request's
+   trusted `slug` (never from client-supplied identifiers).
+2. Re-check `hasPlanCapability` for lead capture.
+3. Honeypot and minimum-fill-time checks (silent rejection — no
+   distinguishable response to a bot).
+4. Parse and validate fields (name required; phone-or-email required) —
+   these errors ARE shown to the visitor.
+5. Per-IP and per-business rate limiting.
+6. Duplicate-submission detection via an atomic fingerprint reservation.
+7. Persist the lead. This must complete before any response is returned.
+8. Return a generic success response.
+9. Attempt the SES notification inline, bounded by a short timeout; record
+   `notificationStatus`/`notificationAttempts` regardless of outcome.
+10. A scheduled retry sweep (Vercel Cron, ~15 minutes) re-attempts any lead
+    still `pending`/`failed` up to a bounded attempt count, after which it
+    stays `failed` for admin visibility — there is no dead-letter queue in
+    this design; the admin troubleshooting view is the failure-recovery
+    path.
+
+Notification failure must never delete, retroactively invalidate, or block
+the stored lead — the lead row is already durable before any email is
+attempted.
+
+## Validation
+
+- `name`: required, non-empty, bounded length
+- `phone`: normalized when supplied
+- `email`: valid, normalized when supplied
+- `serviceNeeded`: bounded length
+- `message`: bounded length
+- At least one of `phone`/`email` is required
+- Trim and normalize all values; treat submitted content as plain text
+- Enforce request-body size limits
+- Safely escape values wherever rendered (emails, dashboards)
+
+## Spam and abuse protection
+
+MVP scope: honeypot field, minimum form-completion timing, per-IP and
+per-business rate limiting (reusing/extracting the `claims` table's
+rate-limit-counter pattern), duplicate-submission fingerprinting, and
+request-size limits. Rapid identical submissions must not create additional
+leads or notifications. The public response never reveals which internal
+check, if any, rejected a submission.
+
+**Cloudflare Turnstile is explicitly deferred** — no `TURNSTILE_*` secret
+or environment variable exists anywhere in this repo today, and adding one
+is out of scope for this stage. The validation pipeline documents (in code)
+exactly where a Turnstile token check would slot in — immediately before
+field validation — as a low-friction fast-follow once real spam volume
+justifies it.
+
+Do not persist raw IP addresses; only a keyed SHA-256 hash, matching the
+existing `claims` table's approach.
+
+## Notification delivery
+
+- **Amazon SES** — first use of SES anywhere in this repo. Unlike every
+  other third-party integration here (OpenAI, Firecrawl, Stripe, Lob), SES
+  authenticates via IAM (`ses:SendEmail`), not an API key, so it
+  deliberately gets **no** Secrets Manager entry — a new least-privilege IAM
+  statement on the existing Vercel-execution role is the only credential
+  path.
+- The sending identity is a CDK-managed `EmailIdentity` (domain + DKIM) in
+  the data stack, so it stays in `cdk diff`/`cdk deploy` rather than a
+  hand-run `aws ses verify-domain-identity` — this repo's `AGENTS.md`
+  already flags hand-run infra steps as a past incident source.
+- Deliver to `Business.email` (see "Starting state" above for the tradeoff
+  this implies).
+- Include the lead's details, source page, and submission time. Use the
+  submitter's own validated email as `Reply-To` only when supplied.
+- Never expose SES delivery results to the public visitor.
+- **SES sandbox mode**: production access has been requested but is not yet
+  approved. Only two recipient addresses are currently verified for testing
+  (`andrew@webpresa.com`, `mudge.andrew+test@gmail.com`) — any
+  `Business.email` outside the verified set will bounce every notification
+  until production access is granted. This is an expected, temporary
+  deployment constraint, not a bug, and is called out again in
+  `deployment.md`.
+
+## Public UX
+
+- Disable submission controls while processing; prevent double submission.
+- Show field-level and form-level validation errors; preserve values after
+  a recoverable error; focus the first invalid field.
+- Replace the form with a clear success state after acceptance. Do not
+  claim the business received an email — only confirm the request was
+  accepted.
+- Keyboard navigation, focus trapping, Escape, focus restoration, screen
+  readers, and mobile layouts (the modal shell already provides most of
+  this — verify it still holds once the form becomes a real async action).
+- Include a telephone link when the business accepts calls (already true
+  today via the modal's existing `phone` prop).
+
+## Customer lead inbox
+
+New `/app/businesses/[businessId]/leads` page, gated by
+`requireBusinessOwnership` + `hasPlanCapability`. A Basic-plan owner sees an
+upsell state on this page, not a 404 or redirect — the failure mode here is
+"upgrade," not "access denied." Authorized Growth-plan owners can:
+
+- View only leads belonging to their business, newest first
+- See name, contact details, requested service, details, and submission time
+- Mark a lead read or archived (no customer-facing delete)
+
+No public endpoint can retrieve lead records.
+
+## Admin view
+
+Added to the existing admin business-detail page, alongside the other
+per-business diagnostic cards (enrichment, scan workflow, scoring):
+
+- Every lead for the business, with `notificationStatus`,
+  `notificationAttempts`, and `lastNotificationError`
+- A manual "Retry notification" action per failed lead, calling the same
+  shared send-and-record function the scheduled retry sweep uses
+- Admin tools never display raw SES payloads or provider secrets
+
+## Logging and observability
+
+Never log `name`, `phone`, `email`, `serviceNeeded`, `message`, or a raw IP
+address — matching this repo's existing `lib/db/*.ts` convention (spot
+verified: no PII is logged anywhere in that layer today). Error logs
+reference only `leadId`/`businessId` and, for SES failures, the provider's
+error code/message id — never the full request/response body.
 
 ## Acceptance criteria
 
-- A valid submission is persisted once.
-- The business receives a notification.
-- Invalid submissions are rejected.
-- Spam controls block common automated abuse.
-- Duplicate rapid submissions are limited.
+- A valid submission is persisted exactly once.
+- The public request receives a generic success response after persistence.
+- Email delivery occurs asynchronously and never blocks or risks the lead
+  write.
+- A notification-provider outage does not lose accepted leads.
+- Failed notifications are retried on a schedule and remain visible (with
+  a manual retry option) to administrators.
+- Invalid submissions are rejected without being persisted.
+- Common automated abuse and rapid duplicate submissions are limited.
+- The destination business is resolved from trusted server-side context,
+  never from client-supplied identifiers.
 - Public users cannot retrieve lead records.
-- Customers can view only their own leads when lead history is enabled.
-- Notification failure does not silently lose the stored lead.
+- Customers can retrieve only leads belonging to businesses they own, and
+  only when their plan includes lead capture.
+- Lead-form rendering and submission are both independently blocked when
+  the business lacks the Growth-plan entitlement.
+- Submitted PII and free-text content never appear in application logs.
+- The modal and confirmation experience remain keyboard- and
+  screen-reader-accessible after the async rewrite.
 
 ## Deferred work
 
+- Cloudflare Turnstile / CAPTCHA
+- A dedicated, customer-confirmed lead-notification email (distinct from
+  `Business.email`)
 - SMS delivery
 - CRM synchronization
 - Automated lead responses
 - Call tracking
 - Lead assignment
+- Notes, tags, and pipeline management
+- File attachments
+- Marketing opt-in
+- Preferred-contact scheduling
 - Sensitive-industry forms
+- Custom form builders
 
 ---
 

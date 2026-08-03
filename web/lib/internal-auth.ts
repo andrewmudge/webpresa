@@ -31,3 +31,21 @@ export async function verifyInternalRequest(request: Request): Promise<boolean> 
   const { sharedSecret } = await getInternalApiSecret();
   return safeEquals(provided, sharedSecret);
 }
+
+/**
+ * Stage 20 — verifies that a request to `/api/internal/leads/*` actually
+ * came from Vercel Cron, not an arbitrary caller. Vercel invokes scheduled
+ * routes with `Authorization: Bearer <CRON_SECRET>` — a different
+ * convention than the EventBridge Connection's custom header above, so this
+ * is a second, parallel verifier rather than a variant of
+ * `verifyInternalRequest`. Reuses the same `internal-api` secret value
+ * (set as `CRON_SECRET` in Vercel's environment) rather than provisioning a
+ * second secret for one more internal caller.
+ */
+export async function verifyVercelCronRequest(request: Request): Promise<boolean> {
+  const provided = request.headers.get('authorization');
+  if (!provided) return false;
+
+  const { sharedSecret } = await getInternalApiSecret();
+  return safeEquals(provided, `Bearer ${sharedSecret}`);
+}

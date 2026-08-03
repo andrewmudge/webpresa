@@ -1,6 +1,6 @@
 import 'server-only';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import type { CustomerBillingProfile } from '@/domain/models/customer-billing-profile';
 import { CustomerBillingProfileSchema } from '@/domain/schemas/customer-billing-profile.schema';
 import { getDynamoDBClient, TABLE_CUSTOMER_BILLING_PROFILES } from './client';
@@ -64,4 +64,24 @@ export async function createCustomerBillingProfile(
     }
     throw err;
   }
+}
+
+/**
+ * Removes the `userId → stripeCustomerId` mapping row (Settings, Delete
+ * Account). Deliberately does not touch the Stripe Customer object itself
+ * — Stripe's own recommendation is against deleting customers with billing
+ * history, and every subscription must already be canceled (via the
+ * Stripe Customer Portal) before account deletion is permitted at all, so
+ * nothing active is left behind; only this app's own foreign-key row is
+ * removed. A no-op if the row doesn't exist (e.g. a customer who never
+ * checked out).
+ */
+export async function deleteCustomerBillingProfile(userId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new DeleteCommand({
+      TableName: TABLE_CUSTOMER_BILLING_PROFILES(),
+      Key: { userId },
+    }),
+  );
 }

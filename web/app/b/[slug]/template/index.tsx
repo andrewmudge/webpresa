@@ -22,6 +22,8 @@ interface Props {
   hasMatchingClaimIntent: boolean;
   isDraft: boolean;
   isAdmin: boolean;
+  /** Stage 20 — whether this business's plan includes lead capture (`hasPlanCapability`, computed by the caller). */
+  leadCaptureEnabled: boolean;
 }
 
 export function GeneratedWebsite({
@@ -34,11 +36,12 @@ export function GeneratedWebsite({
   hasMatchingClaimIntent,
   isDraft,
   isAdmin,
+  leadCaptureEnabled,
 }: Props) {
   const { content, theme } = preview;
   const phone = isValidPhone(content.contact.phone) ? content.contact.phone : undefined;
   const email = isValidEmail(content.contact.email) ? content.contact.email : undefined;
-  const { primary, secondary } = resolvePreviewCtaConfig(content);
+  const { primary, secondary } = resolvePreviewCtaConfig(content, leadCaptureEnabled);
 
   // Load the business's stored section configuration (falling back to the
   // computed default when absent), validate/sanitize it, and drop any
@@ -74,7 +77,7 @@ export function GeneratedWebsite({
         unreadable text (see build_log.md, "Request Service dialog theming
         fix").
       */}
-      <RequestServiceProvider businessName={businessName} phone={phone}>
+      <RequestServiceProvider businessName={businessName} phone={phone} slug={business.slug} leadCaptureEnabled={leadCaptureEnabled}>
         {/* Admin draft indicator */}
         {isDraft && isAdmin && (
           <div className="bg-yellow-400 text-yellow-900 text-center text-xs font-bold py-2 px-4 sticky top-0 z-[60]">

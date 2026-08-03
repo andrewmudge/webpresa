@@ -21,6 +21,7 @@ import { listScansForBusiness, deleteScanEventById } from '@/lib/db/scan-events'
 import { listPostcardsForBusiness, deletePostcardById } from '@/lib/db/postcards';
 import { deleteBusinessById, getBusinessById, putBusiness, updateBusiness, releaseOwnership } from '@/lib/db/businesses';
 import { listClaimsForBusiness, deleteClaimById, putClaim, revokeClaim } from '@/lib/db/claims';
+import { listLeadsForBusiness, deleteLeadById } from '@/lib/db/leads';
 import { createClaim } from '@/domain/factories/claim.factory';
 import { generateAndHashClaimToken } from '@/lib/claim/token';
 import { reconcileDomainConnection } from '@/lib/domains/reconcile';
@@ -1456,22 +1457,25 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   if (!business) return { error: 'Business not found' };
 
   // Fetch all downstream records concurrently
-  const [previews, scans, postcards, claims] = await Promise.all([
+  const [previews, scans, postcards, claims, leads] = await Promise.all([
     listPreviewsForBusiness(businessId),
     listScansForBusiness(businessId),
     listPostcardsForBusiness(businessId),
     listClaimsForBusiness(businessId),
+    listLeadsForBusiness(businessId),
   ]);
 
-  // Delete downstream records concurrently. Claims are included here for
-  // consistency with the existing cascade (Stage 17) — this is an explicit
-  // admin-destructive action, not a claim-lifecycle event, so it does not
-  // conflict with "claim history is preserved during normal operation."
+  // Delete downstream records concurrently. Claims (and, since Stage 20,
+  // Leads) are included here for consistency with the existing cascade
+  // (Stage 17) — this is an explicit admin-destructive action, not a
+  // claim/lead-lifecycle event, so it does not conflict with "history is
+  // preserved during normal operation."
   await Promise.all([
     ...previews.map((p) => deletePreviewById(p.previewId)),
     ...scans.map((s) => deleteScanEventById(s.scanId)),
     ...postcards.map((p) => deletePostcardById(p.postcardId)),
     ...claims.map((c) => deleteClaimById(c.claimId)),
+    ...leads.map((l) => deleteLeadById(l.leadId)),
   ]);
 
   // Delete the business record last

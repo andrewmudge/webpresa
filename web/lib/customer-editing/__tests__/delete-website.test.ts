@@ -19,6 +19,8 @@ const {
   mockDeletePostcard,
   mockListClaims,
   mockDeleteClaim,
+  mockListLeads,
+  mockDeleteLead,
   mockListDomainConnections,
   mockDeleteDomainConnectionRecord,
   mockRemoveProjectDomain,
@@ -35,6 +37,8 @@ const {
   mockDeletePostcard: vi.fn(),
   mockListClaims: vi.fn(),
   mockDeleteClaim: vi.fn(),
+  mockListLeads: vi.fn(),
+  mockDeleteLead: vi.fn(),
   mockListDomainConnections: vi.fn(),
   mockDeleteDomainConnectionRecord: vi.fn(),
   mockRemoveProjectDomain: vi.fn(),
@@ -61,6 +65,10 @@ vi.mock('@/lib/db/postcards', () => ({
 vi.mock('@/lib/db/claims', () => ({
   listClaimsForBusiness: mockListClaims,
   deleteClaimById: mockDeleteClaim,
+}));
+vi.mock('@/lib/db/leads', () => ({
+  listLeadsForBusiness: mockListLeads,
+  deleteLeadById: mockDeleteLead,
 }));
 vi.mock('@/lib/db/domain-connections', () => ({
   listDomainConnectionsForBusiness: mockListDomainConnections,
@@ -95,6 +103,7 @@ beforeEach(() => {
   mockListScans.mockResolvedValue([{ scanId: 'scan_1' }]);
   mockListPostcards.mockResolvedValue([{ postcardId: 'postcard_1' }]);
   mockListClaims.mockResolvedValue([{ claimId: 'claim_1' }]);
+  mockListLeads.mockResolvedValue([{ leadId: 'lead_1' }]);
   mockListDomainConnections.mockResolvedValue([]);
   mockAssetKeyFromUrl.mockImplementation((url: string) => `businesses/biz_1/assets/${url.split('/').pop()}`);
   mockDeleteAsset.mockResolvedValue(undefined);
@@ -116,7 +125,7 @@ describe('deleteCustomerWebsite', () => {
     expect(mockDeleteBusinessById).not.toHaveBeenCalled();
   });
 
-  it('cascades previews, scans, postcards, claims, and photos, then deletes the business', async () => {
+  it('cascades previews, scans, postcards, claims, leads, and photos, then deletes the business', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness());
     const result = await deleteCustomerWebsite('biz_1', 'user_owner');
 
@@ -125,6 +134,7 @@ describe('deleteCustomerWebsite', () => {
     expect(mockDeleteScan).toHaveBeenCalledWith('scan_1');
     expect(mockDeletePostcard).toHaveBeenCalledWith('postcard_1');
     expect(mockDeleteClaim).toHaveBeenCalledWith('claim_1');
+    expect(mockDeleteLead).toHaveBeenCalledWith('lead_1');
     expect(mockDeleteAsset).toHaveBeenCalledTimes(3); // 2 photos + 1 logo
     expect(mockDeleteBusinessById).toHaveBeenCalledWith('biz_1');
   });

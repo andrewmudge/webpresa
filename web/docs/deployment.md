@@ -1011,21 +1011,87 @@ A genuinely new bucket (rather than a prefix) would instead follow the `Webpresa
 
 ---
 
-## Settings Page Redesign — pending IAM deploy
+## Settings Page Redesign — IAM deploys
 
-**Application code implemented 2026-08-02 (see `build_log.md`); the one infrastructure change it depends on is reviewed but not yet deployed.**
+### `AdminUpdateUserAttributes` — deployed 2026-08-02
 
-The Settings page's Account card ("Edit Account," name/phone editing) calls Cognito's `AdminUpdateUserAttributes`, which `webpresa-vercel-dev` is not yet granted. `infra/lib/stacks/vercel-access-stack.ts`'s existing `CognitoCustomerAuth` statement now includes `cognito-idp:AdminUpdateUserAttributes` alongside its existing six actions — the same resource (`customerUserPool.userPoolArn`), no new resource, no replacement.
+The Settings page's Account card ("Edit Account," name/phone editing) calls Cognito's `AdminUpdateUserAttributes`. `infra/lib/stacks/vercel-access-stack.ts`'s `CognitoCustomerAuth` statement was extended with this action, `cdk diff` reviewed (single additive IAM statement change, no other stack affected), approved, and deployed:
 
 ```bash
 cd infra
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-# Reviewed 2026-08-02: a single additive IAM statement change (+1 action on
-# the existing DataAccessPolicy), no other stack affected. Not deployed —
-# awaiting explicit approval per AGENTS.md.
-npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa --require-approval never
 ```
 
-`WEBPRESA_APP_BASE_URL` must be set for any `cdk` command in this app (see `bin/webpresa.ts`'s hard-fail guard, Stage 14 above) even though this particular stack doesn't consume it — use the real deployed app URL, not a placeholder.
+Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-access` — the `CognitoCustomerAuth` statement's `Action` list includes `AdminUpdateUserAttributes`. "Edit Account" name/phone editing is fully functional against the real dev pool.
 
-Until deployed, "Edit Account" name/phone saves will fail with a generic error (the Cognito call throws `AccessDeniedException`, mapped to `updateCustomerProfile`'s existing `'unknown'` reason code) — every other Settings card is unaffected.
+### `AdminDeleteUser` — deployed 2026-08-02
+
+The Delete Account feature (`build_log.md`, "Settings Page Redesign — Delete Account") calls Cognito's `AdminDeleteUser` as its last cascade step. The same `CognitoCustomerAuth` statement now also includes `cognito-idp:AdminDeleteUser`. First deploy attempt hit an expired SSO session (`aws sso login --profile webpresa` needed interactively, `cdk`'s own SDK credential resolution failed with `Unable to resolve AWS account to use` even though `aws sts get-caller-identity` still returned a cached-valid identity) — resolved by re-running `aws sso login --profile webpresa`, after which `cdk diff` showed exactly the expected single additive IAM action (no other changes) and was deployed:
+
+```bash
+cd infra
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa --require-approval never
+```
+
+Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-access` — the `CognitoCustomerAuth` statement's `Action` list includes both `AdminDeleteUser` and `AdminUpdateUserAttributes`. Delete Account's full cascade, including the final Cognito step, is now fully functional against the real dev pool — no known partial-failure gap remains.
+
+---
+
+## Stage 20 — Contact Forms and Lead Delivery deployment guidance
+
+**Application code implemented; not yet deployed.** Unlike Stage 19, this stage has real infrastructure to deploy: one new DynamoDB table, one new IAM statement, several new environment variables, a manually-verified SES sending identity, and — the first time this repo has needed it — a Vercel Cron schedule.
+
+### Deploy sequence
+
+```bash
+cd infra
+
+# 1. Data stack — adds the leads table (PK leadId, business-id-index GSI, ttl attribute):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 2. Vercel access stack — grants the leads table + indexes, and the new
+#    SesSendLeadNotifications IAM statement. Set SES_FROM_DOMAIN if the
+#    sending domain isn't webpresa.com (the fallback baked into bin/webpresa.ts):
+SES_FROM_DOMAIN=webpresa.com WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+SES_FROM_DOMAIN=webpresa.com WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+### SES setup (manual — not CDK-managed)
+
+This repo has no Route53-hosted-zone CDK construct, so unlike every other integration here, the SES sending identity itself is verified entirely through the AWS Console/CLI, not `cdk deploy`:
+
+1. In the SES console (same region as `AWS_REGION`), verify the sending identity — either the `webpresa.com` domain (add the DKIM CNAME records SES provides to wherever `webpresa.com`'s DNS is actually managed) or a single email address (e.g. `leads@webpresa.com`, a simple confirmation-link click).
+2. **The account is in sandbox mode.** Production access has been requested but is not yet approved. Until it is, SES will only deliver to individually verified recipient addresses — currently `andrew@webpresa.com` and `mudge.andrew+test@gmail.com`. Any `Business.email` outside that set will bounce every notification (`notificationStatus` will read `'failed'`) — expected, not a bug. To manually verify the send path end-to-end, use a dev Business whose `Business.email` is set to one of those two addresses.
+3. Set `SES_FROM_EMAIL` in Vercel to the verified sending address.
+
+### New Vercel environment variables
+
+| Variable | Value |
+|---|---|
+| `LEADS_TABLE_NAME` | CloudFormation export `webpresa-dev-leads-name` |
+| `SES_FROM_EMAIL` | The verified SES sending address (see above) |
+| `CRON_SECRET` | The same `sharedSecret` value already populated in the `webpresa-dev-internal-api` secret — Vercel Cron sends this as `Authorization: Bearer <value>` |
+
+### Vercel Cron
+
+`web/vercel.json` (new file — no `vercel.json` existed anywhere in this repo before this stage) schedules `GET /api/internal/leads/retry-notifications` every 15 minutes. Vercel picks this up automatically on deploy — no separate `vercel cron` command exists. Confirm it's registered under the project's Cron Jobs dashboard tab after the first deploy that includes this file, and check its invocation history there to confirm `verifyVercelCronRequest` is accepting real requests (a misconfigured `CRON_SECRET` would show every invocation failing with a 401).
+
+### Manual verification procedure (not yet run)
+
+1. Using a real Growth-plan dev Business (Stage 18 test-mode Checkout) whose `Business.email` is one of the two SES-sandbox-verified addresses above, open its public `/b/[slug]` page and confirm the "Request Service" CTA renders.
+2. Submit the form with a valid name + phone. Confirm the success state renders and no error appears.
+3. In the customer dashboard, sign in as that business's owner and open `/app/businesses/{id}/leads` — confirm the new lead appears with `status: 'new'`.
+4. Check the verified inbox for the notification email; confirm it renders the submitted fields and that "Reply-To" is unset (no email was supplied in step 2) or set correctly (if one was).
+5. In the admin business-detail page, confirm the Leads section shows `notificationStatus: 'sent'` and 1 attempt.
+6. Repeat the submission against a Basic-plan dev Business — confirm the "Request Service" CTA does not render at all, and that a crafted direct POST to `submitLeadAction` (bypassing the UI) still returns the generic success response without creating a `Lead` row (check DynamoDB directly, not just the response).
+7. Temporarily point a test Business's `email` at an unverified address, submit a lead, confirm `notificationStatus` becomes `'failed'` with a short SES exception name in `lastNotificationError`, and that the admin's manual "Retry notification" button re-attempts it.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `Business.email` not verified in the SES sandbox | The send fails; `notificationStatus` is recorded `'failed'` with the SES exception name; the `Lead` itself remains persisted and visible in both dashboards |
+| A Basic-plan business's slug is submitted directly (bypassing the UI, which never renders the CTA) | `submitLeadAction` re-checks `hasPlanCapability` server-side and returns the generic success response without writing a `Lead` |
+| Same visitor submits the same form twice within the fingerprint window | The second submission's `reserveLeadFingerprint` conditional write fails; a generic success response is returned, no second `Lead` is created |
+| Vercel Cron's `CRON_SECRET` is unset or wrong in the deployed environment | `/api/internal/leads/retry-notifications` returns 401 for every scheduled invocation; failed leads accumulate unretried until fixed — visible via the Cron dashboard's invocation history and the admin Leads section's growing `notificationAttempts` staying flat |

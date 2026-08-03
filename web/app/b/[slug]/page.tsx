@@ -6,7 +6,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { getScanEventById } from '@/lib/db/scan-events';
 import { getSession } from '@/lib/auth/session';
 import { getCustomerSession } from '@/lib/auth/customer-session';
-import { computeBusinessAccessMode } from '@/lib/auth/customer-authorization';
+import { computeBusinessAccessMode, hasPlanCapability } from '@/lib/auth/customer-authorization';
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-token';
 import { getClaimBannerState } from '@/lib/claim/banner-state';
 import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
@@ -179,6 +179,12 @@ export default async function PreviewPage({ params, searchParams }: Props) {
   const claimIntent = await verifyClaimIntent(cookieStore.get(CLAIM_INTENT_COOKIE_NAME)?.value);
   const hasMatchingClaimIntent = claimIntent?.businessId === business.businessId;
 
+  // Stage 20 — lead capture is Growth-plan-only. Computed here, from the
+  // trusted `business` this page already resolved from `slug`, and
+  // threaded down to gate CTA resolution — never trust the client to decide
+  // whether the "Request Service" action is live.
+  const leadCaptureEnabled = hasPlanCapability(computeBusinessAccessMode(business), 'lead_capture');
+
   return (
     <GeneratedWebsite
       preview={preview}
@@ -190,6 +196,7 @@ export default async function PreviewPage({ params, searchParams }: Props) {
       hasMatchingClaimIntent={hasMatchingClaimIntent}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}
+      leadCaptureEnabled={leadCaptureEnabled}
     />
   );
 }

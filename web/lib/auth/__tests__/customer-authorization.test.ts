@@ -33,6 +33,7 @@ import {
   requireBusinessAccess,
   requireActiveSubscription,
   computeBusinessAccessMode,
+  hasPlanCapability,
 } from '@/lib/auth/customer-authorization';
 
 function makeBusiness(overrides: Record<string, unknown> = {}) {
@@ -135,6 +136,29 @@ describe('computeBusinessAccessMode', () => {
     // out to getBusinessById/getCustomerSession, it would throw.
     const result = computeBusinessAccessMode({ subscriptionStatus: 'active', plan: 'basic' });
     expect(result.mode).toBe('full');
+  });
+});
+
+describe('hasPlanCapability — lead_capture (Stage 20)', () => {
+  it('grants capability for a full-access Growth business', () => {
+    expect(hasPlanCapability({ mode: 'full', plan: 'growth' }, 'lead_capture')).toBe(true);
+  });
+
+  it('denies capability for a full-access Basic business', () => {
+    expect(hasPlanCapability({ mode: 'full', plan: 'basic' }, 'lead_capture')).toBe(false);
+  });
+
+  it('denies capability for a billing_recovery Growth business — past_due does not pass', () => {
+    expect(hasPlanCapability({ mode: 'billing_recovery', plan: 'growth' }, 'lead_capture')).toBe(false);
+  });
+
+  it('denies capability for mode "none" regardless of plan', () => {
+    expect(hasPlanCapability({ mode: 'none' }, 'lead_capture')).toBe(false);
+  });
+
+  it('takes no DynamoDB dependency — a pure function over an already-computed BusinessAccessResult', () => {
+    // No mocks configured — if this reached out to getBusinessById, it would throw.
+    expect(hasPlanCapability({ mode: 'full', plan: 'growth' }, 'lead_capture')).toBe(true);
   });
 });
 

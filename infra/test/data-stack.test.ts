@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly nine DynamoDB tables', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 9);
+  it('creates exactly ten DynamoDB tables', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 10);
   });
 });
 
@@ -248,7 +248,36 @@ describe('GSI names', () => {
     });
   });
 
-  it('no table other than Claims has a TTL attribute', () => {
+  it('Leads table has leadId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-leads',
+      KeySchema: Match.arrayWith([{ AttributeName: 'leadId', KeyType: 'HASH' }]),
+    });
+  });
+
+  it('Leads table has business-id-index and no status-index (low cardinality)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-leads',
+      GlobalSecondaryIndexes: Match.arrayWith([Match.objectLike({ IndexName: 'business-id-index' })]),
+    });
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-leads' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes: Array<{ IndexName: string }> };
+    };
+    const indexNames = table.Properties.GlobalSecondaryIndexes.map((g) => g.IndexName);
+    expect(indexNames).not.toContain('status-index');
+  });
+
+  it('Leads table has a TTL attribute (used only by rate-limit-counter and fingerprint-reservation items, never real Lead records)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-leads',
+      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+    });
+  });
+
+  it('no table other than Claims and Leads has a TTL attribute', () => {
     const tableNames = [
       'webpresa-dev-businesses',
       'webpresa-dev-site-previews',
@@ -417,9 +446,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 32 outputs — 18 table outputs (Stage 19.x adds CustomerOnboarding and DomainConnections), 2 bucket outputs, 10 secret ARN outputs (Stage 19.x adds vercel-api), 2 Cognito outputs', () => {
+  it('creates 34 outputs — 20 table outputs (Stage 20 adds Leads), 2 bucket outputs, 10 secret ARN outputs (Stage 19.x adds vercel-api), 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(32);
+    expect(Object.keys(outputs)).toHaveLength(34);
   });
 });
 

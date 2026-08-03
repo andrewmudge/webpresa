@@ -5,6 +5,7 @@ import type { Address } from '@/domain/models/common';
 import type { Claim } from '@/domain/models/claim';
 import { ClaimSchema } from '@/domain/schemas/claim.schema';
 import { getDynamoDBClient, TABLE_CLAIMS, TABLE_BUSINESSES } from './client';
+import * as rateLimit from './rate-limit';
 
 // ---------------------------------------------------------------------------
 // Pure predicates
@@ -288,11 +289,18 @@ export async function consumeClaim(params: ConsumeClaimParams): Promise<ConsumeC
 // table (see implementation.md, Stage 17, "Claim-token requirements"). Real
 // Claim records never populate `count`/`ttl`, so DynamoDB TTL cleanup of
 // these counter items never touches claim history.
+//
+// The actual DynamoDB call is the table-agnostic implementation in
+// `./rate-limit` (extracted in Stage 20 so `leads.ts` doesn't carry a second,
+// independently-drifting copy of this security-sensitive logic) — these
+// wrappers just fix the table/partition-key to Claims', preserving the
+// original call shape every existing caller (`lib/claim/validate-token.ts`)
+// already depends on.
 // ---------------------------------------------------------------------------
 
 /** Builds the Claims-table partition-key value for a rate-limit counter item. */
 export function buildRateLimitKey(ipHash: string, windowBucket: string): string {
-  return `RATELIMIT#${ipHash}#${windowBucket}`;
+  return rateLimit.buildRateLimitKey(ipHash, windowBucket);
 }
 
 export interface RateLimitCheckParams {
@@ -308,38 +316,13 @@ export interface RateLimitCheckParams {
  * `false` (never throws) once the window's limit is reached — the caller
  * treats that identically to any other invalid-claim response, never
  * surfacing a distinct "rate limited" message.
- *
- * The condition is `attribute_not_exists(#count) OR #count < :limit`, not a
- * bare `#count < :limit` — the first request in a new window must *create*
- * the counter item, and referencing `#count` in a condition before it exists
- * would otherwise throw instead of succeed. Mirrors the conditional-update
- * idiom already established by `claimScanExecutionStatus`
- * (`lib/db/scan-executions.ts`).
  */
 export async function checkAndIncrementRateLimit(params: RateLimitCheckParams): Promise<boolean> {
-  const { bucketKey, limit, ttlEpochSeconds } = params;
-  const client = getDynamoDBClient();
-
-  try {
-    await client.send(
-      new UpdateCommand({
-        TableName: TABLE_CLAIMS(),
-        Key: { claimId: bucketKey },
-        UpdateExpression:
-          'ADD #count :incr SET #ttl = if_not_exists(#ttl, :ttl), windowStart = if_not_exists(windowStart, :now)',
-        ConditionExpression: 'attribute_not_exists(#count) OR #count < :limit',
-        ExpressionAttributeNames: { '#count': 'count', '#ttl': 'ttl' },
-        ExpressionAttributeValues: {
-          ':incr': 1,
-          ':limit': limit,
-          ':ttl': ttlEpochSeconds,
-          ':now': new Date().toISOString(),
-        },
-      }),
-    );
-    return true;
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) return false;
-    throw err;
-  }
+  return rateLimit.checkAndIncrementRateLimit({
+    tableName: TABLE_CLAIMS(),
+    partitionKeyName: 'claimId',
+    bucketKey: params.bucketKey,
+    limit: params.limit,
+    ttlEpochSeconds: params.ttlEpochSeconds,
+  });
 }

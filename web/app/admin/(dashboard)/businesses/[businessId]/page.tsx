@@ -8,6 +8,7 @@ import { listScansForBusiness } from '@/lib/db/scan-events';
 import { listPostcardsForBusiness } from '@/lib/db/postcards';
 import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
 import { listClaimsForBusiness } from '@/lib/db/claims';
+import { listLeadsForBusiness } from '@/lib/db/leads';
 import { listDomainConnectionsForBusiness } from '@/lib/db/domain-connections';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { ClaimSection } from './ClaimSection';
@@ -38,6 +39,7 @@ import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
 import { ScoringSection } from './ScoringSection';
 import { ScanImageReview } from './ScanImageReview';
+import { LeadsSection } from './LeadsSection';
 import { FoundContactInfo } from './FoundContactInfo';
 import { getLatestSnapshotForBusiness } from '@/lib/firecrawl/snapshot';
 import { isRetryableFailureCategory } from '@/lib/firecrawl/retry';
@@ -85,7 +87,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     ? (expandedSectionRaw as WebsiteSectionType)
     : undefined;
 
-  const [business, previews, scans, postcards, scanExecutions, claims, domainConnections] = await Promise.all([
+  const [business, previews, scans, postcards, scanExecutions, claims, domainConnections, leads] = await Promise.all([
     getBusinessById(businessId),
     listPreviewsForBusiness(businessId).catch(() => []),
     listScansForBusiness(businessId).catch(() => []),
@@ -93,6 +95,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     listScanExecutionsForBusiness(businessId).catch(() => []),
     listClaimsForBusiness(businessId).catch(() => []),
     listDomainConnectionsForBusiness(businessId).catch(() => []),
+    listLeadsForBusiness(businessId).catch(() => []),
   ]);
   const domainConnection = domainConnections.find((c) => c.status !== 'disconnected') ?? null;
 
@@ -298,6 +301,11 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       {/* AI website assessment (Stage 15) — scores the existing_site scan; requires a completed Firecrawl enrichment above. */}
       <div className="mb-6">
         <ScoringSection business={business} scans={scans} resultQuery={scoringResult} overrideQuery={scoreOverride} />
+      </div>
+
+      {/* Lead capture and delivery (Stage 20) — notification troubleshooting, independent of the scan/enrichment pipeline above. */}
+      <div className="mb-6">
+        <LeadsSection businessId={businessId} leads={leads} />
       </div>
 
       {/* Business Details — everything is editable directly on this page; there is no separate edit screen. */}

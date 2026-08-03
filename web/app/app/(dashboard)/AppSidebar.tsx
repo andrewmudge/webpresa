@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, CreditCard, Settings, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react';
+import { Menu, X, ChevronDown, ExternalLink, LayoutDashboard, Globe, Inbox, CreditCard, Settings, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react';
 import { customerSignOutAction } from '@/lib/auth/customer-actions';
 
 /**
@@ -76,6 +76,10 @@ interface AppSidebarProps {
 const NAV_ITEMS = [
   { segment: '', label: 'Overview', icon: LayoutDashboard },
   { segment: 'website', label: 'Website', icon: Globe },
+  // Stage 20 — shown to every business regardless of plan, consistent with
+  // billing/settings below; a Basic-plan business sees an upsell state on
+  // the page itself rather than the nav item being conditionally hidden.
+  { segment: 'leads', label: 'Leads', icon: Inbox },
   { segment: 'billing', label: 'Subscription', icon: CreditCard },
   { segment: 'settings', label: 'Settings', icon: Settings },
 ];

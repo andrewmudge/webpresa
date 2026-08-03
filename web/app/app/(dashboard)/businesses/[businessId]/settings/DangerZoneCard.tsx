@@ -3,24 +3,27 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { DeleteWebsiteModal } from './DeleteWebsiteModal';
+import { DeleteAccountModal } from './DeleteAccountModal';
 
 interface Props {
   businessId: string;
   businessName: string;
   hasActiveSubscription: boolean;
+  email: string;
+  businessCount: number;
   isReadOnly: boolean;
 }
 
 /**
- * Visually distinct but not dominant — a single real action (Delete
- * Website). Delete Account and Export Website Data are deliberately not
- * shown at all this round: neither is safely buildable yet (no Cognito
- * user deletion path or cross-business handling for account deletion, no
- * export generator anywhere in this codebase) — see implementation.md's
- * MVP rule against exposing an unsafe or placeholder destructive action.
+ * Visually distinct but not dominant. Delete Website and Delete Account are
+ * both real, fully-implemented actions; Export Website Data is still
+ * deliberately not shown — no export generator exists anywhere in this
+ * codebase, and implementation.md's MVP rule is against exposing an unsafe
+ * or placeholder destructive action.
  */
-export function DangerZoneCard({ businessId, businessName, hasActiveSubscription, isReadOnly }: Props) {
-  const [deleteOpen, setDeleteOpen] = useState(false);
+export function DangerZoneCard({ businessId, businessName, hasActiveSubscription, email, businessCount, isReadOnly }: Props) {
+  const [deleteWebsiteOpen, setDeleteWebsiteOpen] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
 
   return (
     <>
@@ -31,19 +34,38 @@ export function DangerZoneCard({ businessId, businessName, hasActiveSubscription
         </div>
         <p className="text-xs text-gray-500 mb-4">Irreversible actions — proceed with caution.</p>
 
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-gray-900">Delete Website</p>
-            <p className="text-xs text-gray-500">Permanently delete this website and all its data.</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Delete Website</p>
+              <p className="text-xs text-gray-500">Permanently delete this website and all its data.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteWebsiteOpen(true)}
+              disabled={isReadOnly}
+              className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Delete
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setDeleteOpen(true)}
-            disabled={isReadOnly}
-            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Delete
-          </button>
+
+          <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Delete Account</p>
+              <p className="text-xs text-gray-500">
+                Permanently delete your account and every website you own ({businessCount}).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteAccountOpen(true)}
+              disabled={isReadOnly}
+              className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-red-700 border border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Delete
+            </button>
+          </div>
         </div>
       </div>
 
@@ -51,8 +73,15 @@ export function DangerZoneCard({ businessId, businessName, hasActiveSubscription
         businessId={businessId}
         businessName={businessName}
         hasActiveSubscription={hasActiveSubscription}
-        isOpen={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
+        isOpen={deleteWebsiteOpen}
+        onClose={() => setDeleteWebsiteOpen(false)}
+      />
+      <DeleteAccountModal
+        businessId={businessId}
+        email={email}
+        businessCount={businessCount}
+        isOpen={deleteAccountOpen}
+        onClose={() => setDeleteAccountOpen(false)}
       />
     </>
   );

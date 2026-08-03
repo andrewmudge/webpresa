@@ -9,6 +9,7 @@ import {
   ConfirmForgotPasswordCommand,
   ListUsersCommand,
   AdminUpdateUserAttributesCommand,
+  AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
 /**
@@ -327,6 +328,30 @@ export async function updateCustomerProfile(
   } catch (err) {
     const name = errorName(err);
     if (name === 'InvalidParameterException') return { ok: false, reason: 'invalid_phone' };
+    return { ok: false, reason: 'unknown' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion (Settings redesign — Danger Zone)
+// ---------------------------------------------------------------------------
+
+/**
+ * Permanently deletes the Cognito user. Keyed on `sub`, same as
+ * `updateCustomerProfile` — see that function's doc comment for why an
+ * `Admin*` API needs the pool's real `Username` (the `sub`), not `email`.
+ *
+ * Irreversible and the last step of account deletion — callers must have
+ * already torn down every owned business and the billing-profile mapping
+ * first (see `lib/customer-editing/delete-account.ts`), since once this
+ * succeeds the customer can never sign in again to retry a failed cleanup
+ * step.
+ */
+export async function deleteCustomerAccount(sub: string): Promise<{ ok: true } | { ok: false; reason: 'unknown' }> {
+  try {
+    await getCognitoClient().send(new AdminDeleteUserCommand({ UserPoolId: getUserPoolId(), Username: sub }));
+    return { ok: true };
+  } catch {
     return { ok: false, reason: 'unknown' };
   }
 }

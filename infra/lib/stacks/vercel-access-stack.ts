@@ -17,6 +17,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly scanExecutionsTable: dynamodb.ITable;
   readonly postcardsTable: dynamodb.ITable;
   readonly claimsTable: dynamodb.ITable;
+  readonly leadsTable: dynamodb.ITable;
   readonly customerBillingProfilesTable: dynamodb.ITable;
   readonly customerOnboardingTable: dynamodb.ITable;
   readonly domainConnectionsTable: dynamodb.ITable;
@@ -36,6 +37,15 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly screenshotLambdaFunction: lambda.IFunction;
   readonly scanWorkflowStateMachine: sfn.IStateMachine;
   readonly customerUserPool: cognito.IUserPool;
+  /**
+   * Stage 20 — the domain (e.g. `webpresa.com`) the lead-notification
+   * sending identity lives under. Scopes the SES IAM grant below without a
+   * CDK-managed `ses.EmailIdentity` resource: unlike every other stack in
+   * this app, this repo has no Route53-hosted-zone CDK construct to drive
+   * DNS-based domain verification, so the SES identity itself (and DKIM)
+   * is verified manually via the AWS Console — see deployment.md.
+   */
+  readonly sesFromDomain: string;
 }
 
 /**
@@ -93,6 +103,7 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.customerOnboardingTable,
       props.domainConnectionsTable,
       props.stockImagesTable,
+      props.leadsTable,
     ];
 
     this.dataAccessPolicy = new iam.ManagedPolicy(this, 'DataAccessPolicy', {
@@ -135,9 +146,11 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
           ],
         }),
         // Stage 17 — customer identity. Minimal, explicit action list rather
-        // than a wildcard; extend here (e.g. UpdateUserAttributes,
-        // VerifyUserAttribute) only when a feature actually needs it, such
-        // as email-change support in a later stage.
+        // than a wildcard; extend here only when a feature actually needs
+        // it. AdminUpdateUserAttributes added for the Settings redesign's
+        // Account card (name/phone editing); AdminDeleteUser added for the
+        // same redesign's Delete Account action — VerifyUserAttribute
+        // remains deferred until email-change support is a real feature.
         new iam.PolicyStatement({
           sid: 'CognitoCustomerAuth',
           actions: [
@@ -148,8 +161,20 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
             'cognito-idp:ForgotPassword',
             'cognito-idp:ConfirmForgotPassword',
             'cognito-idp:ListUsers',
+            'cognito-idp:AdminUpdateUserAttributes',
+            'cognito-idp:AdminDeleteUser',
           ],
           resources: [props.customerUserPool.userPoolArn],
+        }),
+        // Stage 20 — lead-notification email. SES authenticates via IAM,
+        // not an API key, so (unlike every other third-party integration
+        // above) there is deliberately no corresponding Secrets Manager
+        // entry — this grant is the entire credential path. Scoped to the
+        // sending domain's identity ARN, not '*'.
+        new iam.PolicyStatement({
+          sid: 'SesSendLeadNotifications',
+          actions: ['ses:SendEmail'],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${props.sesFromDomain}`],
         }),
       ],
     });

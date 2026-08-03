@@ -62,6 +62,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly scanExecutionsTable: dynamodb.Table;
   public readonly postcardsTable: dynamodb.Table;
   public readonly claimsTable: dynamodb.Table;
+  public readonly leadsTable: dynamodb.Table;
   public readonly customerBillingProfilesTable: dynamodb.Table;
   public readonly customerOnboardingTable: dynamodb.Table;
   public readonly domainConnectionsTable: dynamodb.Table;
@@ -310,6 +311,46 @@ export class WebpresaDataStack extends cdk.Stack {
       ],
     });
     this.claimsTable = claims.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Leads (Stage 20 — Contact Forms and Lead Delivery)
+    //   PK: leadId
+    //   GSI: business-id-index (SK: createdAt — per-business lead inbox,
+    //     newest-first, mirrors postcards/scan-events)
+    //   No status-index: LEAD_STATUSES is only 3 low-cardinality values;
+    //   per-business queries (customer inbox, admin view) cover every real
+    //   need — a global cross-business "all new leads" view is YAGNI, the
+    //   same reasoning Claims above already documents for its own
+    //   low-cardinality status field.
+    //
+    //   TTL attribute `ttl` is enabled on this table, but — exactly like
+    //   Claims above — is populated ONLY by two non-Lead item shapes this
+    //   table also carries (see web/lib/db/leads.ts):
+    //     `RATELIMIT#<ipHash-or-businessId>#<windowBucket>` — per-IP and
+    //       per-business submission rate limiting, reusing Claims' own
+    //       counter shape via the shared web/lib/db/rate-limit.ts helper.
+    //     `FINGERPRINT#<fingerprint>` — atomic duplicate-submission
+    //       suppression via a conditional PutItem
+    //       (ConditionExpression: attribute_not_exists(PK)), the same
+    //       atomic-reservation pattern DomainConnections below uses for
+    //       normalizedDomain rather than a GSI-query-then-write.
+    //   Real Lead records never set `ttl` — lead history is preserved
+    //   indefinitely, never auto-deleted.
+    // ───────────────────────────────────────────────────────────────────────
+    const leads = new WebpresaTable(this, 'Leads', {
+      config,
+      tableName: 'leads',
+      partitionKey: { name: 'leadId', type: S },
+      timeToLiveAttribute: 'ttl',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'business-id-index',
+          partitionKey: { name: 'businessId', type: S },
+          sortKey: createdAtSortKey,
+        },
+      ],
+    });
+    this.leadsTable = leads.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // CustomerBillingProfiles (Stage 18 — Stripe Subscriptions)

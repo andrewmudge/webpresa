@@ -8,6 +8,10 @@
     "synth": "cdk synth",
     "diff": "cdk diff WebpresaDevDataStack --profile webpresa",
     "deploy:dev": "cdk deploy WebpresaDevDataStack --profile webpresa",
+    "diff:screenshot": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk diff WebpresaDevScreenshotStack --profile webpresa",
+    "deploy:screenshot": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk deploy WebpresaDevScreenshotStack --profile webpresa",
+    "diff:scan-workflow": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk diff WebpresaDevScanWorkflowStack --profile webpresa",
+    "deploy:scan-workflow": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk deploy WebpresaDevScanWorkflowStack --profile webpresa",
     "test": "vitest run",
     "test:watch": "vitest"
   },

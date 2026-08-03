@@ -97,10 +97,34 @@ export async function requireActiveSubscription(userId: string, businessId: stri
   return result;
 }
 
-// NOT added in Stage 18: a future `requirePlanCapability(businessId, capability)`
-// boundary (e.g. `capability === 'multi_city_seo'` implies `plan === 'growth'`)
-// is intentionally not shipped as an unimplemented stub — there is no
-// consuming route in this app yet for it to protect. Stage 19/20 should
-// define it from their own real requirements once a real Basic/Growth
-// feature difference exists to gate, the same principle Stage 17 already
-// applied to this file before Stage 18 existed.
+// ---------------------------------------------------------------------------
+// Plan capability gate (Stage 20 — the real Basic/Growth feature difference
+// Stage 18 deferred this boundary for: PLAN_CATALOG.growth.features already
+// advertises "Lead forms to capture new customers" as Growth-only).
+// ---------------------------------------------------------------------------
+
+export type PlanCapability = 'lead_capture';
+
+const CAPABILITY_REQUIRED_PLAN: Record<PlanCapability, WebpresaPlan> = {
+  lead_capture: 'growth',
+};
+
+/**
+ * Growth-only feature boundary. Takes an already-computed
+ * `BusinessAccessResult` (from `computeBusinessAccessMode`/
+ * `requireBusinessAccess`) rather than re-fetching the business, so callers
+ * that already did that lookup for another reason (rendering the CTA,
+ * gating the dashboard page) don't pay for a second one.
+ *
+ * A `past_due` (`billing_recovery`) Growth business does NOT pass — actively
+ * capturing new leads a business may not stay billed to keep is the wrong
+ * default, unlike e.g. merely viewing already-captured data.
+ *
+ * Checked independently at every call site that matters (both where the
+ * public "Request Service" CTA is resolved and inside the submission
+ * handler itself) — a hidden or absent form must never be the only thing
+ * standing between a Basic-plan business and lead capture.
+ */
+export function hasPlanCapability(access: BusinessAccessResult, capability: PlanCapability): boolean {
+  return access.mode === 'full' && access.plan === CAPABILITY_REQUIRED_PLAN[capability];
+}

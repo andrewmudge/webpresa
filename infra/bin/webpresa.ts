@@ -35,13 +35,60 @@ const dataStack = new WebpresaDataStack(app, `Webpresa${label}DataStack`, {
 
 // Stage 14 — the public app origin the screenshot Lambda constructs
 // generated-preview URLs from (SitePreview stores only a slug, never an
-// absolute URL — see implementation.md, Stage 14, "Lambda payload"). Read
-// from the environment rather than hard-coded so deploying to a real
-// account requires deliberately setting it; the fallback below is a
-// synth-only placeholder so `cdk synth`/`cdk diff` don't hard-fail with no
-// override — see deployment.md before ever deploying this stack for real.
-const appBaseUrl =
-  process.env.WEBPRESA_APP_BASE_URL ?? `https://REPLACE_WITH_${label.toUpperCase()}_APP_BASE_URL.invalid`;
+// absolute URL — see implementation.md, Stage 14, "Lambda payload"). Also
+// feeds the Stage 16 scan workflow's HttpInvoke endpoints. Read from the
+// environment, with no placeholder fallback: a prior version of this file
+// silently fell back to a fake ".invalid" URL when this var was unset,
+// which CloudFormation deployed without complaint on 2026-07-28, breaking
+// the screenshot Lambda and scan workflow state machine at runtime for
+// days before anyone noticed. Hard-failing here means that class of bug
+// can't happen again — see deployment.md before deploying either stack.
+const appBaseUrl = process.env.WEBPRESA_APP_BASE_URL;
+if (!appBaseUrl) {
+  throw new Error(
+    'WEBPRESA_APP_BASE_URL must be set for any cdk command in this app (synth/diff/deploy) — ' +
+      'see web/docs/deployment.md. There is no placeholder fallback: an unset value used to ' +
+      'silently deploy a fake ".invalid" URL into the screenshot Lambda and scan workflow state ' +
+      'machine, breaking both at runtime without CloudFormation ever failing (2026-07-28 incident).',
+  );
+}
+
+// Second layer of the same guard: being *set* isn't enough — the 2026-07-28
+// incident's actual fallback value (`https://REPLACE_WITH_..._URL.invalid`)
+// was itself a syntactically well-formed URL, so "non-empty" alone wouldn't
+// have caught a copy-pasted placeholder either. Reject anything that isn't a
+// real https:// URL, and anything whose hostname still carries an obvious
+// placeholder marker — catches both "forgot to set it" (guard above) and
+// "set it to a leftover placeholder/example value" (this guard) before
+// either can reach `cdk deploy`.
+let parsedAppBaseUrl: URL;
+try {
+  parsedAppBaseUrl = new URL(appBaseUrl);
+} catch {
+  throw new Error(
+    `WEBPRESA_APP_BASE_URL is not a valid absolute URL: "${appBaseUrl}". ` +
+      'Expected something like https://webpresa-git-dev-andrew-mudges-projects.vercel.app — see web/docs/deployment.md.',
+  );
+}
+
+const PLACEHOLDER_HOSTNAME_MARKERS = ['invalid', 'example', 'replace_with', 'placeholder', 'localhost'];
+const lowerHostname = parsedAppBaseUrl.hostname.toLowerCase();
+
+if (parsedAppBaseUrl.protocol !== 'https:') {
+  throw new Error(
+    `WEBPRESA_APP_BASE_URL must be an https:// URL, got "${appBaseUrl}" (protocol "${parsedAppBaseUrl.protocol}") — ` +
+      'see web/docs/deployment.md.',
+  );
+}
+
+const matchedMarker = PLACEHOLDER_HOSTNAME_MARKERS.find((marker) => lowerHostname.includes(marker));
+if (matchedMarker) {
+  throw new Error(
+    `WEBPRESA_APP_BASE_URL ("${appBaseUrl}") looks like a placeholder value (hostname contains "${matchedMarker}"), ` +
+      'not a real deployed app URL — this is exactly the class of value the 2026-07-28 incident silently deployed. ' +
+      'Set it to the real dev/prod app origin — see web/docs/deployment.md.',
+  );
+}
 
 // Deployed independently and BEFORE the screenshot stack — see
 // WebpresaScreenshotRepositoryStack's doc comment for why a container-image
@@ -98,6 +145,7 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   scanExecutionsTable: dataStack.scanExecutionsTable,
   postcardsTable: dataStack.postcardsTable,
   claimsTable: dataStack.claimsTable,
+  leadsTable: dataStack.leadsTable,
   customerBillingProfilesTable: dataStack.customerBillingProfilesTable,
   customerOnboardingTable: dataStack.customerOnboardingTable,
   domainConnectionsTable: dataStack.domainConnectionsTable,
@@ -117,4 +165,9 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
   scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
   customerUserPool: dataStack.customerUserPool,
+  // Stage 20 — no placeholder-URL-style hard fail needed here: unlike
+  // WEBPRESA_APP_BASE_URL, an unset value just falls back to the real
+  // sending domain this app already owns, and the SES identity itself
+  // still needs manual console verification regardless of this value.
+  sesFromDomain: process.env.SES_FROM_DOMAIN ?? 'webpresa.com',
 });

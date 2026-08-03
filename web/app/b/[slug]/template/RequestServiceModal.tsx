@@ -20,6 +20,10 @@ export function useRequestService(): RequestServiceContextValue {
 interface RequestServiceProviderProps {
   businessName: string;
   phone?: string;
+  /** The trusted business slug — the only identifier `submitLeadAction` actually needs; it re-resolves everything else server-side. */
+  slug: string;
+  /** Stage 20 — whether this business's plan includes lead capture (`hasPlanCapability`). */
+  leadCaptureEnabled: boolean;
   children: ReactNode;
 }
 
@@ -32,10 +36,19 @@ interface RequestServiceProviderProps {
  * slides up from the bottom on mobile (single component, breakpoint-driven
  * via Tailwind classes rather than two separate implementations).
  */
-export function RequestServiceProvider({ businessName, phone, children }: RequestServiceProviderProps) {
+export function RequestServiceProvider({ businessName, phone, slug, leadCaptureEnabled, children }: RequestServiceProviderProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const openRequestService = useCallback(() => setIsOpen(true), []);
+  // Stage 20 defense-in-depth: CTA resolution already omits the "Request
+  // Service" button entirely for a Basic-plan business (see
+  // `resolvePreviewCta` in `cta.tsx`), so `openRequestService` should never
+  // actually get called when `leadCaptureEnabled` is false — but this
+  // Provider is the one shared chokepoint every trigger goes through, so it
+  // no-ops here too rather than trusting that CTA resolution is the only
+  // path that could ever call it.
+  const openRequestService = useCallback(() => {
+    if (leadCaptureEnabled) setIsOpen(true);
+  }, [leadCaptureEnabled]);
   const close = useCallback(() => setIsOpen(false), []);
 
   useEffect(() => {
@@ -95,7 +108,7 @@ export function RequestServiceProvider({ businessName, phone, children }: Reques
                 </button>
               </div>
               <div className="overflow-y-auto px-5 py-5">
-                <RequestServiceForm businessName={businessName} phone={phone} onSuccess={close} />
+                <RequestServiceForm businessName={businessName} phone={phone} slug={slug} onSuccess={close} />
               </div>
             </motion.div>
           </div>

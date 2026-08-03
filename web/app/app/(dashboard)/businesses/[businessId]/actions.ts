@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import type { WebsiteSectionType } from '@/domain/constants/website-sections';
 import { requireCustomerSession, requireActiveSubscription, requireBusinessOwnership } from '@/lib/auth/customer-authorization';
 import type { CustomerSessionPayload } from '@/lib/auth/customer-session';
+import { deleteCustomerSession } from '@/lib/auth/customer-session';
 import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info';
 import { updateCustomerTheme } from '@/lib/customer-editing/theme';
 import { updateCustomerCta } from '@/lib/customer-editing/cta';
@@ -28,6 +29,7 @@ import { updateCustomerDraftNoticePreference } from '@/lib/customer-editing/noti
 import { updateCustomerBusinessHours } from '@/lib/customer-editing/hours';
 import { updateCustomerAccountProfile } from '@/lib/customer-editing/account';
 import { deleteCustomerWebsite } from '@/lib/customer-editing/delete-website';
+import { deleteCustomerAccount } from '@/lib/customer-editing/delete-account';
 import { requestCustomerPasswordReset } from '@/lib/auth/customer-cognito';
 import { persistWebsiteSections } from '@/lib/website-sections/persist';
 
@@ -148,6 +150,32 @@ export async function deleteWebsiteActionCustomer(
     return result;
   }
   redirect('/app?deleted=1');
+}
+
+/**
+ * Whole-account delete — same "called directly, return an error state
+ * instead of redirecting on failure" shape as `deleteWebsiteActionCustomer`.
+ * Confirmation is the customer's own email (not the business name — this
+ * deletes every business they own, not just the current one), re-verified
+ * server-side against the session, never the client-posted value alone.
+ * Signs the customer out and clears their session on success, since the
+ * Cognito account backing it no longer exists.
+ */
+export async function deleteAccountActionCustomer(
+  businessId: string,
+  formData: FormData,
+): Promise<{ message?: string } | undefined> {
+  const session = await requireEditAccess(businessId);
+  const typedEmail = formData.get('confirmEmail');
+  if (typeof typedEmail !== 'string' || typedEmail !== session.email) {
+    return { message: 'Email did not match.' };
+  }
+  const result = await deleteCustomerAccount(session.sub);
+  if (result?.message) {
+    return result;
+  }
+  await deleteCustomerSession();
+  redirect('/account/sign-in?accountDeleted=1');
 }
 
 // ---------------------------------------------------------------------------
