@@ -52,13 +52,13 @@ function groupWithDashes(value: string, groupSize: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a new 160-bit (20-byte) random claim token, Crockford
- * Base32-encoded and dash-grouped in fours for manual entry — 160 bits
- * encodes to exactly 32 base32 characters (8 groups), e.g.
- * `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`.
+ * Generate a new 80-bit (10-byte) random claim token, Crockford
+ * Base32-encoded and dash-grouped in fours for manual entry — 80 bits
+ * encodes to exactly 16 base32 characters (4 groups), e.g.
+ * `XXXX-XXXX-XXXX-XXXX`.
  */
 export function generateClaimToken(): string {
-  const bytes = randomBytes(20);
+  const bytes = randomBytes(10);
   return groupWithDashes(encodeCrockfordBase32(bytes), 4);
 }
 

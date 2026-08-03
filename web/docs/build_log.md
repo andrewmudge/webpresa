@@ -7884,3 +7884,65 @@ infra/bin/webpresa.ts                                                           
 infra/test/data-stack.test.ts                                                                            MODIFIED — new table assertions, updated table/output counts
 infra/test/vercel-access-stack.test.ts                                                                   MODIFIED — 3 new tables in test setup, updated resource count
 ```
+
+---
+
+# Stage 21 follow-up: admin UI text-color fix, list-refresh fix, claim-flow tip
+
+**Date:** 2026-08-03
+
+Three small fixes from manual testing feedback on the new `/admin/campaigns` UI, none touching Stage 21's actual redirect/tracking logic:
+
+1. **Unreadable input/select text** — the same root cause as the earlier documented "Input Text Color Fix" (2026-07-14): every `<input>`/`<select>` in `NewCampaignForm.tsx`/`CampaignDetail.tsx` had no explicit text/background color, so it inherited `body`'s `color: var(--foreground)`, which flips to near-white under `prefers-color-scheme: dark`. Added explicit `bg-white text-gray-900 placeholder:text-gray-400` to all of them, matching the established `FormFields.tsx` pattern.
+2. **Add-recipient (and status/destination edits) not appearing without a manual reload** — confirmed root cause: Next.js 16 Server Actions don't auto-revalidate the calling route unless the action itself calls `revalidatePath`/`refresh()`/`redirect()` or mutates a cookie; none of the campaign actions do. Added `router.refresh()` (matching the existing `LeadsList.tsx`/`PhotoManager.tsx` convention for this exact `useTransition`+await dispatch style) after every successful mutation in `CampaignDetail.tsx`'s four handlers. The identical gap was found to already exist in the pre-existing `ClaimSection.tsx` (Stage 17's claim-history/generate-link panel) — masked there by an unrelated local-state trick for the one-time token reveal — and was fixed the same way at the user's request.
+3. **"Claim my website" needing two clicks** — traced precisely, not a bug: manual claim-code entry and the real `/claim/{token}` QR link both set the same claim-intent cookie and deliberately redirect to `/b/[slug]` first ("customer sees the site before signing up," existing Stage 17 design); the banner already correctly jumps straight to signup once that cookie is set. The extra click only happened because the test campaign's destination was a bare preview URL rather than the business's actual claim link, causing two separate landings on the preview instead of one. No Stage 17 behavior changed; added a short tip under the "Add recipient" form's destination field instead, nudging admins to use the claim link for claim-driving campaigns.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/campaigns/new/NewCampaignForm.tsx                                             MODIFIED — bg-white/text-gray-900/placeholder:text-gray-400 on input+select
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                      MODIFIED — same text-color fix on all inputs/selects; router.refresh() after every mutation; destination-field tip
+web/app/admin/(dashboard)/businesses/[businessId]/ClaimSection.tsx                                       MODIFIED — router.refresh() after generate/revoke/release actions (same gap as CampaignDetail.tsx)
+```
+
+## Verification
+
+```
+npx tsc --noEmit  — passes
+npm run lint      — 0 errors, 2 pre-existing unrelated warnings
+npm test          — 102 files, 1,111 tests passed (no test changes needed — client-side refresh timing / CSS only)
+npm run build     — succeeds
+```
+
+---
+
+# Claim-token length reduced from 160 bits to 80 bits
+
+**Date:** 2026-08-03
+
+The user asked, while manually testing Stage 21, why the Stage 17 claim token (`lib/claim/token.ts`) is 160 bits / 32 Crockford Base32 characters, and whether it could be much shorter — correctly noting that even a handful of alphanumeric characters yields billions of combinations, and explicitly asking not to be agreed with reflexively.
+
+**Analysis, not just agreement**: 160 bits was never derived from a specific threat calculation — the code comment only ever called it "a safe, round number" (it matches a SHA-1 output length). But the *reason* entropy matters at all here is real and already documented elsewhere in the same code: the per-IP rate limiter (10 attempts/10 minutes) is explicitly *not* the security boundary — "the token's entropy is the real defense against brute force" — because a distributed attacker trivially evades a per-IP cap. Worked the actual brute-force math for the user's proposed 9 characters (45 bits): since any one of N *currently outstanding* claim tokens is an equally valid target (claim any business, not a specific one), and tokens are continuously reissued as more businesses go through the postcard funnel, the real metric is N/2^45 per guess, not 1/2^45 — at a plausible 1,000 outstanding tokens and a distributed attacker doing 10,000 guesses/sec, expected time to a hit is ~40 days, inside a single token's own 30-day validity window. 128 bits (26 characters) is the conventional industry floor for this exact class of secret (same order as UUIDv4, password-reset tokens, session IDs) and is infeasible at any realistic guess rate. Presented this analysis plus the entropy table to the user via `AskUserQuestion` rather than picking a number unilaterally; they chose **80 bits (16 characters)** — the same entropy already chosen independently for the Stage 21 campaign code, a middle ground the analysis flagged as defensible though slightly below the 128-bit floor.
+
+**Implementation**: `generateClaimToken()` (`lib/claim/token.ts`) now calls `randomBytes(10)` instead of `randomBytes(20)` — 80 bits divides cleanly into exactly 16 Crockford Base32 characters (4 dash-grouped groups of 4), the same clean-division property the original 160-bit/32-character choice relied on. No schema or table change: `Claim.tokenHash` is always a 64-hex-character HMAC-SHA256 digest regardless of the raw token's length, and it's looked up by hash via `token-hash-index`, never by length — so already-issued 32-character tokens (e.g. on a mailed postcard) keep validating correctly; only newly generated tokens are shorter going forward. A genuinely pleasant side effect found while reviewing the manual-entry form: `ClaimTokenForm.tsx`'s input placeholder was already `"XXXX-XXXX-XXXX-XXXX"` (16 characters, 4 groups) — wrong for the old 32-character token, now exactly correct with no UI change needed.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                              MODIFIED — Stage 17 "Claim-token requirements" bit size/rationale corrected
+web/docs/architecture.md                                                                                 MODIFIED — Stage 21 "Campaign codes are opaque, not claim tokens" paragraph reworded (both codes now share 80 bits; distinguished by dash-grouping/purpose, not entropy)
+web/docs/build_log.md                                                                                    MODIFIED — this entry
+web/lib/claim/token.ts                                                                                    MODIFIED — randomBytes(20) → randomBytes(10); doc comment updated
+web/lib/claim/__tests__/token.test.ts                                                                     MODIFIED — length assertion 32 → 16 chars, 160 → 80 bits
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings
+npm test             — 102 files, 1,111 tests passed
+npm run build        — succeeds
+```
+
+No infra change, no `cdk diff`/deploy needed — pure application-code change to a value-generation function. Already-issued claim tokens (any length) continue to validate unaffected.

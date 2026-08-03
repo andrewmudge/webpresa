@@ -20,12 +20,12 @@ beforeEach(() => {
 });
 
 describe('generateClaimToken', () => {
-  it('produces a dash-grouped, Crockford-Base32-only token with 160 bits of entropy', () => {
+  it('produces a dash-grouped, Crockford-Base32-only token with 80 bits of entropy', () => {
     const token = generateClaimToken();
     const stripped = token.replace(/-/g, '');
 
-    // 160 bits / 5 bits-per-char = 32 base32 characters.
-    expect(stripped).toHaveLength(32);
+    // 80 bits / 5 bits-per-char = 16 base32 characters.
+    expect(stripped).toHaveLength(16);
     expect(stripped).toMatch(/^[0-9A-HJKMNP-TV-Z]+$/); // excludes I, L, O, U
     expect(token).toContain('-');
   });
