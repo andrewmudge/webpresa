@@ -1075,7 +1075,7 @@ This repo has no Route53-hosted-zone CDK construct, so unlike every other integr
 
 ### Vercel Cron
 
-`web/vercel.json` (new file — no `vercel.json` existed anywhere in this repo before this stage) schedules `GET /api/internal/leads/retry-notifications` every 15 minutes. Vercel picks this up automatically on deploy — no separate `vercel cron` command exists. Confirm it's registered under the project's Cron Jobs dashboard tab after the first deploy that includes this file, and check its invocation history there to confirm `verifyVercelCronRequest` is accepting real requests (a misconfigured `CRON_SECRET` would show every invocation failing with a 401).
+`web/vercel.json` (new file — no `vercel.json` existed anywhere in this repo before this stage) schedules `GET /api/internal/leads/retry-notifications` **once daily** (`0 6 * * *` — 06:00 UTC, arbitrary off-peak hour). This was originally every 15 minutes, but the project is on Vercel's Hobby plan, which hard-caps cron jobs at once/day — a `vercel deploy` with a sub-daily schedule fails outright with `Hobby accounts are limited to daily cron jobs`. Daily is the fastest this can run without upgrading to Pro; upgrading later is a one-line schedule change, no code change. Vercel picks the cron up automatically on deploy — no separate `vercel cron` command exists. Confirm it's registered under the project's Cron Jobs dashboard tab after the first deploy that includes this file, and check its invocation history there to confirm `verifyVercelCronRequest` is accepting real requests (a misconfigured `CRON_SECRET` would show every invocation failing with a 401).
 
 ### Manual verification procedure (not yet run)
 

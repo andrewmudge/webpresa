@@ -3590,8 +3590,9 @@ Basic-plan submission.
 8. Return a generic success response.
 9. Attempt the SES notification inline, bounded by a short timeout; record
    `notificationStatus`/`notificationAttempts` regardless of outcome.
-10. A scheduled retry sweep (Vercel Cron, ~15 minutes) re-attempts any lead
-    still `pending`/`failed` up to a bounded attempt count, after which it
+10. A scheduled retry sweep (Vercel Cron, once daily — the fastest schedule
+    the project's Hobby plan allows) re-attempts any lead still
+    `pending`/`failed` up to a bounded attempt count, after which it
     stays `failed` for admin visibility — there is no dead-letter queue in
     this design; the admin troubleshooting view is the failure-recovery
     path.

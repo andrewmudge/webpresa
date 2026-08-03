@@ -7680,7 +7680,30 @@ cd infra && cdk synth WebpresaDevDataStack WebpresaDevVercelAccessStack --profil
                         through bin/webpresa.ts is well-formed
 ```
 
-Per `AGENTS.md`'s verification policy, no dev server/browser check was performed. **Not yet deployed** — no `cdk deploy` was run (would create the real `leads` table and IAM grant); the SES sending identity also still needs manual console verification. See `deployment.md`, "Stage 20 — Contact Forms and Lead Delivery deployment guidance," for the full deploy sequence and manual-verification procedure, neither of which has been executed yet.
+Per `AGENTS.md`'s verification policy, no dev server/browser check was performed.
+
+## Deploy log
+
+Infra deployed to dev the same day, after showing the full `cdk diff` for both stacks and getting explicit approval (account `539898341083`, region `us-east-1`):
+
+1. **`WebpresaDevDataStack`** — purely additive: 1 new resource (`webpresa-dev-leads` table + its 2 CloudFormation outputs). Deployed successfully; verified live via `aws dynamodb describe-table` (PK `leadId`, `business-id-index` GSI, TTL enabled, status `ACTIVE`).
+2. **`WebpresaDevVercelAccessStack`** — in-place modification of the existing `webpresa-dev-vercel-data-access` managed policy: the `DynamoDbTables` statement's resource list grew by 2 entries (Leads table + index wildcard), and a new `SesSendLeadNotifications` statement was added (`ses:SendEmail`, scoped to `arn:aws:ses:us-east-1:539898341083:identity/webpresa.com`). No new managed policy, no resource replacement. Deployed successfully; verified live via `aws iam get-policy-version`.
+3. **SES sending identity turned out to already be fully set up** — `aws sesv2 list-email-identities` showed `webpresa.com` domain-verified with DKIM signing enabled (`DkimStatus: SUCCESS`), plus the two individually-verified recipient addresses the user had already set up before this session (`andrew@webpresa.com`, `mudge.andrew+test@gmail.com`). No manual SES console work was actually needed — `deployment.md`'s "manual setup" step turned out to already be done. `SES_FROM_EMAIL` was set to `leads@webpresa.com` (a new address under the already-verified domain, needs no separate verification of its own).
+4. **Vercel env vars** — `LEADS_TABLE_NAME`, `SES_FROM_EMAIL`, and `CRON_SECRET` (the same value as the `internal-api` Secrets Manager secret's `sharedSecret` — reading it required the user to run the `aws secretsmanager get-secret-value` command themselves and paste the value, since the auto-mode permission classifier correctly blocked reading a live credential directly) were all added for both Production and Preview via `vercel env add`, matching every existing table-name/secret-name env var's Production+Preview convention.
+5. **Commit + push** (`57ee5fd`, `git push -u origin dev`) did **not** trigger a Vercel deployment — `vercel project inspect` showed no Git Repository section at all; this project has no GitHub integration configured, and every prior deployment (visible via `vercel ls`) was triggered manually through the CLI, not by pushing. A manual `vercel deploy` was needed.
+6. **First `vercel deploy` attempt failed twice**, both self-inflicted tooling issues, not application bugs:
+   - Running `vercel deploy` from inside `web/` (where `.vercel/project.json` lives) double-applied the project's `Root Directory: web` setting, producing a nonexistent `~/apps/webpresa/web/web` path. Worked around by copying `.vercel` to the repo root and deploying from there instead (root + `Root Directory: web` = the real `web/` path). The temporary root-level `.vercel` copy was never committed.
+   - Deploy then failed for real: `web/vercel.json`'s `*/15 * * * *` cron schedule exceeds Vercel Hobby's once-daily cron limit (`Hobby accounts are limited to daily cron jobs`). The user wants to stay on Hobby for now, so the schedule was changed to `0 6 * * *` (once daily) — see the follow-up entry immediately below for the fix and rationale.
+
+## Files changed (deploy-log follow-up)
+
+```
+web/vercel.json                                                                                        MODIFIED — cron schedule */15 * * * * → 0 6 * * * (Vercel Hobby plan's once-daily cron limit)
+web/docs/architecture.md                                                                               MODIFIED — Stage 20 retry-sweep cadence corrected to daily, Hobby-tier constraint noted
+web/docs/deployment.md                                                                                 MODIFIED — Stage 20 deployment guidance's cadence corrected to daily
+web/docs/implementation.md                                                                             MODIFIED — Stage 20 submission-workflow step 10 cadence corrected to daily
+web/docs/build_log.md                                                                                  MODIFIED — this deploy-log addendum
+```
 
 ## Files changed
 
