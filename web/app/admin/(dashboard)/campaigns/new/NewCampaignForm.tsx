@@ -43,7 +43,7 @@ export function NewCampaignForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           placeholder="e.g. Spring 2026 postcard drop"
         />
       </div>
@@ -56,7 +56,7 @@ export function NewCampaignForm() {
           id="channel"
           value={channel}
           onChange={(e) => setChannel(e.target.value as CampaignChannel)}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
         >
           {CAMPAIGN_CHANNELS.map((value) => (
             <option key={value} value={value}>

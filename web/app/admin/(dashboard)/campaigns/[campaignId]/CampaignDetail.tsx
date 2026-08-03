@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Campaign, CampaignStatus } from '@/domain/models/campaign';
 import { CAMPAIGN_STATUSES } from '@/domain/models/campaign';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
@@ -84,6 +85,7 @@ export function CampaignDetail({ campaign, recipients, businesses, recentScansBy
 // ---------------------------------------------------------------------------
 
 function CampaignHeader({ campaign }: { campaign: Campaign }) {
+  const router = useRouter();
   const [status, setStatus] = useState<CampaignStatus>(campaign.status);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -97,7 +99,9 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
       if (result.error) {
         setError(result.error);
         setStatus(previous);
+        return;
       }
+      router.refresh();
     });
   }
 
@@ -119,7 +123,7 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
             value={status}
             disabled={isPending}
             onChange={(e) => handleStatusChange(e.target.value as CampaignStatus)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm capitalize disabled:opacity-60"
+            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 capitalize disabled:opacity-60"
           >
             {CAMPAIGN_STATUSES.map((value) => (
               <option key={value} value={value} className="capitalize">
@@ -147,6 +151,7 @@ function RecipientCard({
   business?: BusinessOption;
   recentScans: ScanHit[];
 }) {
+  const router = useRouter();
   const [destinationUrl, setDestinationUrl] = useState(recipient.destinationUrl);
   const [destinationLabel, setDestinationLabel] = useState(recipient.destinationLabel ?? '');
   const [status, setStatus] = useState<CampaignRecipientStatus>(recipient.status);
@@ -171,6 +176,7 @@ function RecipientCard({
         return;
       }
       setSavedAt(Date.now());
+      router.refresh();
     });
   }
 
@@ -184,7 +190,9 @@ function RecipientCard({
       if (result.error) {
         setError(result.error);
         setStatus(previous);
+        return;
       }
+      router.refresh();
     });
   }
 
@@ -241,7 +249,7 @@ function RecipientCard({
             value={destinationUrl}
             onChange={(e) => setDestinationUrl(e.target.value)}
             required
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           />
         </div>
         <div className="w-40">
@@ -251,7 +259,7 @@ function RecipientCard({
             value={destinationLabel}
             onChange={(e) => setDestinationLabel(e.target.value)}
             placeholder="e.g. preview"
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           />
         </div>
         <button
@@ -291,6 +299,7 @@ function RecipientCard({
 // ---------------------------------------------------------------------------
 
 function AddRecipientForm({ campaignId, businesses }: { campaignId: string; businesses: BusinessOption[] }) {
+  const router = useRouter();
   const [businessId, setBusinessId] = useState('');
   const [destinationUrl, setDestinationUrl] = useState('');
   const [destinationLabel, setDestinationLabel] = useState('');
@@ -309,6 +318,7 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
       setBusinessId('');
       setDestinationUrl('');
       setDestinationLabel('');
+      router.refresh();
     });
   }
 
@@ -327,7 +337,7 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
             value={businessId}
             onChange={(e) => setBusinessId(e.target.value)}
             required
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           >
             <option value="" disabled>
               Select a business…
@@ -347,7 +357,7 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
             onChange={(e) => setDestinationUrl(e.target.value)}
             placeholder="https://webpresa.com/b/joe-plumbing"
             required
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           />
         </div>
         <div className="w-40">
@@ -357,7 +367,7 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
             value={destinationLabel}
             onChange={(e) => setDestinationLabel(e.target.value)}
             placeholder="e.g. preview"
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
           />
         </div>
         <button
@@ -368,6 +378,11 @@ function AddRecipientForm({ campaignId, businesses }: { campaignId: string; busi
           {isPending ? 'Adding…' : 'Add recipient'}
         </button>
       </div>
+      <p className="text-xs text-gray-400">
+        Tip: for a campaign meant to drive claiming, use the business&apos;s claim link (Business →
+        Claim → Generate claim link), not just its preview URL — that way scanning the QR lands on
+        the preview already primed to claim, instead of requiring the visitor to type in a code first.
+      </p>
     </form>
   );
 }

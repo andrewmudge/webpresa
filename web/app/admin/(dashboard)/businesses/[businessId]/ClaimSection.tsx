@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Claim } from '@/domain/models/claim';
 import { generateClaimLinkAction, revokeClaimAction, releaseOwnershipAction } from './actions';
 
@@ -19,6 +20,7 @@ interface Props {
  * design (see implementation.md, Stage 17, "Claim-token requirements").
  */
 export function ClaimSection({ businessId, ownerUserId, ownerEmail, ownerName, claimedAt, claims }: Props) {
+  const router = useRouter();
   const [generated, setGenerated] = useState<{ rawToken: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -32,6 +34,7 @@ export function ClaimSection({ businessId, ownerUserId, ownerEmail, ownerName, c
         return;
       }
       if (result.rawToken) setGenerated({ rawToken: result.rawToken });
+      router.refresh();
     });
   }
 
@@ -39,7 +42,11 @@ export function ClaimSection({ businessId, ownerUserId, ownerEmail, ownerName, c
     setError(null);
     startTransition(async () => {
       const result = await revokeClaimAction(claimId);
-      if (result.error) setError(result.error);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
     });
   }
 
@@ -50,7 +57,11 @@ export function ClaimSection({ businessId, ownerUserId, ownerEmail, ownerName, c
     }
     startTransition(async () => {
       const result = await releaseOwnershipAction(businessId);
-      if (result.error) setError(result.error);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
     });
   }
 

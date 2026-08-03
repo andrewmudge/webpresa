@@ -7757,6 +7757,30 @@ infra/test/data-stack.test.ts                                                   
 infra/test/vercel-access-stack.test.ts                                                                  MODIFIED — leadsTable/sesFromDomain in test setup, SES statement assertions, updated resource count
 ```
 
+## Post-deploy debugging — lead notification emails not arriving (resolved 2026-08-03)
+
+First real end-to-end test (a Growth-plan dev business, "Test Plumbing") surfaced two independent problems before notification email actually worked. Both are now resolved and confirmed live via the admin dashboard's "Retry notification" button.
+
+**Problem 1 — stale seed data, not a code bug.** The test business's `Business.email` was `test3814@example.com`, leftover placeholder/seed data, not the `mudge.andrew+test@gmail.com` address the user believed was set. Since the AWS account is still in SES sandbox mode (production access requested, not yet approved), sends to that unverified placeholder correctly failed with `MessageRejected`. Fixed by editing the business's email in Settings — confirmed via direct `Business` table read that this correctly writes the canonical `Business.email` field (the one `sendLeadNotificationAndRecordOutcome` reads), separate from the publicly-displayed `SitePreview.content.contact.email`, which Settings deliberately never touches (see `lib/customer-editing/business-info.ts` — email/phone/address writes are Business-only; only `socialLinks` gets a "dual-write" convenience copy into the current draft preview). The public page showing a stale email after this edit is expected, unrelated behavior, not a regression.
+
+**Problem 2 — `ses:SendEmail` IAM resource-level scoping was unreliable in practice, not just once.** Went through three IAM statement resources in sequence, each looking correct on paper and confirmed via `aws iam simulate-principal-policy`, before landing on one that actually worked reliably:
+
+1. `identity/webpresa.com` (original) — real calls from the deployed app failed with `AccessDeniedException`, despite `simulate-principal-policy` saying the action+resource was allowed, and despite an identical `aws sesv2 send-email` call with admin credentials succeeding instantly. This isolated the problem to IAM authorization specifically (not SES config, DKIM, or the recipient), since a real send with different, unscoped credentials worked immediately.
+2. `identity/*` — fixed it for two calls in a row (confirmed by watching the failure mode change from `AccessDeniedException` to a genuine SES-side `MessageRejected`, i.e. the call got *past* IAM), but then reverted to intermittent `AccessDeniedException` on later calls with no code or policy change in between — including calls made hours after the fix, well past any reasonable IAM propagation delay, and including ones unrelated to the concurrent Stage 21 session's own deploys of this same stack (checked via `aws cloudformation describe-stack-events` to rule that out directly).
+3. **`'*'` (bare, unscoped)** — the actual fix. Confirmed via a real admin-dashboard "Retry notification" click against a previously-failed lead. Root cause is believed to be a known real-world AWS rough edge: `ses:SendEmail`'s resource-level authorization is inconsistently enforced server-side for *pattern-matched* resource ARNs (`identity/webpresa.com`, `identity/*`) in a way IAM's own policy simulator doesn't reflect; a bare `'*'` resource routes through IAM's simpler unconditional-allow evaluation path instead of pattern matching, sidestepping whatever internal inconsistency causes the intermittent denials. This does not change what can actually be sent — SES's own identity-verification requirement remains the real, and only, boundary regardless of the IAM resource pattern (the account can still only ever send from `webpresa.com`, its one verified identity).
+
+## Files changed (post-deploy debugging follow-up)
+
+```
+infra/lib/stacks/vercel-access-stack.ts                                                               MODIFIED — SesSendLeadNotifications resource: identity/webpresa.com → identity/* → '*' (three deploys, see above)
+infra/test/vercel-access-stack.test.ts                                                                MODIFIED — SES statement assertion updated to match each resource change, final state asserts bare '*'
+web/docs/architecture.md                                                                              MODIFIED — SES section rewritten to describe the bare '*' resource and why
+web/docs/deployment.md                                                                                MODIFIED — Vercel access stack deploy step's SES comment updated
+web/docs/build_log.md                                                                                 MODIFIED — this addendum
+```
+
+Deployed to dev (all three IAM revisions, `WebpresaDevVercelAccessStack` only — no other resource changed, no app redeploy needed since IAM takes effect immediately for the already-running app). Verified live each time via `aws iam get-policy-version`; final state additionally confirmed working end-to-end via a real notification email received after clicking "Retry notification" on a previously-failed lead.
+
 ---
 
 # Stage 21 — Campaign and QR Tracking

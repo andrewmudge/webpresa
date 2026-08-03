@@ -1051,9 +1051,9 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --pro
 WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
 
 # 2. Vercel access stack — grants the leads table + indexes, and the new
-#    SesSendLeadNotifications IAM statement (scoped to identity/* — every
-#    SES identity in the account/region; see architecture.md for why a
-#    single-identity scope didn't work in practice):
+#    SesSendLeadNotifications IAM statement (bare Resource: '*' — see
+#    architecture.md for why two narrower, pattern-matched scopes both
+#    proved unreliable in practice):
 WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
 WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
 ```
