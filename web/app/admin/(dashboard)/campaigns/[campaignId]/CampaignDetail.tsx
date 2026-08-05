@@ -13,6 +13,7 @@ import {
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
 } from '../actions';
+import { createPostcardAction } from '../../postcards/actions';
 
 interface BusinessOption {
   businessId: string;
@@ -256,6 +257,10 @@ function RecipientCard({
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
 
       <div className="mt-3">
+        <GeneratePostcardControl campaignRecipientId={recipient.campaignRecipientId} postcardId={recipient.postcardId} />
+      </div>
+
+      <div className="mt-3">
         <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
           {showOverride ? 'Hide destination override' : 'Override destination'}
         </button>
@@ -316,6 +321,46 @@ function RecipientCard({
         )}
       </div>
     </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generate postcard (Stage 22) — reachable per-recipient rather than a
+// separate bulk-selection flow, matching this stage's manual-only workflow.
+// ---------------------------------------------------------------------------
+
+function GeneratePostcardControl({ campaignRecipientId, postcardId }: { campaignRecipientId: string; postcardId?: string }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  if (postcardId) {
+    return (
+      <a href={`/admin/postcards/${postcardId}`} className="text-xs text-(--color-brand) hover:underline">
+        View postcard →
+      </a>
+    );
+  }
+
+  function handleGenerate() {
+    setError(null);
+    startTransition(async () => {
+      const result = await createPostcardAction(campaignRecipientId);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      router.push(`/admin/postcards/${result.postcardId}`);
+    });
+  }
+
+  return (
+    <div>
+      <button type="button" onClick={handleGenerate} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
+        {isPending ? 'Generating…' : 'Generate postcard'}
+      </button>
+      {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
+    </div>
   );
 }
 

@@ -1,8 +1,40 @@
 import 'server-only';
-import { QueryCommand, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, GetCommand, PutCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import type { Postcard } from '@/domain/models/postcard';
 import { PostcardSchema } from '@/domain/schemas/postcard.schema';
 import { getDynamoDBClient, TABLE_POSTCARDS } from './client';
+
+const LIST_SAFETY_CAP_PAGES = 40;
+
+/**
+ * Every postcard, newest first — the admin `/admin/postcards` list. A
+ * bounded `Scan`, not a GSI query: postcard count stays small under manual,
+ * one-at-a-time generation (Stage 22 MVP), the same YAGNI reasoning already
+ * applied to `campaigns`/`customer-billing-profiles`.
+ */
+export async function listAllPostcards(): Promise<Postcard[]> {
+  const client = getDynamoDBClient();
+  const items: Postcard[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  let pages = 0;
+
+  do {
+    const result = await client.send(
+      new ScanCommand({
+        TableName: TABLE_POSTCARDS(),
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+      }),
+    );
+    for (const item of result.Items ?? []) {
+      items.push(PostcardSchema.parse(item));
+    }
+    exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    pages += 1;
+  } while (exclusiveStartKey && pages < LIST_SAFETY_CAP_PAGES);
+
+  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return items;
+}
 
 /** The Postcard generated for one CampaignRecipient, if any — a CampaignRecipient has at most one Postcard (see `CampaignRecipient.postcardId`). */
 export async function getPostcardByCampaignRecipientId(campaignRecipientId: string): Promise<Postcard | null> {
@@ -57,6 +89,20 @@ export async function putPostcard(postcard: Postcard): Promise<void> {
     new PutCommand({
       TableName: TABLE_POSTCARDS(),
       Item: postcard,
+    }),
+  );
+}
+
+/** Records explicit admin approval (Phase 3) — approval only unlocks submission, it never triggers it. */
+export async function approvePostcard(postcardId: string, reviewedBy: string): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
+      UpdateExpression: 'SET reviewedAt = :now, reviewedBy = :reviewedBy, updatedAt = :now',
+      ExpressionAttributeValues: { ':now': now, ':reviewedBy': reviewedBy },
     }),
   );
 }

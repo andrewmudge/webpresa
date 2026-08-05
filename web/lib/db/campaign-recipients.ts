@@ -134,6 +134,20 @@ export async function updateCampaignRecipientStatus(
   );
 }
 
+/** Links a newly generated Postcard back to its CampaignRecipient (Stage 22) — the `postcardId` forward-reference Stage 21 reserved for this. */
+export async function linkPostcardToCampaignRecipient(campaignRecipientId: string, postcardId: string): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_CAMPAIGN_RECIPIENTS(),
+      Key: { campaignRecipientId },
+      UpdateExpression: 'SET postcardId = :postcardId, updatedAt = :now',
+      ExpressionAttributeValues: { ':postcardId': postcardId, ':now': now },
+    }),
+  );
+}
+
 export interface RecordScanHitRollupParams {
   campaignRecipientId: string;
   /** Whether this scan's visitor-fingerprint reservation was newly created — see `lib/db/scan-hits.ts`, `reserveVisitorFingerprint`. */
