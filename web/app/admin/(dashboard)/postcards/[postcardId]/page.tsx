@@ -10,7 +10,11 @@ import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
 import { getLobSenderAddress, type LobSenderAddress } from '@/lib/env/lob-sender-address';
 import PostcardFront from '../components/PostcardFront';
 import PostcardBack from '../components/PostcardBack';
+import PostcardZoom from '../components/PostcardZoom';
 import ApproveButton from './ApproveButton';
+
+/** Lob "6x9" jumbo postcard — landscape, 9" wide × 6" tall. See deployment.md, Stage 22. */
+const POSTCARD_SIZE_INCHES = { width: 9, height: 6 };
 
 export const dynamic = 'force-dynamic';
 
@@ -73,25 +77,29 @@ export default async function PostcardDetailPage({ params }: Props) {
           </p>
 
           <div>
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Front</p>
-            <PostcardFront
-              businessName={business.name}
-              industry={business.industry}
-              logoUrl={business.logoUrl}
-              beforeScreenshotSrc={beforeShots.desktopSrc}
-              afterScreenshotSrc={afterShots.desktopSrc}
-              qrDataUri={qrDataUri}
-            />
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Front — click to enlarge</p>
+            <PostcardZoom label="Front" sizeInches={POSTCARD_SIZE_INCHES}>
+              <PostcardFront
+                businessName={business.name}
+                industry={business.industry}
+                logoUrl={business.logoUrl}
+                beforeScreenshotSrc={beforeShots.desktopSrc}
+                afterScreenshotSrc={afterShots.desktopSrc}
+                qrDataUri={qrDataUri}
+              />
+            </PostcardZoom>
           </div>
 
           <div>
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Back</p>
-            <PostcardBack
-              recipientName={business.name}
-              recipientAddress={business.address}
-              senderName={senderAddress?.name}
-              senderAddress={senderAddress}
-            />
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Back — click to enlarge</p>
+            <PostcardZoom label="Back" sizeInches={POSTCARD_SIZE_INCHES}>
+              <PostcardBack
+                recipientName={business.name}
+                recipientAddress={business.address}
+                senderName={senderAddress?.name}
+                senderAddress={senderAddress}
+              />
+            </PostcardZoom>
           </div>
 
           <p className="text-xs text-gray-400">

@@ -1,7 +1,7 @@
 /**
- * Postcard-shaped layout wrapper — 3:2 aspect ratio matches a standard 6"×4"
- * printed postcard. Purely presentational; front/back content is passed as
- * children.
+ * Postcard-shaped layout wrapper — 3:2 aspect ratio matches the chosen
+ * 9"×6" (Lob "6x9" jumbo) printed postcard, landscape orientation. Purely
+ * presentational; front/back content is passed as children.
  */
 export default function PostcardFrame({ children }: { children: React.ReactNode }) {
   return (
