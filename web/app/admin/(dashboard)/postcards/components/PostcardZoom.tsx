@@ -1,29 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { POSTCARD_TRIM_SIZE_INCHES, POSTCARD_BLEED_SIZE_INCHES, POSTCARD_SAFE_ZONE_SIZE_INCHES } from './postcard-size';
 
 /**
  * Click-to-enlarge wrapper for a postcard front/back preview (Stage 22).
  * The thumbnail and the modal both render the same `children` element — a
  * pure, prop-driven presentational component (`PostcardFront`/
- * `PostcardBack`), so rendering it twice costs no extra data fetching;
- * images just resolve from the browser cache the second time.
+ * `PostcardBack`, wrapped in `PostcardFrame`), so rendering it twice costs
+ * no extra data fetching; images just resolve from the browser cache the
+ * second time.
  *
- * The modal sizes itself to the postcard's actual physical dimensions
- * (`sizeInches`) via the CSS `in` unit — browsers approximate 96px per inch
- * per the CSS spec, so this isn't true physical size on every monitor, but
- * it's the closest a browser can get and the standard convention for it.
- * `min(...vw)` keeps it from overflowing small/admin-panel viewports.
+ * The modal sizes itself to the postcard's full bleed-canvas dimensions
+ * (`POSTCARD_BLEED_SIZE_INCHES` — `PostcardFrame` is itself sized to this,
+ * so nesting it here stays proportionally correct) via the CSS `in` unit —
+ * browsers approximate 96px per inch per the CSS spec, so this isn't true
+ * physical size on every monitor, but it's the closest a browser can get
+ * and the standard convention for it. `min(...vw/vh)` keeps it from
+ * overflowing small/admin-panel viewports.
  */
-export default function PostcardZoom({
-  label,
-  sizeInches,
-  children,
-}: {
-  label: string;
-  sizeInches: { width: number; height: number };
-  children: React.ReactNode;
-}) {
+export default function PostcardZoom({ label, children }: { label: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -55,9 +51,14 @@ export default function PostcardZoom({
           onClick={() => setOpen(false)}
         >
           <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            <div style={{ width: `min(${sizeInches.width}in, 90vw)`, height: `min(${sizeInches.height}in, 60vh)` }}>{children}</div>
-            <p className="text-xs text-white/70">
-              {label} — actual size ({sizeInches.width}&quot;×{sizeInches.height}&quot;, approximated at 96px/in — true on-screen size varies by monitor)
+            <div style={{ width: `min(${POSTCARD_BLEED_SIZE_INCHES.width}in, 90vw)`, height: `min(${POSTCARD_BLEED_SIZE_INCHES.height}in, 60vh)` }}>
+              {children}
+            </div>
+            <p className="max-w-md text-center text-xs text-white/70">
+              {label} — actual size. Solid border is the {POSTCARD_BLEED_SIZE_INCHES.width}&quot;×{POSTCARD_BLEED_SIZE_INCHES.height}&quot; print file
+              (bleed included); dashed line is the {POSTCARD_TRIM_SIZE_INCHES.width}&quot;×{POSTCARD_TRIM_SIZE_INCHES.height}&quot; trim edge the recipient
+              actually sees; dotted line is the {POSTCARD_SAFE_ZONE_SIZE_INCHES.width}&quot;×{POSTCARD_SAFE_ZONE_SIZE_INCHES.height}&quot; safe zone essential
+              content should stay inside. Approximated at 96px/in — true on-screen size varies by monitor.
             </p>
             <button type="button" onClick={() => setOpen(false)} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white hover:bg-white/20">
               Close

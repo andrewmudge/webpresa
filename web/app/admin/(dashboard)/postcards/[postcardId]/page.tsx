@@ -13,9 +13,6 @@ import PostcardBack from '../components/PostcardBack';
 import PostcardZoom from '../components/PostcardZoom';
 import ApproveButton from './ApproveButton';
 
-/** Lob "6x9" jumbo postcard — landscape, 9" wide × 6" tall. See deployment.md, Stage 22. */
-const POSTCARD_SIZE_INCHES = { width: 9, height: 6 };
-
 export const dynamic = 'force-dynamic';
 
 interface Props {
@@ -78,7 +75,7 @@ export default async function PostcardDetailPage({ params }: Props) {
 
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Front — click to enlarge</p>
-            <PostcardZoom label="Front" sizeInches={POSTCARD_SIZE_INCHES}>
+            <PostcardZoom label="Front">
               <PostcardFront
                 businessName={business.name}
                 industry={business.industry}
@@ -92,7 +89,7 @@ export default async function PostcardDetailPage({ params }: Props) {
 
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Back — click to enlarge</p>
-            <PostcardZoom label="Back" sizeInches={POSTCARD_SIZE_INCHES}>
+            <PostcardZoom label="Back">
               <PostcardBack
                 recipientName={business.name}
                 recipientAddress={business.address}
