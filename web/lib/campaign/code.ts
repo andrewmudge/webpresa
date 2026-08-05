@@ -6,16 +6,24 @@ import { randomBytes } from 'crypto';
  * CampaignRecipient's QR code encodes (`/r/{campaignCode}`).
  *
  * Same opaque-random-identifier approach as Stage 17's claim tokens
- * (Crockford Base32, excludes ambiguous I/L/O/U), sized and formatted for a
- * URL/QR rather than manual typing: 80 bits (not 160), no dash-grouping
- * (never hand-typed). 80 bits of entropy makes a generation-time collision
- * astronomically unlikely, so — matching the claim-token precedent —
- * generation needs no atomic uniqueness transaction, only the
- * `campaign-code-index` GSI for lookup (see `lib/db/campaign-recipients.ts`).
+ * (Crockford Base32, excludes ambiguous I/L/O/U), sized for a URL/QR rather
+ * than manual typing: 80 bits (not 160), no dash-grouping in the stored/
+ * looked-up value itself (dashes are added only for display — see
+ * `./code-format.ts` — and stripped back out on manual entry, for the `/r`
+ * fallback page when a visitor can't scan the QR). 80 bits of entropy makes
+ * a generation-time collision astronomically unlikely, so — matching the
+ * claim-token precedent — generation needs no atomic uniqueness
+ * transaction, only the `campaign-code-index` GSI for lookup (see
+ * `lib/db/campaign-recipients.ts`).
  *
  * The Crockford encoder below is a small, self-contained duplicate of
  * `lib/claim/token.ts`'s rather than a shared extraction — Stage 21
  * deliberately doesn't touch Stage 17 files for a ~15-line pure function.
+ *
+ * Server-only (imports Node's `crypto`) — the display/normalization helpers
+ * in `./code-format.ts` are split into their own file specifically so a
+ * client component (the admin recipient card) can import them without
+ * pulling this file's `server-only` guard into the client bundle.
  */
 
 const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

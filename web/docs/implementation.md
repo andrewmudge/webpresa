@@ -3976,6 +3976,10 @@ this one field set).
   matches the existing `/claim/[claimToken]` precedent for a public
   GET-and-redirect entrypoint, and `architecture.md`'s "API boundaries"
   exception for endpoints that must be addressable as a plain URL).
+- **`GET /r`** — public page, manual campaign-code entry for a visitor who
+  can't scan the QR (see "Manual entry fallback" below). Coexists with
+  `/r/[campaignCode]` the same way `/claim` coexists with
+  `/claim/[claimToken]`.
 - **`GET /api/campaigns/[campaignRecipientId]/qr`** — admin-session-gated
   Route Handler; renders a QR PNG on demand from
   `https://webpresa.com/r/{campaignCode}` (via `qrcode`), for the admin
@@ -4092,6 +4096,49 @@ Valid, recipient.status='active', parent Campaign.status='active'?
 Server always re-resolves `campaignCode → CampaignRecipient → destination`
 itself; nothing about the destination is ever trusted from the request
 beyond the code.
+
+## Manual entry fallback
+
+**`GET /r`** (`app/r/page.tsx`) — a static page coexisting with the dynamic
+`/r/[campaignCode]` route (the same "page + sibling dynamic route" pairing
+`/claim/page.tsx` and `/claim/[claimToken]/route.ts` already establish),
+for a postcard recipient who can't scan the QR. A simple form
+(`CampaignCodeForm.tsx`) posts to `submitCampaignCodeAction`
+(`app/r/actions.ts`), which:
+
+1. Normalizes the typed input (strip whitespace/dashes, uppercase —
+   `normalizeCampaignCodeInput`, mirroring `normalizeClaimToken`).
+2. Calls `resolveCampaignRedirect()` **unchanged** — the identical
+   function `/r/[campaignCode]` itself calls, with an empty
+   `incomingSearchParams` (nothing to forward from a typed submission) and
+   a `requestUrl` built from the `host`/`x-forwarded-proto` headers (no
+   `request.url` available inside a Server Action).
+3. `outcome: 'invalid'` → one generic message ("that code doesn't look
+   right, or has expired"), regardless of which internal check failed —
+   same "never distinguish why" principle as everywhere else in this
+   stage, extended to this entry point.
+4. `outcome: 'redirect'` → sets the claim-intent cookie when one was
+   produced, then redirects — identical outcome to scanning.
+
+**Deliberately does not reuse `/claim`** (Stage 17's own manual-entry page
+for claim tokens), even though `/claim` already has a polished form and
+generic-error UX. Two concrete reasons: a visit through `/claim` would
+never become a `ScanHit`, silently undercounting anyone who can't scan the
+QR; and the raw claim token is only ever available once, at the moment a
+claim is freshly generated (see "Destination resolution" above) — a
+recipient whose claim was *reused* has no raw token to have ever printed.
+`campaignCode` has neither problem: it's permanently stored and already
+drives the fully-tracked path, so typed-in entry counts identically to a
+scan no matter how the recipient's claim was provisioned.
+
+`lib/campaign/code-format.ts` (new, deliberately separate from
+`lib/campaign/code.ts`'s `server-only`-guarded `generateCampaignCode`, so
+a client component can import it) holds `normalizeCampaignCodeInput` and
+`formatCampaignCodeForDisplay` — the latter groups a code into dashed
+fours (`AB23-CD45-EF67-GH89`) purely for display/print (the admin
+recipient card, and whatever gets printed next to a QR code); the
+stored/looked-up `campaignCode` and the QR payload itself are never
+dash-grouped.
 
 ## Analytics
 
@@ -4670,9 +4717,8 @@ All MVP stages.
 13. Process webhook.
 14. Activate customer.
 15. Submit a lead.
-16. Confirm delivery.
-17. Submit an edit request.
-18. Confirm admin handling.
+16. Confirm delivery
+17. Confirm admin handling.
 
 ## Acceptance criteria
 

@@ -7995,3 +7995,46 @@ npm run build        — succeeds
 ```
 
 No infra/table changes — an existing table's item shape gained optional fields, still validated per-write, no new GSI, no migration.
+
+---
+
+# Manual-entry fallback for campaign codes (no QR scanner needed)
+
+**Date:** 2026-08-03
+
+The user asked how to handle a postcard recipient without a phone/camera to scan the QR — "all we can do is give them a URL and a claim code." Investigated the obvious shortcut first — reusing the existing `/claim` manual-entry page (Stage 17, already has a polished form and generic error UX) — and found it was the wrong fit for two concrete reasons, not just style: a visit through `/claim` never becomes a `ScanHit` (silently undercounting anyone who can't scan the QR), and the raw claim token is only ever available once, at the moment a claim is freshly generated — a recipient whose claim was *reused* (the common case for a business already in another campaign, per the claim-auto-wiring work earlier today) has no raw token to ever print. `campaignCode`, by contrast, is always permanently stored and already drives the fully-tracked path. Confirmed with the user: build a dedicated manual-entry page for campaign codes that reuses the same tracked redirect logic, rather than routing through `/claim`.
+
+**`GET /r`** (`app/r/page.tsx`) — coexists with the existing dynamic `/r/[campaignCode]` route exactly the way `/claim/page.tsx` already coexists with `/claim/[claimToken]/route.ts` (confirmed this is a supported Next.js pattern, not a new one). A simple form (`CampaignCodeForm.tsx`, mirroring `ClaimTokenForm.tsx`) posts to `submitCampaignCodeAction` (`app/r/actions.ts`), which normalizes the typed input and then calls `resolveCampaignRedirect()` **completely unchanged** — the same function the QR scan route itself calls — with an empty `incomingSearchParams` and a `requestUrl` built from the `host`/`x-forwarded-proto` request headers (a Server Action has no `request.url` the way a Route Handler does). This is the entire point of the design: a typed-in code goes through identical rate-limiting, `ScanHit` recording, rollup updates, and claim-intent-cookie logic as a scan, so it counts the same in analytics and works no matter how the recipient's claim was provisioned.
+
+**Split `lib/campaign/code.ts`** — `normalizeCampaignCodeInput` and a new `formatCampaignCodeForDisplay` (groups a code into dashed fours, `AB23-CD45-EF67-GH89`, for display/print only) needed to be importable from a client component (the admin recipient card), but `code.ts` carries a `server-only` guard (it also generates codes via Node's `crypto`). Rather than weakening that guard, moved the two pure, dependency-free functions into a new `lib/campaign/code-format.ts` with no `server-only` import — `code.ts` keeps only `generateCampaignCode`.
+
+**Admin UI** — `RecipientCard` now displays the campaign code dash-grouped (`formatCampaignCodeForDisplay`) instead of the raw string, with a line under the QR: "No scanner? Visit webpresa.com/r and enter this code" — closing the loop so admins know what to print alongside a QR for exactly this scenario.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                             MODIFIED — Stage 21 "Manual entry fallback" section, Required routes updated
+web/docs/architecture.md                                                                                MODIFIED — Stage 21 section gains the manual-entry-fallback paragraph
+web/docs/build_log.md                                                                                   MODIFIED — this entry
+web/lib/campaign/code.ts                                                                                MODIFIED — now holds only generateCampaignCode; doc comment updated
+web/lib/campaign/code-format.ts                                                                         NEW — normalizeCampaignCodeInput, formatCampaignCodeForDisplay
+web/lib/campaign/__tests__/code-format.test.ts                                                          NEW
+web/app/r/page.tsx                                                                                       NEW
+web/app/r/CampaignCodeForm.tsx                                                                           NEW
+web/app/r/actions.ts                                                                                     NEW — submitCampaignCodeAction
+web/app/r/__tests__/actions.test.ts                                                                      NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                     MODIFIED — dash-grouped code display, manual-entry hint
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, 2 pre-existing unrelated warnings
+npm test             — new test files pass (38 tests across the 5 affected files);
+                        full repo suite run after this and the CampaignDetail.tsx change together
+npm run build        — succeeds; /r (static page) and /r/[campaignCode] (dynamic route)
+                        both registered with no conflict
+```
+
+No infra/table changes.

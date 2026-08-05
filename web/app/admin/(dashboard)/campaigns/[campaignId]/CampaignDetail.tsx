@@ -6,6 +6,7 @@ import type { Campaign, CampaignStatus } from '@/domain/models/campaign';
 import { CAMPAIGN_STATUSES } from '@/domain/models/campaign';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
 import type { ScanHit } from '@/domain/models/scan-hit';
+import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import {
   updateCampaignStatusAction,
   addCampaignRecipientAction,
@@ -205,7 +206,7 @@ function RecipientCard({
           <img src={qrUrl} alt={`QR code for ${redirectUrl}`} width={96} height={96} className="rounded-lg border border-gray-100" />
           <div className="text-sm">
             <p className="font-medium text-gray-900">{business ? business.name : recipient.businessId}</p>
-            <p className="text-gray-500 font-mono text-xs mt-0.5">{recipient.campaignCode}</p>
+            <p className="text-gray-500 font-mono text-xs mt-0.5">{formatCampaignCodeForDisplay(recipient.campaignCode)}</p>
             <p className="mt-1">
               <a href={qrUrl} download={`campaign-${recipient.campaignCode}.png`} className="text-(--color-brand) hover:underline text-xs">
                 Download QR
@@ -214,6 +215,9 @@ function RecipientCard({
               <a href={redirectUrl} target="_blank" rel="noreferrer" className="text-(--color-brand) hover:underline text-xs">
                 Open link
               </a>
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              No scanner? Visit <span className="font-mono">webpresa.com/r</span> and enter this code.
             </p>
             <div className="mt-2 flex gap-4 text-xs text-gray-500">
               <span>

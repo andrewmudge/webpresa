@@ -1145,3 +1145,55 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessS
 | The same IP exceeds the redirect route's rate limit (30 requests/minute) | Same homepage-redirect fallback; the code's 80-bit entropy, not this limit, is the real defense against guessing |
 | A request to `/r/{code}` includes its own `?campaign=SOMETHING` query param | Ignored — the server-resolved code always overwrites it in the final redirect URL |
 | `GET /api/campaigns/[campaignRecipientId]/qr` requested without an admin session | 401, no image returned |
+
+## Stage 22 — Webpresa Postcard Generation and Lob Fulfillment deployment guidance
+
+**Infra Phase 0 deployed to dev (2026-08-05); app code not yet deployed.** One new DynamoDB table (`postcard-webhook-events`) plus a GSI rename on the existing `postcards` table (`campaign-code-index`/`campaignCode` → `campaign-recipient-id-index`/`campaignRecipientId`, matching Stage 21's own "Relationship to Postcard" note that a Postcard should reference its `CampaignRecipient` rather than duplicate its code/destination). No new secrets — the `lob` secret (Stage 10) already exists as a placeholder; no new IAM roles yet (the render Lambda described below is still unbuilt).
+
+### Deploy sequence — GSI rename requires two deploys, not one
+
+DynamoDB rejects creating and deleting a GSI in the same CloudFormation update (`"Cannot perform more than one GSI creation or deletion in a single update"`). The rename was split accordingly — this is a one-time transitional step, not a pattern to repeat for ordinary additive changes:
+
+```bash
+cd infra
+
+# Step 1 — additive only: create postcard-webhook-events, add
+# campaign-recipient-id-index to postcards (old campaign-code-index index
+# temporarily left in place):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# Step 2 — after step 1 succeeds, remove the old campaign-code-index GSI
+# (deletion only):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+
+# 3. Vercel access stack — grants the new table + its index on the existing
+#    DynamoDbTables IAM statement (no new statement, no new policy):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+```
+
+The `postcards` table itself was empty in dev at rename time, so this was a clean schema change, not a data migration — no backfill was needed or performed.
+
+### New Vercel environment variables (not yet added to Vercel)
+
+| Variable | Value | Notes |
+|---|---|---|
+| `POSTCARD_WEBHOOK_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcard-webhook-events-name` | Deployed 2026-08-05; not yet added to Vercel |
+| `WEBPRESA_LOB_SENDER_NAME` | Webpresa's own company name, e.g. `Webpresa` | Not a secret — printed on every outgoing postcard. Read by `web/lib/env/lob-sender-address.ts`, mirroring `WEBPRESA_APP_BASE_URL`'s plain-env-var (not Secrets Manager) pattern |
+| `WEBPRESA_LOB_SENDER_ADDRESS_LINE1` | Webpresa's own return-mail street address | |
+| `WEBPRESA_LOB_SENDER_ADDRESS_LINE2` | Optional — suite/unit | |
+| `WEBPRESA_LOB_SENDER_CITY` | | |
+| `WEBPRESA_LOB_SENDER_STATE` | | |
+| `WEBPRESA_LOB_SENDER_POSTAL_CODE` | | |
+| `WEBPRESA_LOB_SENDER_COUNTRY` | ISO 3166-1 alpha-2, e.g. `US` | |
+
+None of these are populated yet — Phase 4 (Lob submission) needs the sender-address values before any real submission can be attempted; the render pipeline (Phase 2) needs them earlier if the back-template's return address is rendered directly rather than left to Lob's own overlay (see the open question in the implementation plan).
+
+### Still outstanding before Stage 22 can submit real postcards
+
+- Populate the real (test-mode) Lob API key: `aws secretsmanager put-secret-value --secret-id webpresa-dev-lob --secret-string '{"apiKey":"..."}' --profile webpresa`.
+- Look up Lob's current webhook signature-verification method and extend the `lob` secret's `jsonKeys` with `webhookSecret` (mirrors the Stripe secret's `{ secretKey, webhookSecret }` shape) — not yet done.
+- Populate the `WEBPRESA_LOB_SENDER_*` Vercel env vars above.
+- Register the Lob webhook URL with `?x-vercel-protection-bypass=<secret>` appended, reusing the existing `webpresa-{env}-vercel-protection-bypass` secret (Stage 14) exactly as the Stripe webhook does — no new bypass secret needed.

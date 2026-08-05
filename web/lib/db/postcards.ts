@@ -4,6 +4,23 @@ import type { Postcard } from '@/domain/models/postcard';
 import { PostcardSchema } from '@/domain/schemas/postcard.schema';
 import { getDynamoDBClient, TABLE_POSTCARDS } from './client';
 
+/** The Postcard generated for one CampaignRecipient, if any — a CampaignRecipient has at most one Postcard (see `CampaignRecipient.postcardId`). */
+export async function getPostcardByCampaignRecipientId(campaignRecipientId: string): Promise<Postcard | null> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_POSTCARDS(),
+      IndexName: 'campaign-recipient-id-index',
+      KeyConditionExpression: 'campaignRecipientId = :campaignRecipientId',
+      ExpressionAttributeValues: { ':campaignRecipientId': campaignRecipientId },
+      Limit: 1,
+    }),
+  );
+  const items = result.Items ?? [];
+  if (items.length === 0) return null;
+  return PostcardSchema.parse(items[0]);
+}
+
 export async function getPostcardById(postcardId: string): Promise<Postcard | null> {
   const client = getDynamoDBClient();
   const result = await client.send(

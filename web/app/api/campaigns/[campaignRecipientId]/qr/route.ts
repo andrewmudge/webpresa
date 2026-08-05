@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import QRCode from 'qrcode';
 import { getSession } from '@/lib/auth/session';
 import { getCampaignRecipientById } from '@/lib/db/campaign-recipients';
+import { generateCampaignQrPng } from '@/lib/campaign/qr';
 
 /**
  * Admin-only QR PNG for one CampaignRecipient's `/r/{campaignCode}` URL
@@ -26,8 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const redirectUrl = new URL(`/r/${recipient.campaignCode}`, request.url).toString();
-  const png = await QRCode.toBuffer(redirectUrl, { type: 'png', width: 512, margin: 2 });
+  const png = await generateCampaignQrPng(recipient.campaignCode, request.url);
 
   return new NextResponse(new Uint8Array(png), {
     headers: {

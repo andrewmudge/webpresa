@@ -65,8 +65,8 @@ describe('unique IDs', () => {
   it('two Postcard records get different postcardIds', () => {
     const biz = createBusiness({ name: 'Acme Plumbing', industry: 'plumbing' });
     const preview = createSitePreview({ businessId: biz.businessId, templateId: 't1', content: validContent, theme: validTheme });
-    const pc1 = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob', campaignCode: 'CAMP001', qrDestination: 'https://webpresa.com/preview/abc' });
-    const pc2 = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob', campaignCode: 'CAMP001', qrDestination: 'https://webpresa.com/preview/abc' });
+    const pc1 = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob' });
+    const pc2 = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob' });
     expect(pc1.postcardId).not.toBe(pc2.postcardId);
   });
 });
@@ -97,7 +97,7 @@ describe('createdAt is always set', () => {
   it('Postcard has createdAt', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'hvac' });
     const p = createSitePreview({ businessId: biz.businessId, templateId: 't1', content: validContent, theme: validTheme });
-    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob', campaignCode: 'C1', qrDestination: 'https://webpresa.com/p/1' });
+    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob' });
     expect(pc.createdAt).toBeTruthy();
   });
 });
@@ -154,7 +154,7 @@ describe('status validation', () => {
   it('PostcardSchema rejects an invalid status string', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'plumbing' });
     const p = createSitePreview({ businessId: biz.businessId, templateId: 't1', content: validContent, theme: validTheme });
-    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob', campaignCode: 'C1', qrDestination: 'https://webpresa.com/p/1' });
+    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob' });
     const result = PostcardSchema.safeParse({ ...pc, status: 'sent' });
     expect(result.success).toBe(false);
   });
@@ -479,7 +479,7 @@ describe('ID prefix format', () => {
   it('Postcard ID starts with postcard_', () => {
     const biz = createBusiness({ name: 'Prefix Test', industry: 'accounting' });
     const p = createSitePreview({ businessId: biz.businessId, templateId: 't1', content: validContent, theme: validTheme });
-    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob', campaignCode: 'C1', qrDestination: 'https://webpresa.com/p/1' });
+    const pc = createPostcard({ businessId: biz.businessId, previewId: p.previewId, provider: 'lob' });
     expect(pc.postcardId).toMatch(/^postcard_/);
   });
 });

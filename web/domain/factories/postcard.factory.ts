@@ -6,13 +6,14 @@ export interface CreatePostcardInput {
   businessId: string;
   previewId: string;
   provider: PostcardProvider;
-  campaignCode: string;
-  /** Full URL the QR code on the postcard resolves to. */
-  qrDestination: string;
+  /** The CampaignRecipient this postcard is being generated for. Absent for a single-postcard test send. */
+  campaignRecipientId?: string;
 }
 
 /**
- * Create a new Postcard record in `'pending'` status.
+ * Create a new Postcard record in `'pending'` status, with no rendered
+ * artifacts yet — those are populated by a later rendering step (Stage 22,
+ * Phase 2), not at creation.
  *
  * The provider integration layer is responsible for submitting the
  * postcard job and updating `providerPostcardId`, `status`, `mailedAt`,
@@ -25,9 +26,8 @@ export function createPostcard(input: CreatePostcardInput): Postcard {
     postcardId: generateId('postcard_'),
     businessId: input.businessId,
     previewId: input.previewId,
+    ...(input.campaignRecipientId !== undefined && { campaignRecipientId: input.campaignRecipientId }),
     provider: input.provider,
-    campaignCode: input.campaignCode,
-    qrDestination: input.qrDestination,
     status: 'pending',
     createdAt: now,
     updatedAt: now,
