@@ -60,16 +60,22 @@ export default function PostcardDeviceMockup({ desktopSrc, mobileSrc }: Postcard
   }
 
   return (
-    // `maxWidth`/`maxHeight: 100%` + `aspectRatio`, no explicit width or
-    // height, inside a centering flex parent (see `PostcardFront.tsx`'s
-    // right column) — this is the standard CSS "contain" pattern for a
-    // fixed-ratio box: the browser picks whichever of width/height is the
-    // binding constraint so the box never overflows either axis. A plain
-    // `h-full` (an earlier version of this fix) derived width purely from
-    // height and could still overflow *width* on a narrow column — that's
-    // what was cutting the phone off and pushing the mockup outside the
-    // safe zone.
-    <div className="relative" style={{ aspectRatio: `${VIEWBOX.width} / ${VIEWBOX.height}`, maxWidth: '100%', maxHeight: '100%' }}>
+    // `position: absolute` + `inset: 0` + `margin: auto`, with
+    // `aspectRatio` and `maxWidth`/`maxHeight: 100%` but no explicit width
+    // or height — the standard CSS "contain" pattern for a fixed-ratio box
+    // that must never overflow either axis of its parent (which must be
+    // `position: relative` and sized — see `PostcardFront.tsx`'s right
+    // column). This needs `position: absolute` specifically: a previous
+    // version used a plain `position: relative` box with the same
+    // aspect-ratio/max-width/max-height and nothing else, which collapsed
+    // to 0×0 and stopped rendering entirely — every visible child here
+    // (the SVG, the screenshots) is itself `absolute`, so a `relative`
+    // parent has no normal-flow content to derive an intrinsic size from.
+    // An absolutely-positioned box with `inset: 0` DOES have a defined
+    // containing block to size itself against, which is what makes the
+    // aspect-ratio + max-width/max-height "shrink to fit both axes"
+    // computation actually resolve to something instead of nothing.
+    <div className="absolute inset-0 m-auto" style={{ aspectRatio: `${VIEWBOX.width} / ${VIEWBOX.height}`, maxWidth: '100%', maxHeight: '100%' }}>
       {/* Bezels — painted first, behind the screenshots. */}
       <svg viewBox={`0 0 ${VIEWBOX.width} ${VIEWBOX.height}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden="true">
         {desktopSrc && (

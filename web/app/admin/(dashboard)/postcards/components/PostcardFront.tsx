@@ -101,7 +101,7 @@ export default function PostcardFront({
           style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}
         >
           <div className="flex min-h-0 w-[36%] flex-col justify-center gap-[1.2cqh]">
-            <h1 className="text-[3.1cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
+            <h1 className="text-[3.9cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
               Websites
               <br />
               are hard.
@@ -140,7 +140,13 @@ export default function PostcardFront({
             <span className="w-fit shrink-0 rounded-full px-[1.2cqw] py-[0.5cqh] text-[1.1cqw] font-semibold text-white" style={{ backgroundColor: POSTCARD_BLUE }}>
               YOUR NEW WEBSITE
             </span>
-            <div className="flex min-h-0 w-full flex-1 items-center justify-center">
+            {/* `relative`: PostcardDeviceMockup's root is `absolute inset-0
+                m-auto` — it needs a positioned, sized ancestor to contain
+                against. Without `relative` here it would size against the
+                nearest positioned ancestor instead (PostcardFrame's own
+                root), which is exactly the kind of mispositioning that
+                made the mockup disappear/misbehave before. */}
+            <div className="relative min-h-0 w-full flex-1">
               <PostcardDeviceMockup desktopSrc={afterDesktopScreenshotSrc} mobileSrc={afterMobileScreenshotSrc} />
             </div>
           </div>
@@ -155,7 +161,7 @@ export default function PostcardFront({
             divider lands at roughly 1/3 of the *whole card's* width, not
             just after however wide the QR happens to be — the left zone's
             width is safe-zone-padding + 30cqw ≈ card-width/3. */}
-        <div className="relative mt-auto flex items-stretch overflow-hidden py-[1.8cqh]" style={{ ...safeZonePadding, backgroundColor: POSTCARD_BLUE }}>
+        <div className="relative mt-auto flex items-stretch overflow-hidden py-[0.8cqh]" style={{ ...safeZonePadding, backgroundColor: POSTCARD_BLUE }}>
           {/* Decorative dot-grid texture, bottom-left corner only — no image asset needed. */}
           <div
             aria-hidden="true"
@@ -163,10 +169,10 @@ export default function PostcardFront({
             style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)', backgroundSize: '0.6cqw 0.6cqw' }}
           />
 
-          <div className="flex w-[30cqw] shrink-0 items-center justify-end gap-[0.8cqw]">
+          <div className="flex w-[30cqw] shrink-0 items-center justify-center gap-[0.8cqw]">
             <div className="relative flex shrink-0 items-end gap-[0.5cqw]">
-              <p className={`${caveat.className} rotate-[-4deg] pb-[1.2cqw] text-[2.3cqw] leading-none text-white`}>Scan Me!</p>
-              <CornerDownRight className="h-[2.3cqw] w-[2.3cqw] shrink-0 pb-[0.4cqw] text-white/80" />
+              <p className={`${caveat.className} rotate-[-4deg] pb-[1.2cqw] text-[3.5cqw] leading-none text-white`}>Scan Me!</p>
+              <CornerDownRight className="h-[3.5cqw] w-[3.5cqw] shrink-0 pb-[0.4cqw] text-white/80" />
             </div>
             <div className="w-[13cqw] shrink-0">
               <PostcardQrWithBadge qrDataUri={qrDataUri} />
@@ -180,24 +186,31 @@ export default function PostcardFront({
             </span>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col justify-center gap-[1cqh] pl-[1.5cqw]">
-            <div className="flex items-center gap-[1cqw]">
-              <Globe className="h-[2cqw] w-[2cqw] shrink-0 text-white/70" />
-              <div className="min-w-0">
-                <p className="text-[1cqw] font-semibold tracking-wide text-(--color-accent)">GO TO:</p>
-                <p className="truncate text-[2cqw] font-bold leading-tight text-white">webpresa.com/access</p>
+          {/* justify-center on the flex-1 outer box, wrapping a width-auto
+              inner column — centers the whole two-row block between the OR
+              divider and the card's right edge, rather than it hugging the
+              divider side (its old min-w-0/flex-1/truncate setup let each
+              row grow left-to-right instead of centering as a unit). */}
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <div className="flex flex-col gap-[1.2cqh]">
+              <div className="flex items-center gap-[1.2cqw]">
+                <Globe className="h-[2.6cqw] w-[2.6cqw] shrink-0 text-white/70" />
+                <div>
+                  <p className="text-[1.2cqw] font-semibold tracking-wide text-(--color-accent)">GO TO:</p>
+                  <p className="text-[2.6cqw] font-bold leading-tight text-white">webpresa.com/access</p>
+                </div>
               </div>
-            </div>
-            <div className="h-px bg-white/20" />
-            <div className="flex items-center gap-[1cqw]">
-              <Lock className="h-[2cqw] w-[2cqw] shrink-0 text-white/70" />
-              <div className="min-w-0">
-                <p className="text-[1cqw] font-semibold tracking-wide text-(--color-accent)">ENTER YOUR ACCESS CODE:</p>
-                {accessCodeDisplay && (
-                  <span className="mt-[0.3cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.25cqh] text-[1.7cqw] font-bold tracking-wide text-gray-900">
-                    {accessCodeDisplay}
-                  </span>
-                )}
+              <div className="h-px bg-white/20" />
+              <div className="flex items-center gap-[1.2cqw]">
+                <Lock className="h-[2.6cqw] w-[2.6cqw] shrink-0 text-white/70" />
+                <div>
+                  <p className="text-[1.2cqw] font-semibold tracking-wide text-(--color-accent)">ENTER YOUR ACCESS CODE:</p>
+                  {accessCodeDisplay && (
+                    <span className="mt-[0.3cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.25cqh] text-[2.2cqw] font-bold tracking-wide text-gray-900">
+                      {accessCodeDisplay}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

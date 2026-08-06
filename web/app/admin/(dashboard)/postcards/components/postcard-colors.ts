@@ -5,4 +5,4 @@
  * admin/marketing app uses, so this is scoped to the postcard components
  * only rather than changing the global token.
  */
-export const POSTCARD_BLUE = '#004FB9';
+export const POSTCARD_BLUE = '#0048AA';
