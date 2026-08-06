@@ -4,17 +4,9 @@ import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { PLAN_CATALOG } from "@/domain/constants/plan-catalog";
 
-const includes = [
-  "Professional, managed website",
-  "Managed hosting — fast & reliable",
-  "Security monitoring & updates",
-  "SEO foundation & Google indexing",
-  "Analytics dashboard",
-  "Unlimited content edits",
-  "Mobile-optimized on all devices",
-  "Priority support",
-];
+const includes = PLAN_CATALOG.basic.features;
 
 export default function PricingSection() {
   const ref = useRef(null);
@@ -45,8 +37,9 @@ export default function PricingSection() {
             Simple, transparent pricing.
           </h2>
           <p className="text-lg text-gray-500 max-w-xl mx-auto">
-            No setup fees. No surprise bills. Everything your business needs to
-            look professional online — for one flat monthly rate.
+            No setup fees. No surprise bills. Start with everything you need
+            to look professional online — upgrade anytime as your business
+            grows.
           </p>
         </motion.div>
 
@@ -64,22 +57,25 @@ export default function PricingSection() {
             <div className="px-8 pt-10 pb-10">
               {/* Badge */}
               <span className="inline-block bg-brand-muted text-brand text-xs font-bold px-3 py-1 rounded-full mb-6">
-                Most Popular
+                Start Here
               </span>
 
               {/* Price */}
+              <span className="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">
+                Starting at
+              </span>
               <div className="flex items-end gap-1 mb-2">
                 <span className="text-6xl font-black text-gray-900 leading-none tracking-tight">
-                  $149
+                  {PLAN_CATALOG.basic.priceDisplay.replace("/month", "")}
                 </span>
                 <span className="text-xl text-gray-400 font-medium pb-1">/month</span>
               </div>
               <p className="text-sm text-gray-400 mb-8">
-                12-month agreement · Cancel anytime after the first year
+                Cancel anytime — no long-term contract.
               </p>
 
               {/* Features */}
-              <ul className="space-y-3.5 mb-9" role="list">
+              <ul className="space-y-3.5 mb-6" role="list">
                 {includes.map((item) => (
                   <li key={item} className="flex items-center gap-3">
                     <CheckCircle2
@@ -87,10 +83,25 @@ export default function PricingSection() {
                       className="text-brand flex-shrink-0"
                       aria-hidden="true"
                     />
-                    <span className="text-sm text-gray-700">{item}</span>
+                    <span className="text-sm text-gray-700">
+                      {item}
+                      {item === "Unlimited edits to your website" && (
+                        <span className="text-gray-400">
+                          {" "}
+                          — edit instantly yourself, no request needed
+                        </span>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
+
+              {/* Growth upsell */}
+              <p className="text-xs text-gray-400 mb-6 pb-6 border-b border-gray-100">
+                Need more visibility? {PLAN_CATALOG.growth.label} (
+                {PLAN_CATALOG.growth.priceDisplay}) adds multi-city SEO pages
+                and lead forms — upgrade anytime from your dashboard.
+              </p>
 
               {/* CTA */}
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>

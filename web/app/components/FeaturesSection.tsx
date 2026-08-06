@@ -25,7 +25,7 @@ const columns = [
       "Managed hosting",
       "Security monitoring",
       "Ongoing maintenance",
-      "Unlimited content updates",
+      "Edit content yourself, anytime",
       "Monthly performance review",
     ],
   },
@@ -47,7 +47,7 @@ export default function FeaturesSection() {
             id="features-heading"
             className="text-4xl sm:text-5xl font-bold text-gray-900 tracking-tight"
           >
-            One plan. Everything managed.
+            Everything managed. Full control, still yours.
           </h2>
         </div>
 

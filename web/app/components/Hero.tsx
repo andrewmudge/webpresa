@@ -15,7 +15,7 @@ const fadeUp = {
 
 const trustItems = [
   "Hosting included",
-  "Unlimited updates",
+  "Edit it yourself",
   "No technical skills needed",
 ];
 

@@ -22,9 +22,9 @@ const steps = [
   {
     number: "03",
     icon: RefreshCw,
-    title: "We Keep It Running",
+    title: "You're in Control",
     description:
-      "Hosting, security updates, content changes, and ongoing improvements are all included. Focus on your business — we handle the rest.",
+      "Log in anytime to update your content, photos, services, and theme — changes go live instantly, no waiting on us. Meanwhile, we handle hosting, security, and uptime in the background.",
   },
 ];
 
@@ -57,7 +57,7 @@ export default function HowItWorks() {
             An effortless process, start to finish.
           </h2>
           <p className="mt-4 text-lg text-gray-500 max-w-xl mx-auto">
-            We handle every step. You just tell us about your business — we take care of the rest.
+            We build it, host it, and secure it. You stay in control of what it says.
           </p>
         </motion.div>
 

@@ -59,14 +59,22 @@ export default function PostcardFront({
             <img src="/webpresa_w.png" alt="" className="h-[3.2cqw] w-auto" />
             <span className="text-[1.6cqw] font-bold tracking-wide text-(--color-brand)">WEBPRESA</span>
           </div>
-          <div className="w-[46cqw]">
+          <div className="w-[50cqw]">
             <PostcardDiagonalBanner />
           </div>
         </div>
 
-        {/* Main content — safe-zone padded */}
-        <div className="flex flex-1 gap-[2.5cqw]" style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}>
-          <div className="flex w-[38%] flex-col justify-center gap-[1.5cqh]">
+        {/* Main content — safe-zone padded. min-h-0 throughout: these are flex
+            children in columns whose height must come from the flex layout
+            (so the device mockup below is properly bounded by the space
+            actually left after the header/footer), not from their own
+            content — flex items default to min-height:auto, which otherwise
+            lets content force a taller box than its share of the row. */}
+        <div
+          className="flex min-h-0 flex-1 gap-[2.5cqw]"
+          style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}
+        >
+          <div className="flex min-h-0 w-[38%] flex-col justify-center gap-[1.5cqh]">
             <h1 className="text-[3.3cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
               We built <span className="text-(--color-brand)">{businessName}</span> a new website.
             </h1>
@@ -100,11 +108,21 @@ export default function PostcardFront({
             <ArrowRight className="h-[3.5cqw] w-[3.5cqw] text-(--color-brand)" />
           </div>
 
-          <div className="flex w-[54%] flex-col justify-center gap-[1.2cqh]">
-            <span className="w-fit rounded-full bg-(--color-brand) px-[1.2cqw] py-[0.5cqh] text-[1.1cqw] font-semibold text-white">
+          <div className="flex min-h-0 w-[54%] flex-col items-center gap-[1cqh]">
+            <span className="w-fit shrink-0 rounded-full bg-(--color-brand) px-[1.2cqw] py-[0.5cqh] text-[1.1cqw] font-semibold text-white">
               YOUR NEW WEBSITE
             </span>
-            <PostcardDeviceMockup desktopSrc={afterDesktopScreenshotSrc} mobileSrc={afterMobileScreenshotSrc} />
+            {/* The device mockup is sized from this box's HEIGHT (flex-1 of
+                whatever the row leaves after the badge above), with its own
+                width derived from aspect-ratio — not the reverse. Sizing it
+                from the column's WIDTH instead (54% of the card) was the
+                actual bug: on this landscape card, that produced a box
+                taller than the vertical space actually available, so it
+                overflowed upward into the header and downward past the
+                footer instead of being contained. */}
+            <div className="min-h-0 w-full flex-1">
+              <PostcardDeviceMockup desktopSrc={afterDesktopScreenshotSrc} mobileSrc={afterMobileScreenshotSrc} />
+            </div>
           </div>
         </div>
 

@@ -31,10 +31,10 @@ const rows = [
     webpresa: { value: "Not required", type: "good" },
   },
   {
-    label: "Ongoing Updates",
+    label: "Who Makes Edits",
     agency: { value: "Billable hours", type: "bad" },
-    diy: { value: "Do it yourself", type: "neutral" },
-    webpresa: { value: "Unlimited, included", type: "good" },
+    diy: { value: "You build & edit alone", type: "neutral" },
+    webpresa: { value: "Edit it yourself, instantly", type: "good" },
   },
   {
     label: "SEO Foundation",

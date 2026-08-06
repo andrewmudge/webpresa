@@ -21,9 +21,9 @@ const faqs = [
       "Yes, absolutely. Your domain name is yours. If you already have one, we'll connect it to your new site. If you need one, we'll help you register it in your name. You always remain the owner.",
   },
   {
-    question: "Can I request changes?",
+    question: "Can I make changes myself?",
     answer:
-      "Unlimited edits are included in your subscription. Need to update your hours, add a new service, or swap out a photo? Just send us a message and we'll handle it—typically within one business day.",
+      "Yes — you get full access to your own website editor. Update your hours, add a service, swap a photo, change your theme, or edit your content anytime, and publish the changes yourself instantly. No waiting on us, no request tickets.",
   },
   {
     question: "Is hosting included?",
@@ -31,9 +31,9 @@ const faqs = [
       "Yes. Fast, secure, managed hosting is included in your monthly subscription. We handle all server maintenance, SSL certificates, uptime monitoring, and performance optimization.",
   },
   {
-    question: "What happens after 12 months?",
+    question: "Can I cancel anytime?",
     answer:
-      "After the initial 12-month agreement, your subscription continues month-to-month. You can cancel anytime with 30 days' notice. If you decide to cancel, we'll help you transition your domain and content.",
+      "Yes. There's no long-term contract. You can change plans, update your payment method, or cancel directly from your dashboard's billing page — no phone calls or emails required.",
   },
   {
     question: "Can you replace my existing website?",
