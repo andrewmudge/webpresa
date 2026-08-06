@@ -218,7 +218,7 @@ function RecipientCard({
               </a>
             </p>
             <p className="mt-1 text-xs text-gray-400">
-              No scanner? Visit <span className="font-mono">webpresa.com/r</span> and enter this code.
+              No scanner? Visit <span className="font-mono">webpresa.com/access</span> and enter this code.
             </p>
             <div className="mt-2 flex gap-4 text-xs text-gray-500">
               <span>

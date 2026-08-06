@@ -3980,6 +3980,14 @@ this one field set).
   can't scan the QR (see "Manual entry fallback" below). Coexists with
   `/r/[campaignCode]` the same way `/claim` coexists with
   `/claim/[claimToken]`.
+- **`GET /access`** — a plain `redirect('/r')`; the friendlier address
+  actually printed on postcards and told to people, since "webpresa.com/r"
+  reads as meaningless shorthand to a customer.
+- **`GET /acess`, `/acces`, `/accsess`, `/acesss`, `/aress`** — the five
+  most likely misspellings of "access" (missing/doubled/transposed
+  letters), each its own `app/{name}/page.tsx` with the same one-line
+  `redirect('/r')`, catching a mistyped postcard address. Each redirects
+  straight to `/r`, not chained through `/access`.
 - **`GET /api/campaigns/[campaignRecipientId]/qr`** — admin-session-gated
   Route Handler; renders a QR PNG on demand from
   `https://webpresa.com/r/{campaignCode}` (via `qrcode`), for the admin
@@ -4098,6 +4106,20 @@ itself; nothing about the destination is ever trusted from the request
 beyond the code.
 
 ## Manual entry fallback
+
+**`GET /access`** (`app/access/page.tsx`) — the address actually printed on
+postcards and told to people. "webpresa.com/r" reads as meaningless
+shorthand to a customer even though it stands for "redirect" internally, so
+`/access` is a plain Server Component that does nothing but
+`redirect('/r')` (a temporary, 307 redirect — not `permanentRedirect()`,
+since a 308 would get cached aggressively by browsers and make the alias
+harder to adjust later). `/r` itself is unchanged and still works directly.
+
+Five sibling pages — `/acess`, `/acces`, `/accsess`, `/acesss`, `/aress` —
+cover the most likely ways someone mistypes "access" reading it off a
+postcard (a missing letter, a doubled letter, `cc`→`r`). Each is its own
+`app/{name}/page.tsx` with the identical one-line `redirect('/r')`, and
+each redirects straight to `/r` rather than chaining through `/access`.
 
 **`GET /r`** (`app/r/page.tsx`) — a static page coexisting with the dynamic
 `/r/[campaignCode]` route (the same "page + sibling dynamic route" pairing

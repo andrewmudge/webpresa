@@ -8038,3 +8038,68 @@ npm run build        — succeeds; /r (static page) and /r/[campaignCode] (dynam
 ```
 
 No infra/table changes.
+
+---
+
+# /access — a friendlier public alias for /r
+
+**Date:** 2026-08-06
+
+The user pointed out that "webpresa.com/r" means nothing to a customer — it only makes sense internally as shorthand for "redirect." Added `webpresa.com/access` as the address that actually gets printed on postcards and shown in the admin UI, while `/r` keeps doing its job underneath, unchanged.
+
+`app/access/page.tsx` is a plain Server Component that calls `redirect('/r')` — nothing else. A temporary (307) redirect rather than `permanentRedirect()` (308): 308s get cached aggressively by browsers, which would make this alias harder to adjust later if needed — not worth trading away this early in the feature's life for the marginal benefit of a permanent redirect on what's an internal utility URL, not a public content page. Updated the admin recipient card's "No scanner?" hint and the Stage 21 docs to point at `/access` instead of `/r`.
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                             MODIFIED — Stage 21 "Manual entry fallback" + Required routes note /access
+web/docs/architecture.md                                                                                MODIFIED — Stage 21 section gains the /access paragraph
+web/docs/build_log.md                                                                                   MODIFIED — this entry
+web/app/access/page.tsx                                                                                 NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                     MODIFIED — "No scanner?" hint now points at webpresa.com/access
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, pre-existing unrelated warnings only
+npm test             — full suite unaffected (no new logic to test — a zero-branch redirect page)
+npm run build        — succeeds; /access registers as a route with no conflicts
+```
+
+No infra/table changes.
+
+---
+
+# Misspelling-tolerant redirects for /access
+
+**Date:** 2026-08-06
+
+The user flagged five likely ways someone mistypes "access" reading it off a postcard, and asked for all of them to still land on `/r`: `acess` (missing a "c"), `acces` (missing the final "s"), `accsess` (extra "s" in the middle), `acesss` (missing a "c", extra "s" at the end), and `aress` (double "cc" swapped for "r").
+
+Added five more one-line redirect pages, identical in shape to `app/access/page.tsx` — each its own `app/{name}/page.tsx` calling `redirect('/r')` directly (not chained through `/access`, to avoid an unnecessary extra hop).
+
+## Files changed
+
+```
+web/docs/implementation.md                                                                             MODIFIED — Required routes + Manual entry fallback note the 5 misspelling siblings
+web/docs/architecture.md                                                                                MODIFIED — /access paragraph gains the misspelling-siblings sentence
+web/docs/build_log.md                                                                                   MODIFIED — this entry
+web/app/acess/page.tsx                                                                                  NEW
+web/app/acces/page.tsx                                                                                  NEW
+web/app/accsess/page.tsx                                                                                NEW
+web/app/acesss/page.tsx                                                                                 NEW
+web/app/aress/page.tsx                                                                                  NEW
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes
+npm run lint         — 0 errors, pre-existing unrelated warnings only
+npm test             — full suite unaffected (no new logic — five more zero-branch redirect pages)
+npm run build        — succeeds; all 5 routes registered with no conflicts
+```
+
+No infra/table changes.
