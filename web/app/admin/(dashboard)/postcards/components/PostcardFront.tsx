@@ -1,10 +1,11 @@
 import { Caveat } from 'next/font/google';
-import { ArrowRight, Globe, Lock, CornerDownRight } from 'lucide-react';
+import { Globe, Lock, CornerDownRight } from 'lucide-react';
 import PostcardFrame from './PostcardFrame';
 import PostcardDeviceMockup from './PostcardDeviceMockup';
 import PostcardDiagonalBanner from './PostcardDiagonalBanner';
 import PostcardQrWithBadge from './PostcardQrWithBadge';
 import { POSTCARD_SAFE_ZONE_INSET_PERCENT } from './postcard-size';
+import { POSTCARD_BLUE } from './postcard-colors';
 
 const caveat = Caveat({ subsets: ['latin'], weight: '600' });
 
@@ -25,6 +26,22 @@ const safeZonePadding = {
   paddingTop: `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}cqh`,
   paddingBottom: `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}cqh`,
 };
+
+/**
+ * A hand-drawn-style curved arrow (quadratic curve + chevron head),
+ * matching the "Scan Me!" corner-arrow's informal, marketing-sketch feel —
+ * used in place of a plain straight `ArrowRight` for the before→after
+ * connector, per 2026-08-06 feedback ("a stylish arrow... similar to the
+ * one in scan me").
+ */
+function CurvedArrow({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 60" fill="none" className={className} aria-hidden="true">
+      <path d="M4 44 Q 46 6 92 24" stroke={POSTCARD_BLUE} strokeWidth="7" strokeLinecap="round" />
+      <path d="M76 12 L94 24 L80 40" stroke={POSTCARD_BLUE} strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
 
 /**
  * The standardized Webpresa postcard front (Stage 22) — one fixed layout,
@@ -54,12 +71,19 @@ export default function PostcardFront({
   return (
     <PostcardFrame>
       <div className="flex h-full flex-col bg-white">
-        {/* Header — full-bleed row: logo (safe-zone padded) + diagonal banner (edge-to-edge) */}
+        {/* Header — full-bleed row: logo (safe-zone padded, plus extra
+            margin so it clears the dotted guide with room to spare, not
+            sitting flush on it) + diagonal banner (edge-to-edge). */}
         <div className="flex items-stretch justify-between">
-          <div className="flex items-center gap-[0.6cqw] py-[1.5cqh]" style={{ paddingLeft: safeZonePadding.paddingLeft }}>
+          <div
+            className="flex items-center gap-[0.7cqw] pb-[1.5cqh] pt-[2.2cqh]"
+            style={{ paddingLeft: `calc(${safeZonePadding.paddingLeft} + 1.5cqw)` }}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/webpresa_w.png" alt="" className="h-[3.2cqw] w-auto" />
-            <span className="text-[1.6cqw] font-bold tracking-wide text-(--color-brand)">WEBPRESA</span>
+            <img src="/webpresa_logo.png" alt="" className="h-[3.6cqw] w-auto" />
+            <span className="text-[1.6cqw] font-bold tracking-wide" style={{ color: POSTCARD_BLUE }}>
+              WEBPRESA
+            </span>
           </div>
           <div className="w-[50cqw]">
             <PostcardDiagonalBanner />
@@ -73,17 +97,21 @@ export default function PostcardFront({
             content — flex items default to min-height:auto, which otherwise
             lets content force a taller box than its share of the row. */}
         <div
-          className="flex min-h-0 flex-1 gap-[2.5cqw]"
+          className="flex min-h-0 flex-1 gap-[2cqw]"
           style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}
         >
-          <div className="flex min-h-0 w-[38%] flex-col justify-center gap-[1.2cqh]">
+          <div className="flex min-h-0 w-[36%] flex-col justify-center gap-[1.2cqh]">
             <h1 className="text-[3.1cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
-              Websites are hard.
+              Websites
               <br />
-              <span className="text-(--color-brand)">We already built yours.</span>
+              are hard.
+              <br />
+              <span style={{ color: POSTCARD_BLUE }}>We already</span>
+              <br />
+              <span style={{ color: POSTCARD_BLUE }}>built yours.</span>
             </h1>
 
-            <div className="relative mt-[0.8cqh] w-[70%]">
+            <div className="relative mt-[0.8cqh] w-[80%]">
               <span className="absolute -top-[1.4cqh] left-[6%] z-10 rounded-full bg-gray-900 px-[1cqw] py-[0.35cqh] text-[0.9cqw] font-semibold text-white">
                 YOUR CURRENT SITE
               </span>
@@ -98,23 +126,21 @@ export default function PostcardFront({
             </div>
           </div>
 
-          <div className="flex w-[8%] items-center justify-center">
-            <ArrowRight className="h-[3.5cqw] w-[3.5cqw] text-(--color-brand)" />
+          <div className="flex w-[6%] items-center justify-center">
+            <CurvedArrow className="h-[3.2cqw] w-[5.2cqw]" />
           </div>
 
-          <div className="flex min-h-0 w-[54%] flex-col items-center gap-[1cqh]">
-            <span className="w-fit shrink-0 rounded-full bg-(--color-brand) px-[1.2cqw] py-[0.5cqh] text-[1.1cqw] font-semibold text-white">
+          {/* w-[58%], up from 54%: reclaims the width the arrow column gave
+              up above (6% vs. the old 8%) so the mockup keeps roughly the
+              same footprint — the actual fix for the mockup being cut off
+              and crossing outside the safe zone is the "contain" sizing in
+              PostcardDeviceMockup.tsx (max-width/max-height + aspect-ratio
+              inside this centering flex box), not this width number. */}
+          <div className="flex min-h-0 w-[58%] flex-col items-center gap-[1cqh]">
+            <span className="w-fit shrink-0 rounded-full px-[1.2cqw] py-[0.5cqh] text-[1.1cqw] font-semibold text-white" style={{ backgroundColor: POSTCARD_BLUE }}>
               YOUR NEW WEBSITE
             </span>
-            {/* The device mockup is sized from this box's HEIGHT (flex-1 of
-                whatever the row leaves after the badge above), with its own
-                width derived from aspect-ratio — not the reverse. Sizing it
-                from the column's WIDTH instead (54% of the card) was the
-                actual bug in an earlier version: on this landscape card,
-                that produced a box taller than the vertical space actually
-                available, so it overflowed upward into the header and
-                downward past the footer instead of being contained. */}
-            <div className="min-h-0 w-full flex-1">
+            <div className="flex min-h-0 w-full flex-1 items-center justify-center">
               <PostcardDeviceMockup desktopSrc={afterDesktopScreenshotSrc} mobileSrc={afterMobileScreenshotSrc} />
             </div>
           </div>
@@ -123,11 +149,13 @@ export default function PostcardFront({
         {/* Footer CTA — full-bleed band, content padded to the safe zone
             inside it. Two equally-valid paths to the same destination: scan
             the QR, or go type the access code in at webpresa.com/access
-            (a real route — see web/app/access/page.tsx). */}
-        <div
-          className="relative mt-auto flex items-center gap-[1.5cqw] overflow-hidden bg-(--color-brand-dark) py-[1.8cqh]"
-          style={safeZonePadding}
-        >
+            (a real route — see web/app/access/page.tsx).
+
+            Section widths are explicit (not content-sized) so the OR
+            divider lands at roughly 1/3 of the *whole card's* width, not
+            just after however wide the QR happens to be — the left zone's
+            width is safe-zone-padding + 30cqw ≈ card-width/3. */}
+        <div className="relative mt-auto flex items-stretch overflow-hidden py-[1.8cqh]" style={{ ...safeZonePadding, backgroundColor: POSTCARD_BLUE }}>
           {/* Decorative dot-grid texture, bottom-left corner only — no image asset needed. */}
           <div
             aria-hidden="true"
@@ -135,36 +163,38 @@ export default function PostcardFront({
             style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)', backgroundSize: '0.6cqw 0.6cqw' }}
           />
 
-          <div className="relative flex shrink-0 items-end gap-[0.4cqw]">
-            <p className={`${caveat.className} rotate-[-4deg] pb-[0.8cqw] text-[1.7cqw] leading-none text-white`}>Scan Me!</p>
-            <CornerDownRight className="h-[1.7cqw] w-[1.7cqw] shrink-0 pb-[0.3cqw] text-white/80" />
-          </div>
-          <div className="w-[9cqw] shrink-0">
-            <PostcardQrWithBadge qrDataUri={qrDataUri} />
+          <div className="flex w-[30cqw] shrink-0 items-center justify-end gap-[0.8cqw]">
+            <div className="relative flex shrink-0 items-end gap-[0.5cqw]">
+              <p className={`${caveat.className} rotate-[-4deg] pb-[1.2cqw] text-[2.3cqw] leading-none text-white`}>Scan Me!</p>
+              <CornerDownRight className="h-[2.3cqw] w-[2.3cqw] shrink-0 pb-[0.4cqw] text-white/80" />
+            </div>
+            <div className="w-[13cqw] shrink-0">
+              <PostcardQrWithBadge qrDataUri={qrDataUri} />
+            </div>
           </div>
 
-          <div className="relative flex h-[8cqw] w-[3cqw] shrink-0 items-center justify-center">
+          <div className="relative flex w-[3cqw] shrink-0 items-center justify-center">
             <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/25" />
-            <span className="relative flex h-[2.4cqw] w-[2.4cqw] shrink-0 items-center justify-center rounded-full bg-white text-[1cqw] font-bold text-(--color-brand)">
+            <span className="relative flex h-[2.4cqw] w-[2.4cqw] shrink-0 items-center justify-center rounded-full bg-white text-[1cqw] font-bold" style={{ color: POSTCARD_BLUE }}>
               OR
             </span>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-[0.8cqh]">
-            <div className="flex items-center gap-[0.8cqw]">
-              <Globe className="h-[1.6cqw] w-[1.6cqw] shrink-0 text-white/70" />
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-[1cqh] pl-[1.5cqw]">
+            <div className="flex items-center gap-[1cqw]">
+              <Globe className="h-[2cqw] w-[2cqw] shrink-0 text-white/70" />
               <div className="min-w-0">
-                <p className="text-[0.85cqw] font-semibold tracking-wide text-(--color-accent)">GO TO:</p>
-                <p className="truncate text-[1.5cqw] font-bold leading-tight text-white">webpresa.com/access</p>
+                <p className="text-[1cqw] font-semibold tracking-wide text-(--color-accent)">GO TO:</p>
+                <p className="truncate text-[2cqw] font-bold leading-tight text-white">webpresa.com/access</p>
               </div>
             </div>
             <div className="h-px bg-white/20" />
-            <div className="flex items-center gap-[0.8cqw]">
-              <Lock className="h-[1.6cqw] w-[1.6cqw] shrink-0 text-white/70" />
+            <div className="flex items-center gap-[1cqw]">
+              <Lock className="h-[2cqw] w-[2cqw] shrink-0 text-white/70" />
               <div className="min-w-0">
-                <p className="text-[0.85cqw] font-semibold tracking-wide text-(--color-accent)">ENTER YOUR ACCESS CODE:</p>
+                <p className="text-[1cqw] font-semibold tracking-wide text-(--color-accent)">ENTER YOUR ACCESS CODE:</p>
                 {accessCodeDisplay && (
-                  <span className="mt-[0.2cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.2cqh] text-[1.3cqw] font-bold tracking-wide text-gray-900">
+                  <span className="mt-[0.3cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.25cqh] text-[1.7cqw] font-bold tracking-wide text-gray-900">
                     {accessCodeDisplay}
                   </span>
                 )}

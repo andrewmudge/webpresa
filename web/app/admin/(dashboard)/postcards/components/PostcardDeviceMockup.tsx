@@ -60,15 +60,16 @@ export default function PostcardDeviceMockup({ desktopSrc, mobileSrc }: Postcard
   }
 
   return (
-    // h-full, not w-full: this component's caller must give its wrapper a
-    // *definite height* (e.g. `flex-1` inside a `min-h-0` column) and let
-    // width be derived from that via aspect-ratio, not the other way
-    // around. On a landscape postcard, available height is the scarce
-    // resource once a header and footer band both take their own share —
-    // deriving height FROM width is exactly what overflowed the header
-    // last time. See `PostcardFront.tsx`'s right column for the parent
-    // half of this contract.
-    <div className="relative mx-auto h-full" style={{ aspectRatio: `${VIEWBOX.width} / ${VIEWBOX.height}` }}>
+    // `maxWidth`/`maxHeight: 100%` + `aspectRatio`, no explicit width or
+    // height, inside a centering flex parent (see `PostcardFront.tsx`'s
+    // right column) — this is the standard CSS "contain" pattern for a
+    // fixed-ratio box: the browser picks whichever of width/height is the
+    // binding constraint so the box never overflows either axis. A plain
+    // `h-full` (an earlier version of this fix) derived width purely from
+    // height and could still overflow *width* on a narrow column — that's
+    // what was cutting the phone off and pushing the mockup outside the
+    // safe zone.
+    <div className="relative" style={{ aspectRatio: `${VIEWBOX.width} / ${VIEWBOX.height}`, maxWidth: '100%', maxHeight: '100%' }}>
       {/* Bezels — painted first, behind the screenshots. */}
       <svg viewBox={`0 0 ${VIEWBOX.width} ${VIEWBOX.height}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden="true">
         {desktopSrc && (

@@ -1,3 +1,5 @@
+import { POSTCARD_BLUE } from './postcard-colors';
+
 export interface PostcardQrWithBadgeProps {
   qrDataUri?: string;
 }
@@ -15,7 +17,7 @@ export interface PostcardQrWithBadgeProps {
  */
 export default function PostcardQrWithBadge({ qrDataUri }: PostcardQrWithBadgeProps) {
   return (
-    <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl border-2 border-(--color-brand) bg-white p-[6%]">
+    <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl border-2 bg-white p-[6%]" style={{ borderColor: POSTCARD_BLUE }}>
       {qrDataUri ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={qrDataUri} alt="Scan to view your new website" className="h-full w-full" />
@@ -23,7 +25,7 @@ export default function PostcardQrWithBadge({ qrDataUri }: PostcardQrWithBadgePr
         <span className="text-center text-xs text-gray-400">No QR — postcard has no CampaignRecipient</span>
       )}
       {qrDataUri && (
-        <span className="absolute flex h-[20%] w-[20%] items-center justify-center rounded-full border-2 border-(--color-brand) bg-white shadow-sm">
+        <span className="absolute flex h-[20%] w-[20%] items-center justify-center rounded-full border-2 bg-white shadow-sm" style={{ borderColor: POSTCARD_BLUE }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/webpresa_w.png" alt="" className="h-[65%] w-[65%] object-contain" />
         </span>
