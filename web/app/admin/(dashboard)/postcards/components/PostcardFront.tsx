@@ -76,14 +76,11 @@ export default function PostcardFront({
             sitting flush on it) + diagonal banner (edge-to-edge). */}
         <div className="flex items-stretch justify-between">
           <div
-            className="flex items-center gap-[0.7cqw] pb-[1.5cqh] pt-[2.2cqh]"
+            className="flex items-center pb-[1.5cqh] pt-[2.2cqh]"
             style={{ paddingLeft: `calc(${safeZonePadding.paddingLeft} + 1.5cqw)` }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/webpresa_logo.png" alt="" className="h-[3.6cqw] w-auto" />
-            <span className="text-[1.6cqw] font-bold tracking-wide" style={{ color: POSTCARD_BLUE }}>
-              WEBPRESA
-            </span>
+            <img src="/webpresa_logo.png" alt="Webpresa" className="h-[6.5cqw] w-auto" />
           </div>
           <div className="w-[50cqw]">
             <PostcardDiagonalBanner />
@@ -100,8 +97,8 @@ export default function PostcardFront({
           className="flex min-h-0 flex-1 gap-[2cqw]"
           style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}
         >
-          <div className="flex min-h-0 w-[36%] flex-col justify-center gap-[1.2cqh]">
-            <h1 className="text-[3.9cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
+          <div className="flex min-h-0 w-[36%] flex-col justify-between gap-[1.2cqh]">
+            <h1 className="flex flex-1 flex-col justify-center text-[5.2cqw] font-bold leading-[1.08] tracking-tight text-gray-900">
               Websites
               <br />
               are hard.
@@ -111,7 +108,7 @@ export default function PostcardFront({
               <span style={{ color: POSTCARD_BLUE }}>built yours.</span>
             </h1>
 
-            <div className="relative mt-[0.8cqh] w-[80%]">
+            <div className="relative w-[80%]">
               <span className="absolute -top-[1.4cqh] left-[6%] z-10 rounded-full bg-gray-900 px-[1cqw] py-[0.35cqh] text-[0.9cqw] font-semibold text-white">
                 YOUR CURRENT SITE
               </span>
@@ -171,8 +168,8 @@ export default function PostcardFront({
 
           <div className="flex w-[30cqw] shrink-0 items-center justify-center gap-[0.8cqw]">
             <div className="relative flex shrink-0 items-end gap-[0.5cqw]">
-              <p className={`${caveat.className} rotate-[-4deg] pb-[1.2cqw] text-[3.5cqw] leading-none text-white`}>Scan Me!</p>
-              <CornerDownRight className="h-[3.5cqw] w-[3.5cqw] shrink-0 pb-[0.4cqw] text-white/80" />
+              <p className={`${caveat.className} rotate-[-4deg] pb-[1cqw] text-[2.2cqw] leading-none text-white`}>Scan Me!</p>
+              <CornerDownRight className="h-[2.2cqw] w-[2.2cqw] shrink-0 pb-[0.3cqw] text-white/80" />
             </div>
             <div className="w-[13cqw] shrink-0">
               <PostcardQrWithBadge qrDataUri={qrDataUri} />
@@ -186,12 +183,10 @@ export default function PostcardFront({
             </span>
           </div>
 
-          {/* justify-center on the flex-1 outer box, wrapping a width-auto
-              inner column — centers the whole two-row block between the OR
-              divider and the card's right edge, rather than it hugging the
-              divider side (its old min-w-0/flex-1/truncate setup let each
-              row grow left-to-right instead of centering as a unit). */}
-          <div className="flex min-w-0 flex-1 items-center justify-center">
+          {/* justify-start (not justify-center): anchored close to the OR
+              divider rather than centered toward the card's right edge —
+              "more to the left" per 2026-08-06 feedback. */}
+          <div className="flex min-w-0 flex-1 items-center justify-start pl-[1.2cqw]">
             <div className="flex flex-col gap-[1.2cqh]">
               <div className="flex items-center gap-[1.2cqw]">
                 <Globe className="h-[2.6cqw] w-[2.6cqw] shrink-0 text-white/70" />

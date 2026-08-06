@@ -42,12 +42,15 @@ const LAPTOP_SCREEN_PERCENT = {
 // Phone outer bezel: positioned overlapping the laptop's bottom-right
 // corner — top-left at (660,230), 260 wide × 560 tall (~9:19.5 portrait).
 const PHONE_BEZEL = { x: 660, y: 230, width: 260, height: 560, rx: 24 };
-// Screen = bezel inset by 8 on every side: (668,238) to (912,790).
+// Screen = bezel inset by 20 on every side: (680,250) to (900,770). Wider
+// than the laptop's proportional inset on purpose — at 8 units (the first
+// version of this component) the resulting border was only ~0.9% of the
+// whole mockup's width and read as "not there" once actually rendered.
 const PHONE_SCREEN_PERCENT = {
-  left: (668 / VIEWBOX.width) * 100, // 72.61%
-  top: (238 / VIEWBOX.height) * 100, // 30.13%
-  width: (244 / VIEWBOX.width) * 100, // 26.52%
-  height: (544 / VIEWBOX.height) * 100, // 68.86%
+  left: (680 / VIEWBOX.width) * 100, // 73.91%
+  top: (250 / VIEWBOX.height) * 100, // 31.65%
+  width: (220 / VIEWBOX.width) * 100, // 23.91%
+  height: (520 / VIEWBOX.height) * 100, // 65.82%
 };
 
 export default function PostcardDeviceMockup({ desktopSrc, mobileSrc }: PostcardDeviceMockupProps) {
