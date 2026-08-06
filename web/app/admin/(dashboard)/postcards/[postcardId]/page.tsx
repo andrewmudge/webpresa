@@ -6,6 +6,7 @@ import { getCampaignRecipientById } from '@/lib/db/campaign-recipients';
 import { getLatestExistingSiteScreenshots } from '@/lib/screenshots/latest-existing-site-screenshot';
 import { getLatestPreviewScreenshots } from '@/lib/screenshots/latest-preview-screenshot';
 import { generateCampaignQrPng } from '@/lib/campaign/qr';
+import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
 import { getLobSenderAddress, type LobSenderAddress } from '@/lib/env/lob-sender-address';
 import PostcardFront from '../components/PostcardFront';
@@ -44,12 +45,11 @@ export default async function PostcardDetailPage({ params }: Props) {
   ]);
 
   let qrDataUri: string | undefined;
-  let redirectUrlDisplay: string | undefined;
+  let accessCodeDisplay: string | undefined;
   if (recipient) {
-    const appBaseUrl = resolveAppBaseUrl();
-    const png = await generateCampaignQrPng(recipient.campaignCode, appBaseUrl);
+    const png = await generateCampaignQrPng(recipient.campaignCode, resolveAppBaseUrl());
     qrDataUri = `data:image/png;base64,${png.toString('base64')}`;
-    redirectUrlDisplay = `${new URL(`/r/${recipient.campaignCode}`, appBaseUrl).host}/r/${recipient.campaignCode}`;
+    accessCodeDisplay = formatCampaignCodeForDisplay(recipient.campaignCode);
   }
 
   let senderAddress: LobSenderAddress | undefined;
@@ -85,7 +85,7 @@ export default async function PostcardDetailPage({ params }: Props) {
                 afterDesktopScreenshotSrc={afterShots.desktopSrc}
                 afterMobileScreenshotSrc={afterShots.mobileSrc}
                 qrDataUri={qrDataUri}
-                redirectUrlDisplay={redirectUrlDisplay}
+                accessCodeDisplay={accessCodeDisplay}
               />
             </PostcardZoom>
           </div>

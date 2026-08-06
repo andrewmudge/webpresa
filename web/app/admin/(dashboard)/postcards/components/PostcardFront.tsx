@@ -1,13 +1,12 @@
 import { Caveat } from 'next/font/google';
-import { ArrowRight, CheckCircle2, MousePointerClick, CornerDownLeft } from 'lucide-react';
+import { ArrowRight, Globe, Lock, CornerDownRight } from 'lucide-react';
 import PostcardFrame from './PostcardFrame';
 import PostcardDeviceMockup from './PostcardDeviceMockup';
 import PostcardDiagonalBanner from './PostcardDiagonalBanner';
+import PostcardQrWithBadge from './PostcardQrWithBadge';
 import { POSTCARD_SAFE_ZONE_INSET_PERCENT } from './postcard-size';
 
 const caveat = Caveat({ subsets: ['latin'], weight: '600' });
-
-const CHECKLIST_ITEMS = ['Designed for your customers', 'Optimized for local search', 'Built to turn visitors into calls'];
 
 export interface PostcardFrontProps {
   businessName: string;
@@ -16,8 +15,8 @@ export interface PostcardFrontProps {
   afterMobileScreenshotSrc?: string;
   /** Data URI (`data:image/png;base64,...`) of the recipient's tracked QR code. */
   qrDataUri?: string;
-  /** Display-friendly redirect URL, e.g. `webpresa.com/r/7X9K2L` (protocol stripped). */
-  redirectUrlDisplay?: string;
+  /** Dash-grouped campaign code for the manual-entry fallback, e.g. `7X9K-2L4M-8N3P-7Q5R` (see `formatCampaignCodeForDisplay`). */
+  accessCodeDisplay?: string;
 }
 
 const safeZonePadding = {
@@ -29,11 +28,14 @@ const safeZonePadding = {
 
 /**
  * The standardized Webpresa postcard front (Stage 22) — one fixed layout,
- * dynamically populated from business data. Rebuilt to match the reference
- * marketing design (2026-08-05): hero headline with the business name
- * highlighted, a diagonal "Modern. Mobile Friendly. Built to Convert."
- * banner, a small current-site thumbnail → arrow → laptop/phone mockup of
- * the new site, a checklist, and a dark CTA footer with the QR code.
+ * dynamically populated from business data. Rebuilt (2026-08-06) to match
+ * the final reference design: generic hero headline (no business-name
+ * interpolation), a diagonal "Modern. Mobile Friendly. Built to Convert."
+ * banner, a current-site thumbnail → arrow → laptop/phone mockup of the
+ * new site, and a dark CTA footer offering two paths — scan the QR, or go
+ * to `webpresa.com/access` and enter the printed access code — both
+ * resolving to the same real `CampaignRecipient`/campaign-code mechanism
+ * from Stage 21.
  *
  * Two layers, matching real print bleed practice: decorative background
  * elements (the diagonal banner, the footer band) span the full bleed
@@ -47,7 +49,7 @@ export default function PostcardFront({
   afterDesktopScreenshotSrc,
   afterMobileScreenshotSrc,
   qrDataUri,
-  redirectUrlDisplay,
+  accessCodeDisplay,
 }: PostcardFrontProps) {
   return (
     <PostcardFrame>
@@ -74,34 +76,26 @@ export default function PostcardFront({
           className="flex min-h-0 flex-1 gap-[2.5cqw]"
           style={{ paddingLeft: safeZonePadding.paddingLeft, paddingRight: safeZonePadding.paddingRight }}
         >
-          <div className="flex min-h-0 w-[38%] flex-col justify-center gap-[1.5cqh]">
-            <h1 className="text-[3.3cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
-              We built <span className="text-(--color-brand)">{businessName}</span> a new website.
+          <div className="flex min-h-0 w-[38%] flex-col justify-center gap-[1.2cqh]">
+            <h1 className="text-[3.1cqw] font-bold leading-[1.05] tracking-tight text-gray-900">
+              Websites are hard.
+              <br />
+              <span className="text-(--color-brand)">We already built yours.</span>
             </h1>
-            <p className="text-[1.3cqw] leading-snug text-gray-500">
-              A modern site designed to get you found and <span className="text-(--color-accent) font-medium">get you more clients</span>.
-            </p>
 
-            <div>
-              <p className="mb-[0.4cqh] text-[1cqw] font-semibold uppercase tracking-wide text-gray-400">Your current site</p>
-              <div className="flex aspect-[16/10] w-[70%] items-center justify-center overflow-hidden rounded-[0.4cqw] border border-gray-200 bg-gray-50">
+            <div className="relative mt-[0.8cqh] w-[70%]">
+              <span className="absolute -top-[1.4cqh] left-[6%] z-10 rounded-full bg-gray-900 px-[1cqw] py-[0.35cqh] text-[0.9cqw] font-semibold text-white">
+                YOUR CURRENT SITE
+              </span>
+              <div className="flex aspect-[16/10] items-center justify-center overflow-hidden rounded-[0.4cqw] border border-gray-200 bg-gray-50 pt-[1.5cqh]">
                 {beforeScreenshotSrc ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
                 ) : (
-                  <p className="p-[1cqw] text-center text-[1.5cqw] text-gray-400">No existing-site screenshot yet</p>
+                  <p className="p-[1cqw] text-center text-[1.3cqw] text-gray-400">No existing-site screenshot yet</p>
                 )}
               </div>
             </div>
-
-            <ul className="flex flex-col gap-[0.6cqh]">
-              {CHECKLIST_ITEMS.map((item) => (
-                <li key={item} className="flex items-center gap-[0.7cqw] text-[1.2cqw] text-gray-700">
-                  <CheckCircle2 className="h-[1.6cqw] w-[1.6cqw] shrink-0 text-green-500" />
-                  {item}
-                </li>
-              ))}
-            </ul>
           </div>
 
           <div className="flex w-[8%] items-center justify-center">
@@ -116,48 +110,66 @@ export default function PostcardFront({
                 whatever the row leaves after the badge above), with its own
                 width derived from aspect-ratio — not the reverse. Sizing it
                 from the column's WIDTH instead (54% of the card) was the
-                actual bug: on this landscape card, that produced a box
-                taller than the vertical space actually available, so it
-                overflowed upward into the header and downward past the
-                footer instead of being contained. */}
+                actual bug in an earlier version: on this landscape card,
+                that produced a box taller than the vertical space actually
+                available, so it overflowed upward into the header and
+                downward past the footer instead of being contained. */}
             <div className="min-h-0 w-full flex-1">
               <PostcardDeviceMockup desktopSrc={afterDesktopScreenshotSrc} mobileSrc={afterMobileScreenshotSrc} />
             </div>
           </div>
         </div>
 
-        {/* Footer CTA — full-bleed band, content padded to the safe zone inside it */}
-        <div className="mt-auto flex items-center justify-between bg-(--color-brand-dark) py-[2cqh]" style={safeZonePadding}>
-          <div className="flex items-center gap-[1.2cqw]">
-            <span className="flex h-[3.4cqw] w-[3.4cqw] shrink-0 items-center justify-center rounded-full bg-white">
-              <MousePointerClick className="h-[1.8cqw] w-[1.8cqw] text-(--color-brand)" />
-            </span>
-            <div>
-              <p className="text-[1.5cqw] font-semibold leading-tight text-white">See your new website now!</p>
-              <p className="text-[1.1cqw] leading-tight text-white/70">Scan the QR code or visit:</p>
-              {redirectUrlDisplay && (
-                <span className="mt-[0.5cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.3cqh] text-[1.1cqw] font-medium text-(--color-brand-dark)">
-                  {redirectUrlDisplay}
-                </span>
-              )}
-            </div>
+        {/* Footer CTA — full-bleed band, content padded to the safe zone
+            inside it. Two equally-valid paths to the same destination: scan
+            the QR, or go type the access code in at webpresa.com/access
+            (a real route — see web/app/access/page.tsx). */}
+        <div
+          className="relative mt-auto flex items-center gap-[1.5cqw] overflow-hidden bg-(--color-brand-dark) py-[1.8cqh]"
+          style={safeZonePadding}
+        >
+          {/* Decorative dot-grid texture, bottom-left corner only — no image asset needed. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 h-[10cqw] w-[10cqw] opacity-30"
+            style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)', backgroundSize: '0.6cqw 0.6cqw' }}
+          />
+
+          <div className="relative flex shrink-0 items-end gap-[0.4cqw]">
+            <p className={`${caveat.className} rotate-[-4deg] pb-[0.8cqw] text-[1.7cqw] leading-none text-white`}>Scan Me!</p>
+            <CornerDownRight className="h-[1.7cqw] w-[1.7cqw] shrink-0 pb-[0.3cqw] text-white/80" />
+          </div>
+          <div className="w-[9cqw] shrink-0">
+            <PostcardQrWithBadge qrDataUri={qrDataUri} />
           </div>
 
-          <div className="flex items-center gap-[0.8cqw]">
-            <p className={`${caveat.className} rotate-[-6deg] text-[1.8cqw] leading-none text-white`}>
-              Scan me!
-              <br />
-              It&apos;s fast!
-            </p>
-            <CornerDownLeft className="h-[2cqw] w-[2cqw] rotate-[-20deg] text-white/80" />
-            <span className="flex h-[7cqw] w-[7cqw] shrink-0 items-center justify-center rounded-[0.8cqw] bg-white p-[0.5cqw]">
-              {qrDataUri ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={qrDataUri} alt="Scan to view your new website" className="h-full w-full" />
-              ) : (
-                <span className="text-center text-[0.9cqw] text-gray-400">No QR — postcard has no CampaignRecipient</span>
-              )}
+          <div className="relative flex h-[8cqw] w-[3cqw] shrink-0 items-center justify-center">
+            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/25" />
+            <span className="relative flex h-[2.4cqw] w-[2.4cqw] shrink-0 items-center justify-center rounded-full bg-white text-[1cqw] font-bold text-(--color-brand)">
+              OR
             </span>
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-[0.8cqh]">
+            <div className="flex items-center gap-[0.8cqw]">
+              <Globe className="h-[1.6cqw] w-[1.6cqw] shrink-0 text-white/70" />
+              <div className="min-w-0">
+                <p className="text-[0.85cqw] font-semibold tracking-wide text-(--color-accent)">GO TO:</p>
+                <p className="truncate text-[1.5cqw] font-bold leading-tight text-white">webpresa.com/access</p>
+              </div>
+            </div>
+            <div className="h-px bg-white/20" />
+            <div className="flex items-center gap-[0.8cqw]">
+              <Lock className="h-[1.6cqw] w-[1.6cqw] shrink-0 text-white/70" />
+              <div className="min-w-0">
+                <p className="text-[0.85cqw] font-semibold tracking-wide text-(--color-accent)">ENTER YOUR ACCESS CODE:</p>
+                {accessCodeDisplay && (
+                  <span className="mt-[0.2cqh] inline-block rounded-md bg-white px-[0.8cqw] py-[0.2cqh] text-[1.3cqw] font-bold tracking-wide text-gray-900">
+                    {accessCodeDisplay}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
