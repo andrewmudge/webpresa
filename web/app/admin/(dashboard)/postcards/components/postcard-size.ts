@@ -29,3 +29,20 @@ export const POSTCARD_SAFE_ZONE_SIZE_INCHES = {
   width: POSTCARD_TRIM_SIZE_INCHES.width - POSTCARD_SAFE_ZONE_INCHES * 2,
   height: POSTCARD_TRIM_SIZE_INCHES.height - POSTCARD_SAFE_ZONE_INCHES * 2,
 };
+
+/**
+ * Inset percentages (of the full bleed canvas) for the trim and safe-zone
+ * guide lines — shared by `PostcardFrame` (draws the guide overlays) and
+ * `PostcardFront` (pads its content wrapper to at least the safe-zone
+ * inset, expressed as `cqw`/`cqh` container-query units so it tracks the
+ * card's actual rendered width/height rather than the viewport).
+ */
+export const POSTCARD_TRIM_INSET_PERCENT = {
+  x: (POSTCARD_BLEED_INCHES / POSTCARD_BLEED_SIZE_INCHES.width) * 100,
+  y: (POSTCARD_BLEED_INCHES / POSTCARD_BLEED_SIZE_INCHES.height) * 100,
+};
+
+export const POSTCARD_SAFE_ZONE_INSET_PERCENT = {
+  x: ((POSTCARD_BLEED_INCHES + POSTCARD_SAFE_ZONE_INCHES) / POSTCARD_BLEED_SIZE_INCHES.width) * 100,
+  y: ((POSTCARD_BLEED_INCHES + POSTCARD_SAFE_ZONE_INCHES) / POSTCARD_BLEED_SIZE_INCHES.height) * 100,
+};

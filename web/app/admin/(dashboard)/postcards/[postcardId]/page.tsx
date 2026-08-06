@@ -44,9 +44,12 @@ export default async function PostcardDetailPage({ params }: Props) {
   ]);
 
   let qrDataUri: string | undefined;
+  let redirectUrlDisplay: string | undefined;
   if (recipient) {
-    const png = await generateCampaignQrPng(recipient.campaignCode, resolveAppBaseUrl());
+    const appBaseUrl = resolveAppBaseUrl();
+    const png = await generateCampaignQrPng(recipient.campaignCode, appBaseUrl);
     qrDataUri = `data:image/png;base64,${png.toString('base64')}`;
+    redirectUrlDisplay = `${new URL(`/r/${recipient.campaignCode}`, appBaseUrl).host}/r/${recipient.campaignCode}`;
   }
 
   let senderAddress: LobSenderAddress | undefined;
@@ -78,11 +81,11 @@ export default async function PostcardDetailPage({ params }: Props) {
             <PostcardZoom label="Front">
               <PostcardFront
                 businessName={business.name}
-                industry={business.industry}
-                logoUrl={business.logoUrl}
                 beforeScreenshotSrc={beforeShots.desktopSrc}
-                afterScreenshotSrc={afterShots.desktopSrc}
+                afterDesktopScreenshotSrc={afterShots.desktopSrc}
+                afterMobileScreenshotSrc={afterShots.mobileSrc}
                 qrDataUri={qrDataUri}
+                redirectUrlDisplay={redirectUrlDisplay}
               />
             </PostcardZoom>
           </div>

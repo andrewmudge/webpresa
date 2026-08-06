@@ -1,10 +1,4 @@
-import { POSTCARD_BLEED_INCHES, POSTCARD_BLEED_SIZE_INCHES, POSTCARD_SAFE_ZONE_INCHES } from './postcard-size';
-
-const trimInsetXPercent = (POSTCARD_BLEED_INCHES / POSTCARD_BLEED_SIZE_INCHES.width) * 100;
-const trimInsetYPercent = (POSTCARD_BLEED_INCHES / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
-
-const safeZoneInsetXPercent = ((POSTCARD_BLEED_INCHES + POSTCARD_SAFE_ZONE_INCHES) / POSTCARD_BLEED_SIZE_INCHES.width) * 100;
-const safeZoneInsetYPercent = ((POSTCARD_BLEED_INCHES + POSTCARD_SAFE_ZONE_INCHES) / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
+import { POSTCARD_TRIM_INSET_PERCENT, POSTCARD_SAFE_ZONE_INSET_PERCENT } from './postcard-size';
 
 /**
  * Postcard-shaped layout wrapper, sized to the full 9.25"×6.25" bleed
@@ -19,20 +13,27 @@ const safeZoneInsetYPercent = ((POSTCARD_BLEED_INCHES + POSTCARD_SAFE_ZONE_INCHE
  * clips it). Purely presentational, and purely a visual guide — it does
  * not itself enforce that `children`'s content respects the safe zone, see
  * `postcard-size.ts`'s doc comment.
+ *
+ * `@container` (Tailwind v4's `container-type: inline-size`) lets
+ * `PostcardFront`'s content size itself with `cqw`/`cqh` units relative to
+ * *this frame's own rendered width*, not the viewport — this frame renders
+ * at very different pixel sizes depending on context (inline review-page
+ * preview vs. the full `PostcardZoom` modal), and viewport-based Tailwind
+ * breakpoints (`sm:`, `lg:`) would be the wrong tool for that.
  */
 export default function PostcardFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative aspect-[9.25/6.25] w-full overflow-hidden rounded-lg border border-gray-300 bg-white shadow-sm">
+    <div className="relative aspect-[9.25/6.25] w-full overflow-hidden rounded-lg border border-gray-300 bg-white shadow-sm @container">
       {children}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute border border-dashed border-red-400/70"
-        style={{ inset: `${trimInsetYPercent}% ${trimInsetXPercent}%` }}
+        style={{ inset: `${POSTCARD_TRIM_INSET_PERCENT.y}% ${POSTCARD_TRIM_INSET_PERCENT.x}%` }}
       />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute border border-dotted border-blue-400/70"
-        style={{ inset: `${safeZoneInsetYPercent}% ${safeZoneInsetXPercent}%` }}
+        style={{ inset: `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}% ${POSTCARD_SAFE_ZONE_INSET_PERCENT.x}%` }}
       />
     </div>
   );
