@@ -146,15 +146,19 @@ export default function PostcardFront({
 
         {/* Feature row: horizontally centered on the desktop display's own
             center (67.23cqw from the card's left edge, measured — not the
-            card's or header row's center), and vertically centered in the
-            gap between the top safe-zone line (4cqh) and the laptop's own
-            top edge (~17cqh, measured), so the gap above the row and the
-            gap below it (down to the laptop) are equal (2026-08-08
-            feedback). Both measurements come from this specific fixed
-            layout (column widths, canvas aspect ratios) which doesn't vary
-            per business, so they're safe to hardcode rather than compute
-            from CSS at render time. */}
-        <div className="absolute" style={{ left: '67.23cqw', top: '8.7cqh', transform: 'translateX(-50%)' }}>
+            card's or header row's center). Vertical position history, all
+            2026-08-08: started centered in the gap between the top
+            safe-zone line (4cqh) and the laptop's own top edge (top:
+            7.84cqh, equal gaps above/below); moved up 1/4" (`QUARTER_INCH_CQH`
+            = 4cqh) to 3.84cqh ("move their position up by 1/4""); that was
+            "too much", so moved back down by half of that move (2cqh) to
+            `5.84cqh` ("move down by 50% of what you moved up") — no longer
+            centered in the original gap. The 67.23/starting-7.84 baseline
+            numbers come from this specific fixed layout (column widths,
+            canvas aspect ratios) which doesn't vary per business, so
+            they're safe to hardcode rather than compute from CSS at
+            render time. */}
+        <div className="absolute" style={{ left: '67.23cqw', top: '5.84cqh', transform: 'translateX(-50%)' }}>
           <PostcardFeatureRow />
         </div>
 
@@ -269,26 +273,36 @@ export default function PostcardFront({
                 {afterMobileScreenshotSrc && (
                   // `right`/`bottom` here are % of *this wrapper's* own box
                   // (= the laptop's exact rendered box, per the comment
-                  // above), not the card — measured directly in-browser.
-                  // Both revised the same day they were first set
-                  // (2026-08-08 feedback, two rounds):
-                  // right: -4.09% (phone's *right edge* at the midpoint
-                  // between the laptop's right edge and the safe line) was
-                  // superseded by -24.09% (phone's *center* at that same
-                  // midpoint — "once again the center of the mobile display
-                  // should bisect the midpoint"), which is the right-edge
-                  // value shifted left by half the phone's own rendered
-                  // width (20% of the wrapper's width, since the phone is
-                  // `width: 40%`).
-                  // bottom: -15.4% (0.5" below the laptop's bottom) was
-                  // reduced to -7.68% (0.25" below — "raise the mobile
-                  // phone so it is only 1/4" below"). Both are safe to
-                  // hardcode as wrapper-relative %: the wrapper's own
-                  // proportions come from fixed layout math (column
-                  // width, row height, the 1030/701 canvas, the 86.25% max)
-                  // that doesn't vary per business, not from screenshot
-                  // content.
-                  <div className="absolute" style={{ width: '40%', height: '64%', right: '-24.09%', bottom: '-7.68%' }}>
+                  // above), not the card.
+                  // right: -13.88% puts the phone's own *right edge* at the
+                  // midpoint between the laptop's right edge and the card's
+                  // right safe-zone line — but NOT via the straightforward
+                  // math (-4.09%, i.e. containing-block-right-edge +
+                  // 4.09% of its width). That value was tried, measured
+                  // in-browser, and landed ~45px short: this wrapper is
+                  // absolutely positioned + auto-sized via aspect-ratio +
+                  // max-width/max-height (the "contain" pattern used
+                  // throughout these mockups), and percentage resolution
+                  // for *its own children* doesn't reliably match its
+                  // rendered box in every engine — a real discrepancy, not
+                  // a units mixup like the earlier QR one. -13.88% was
+                  // reached by measuring `right:0%` and `right:-4.09%`
+                  // directly (two points, since the relationship is still
+                  // linear — same slope as the wrapper's own width, just a
+                  // different baseline) and solving for the value that
+                  // actually lands on the midpoint; verified to land within
+                  // 0.01px. (A same-day revision briefly tried -24.09%,
+                  // i.e. the phone's *center* at the midpoint instead of
+                  // its right edge, but that was corrected right back:
+                  // "you moved the phone too far to the right... once
+                  // again the right edge... should be halfway".)
+                  // bottom: -7.68% is 0.25" below the laptop's bottom
+                  // (reduced from an initial 0.5" — "raise the mobile
+                  // phone so it is only 1/4" below") — this axis matched
+                  // the straightforward math exactly (measured 23.98px
+                  // against a target of 24px), so only `right` needed
+                  // empirical calibration.
+                  <div className="absolute" style={{ width: '40%', height: '64%', right: '-13.88%', bottom: '-7.68%' }}>
                     <PhoneMockup screenshotSrc={afterMobileScreenshotSrc} screenshotAlt={`${businessName}'s new website (mobile)`} />
                   </div>
                 )}
