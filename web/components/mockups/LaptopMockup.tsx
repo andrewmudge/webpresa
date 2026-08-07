@@ -33,7 +33,9 @@ export interface LaptopMockupProps {
  * against.
  */
 
-const CANVAS = { width: 1030, height: 710 };
+// Canvas height trimmed from 710→701 to match the shorter base below (664
+// bezel + 37 base, no gap between them).
+const CANVAS = { width: 1030, height: 701 };
 
 // Bezel: 1000 wide (15 margin each side within the 1030 canvas, matching
 // the base's own width below), 664 tall down to where the base begins.
@@ -44,10 +46,13 @@ const BEZEL_HIGHLIGHT = { x: 16, y: 1, width: 998, height: 662, rx: 13 };
 const SCREEN = { x: 31, y: 24, width: 968, height: 605 };
 const CAMERA = { cx: 515, cy: 12, r: 4 };
 const CHIN_DOT = { cx: 515, cy: 646, r: 3 };
-// Base: full canvas width (1030, vs. the bezel's 1000) — the extra 15 on
-// each side is what reads as a wider, tapering "keyboard deck" beneath the
-// screen unit, the same illusion of perspective real laptop mockups use.
-const BASE = { x: 0, y: 664, width: 1030, height: 46, rx: 6 };
+// Base: full canvas width again (1030, 15 wider than the bezel on each
+// side) — briefly matched to the bezel's width in an earlier round
+// (2026-08-07 feedback), but that was itself reverted the same day ("I was
+// wrong... the gray area does need to stick out left and right relative to
+// the edges of the monitor" — real laptops taper their keyboard deck wider
+// than the screen). The 20% height reduction (46→37) stays.
+const BASE = { x: 0, y: 664, width: 1030, height: 37, rx: 6 };
 const BASE_NOTCH = { x: 475, y: 664, width: 80, height: 6, rx: 3 };
 
 const SCREEN_PERCENT = {

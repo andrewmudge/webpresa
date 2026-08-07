@@ -18,7 +18,7 @@ export interface PostcardQrWithBadgeProps {
 export default function PostcardQrWithBadge({ qrDataUri }: PostcardQrWithBadgeProps) {
   return (
     <div
-      className="relative flex aspect-square w-full items-center justify-center rounded-2xl border-[3px] bg-white p-[9%] shadow-[0_4px_10px_rgba(11,30,61,0.18)]"
+      className="relative flex aspect-square w-full items-center justify-center rounded-md border-[3px] bg-white p-[4%] shadow-[0_4px_10px_rgba(11,30,61,0.18)]"
       style={{ borderColor: POSTCARD_BLUE }}
     >
       {qrDataUri ? (

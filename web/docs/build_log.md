@@ -8103,3 +8103,25 @@ npm run build        — succeeds; all 5 routes registered with no conflicts
 ```
 
 No infra/table changes.
+
+---
+
+**Date:** 2026-08-06
+
+Set up a reusable local Playwright/Chromium screenshot tool so Claude can visually review its own work on generated graphics (postcards, previews) against a running dev server, instead of the user pasting screenshots or waiting on a Vercel deploy each time. This is a deliberate, user-requested exception to the "Verification" rule in `AGENTS.md`, which otherwise still forbids opening a browser to check general UI/frontend layout changes unprompted.
+
+Added `playwright` as a devDependency (`^1.62.1`) and `web/scripts/screenshot.mjs` (usage in its header comment; also runnable as `npm run screenshot -- <url> <output.png> [flags]`).
+
+The sandbox has no `libnspr4`/`libnss3`/`libasound2` system libraries and no sudo (same issue hit in the 2026-07 entry above, where the fix wasn't persisted anywhere reusable). Re-solved it the same way — `apt-get download libnspr4 libnss3 libasound2t64`, then `dpkg -x` each `.deb` with no root needed — but this time extracted them into `~/.cache/webpresa-playwright-libs` (persistent across sessions, outside the repo and outside any one session's ephemeral scratchpad) rather than a throwaway scratchpad dir. `screenshot.mjs` points `LD_LIBRARY_PATH` at that directory itself if it exists, and its header comment has the three-line recreate recipe if a fresh sandbox doesn't have it yet.
+
+Smoke-tested end to end: launched Chromium, screenshotted a `data:` URL, and viewed the resulting PNG with the Read tool — confirmed a real image renders, not just that the process exits 0.
+
+## Files changed
+
+```
+web/AGENTS.md            MODIFIED — Verification section: carved out an explicit exception for self-directed graphics review via screenshot.mjs
+web/package.json         MODIFIED — added playwright devDependency + "screenshot" npm script
+web/scripts/screenshot.mjs   NEW — CLI: node scripts/screenshot.mjs <url> <output.png> [--width=] [--height=] [--full-page] [--selector=]
+```
+
+No infra/table changes. `~/.cache/webpresa-playwright-libs` and the Playwright browser cache live outside the repo, so nothing to commit there.

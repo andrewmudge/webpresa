@@ -14,16 +14,31 @@ import { POSTCARD_TRIM_INSET_PERCENT, POSTCARD_SAFE_ZONE_INSET_PERCENT } from '.
  * not itself enforce that `children`'s content respects the safe zone, see
  * `postcard-size.ts`'s doc comment.
  *
- * `@container` (Tailwind v4's `container-type: inline-size`) lets
- * `PostcardFront`'s content size itself with `cqw`/`cqh` units relative to
- * *this frame's own rendered width*, not the viewport — this frame renders
- * at very different pixel sizes depending on context (inline review-page
- * preview vs. the full `PostcardZoom` modal), and viewport-based Tailwind
- * breakpoints (`sm:`, `lg:`) would be the wrong tool for that.
+ * `[container-type:size]` lets `PostcardFront`'s content size itself with
+ * `cqw`/`cqh` units relative to *this frame's own rendered width and
+ * height*, not the viewport — this frame renders at very different pixel
+ * sizes depending on context (inline review-page preview vs. the full
+ * `PostcardZoom` modal), and viewport-based Tailwind breakpoints (`sm:`,
+ * `lg:`) would be the wrong tool for that.
+ *
+ * Deliberately `size` (both axes), not Tailwind's `@container` utility
+ * (`container-type: inline-size`, width only) — `cqh` needs block-axis
+ * containment too, which `inline-size` doesn't provide. Every `cqh` value
+ * across the postcard components (footer height, gaps, offsets) was
+ * silently resolving against something other than this card for as long as
+ * this was `inline-size`-only (2026-08-06 — found while debugging the
+ * footer rendering far too tall and content overflowing behind it: `cqw`
+ * values were fine throughout every round, `cqh` values were never
+ * actually measuring the card). Safe to set `size` here specifically since
+ * it requires the container's own size to come from *outside* its content
+ * to avoid a circular dependency, which already holds — this element's
+ * size comes from `w-full` + `aspect-[9.25/6.25]`, never its children.
  */
 export default function PostcardFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative aspect-[9.25/6.25] w-full overflow-hidden rounded-lg border border-gray-300 bg-white shadow-sm @container">
+    <div
+      className="relative aspect-[9.25/6.25] w-full overflow-hidden rounded-lg border border-gray-300 bg-white shadow-sm [container-type:size]"
+    >
       {children}
       <div
         aria-hidden="true"

@@ -31,8 +31,9 @@ These rules apply on every task, every session, without exception.
 
 ## Verification
 
-- Do not start a dev server, open a browser, or take screenshots to visually verify UI/frontend changes. The user verifies visual/UI changes themselves.
+- Do not start a dev server, open a browser, or take screenshots to visually verify general UI/frontend layout changes unless asked. The user verifies visual/UI changes themselves.
 - Verification means: lint, type-check, tests, and build (see "Code quality" above). That is sufficient to report a task complete — do not additionally attempt to view the running app.
+- Exception — generated graphics review: when asked to look at your own work on a generated visual artifact (e.g. postcards, generated site previews), use `web/scripts/screenshot.mjs` against a locally running dev server (`npm run dev`) to capture a screenshot and view it yourself with the Read tool. See that script's header comment for the headless-Chromium sandbox setup (missing system libs, no sudo).
 
 ## Scope
 
