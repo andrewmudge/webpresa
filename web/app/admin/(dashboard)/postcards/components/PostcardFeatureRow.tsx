@@ -25,10 +25,10 @@ export default function PostcardFeatureRow() {
               <feature.Icon className="h-[1.8cqw] w-[1.8cqw]" style={{ color: POSTCARD_BLUE }} strokeWidth={2} />
             </span>
             <div>
-              <p className="whitespace-nowrap text-[1.15cqw] font-bold tracking-wide" style={{ color: POSTCARD_NAVY }}>
+              <p className="whitespace-nowrap text-[1.15cqw] font-extrabold tracking-wide" style={{ color: POSTCARD_NAVY }}>
                 {feature.label}
               </p>
-              <p className="whitespace-nowrap text-[0.95cqw] text-gray-500">{feature.sub}</p>
+              <p className="whitespace-nowrap text-[0.95cqw] font-bold text-gray-500">{feature.sub}</p>
             </div>
           </div>
         </div>

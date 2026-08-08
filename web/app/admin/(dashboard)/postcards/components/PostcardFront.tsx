@@ -35,6 +35,7 @@ const CONTENT_RIGHT = `${POSTCARD_SAFE_ZONE_INSET_PERCENT.x}cqw`;
 // feedback), rather than an eyeballed cqw number.
 const ONE_INCH_CQW = (1 / POSTCARD_BLEED_SIZE_INCHES.width) * 100;
 const HALF_INCH_CQW = ONE_INCH_CQW / 2;
+const EIGHTH_INCH_CQW = ONE_INCH_CQW / 8;
 // 1/8 real inch, expressed as `cqh` — same idea, off the card's height
 // (6.25") — used for the QR container's and the URL block's top offsets
 // from the footer's own top edge. Was 1/4" (2026-08-07 feedback); revised
@@ -215,13 +216,29 @@ export default function PostcardFront({
               <span className="absolute -top-[1.6cqh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-[1.4cqw] py-[0.5cqh] text-[1.1cqw] font-bold text-white shadow-sm">
                 YOUR CURRENT SITE
               </span>
-              <div className="h-full w-full overflow-hidden rounded-2xl border border-gray-100 bg-gray-50 pt-[1.6cqh] shadow-[0_3px_10px_rgba(11,30,61,0.08)]">
-                {beforeScreenshotSrc ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
-                ) : (
-                  <p className="p-[1cqw] text-center text-[1.3cqw] text-gray-400">No existing-site screenshot yet</p>
-                )}
+              {/* Solid theme-blue "mat" frame around the preview
+                  (2026-08-09 feedback: "a very opaque theme blue
+                  background around the current site preview") — a fully
+                  opaque fill, not a light tint, with the existing
+                  white/gray card inset inside it via padding.
+                  `POSTCARD_NAVY`, not `POSTCARD_BLUE`: the lighter blue
+                  was "too light" the same day. */}
+              <div className="h-full w-full overflow-hidden rounded-2xl p-[0.6cqw] shadow-[0_3px_10px_rgba(11,30,61,0.08)]" style={{ backgroundColor: POSTCARD_NAVY }}>
+                {/* No `pt-` here (there used to be one, to clear room for
+                    the "YOUR CURRENT SITE" badge poking above): once the
+                    navy mat frame was added, that padding left a visible
+                    white gap between the mat's inner edge and the preview
+                    itself (2026-08-09 feedback). The badge has its own
+                    opaque background and `z-10`, so it stays legible
+                    sitting directly on top of the preview without it. */}
+                <div className="h-full w-full overflow-hidden rounded-xl border border-gray-100 bg-gray-50">
+                  {beforeScreenshotSrc ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
+                  ) : (
+                    <p className="p-[1cqw] text-center text-[1.3cqw] text-gray-400">No existing-site screenshot yet</p>
+                  )}
+                </div>
               </div>
               {/* Nested inside the card itself (not a separate flex column
                   spanning the whole row, as before) and positioned `top:
@@ -339,8 +356,10 @@ export default function PostcardFront({
               (see the constant's own comment) after the bottom edge was
               found overflowing the safe zone: `cqw` and `cqh` aren't the
               same physical length on a 9.25"×6.25" card, so a
-              13.5cqw-*wide* aspect-square box was actually ~20cqh *tall*. */}
-          <div className="absolute" style={{ top: `${BANNER_TOP_INSET_CQH}cqh`, right: `calc(${100 - OR_DIVIDER_LEFT_CQW}cqw + ${HALF_INCH_CQW}cqw)`, width: `${QR_CONTAINER_CQW}cqw` }}>
+              13.5cqw-*wide* aspect-square box was actually ~20cqh *tall*.
+              The extra `EIGHTH_INCH_CQW` in `right` moves it 1/8" further
+              left of its QR/OR-relative position (2026-08-09 feedback). */}
+          <div className="absolute" style={{ top: `${BANNER_TOP_INSET_CQH}cqh`, right: `calc(${100 - OR_DIVIDER_LEFT_CQW}cqw + ${HALF_INCH_CQW}cqw + ${EIGHTH_INCH_CQW}cqw)`, width: `${QR_CONTAINER_CQW}cqw` }}>
             <PostcardQrWithBadge qrDataUri={qrDataUri} />
           </div>
 
@@ -349,12 +368,15 @@ export default function PostcardFront({
               position (2026-08-08 feedback), then 1/4" back *up* the same
               day ("move scan me and accompanying arrow up 1/4""), net
               `HALF_INCH_CQH - QUARTER_INCH_CQH` down from the QR's own top.
-              Font 20% larger (2.2cqw→2.64cqw) per the same message. */}
+              Font 20% larger (2.2cqw→2.64cqw) per the same message. The
+              same `EIGHTH_INCH_CQW` the QR container got is added here too
+              (2026-08-09), so this stays attached to the QR's left edge
+              rather than drifting apart from it. */}
           <div
             className="absolute flex flex-col items-end"
             style={{
               top: `calc(${BANNER_TOP_INSET_CQH}cqh + ${HALF_INCH_CQH}cqh - ${QUARTER_INCH_CQH}cqh)`,
-              right: `calc(${100 - OR_DIVIDER_LEFT_CQW}cqw + ${HALF_INCH_CQW}cqw + ${QR_CONTAINER_CQW}cqw + 1cqw + ${HALF_INCH_CQW}cqw)`,
+              right: `calc(${100 - OR_DIVIDER_LEFT_CQW}cqw + ${HALF_INCH_CQW}cqw + ${EIGHTH_INCH_CQW}cqw + ${QR_CONTAINER_CQW}cqw + 1cqw + ${HALF_INCH_CQW}cqw)`,
               width: '9cqw',
             }}
           >
@@ -395,7 +417,7 @@ export default function PostcardFront({
                 <Globe className="h-[1.4cqw] w-[1.4cqw] text-white" />
               </span>
               <div>
-                <p className="text-[1.05cqw] font-bold tracking-wide" style={{ color: POSTCARD_BLUE_LIGHT }}>
+                <p className="text-[1.05cqw] font-bold tracking-wide text-white">
                   GO TO:
                 </p>
                 <p className="text-[2.6cqw] font-bold leading-tight text-white">webpresa.com/access</p>
@@ -407,7 +429,7 @@ export default function PostcardFront({
                 <Lock className="h-[1.4cqw] w-[1.4cqw] text-white" />
               </span>
               <div>
-                <p className="text-[1.05cqw] font-bold tracking-wide" style={{ color: POSTCARD_BLUE_LIGHT }}>
+                <p className="text-[1.05cqw] font-bold tracking-wide text-white">
                   ENTER YOUR ACCESS CODE:
                 </p>
                 {accessCodeDisplay && (
