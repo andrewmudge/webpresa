@@ -6,6 +6,8 @@ export interface PostcardBackProps {
   recipientAddress?: Address;
   senderName?: string;
   senderAddress?: Address;
+  /** Forwarded to `PostcardFrame` — see its own doc comment. `false` for the Stage 22 Phase 2 print-rendering pages. */
+  showGuides?: boolean;
 }
 
 function formatAddress(address: Address): string[] {
@@ -21,9 +23,9 @@ function formatAddress(address: Address): string[] {
  * `web/docs/deployment.md`, "Stage 22" open questions) — so this layout is
  * a reasonable approximation, not yet the final print-accurate template.
  */
-export default function PostcardBack({ recipientName, recipientAddress, senderName, senderAddress }: PostcardBackProps) {
+export default function PostcardBack({ recipientName, recipientAddress, senderName, senderAddress, showGuides }: PostcardBackProps) {
   return (
-    <PostcardFrame>
+    <PostcardFrame showGuides={showGuides}>
       <div className="flex h-full bg-white p-6 text-sm text-gray-900">
         <div className="flex-1 border-r border-dashed border-gray-200 pr-4">
           {senderAddress ? (

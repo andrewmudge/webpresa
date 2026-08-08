@@ -5,6 +5,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { getCampaignRecipientById, linkPostcardToCampaignRecipient } from '@/lib/db/campaign-recipients';
 import { getPostcardByCampaignRecipientId, putPostcard, approvePostcard } from '@/lib/db/postcards';
 import { createPostcard } from '@/domain/factories/postcard.factory';
+import { renderPostcardArtifacts } from '@/lib/postcards/render';
 
 /**
  * Admin postcard management (Stage 22). Manual-only, one postcard at a
@@ -16,6 +17,16 @@ import { createPostcard } from '@/domain/factories/postcard.factory';
 export interface CreatePostcardResult {
   error?: string;
   postcardId?: string;
+  /**
+   * Set when the `Postcard` record itself was created successfully but the
+   * Phase 2 render (front/back PDF) failed — the record still exists (and
+   * the caller still navigates to it), but its artifacts are missing. Not
+   * an `error`: creation genuinely succeeded, only rendering didn't. There
+   * is no retry action yet — re-running this whole flow isn't possible
+   * (the recipient already has a postcard), so a failure here currently
+   * needs manual follow-up.
+   */
+  renderWarning?: string;
 }
 
 /**
@@ -50,6 +61,11 @@ export async function createPostcardAction(campaignRecipientId: string): Promise
   });
   await putPostcard(postcard);
   await linkPostcardToCampaignRecipient(campaignRecipientId, postcard.postcardId);
+
+  const renderResult = await renderPostcardArtifacts(postcard.postcardId);
+  if (renderResult.status !== 'rendered') {
+    return { postcardId: postcard.postcardId, renderWarning: renderResult.message ?? 'Rendering the postcard artwork failed.' };
+  }
 
   return { postcardId: postcard.postcardId };
 }

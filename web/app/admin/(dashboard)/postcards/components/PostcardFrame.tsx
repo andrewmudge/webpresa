@@ -34,22 +34,43 @@ import { POSTCARD_TRIM_INSET_PERCENT, POSTCARD_SAFE_ZONE_INSET_PERCENT } from '.
  * to avoid a circular dependency, which already holds — this element's
  * size comes from `w-full` + `aspect-[9.25/6.25]`, never its children.
  */
-export default function PostcardFrame({ children }: { children: React.ReactNode }) {
+export interface PostcardFrameProps {
+  children: React.ReactNode;
+  /**
+   * Whether to draw the trim/safe-zone guide overlays *and* the preview-only
+   * card chrome (rounded corners, border, drop shadow — none of which are
+   * artwork either, just screen presentation for a card sitting on a white
+   * admin page). Default `true` (the admin preview/zoom use). The Stage 22
+   * Phase 2 internal render pages
+   * (`/internal/postcards/[postcardId]/render/[side]`) — the ones the
+   * postcard-render Lambda actually turns into the print PDF handed to Lob
+   * — pass `false`: none of this may appear on the physical postcard.
+   */
+  showGuides?: boolean;
+}
+
+export default function PostcardFrame({ children, showGuides = true }: PostcardFrameProps) {
   return (
     <div
-      className="relative aspect-[9.25/6.25] w-full overflow-hidden rounded-lg border border-gray-300 bg-white shadow-sm [container-type:size]"
+      className={`relative aspect-[9.25/6.25] w-full overflow-hidden bg-white [container-type:size] ${
+        showGuides ? 'rounded-lg border border-gray-300 shadow-sm' : ''
+      }`}
     >
       {children}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute border border-dashed border-red-400/70"
-        style={{ inset: `${POSTCARD_TRIM_INSET_PERCENT.y}% ${POSTCARD_TRIM_INSET_PERCENT.x}%` }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute border border-dotted border-blue-400/70"
-        style={{ inset: `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}% ${POSTCARD_SAFE_ZONE_INSET_PERCENT.x}%` }}
-      />
+      {showGuides && (
+        <>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute border border-dashed border-red-400/70"
+            style={{ inset: `${POSTCARD_TRIM_INSET_PERCENT.y}% ${POSTCARD_TRIM_INSET_PERCENT.x}%` }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute border border-dotted border-blue-400/70"
+            style={{ inset: `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}% ${POSTCARD_SAFE_ZONE_INSET_PERCENT.x}%` }}
+          />
+        </>
+      )}
     </div>
   );
 }

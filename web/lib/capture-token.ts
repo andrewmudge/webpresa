@@ -26,6 +26,22 @@ export interface CaptureTokenClaims {
   scanId: string;
 }
 
+/**
+ * Stage 22 Phase 2's capture token — same cookie, same signing key, same
+ * mint-then-verify split as `CaptureTokenClaims` above, but minted by the
+ * postcard-render Lambda (`infra/lambda/postcard-render/src/capture-token.ts`)
+ * immediately before it navigates to
+ * `/internal/postcards/[postcardId]/render/[side]`, so that page can render
+ * without an admin session. Kept as a separate type/function rather than
+ * folded into `verifyCaptureToken` — the two purposes check different
+ * claims against different callers and have no shared validation logic
+ * worth forcing into one signature.
+ */
+export interface PostcardRenderTokenClaims {
+  purpose: 'postcard_render';
+  postcardId: string;
+}
+
 function getSigningKey(signingKey: string): Uint8Array {
   return new TextEncoder().encode(signingKey);
 }
@@ -57,6 +73,28 @@ export async function verifyCaptureToken(
     return { purpose: 'preview_capture', previewId: claims.previewId, scanId: claims.scanId };
   } catch {
     // Expired, malformed, or wrong signature — all fail closed.
+    return null;
+  }
+}
+
+/** Same verification contract as `verifyCaptureToken`, checked against a `postcardId` instead of a `previewId` — see `PostcardRenderTokenClaims`'s doc comment. */
+export async function verifyPostcardRenderToken(
+  token: string | undefined,
+  expected: { postcardId: string },
+): Promise<PostcardRenderTokenClaims | null> {
+  if (!token) return null;
+
+  const { signingKey } = await getCaptureTokenSecret();
+  try {
+    const { payload } = await jwtVerify(token, getSigningKey(signingKey), {
+      algorithms: ['HS256'],
+    });
+    const claims = payload as unknown as Partial<PostcardRenderTokenClaims>;
+    if (claims.purpose !== 'postcard_render' || claims.postcardId !== expected.postcardId) {
+      return null;
+    }
+    return { purpose: 'postcard_render', postcardId: claims.postcardId };
+  } catch {
     return null;
   }
 }

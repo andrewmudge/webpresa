@@ -19,6 +19,8 @@ export interface PostcardFrontProps {
   qrDataUri?: string;
   /** Dash-grouped campaign code for the manual-entry fallback, e.g. `7X9K-2L4M-8N3P-7Q5R` (see `formatCampaignCodeForDisplay`). */
   accessCodeDisplay?: string;
+  /** Forwarded to `PostcardFrame` — see its own doc comment. `false` for the Stage 22 Phase 2 print-rendering pages. */
+  showGuides?: boolean;
 }
 
 // One shared alignment grid (2026-08-06 feedback, "improve alignment"):
@@ -120,9 +122,10 @@ export default function PostcardFront({
   afterMobileScreenshotSrc,
   qrDataUri,
   accessCodeDisplay,
+  showGuides,
 }: PostcardFrontProps) {
   return (
-    <PostcardFrame>
+    <PostcardFrame showGuides={showGuides}>
       <div className="relative flex h-full flex-col bg-white">
         {/* Header — wordmark only now. The feature row moved out of this
             flex row entirely (2026-08-08 feedback: center it on the

@@ -16,11 +16,12 @@ vi.mock('@/lib/secrets', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { verifyCaptureToken } from '../capture-token';
+import { verifyCaptureToken, verifyPostcardRenderToken } from '../capture-token';
 
 const SIGNING_KEY = 'test-signing-key-at-least-32-bytes-long!!';
 const PREVIEW_ID = 'preview_00000000-0000-0000-0000-000000000001';
 const SCAN_ID = 'scan_00000000-0000-0000-0000-000000000002';
+const POSTCARD_ID = 'postcard_00000000-0000-0000-0000-000000000003';
 
 async function signToken(claims: Record<string, unknown>, expiresIn = '5m'): Promise<string> {
   return new SignJWT(claims)
@@ -77,5 +78,45 @@ describe('verifyCaptureToken', () => {
 
   it('rejects a malformed token string', async () => {
     expect(await verifyCaptureToken('not-a-jwt', { previewId: PREVIEW_ID })).toBeNull();
+  });
+});
+
+describe('verifyPostcardRenderToken', () => {
+  it('accepts a validly-signed token for the matching postcard and returns its claims', async () => {
+    const token = await signToken({ purpose: 'postcard_render', postcardId: POSTCARD_ID });
+    const claims = await verifyPostcardRenderToken(token, { postcardId: POSTCARD_ID });
+    expect(claims).toEqual({ purpose: 'postcard_render', postcardId: POSTCARD_ID });
+  });
+
+  it('rejects when no token is supplied', async () => {
+    expect(await verifyPostcardRenderToken(undefined, { postcardId: POSTCARD_ID })).toBeNull();
+  });
+
+  it('rejects a validly-signed token for a different postcard', async () => {
+    const token = await signToken({ purpose: 'postcard_render', postcardId: 'postcard_other' });
+    expect(await verifyPostcardRenderToken(token, { postcardId: POSTCARD_ID })).toBeNull();
+  });
+
+  it('rejects a token with the wrong purpose (e.g. a preview_capture token reused here)', async () => {
+    const token = await signToken({ purpose: 'preview_capture', previewId: PREVIEW_ID, scanId: SCAN_ID });
+    expect(await verifyPostcardRenderToken(token, { postcardId: POSTCARD_ID })).toBeNull();
+  });
+
+  it('rejects an expired token', async () => {
+    const token = await signToken({ purpose: 'postcard_render', postcardId: POSTCARD_ID }, '-1s');
+    expect(await verifyPostcardRenderToken(token, { postcardId: POSTCARD_ID })).toBeNull();
+  });
+
+  it('rejects a token signed with the wrong key', async () => {
+    const token = await new SignJWT({ purpose: 'postcard_render', postcardId: POSTCARD_ID })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(new TextEncoder().encode('a-completely-different-key-value!!!'));
+    expect(await verifyPostcardRenderToken(token, { postcardId: POSTCARD_ID })).toBeNull();
+  });
+
+  it('rejects a malformed token string', async () => {
+    expect(await verifyPostcardRenderToken('not-a-jwt', { postcardId: POSTCARD_ID })).toBeNull();
   });
 });

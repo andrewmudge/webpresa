@@ -43,3 +43,12 @@ export function getScreenshotLambdaFunctionName(): string {
   }
   return name;
 }
+
+/** Stage 22 Phase 2 — the postcard-render Lambda, invoked synchronously (`InvocationType: 'RequestResponse'`) by `lib/postcards/render.ts`, unlike the screenshot Lambda's fire-and-forget invocation above. */
+export function getPostcardRenderLambdaFunctionName(): string {
+  const name = process.env.POSTCARD_RENDER_LAMBDA_FUNCTION_NAME;
+  if (!name) {
+    throw new Error('POSTCARD_RENDER_LAMBDA_FUNCTION_NAME environment variable is not set');
+  }
+  return name;
+}

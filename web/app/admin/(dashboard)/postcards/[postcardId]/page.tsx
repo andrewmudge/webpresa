@@ -103,8 +103,8 @@ export default async function PostcardDetailPage({ params }: Props) {
           </div>
 
           <p className="text-xs text-gray-400">
-            This preview is rendered live from current data, not from a stored artifact — the Lambda-based rendering pipeline that produces the
-            byte-identical artifact submitted to Lob is not yet built (see deployment.md, Stage 22).
+            This preview renders live from current data, not by reading back the stored PDF artifact — but both use the exact same
+            `PostcardFront`/`PostcardBack` components, so what you see here matches what was (or will be) submitted to Lob.
           </p>
         </div>
 
@@ -124,7 +124,10 @@ export default async function PostcardDetailPage({ params }: Props) {
               />
               <ChecklistItem ok={Boolean(recipient)} label={recipient ? `QR destination: /r/${recipient.campaignCode}` : 'No CampaignRecipient — no QR destination'} />
               <ChecklistItem ok={Boolean(senderAddress)} label={senderAddress ? 'Sender/return address configured' : 'Sender/return address not configured'} />
-              <ChecklistItem ok={Boolean(postcard.frontArtifactKey && postcard.backArtifactKey)} label="Rendered artifact stored (not yet built)" />
+              <ChecklistItem
+                ok={Boolean(postcard.frontArtifactKey && postcard.backArtifactKey)}
+                label={postcard.frontArtifactKey && postcard.backArtifactKey ? `Rendered artifact stored (${postcard.renderedAt})` : 'No rendered artifact yet'}
+              />
               <ChecklistItem ok={typeof postcard.costCents === 'number'} label="Estimated mailing cost known (not yet built)" />
             </ul>
           </div>

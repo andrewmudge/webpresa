@@ -93,6 +93,23 @@ export async function putPostcard(postcard: Postcard): Promise<void> {
   );
 }
 
+/** Records a completed render (Phase 2) — called once both sides' PDFs have been uploaded to S3 by the postcard-render Lambda. */
+export async function markPostcardRendered(
+  postcardId: string,
+  artifacts: { frontArtifactKey: string; backArtifactKey: string },
+): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
+      UpdateExpression: 'SET frontArtifactKey = :front, backArtifactKey = :back, renderedAt = :now, updatedAt = :now',
+      ExpressionAttributeValues: { ':front': artifacts.frontArtifactKey, ':back': artifacts.backArtifactKey, ':now': now },
+    }),
+  );
+}
+
 /** Records explicit admin approval (Phase 3) — approval only unlocks submission, it never triggers it. */
 export async function approvePostcard(postcardId: string, reviewedBy: string): Promise<void> {
   const client = getDynamoDBClient();
