@@ -8212,3 +8212,35 @@ Live verification    — real postcard rendered, submitted to Lob (psc_742978167
 ```
 
 Infra deployed: `WebpresaDevPostcardRenderRepositoryStack`, `WebpresaDevPostcardRenderStack` (new), `WebpresaDevVercelAccessStack` (updated). Secrets populated: `lob` (`apiKey` + `webhookSecret`). Vercel env vars added (Production + Preview): `POSTCARD_WEBHOOK_EVENTS_TABLE_NAME`, `POSTCARD_RENDER_LAMBDA_FUNCTION_NAME`, `WEBPRESA_LOB_SENDER_{NAME,ADDRESS_LINE1,CITY,STATE,POSTAL_CODE,COUNTRY}`.
+
+---
+
+**Date:** 2026-08-08 (later same day)
+
+**Fixed the PDF/browser-preview mismatch flagged above.** The user attached the actual generated PDF alongside the approved browser reference image: the print PDF's footer showed faint rectangular boxes around the QR card, the OR-divider circle, the "GO TO" block, and the "ENTER YOUR ACCESS CODE" block — none of which appear in the browser.
+
+**Root cause, confirmed by reading the code before changing anything (per the user's explicit request):** `infra/lambda/postcard-render/src/browser.ts`'s `capturePdf()` never called `page.emulateMedia({ media: 'screen' })` before `page.pdf()`. Playwright's `page.pdf()` renders under `print` CSS media by default, not `screen`, unless told otherwise — confirmed this codebase has zero `@media print` rules anywhere (`grep -rn "@media print" web/ infra/` — nothing), so every postcard has only ever been designed and approved under `screen` media, while the PDF pipeline was silently rendering under a media context nobody had tested against. Chromium's print/PDF compositor is a genuinely different rendering path from its screen compositor, and box-shadow blur+spread combined with border-radius (every flagged element carries a Tailwind `shadow-[...]` utility) is a known case that renders differently there — a single root cause, not four separate element bugs.
+
+**Fix:** one line — `await page.emulateMedia({ media: 'screen' })` right before `page.pdf()`. No changes to `PostcardFront.tsx`/`PostcardBack.tsx`/`PostcardFrame.tsx`/`PostcardQrWithBadge.tsx` — the approved browser design is untouched, since forcing `screen` media reproduces its exact rendering path by construction (there's no print stylesheet to reconcile against).
+
+**Verified against the real deployed Lambda, not just reasoned about.** Rebuilt and pushed the updated container image (`build-and-push-postcard-render-lambda.sh`); the AWS SSO session expired mid-push once (same recurring friction as earlier this session) and the user re-authenticated. Discovered and handled a real operational gotcha: pushing a new image to the same `:latest` ECR tag does **not** update an already-deployed Lambda function — AWS resolves and caches the tag's digest at deploy/update time — so `aws lambda update-function-code --image-uri ...@sha256:...` was required to force the running `webpresa-dev-postcard-render` function onto the new digest (confirmed via `LastUpdateStatus: Successful`). Invoked the updated Lambda directly for both sides of the existing (already-submitted) test postcard — bypassing the app-level `renderPostcardArtifacts` guard that refuses to re-render a non-`pending` postcard, since the Lambda itself has no such restriction and this was a read-only verification, nothing was written back to the `Postcard` record — downloaded the resulting PDFs from S3, and viewed them directly. Confirmed: footer artifacts gone; the QR card's blue border, the OR divider, the horizontal separator, and the access-code pill's shadow all still render correctly; the back side still correctly leaves the ink-free zone blank.
+
+## Files changed
+
+```
+infra/lambda/postcard-render/src/browser.ts   MODIFIED — page.emulateMedia({ media: 'screen' }) before page.pdf()
+web/docs/architecture.md                       MODIFIED — "known issue" notes updated to fixed
+web/docs/build_log.md                          MODIFIED — this entry
+```
+
+## Verification
+
+```
+cd infra/lambda/postcard-render && npx tsc --noEmit && npx vitest run   — passes, 7/7 tests
+Container image rebuilt and pushed to webpresa-dev-postcard-render (ECR)
+aws lambda update-function-code                                         — LastUpdateStatus: Successful, State: Active
+Direct Lambda invoke (front + back, existing test postcard)             — both succeeded, storageKeys returned
+Downloaded + visually inspected both resulting PDFs from S3             — footer artifacts confirmed gone, all intentional design elements intact
+```
+
+No CDK/infra config change — same Lambda, only its container image changed.
