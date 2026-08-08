@@ -1,4 +1,5 @@
 import 'server-only';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { QueryCommand, GetCommand, PutCommand, UpdateCommand, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import type { Postcard } from '@/domain/models/postcard';
 import { PostcardSchema } from '@/domain/schemas/postcard.schema';
@@ -106,6 +107,73 @@ export async function markPostcardRendered(
       Key: { postcardId },
       UpdateExpression: 'SET frontArtifactKey = :front, backArtifactKey = :back, renderedAt = :now, updatedAt = :now',
       ExpressionAttributeValues: { ':front': artifacts.frontArtifactKey, ':back': artifacts.backArtifactKey, ':now': now },
+    }),
+  );
+}
+
+/**
+ * Idempotent `pending` → `submitting` guard (Phase 4) — the same
+ * conditional-write shape `lib/db/claims.ts`'s `consumeClaim` uses, scaled
+ * down to a single table/item since only one `Postcard` record is
+ * involved here (no cross-table transaction needed). Returns `false`
+ * (never throws) when the postcard wasn't `pending` — a second concurrent
+ * submit attempt, or a retry after the first already moved past this
+ * state — so the caller can distinguish "safely refused" from a genuine
+ * DynamoDB error.
+ */
+export async function transitionPostcardToSubmitting(postcardId: string): Promise<boolean> {
+  const client = getDynamoDBClient();
+  try {
+    await client.send(
+      new UpdateCommand({
+        TableName: TABLE_POSTCARDS(),
+        Key: { postcardId },
+        UpdateExpression: 'SET #status = :submitting, updatedAt = :now',
+        ConditionExpression: '#status = :pending',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: { ':submitting': 'submitting', ':pending': 'pending', ':now': new Date().toISOString() },
+      }),
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return false;
+    throw err;
+  }
+}
+
+/** Finalizes a successful Lob submission — called only after `transitionPostcardToSubmitting` has already claimed the record. */
+export async function markPostcardSubmitted(postcardId: string, params: { providerPostcardId: string; costCents?: number }): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  const names: Record<string, string> = { '#status': 'status' };
+  const values: Record<string, unknown> = { ':submitted': 'submitted', ':providerPostcardId': params.providerPostcardId, ':now': now };
+  let setClause = 'SET #status = :submitted, providerPostcardId = :providerPostcardId, submittedAt = :now, updatedAt = :now';
+  if (params.costCents !== undefined) {
+    setClause += ', costCents = :costCents';
+    values[':costCents'] = params.costCents;
+  }
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
+      UpdateExpression: setClause,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+    }),
+  );
+}
+
+/** Records a failed Lob submission attempt — called after `transitionPostcardToSubmitting` already moved the record to `submitting`, so this always transitions onward to a terminal `failed`, never back to `pending` (a fresh postcard would need to be generated, matching this stage's "no automatic retry" scope). */
+export async function markPostcardSubmissionFailed(postcardId: string, failureReason: string): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
+      UpdateExpression: 'SET #status = :failed, failureReason = :failureReason, updatedAt = :now',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: { ':failed': 'failed', ':failureReason': failureReason, ':now': now },
     }),
   );
 }

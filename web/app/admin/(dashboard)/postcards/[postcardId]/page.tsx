@@ -13,6 +13,7 @@ import PostcardFront from '../components/PostcardFront';
 import PostcardBack from '../components/PostcardBack';
 import PostcardZoom from '../components/PostcardZoom';
 import ApproveButton from './ApproveButton';
+import SubmitButton from './SubmitButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,13 +129,31 @@ export default async function PostcardDetailPage({ params }: Props) {
                 ok={Boolean(postcard.frontArtifactKey && postcard.backArtifactKey)}
                 label={postcard.frontArtifactKey && postcard.backArtifactKey ? `Rendered artifact stored (${postcard.renderedAt})` : 'No rendered artifact yet'}
               />
-              <ChecklistItem ok={typeof postcard.costCents === 'number'} label="Estimated mailing cost known (not yet built)" />
+              <ChecklistItem
+                ok={typeof postcard.costCents === 'number'}
+                label={
+                  typeof postcard.costCents === 'number'
+                    ? `Cost: $${(postcard.costCents / 100).toFixed(2)}`
+                    : 'Cost unknown until submitted — Lob exposes no pre-submission cost/dry-run endpoint'
+                }
+              />
             </ul>
           </div>
 
           <div className="rounded-xl border border-(--color-border) bg-white p-5">
             <h3 className="mb-3 text-sm font-semibold text-gray-900">Approval</h3>
             <ApproveButton postcardId={postcard.postcardId} reviewedAt={postcard.reviewedAt} reviewedBy={postcard.reviewedBy} />
+          </div>
+
+          <div className="rounded-xl border border-(--color-border) bg-white p-5">
+            <h3 className="mb-3 text-sm font-semibold text-gray-900">Submission</h3>
+            <SubmitButton
+              postcardId={postcard.postcardId}
+              status={postcard.status}
+              reviewedAt={postcard.reviewedAt}
+              providerPostcardId={postcard.providerPostcardId}
+              failureReason={postcard.failureReason}
+            />
           </div>
         </div>
       </div>

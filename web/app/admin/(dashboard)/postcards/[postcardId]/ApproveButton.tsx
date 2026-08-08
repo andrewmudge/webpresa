@@ -24,7 +24,7 @@ export default function ApproveButton({ postcardId, reviewedAt, reviewedBy }: { 
   if (reviewedAt) {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-        Approved {new Date(reviewedAt).toLocaleString()} by {reviewedBy}. Submission (Phase 4) is not yet built.
+        Approved {new Date(reviewedAt).toLocaleString()} by {reviewedBy}.
       </div>
     );
   }

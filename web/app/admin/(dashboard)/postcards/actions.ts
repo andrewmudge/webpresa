@@ -6,6 +6,7 @@ import { getCampaignRecipientById, linkPostcardToCampaignRecipient } from '@/lib
 import { getPostcardByCampaignRecipientId, putPostcard, approvePostcard } from '@/lib/db/postcards';
 import { createPostcard } from '@/domain/factories/postcard.factory';
 import { renderPostcardArtifacts } from '@/lib/postcards/render';
+import { submitPostcardToLob, type SubmitPostcardOutcome } from '@/lib/lob/submit-postcard';
 
 /**
  * Admin postcard management (Stage 22). Manual-only, one postcard at a
@@ -81,4 +82,18 @@ export async function approvePostcardAction(postcardId: string): Promise<{ error
 
   await approvePostcard(postcardId, session.sub);
   return {};
+}
+
+/**
+ * Submits an approved, rendered postcard to Lob (Phase 4). Admin-only,
+ * same session gate as every other action here — `submitPostcardToLob`
+ * itself independently re-checks `reviewedAt` and the rendered-artifact
+ * keys rather than trusting this route, so it's still safe even if called
+ * directly. No automatic submission path exists anywhere in this stage.
+ */
+export async function submitPostcardToLobAction(postcardId: string): Promise<SubmitPostcardOutcome | { status: 'failed'; message: string }> {
+  const session = await getSession();
+  if (!session) return { status: 'failed', message: 'Unauthorized' };
+
+  return submitPostcardToLob(postcardId);
 }
