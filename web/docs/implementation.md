@@ -4293,7 +4293,40 @@ this stage.
 
 ---
 
-# Stage 22 — Lob Postcard Integration
+# Stage 22 — Webpresa Postcard Generation and Lob Fulfillment
+
+## Status
+
+In progress, sequentially through Phase 0 → 3, per commit history:
+
+- **Phase 0 (Infrastructure)** — written, **not committed, not deployed**.
+  The GSI rename and new `postcard-webhook-events` table exist as
+  uncommitted changes to `infra/lib/stacks/data-stack.ts` /
+  `vercel-access-stack.ts` / `infra/bin/webpresa.ts`. The render Lambda,
+  webhook-secret `jsonKeys` extension, and remaining Phase 0 items below
+  have not been started. Nothing downstream should assume this is
+  deployed until it goes through the `cdk diff` + approval + `cdk deploy`
+  gate.
+- **Phase 1 (Domain model changes)** — done, committed (`bce3d37`,
+  2026-08-05).
+- **Phase 2 (Rendering pipeline)** — partial. QR extraction
+  (`web/lib/campaign/qr.ts`) is done (same commit as Phase 1). The
+  internal render pages, render Lambda, and rendering orchestration are
+  not built — nothing yet writes `Postcard.frontArtifactKey`/
+  `backArtifactKey`.
+- **Phase 3 (Administrative review UI)** — substantially built
+  (`37be755`, 2026-08-05, onward), and the site of all subsequent work:
+  ten-plus commits of visual iteration on `PostcardFrame.tsx`,
+  `PostcardFront.tsx`, `PostcardDiagonalBanner.tsx`,
+  `PostcardFeatureRow.tsx`, `PostcardDeviceMockup.tsx`. This preview
+  renders live from screenshots, not from Phase 2's (unbuilt) rendered
+  artifacts.
+- **Phase 4 (Lob submission)** and **Phase 5 (Webhook)** — not started.
+
+This specification replaces the original terser Stage 22 draft ("Lob
+Postcard Integration") after the user proposed a detailed rewrite; four
+corrections were confirmed against the real codebase before adopting it
+(see "Guiding decisions").
 
 ## Objective
 
@@ -4303,18 +4336,245 @@ Generate, approve, submit, and track physical postcards through Lob.
 
 Stages 10, 15, 17, and 21.
 
-## Major deliverables
+## Guiding decisions
 
-- Lob test-mode configuration
-- Sender-address verification
-- Postcard front and back templates
-- QR placement
-- Admin approval queue
-- Cost confirmation
-- Lob submission service
-- Provider ID storage
-- Lob webhook
-- Idempotent status history
+1. `Postcard` drops `campaignCode`/`qrDestination`, gains an optional
+   `campaignRecipientId`; the `campaign-code-index` GSI becomes
+   `campaign-recipient-id-index`. Per Stage 21's note (above,
+   "Relationship to `Postcard`"), `CampaignRecipient` is the source of
+   truth for campaign code and destination — `Postcard` never duplicates
+   them. The Postcards table is empty/unused in dev, so this is a clean
+   schema change, not a data migration.
+2. QR encoding logic is extracted from the existing
+   `/api/campaigns/[campaignRecipientId]/qr` route into a shared
+   `web/lib/campaign/qr.ts`, reused by rendering rather than rebuilt.
+3. No pluggable multi-provider abstraction. Lob-specific request/response
+   shapes stay inside a new `web/lib/lob/` adapter module; everything
+   upstream works with plain `Postcard`/domain types. Webpresa renders
+   everything itself and hands Lob a finished artifact — no Lob
+   template-system coupling.
+4. The original uncommitted postcards admin scaffold (hardcoded front, two
+   empty files, mock data unrelated to the real domain model) was
+   discarded. The visual layout idea (`aspect-[3/2]`-style postcard frame)
+   was kept; the data plumbing was rebuilt fresh against the real
+   `Postcard`/`Business`/`SitePreview`/`CampaignRecipient` models.
+5. Infra changes (table/GSI changes, new webhook-history table, IAM
+   grants, render-Lambda work) are a discrete, separately reviewed piece
+   of work — `cdk diff` + explicit human approval before `cdk deploy` —
+   completed and deployed before dependent application code is written,
+   per `web/AGENTS.md`'s "do not build application logic during an
+   infrastructure stage."
+
+## Phase 0 — Infrastructure (lands and deploys first)
+
+- **Postcards table**: rename `campaign-code-index` GSI to
+  `campaign-recipient-id-index` (partition key `campaignRecipientId`) in
+  `infra/lib/stacks/data-stack.ts`. Update the doc-comment block above it.
+- **New webhook-event-history table**: PK `lobEventId` (Lob's event id is
+  globally unique — dedup via a conditional `PutItem` on this key, no GSI
+  needed), plus a `postcard-id-index` (PK `postcardId`, SK `receivedAt`)
+  for a per-postcard delivery-history panel. No TTL — webhook history must
+  never expire. Thread through `vercel-access-stack.ts`/
+  `infra/bin/webpresa.ts` like `postcardsTable` is today.
+- **Sender/return address config**: not a secret (printed on every
+  postcard). Plain Vercel env vars (`WEBPRESA_LOB_SENDER_NAME`,
+  `_ADDRESS_LINE1`, `_CITY`, `_STATE`, `_POSTAL_CODE`, `_COUNTRY`) plus a
+  `web/lib/env/lob-sender-address.ts` reader mirroring
+  `WEBPRESA_APP_BASE_URL`. No CDK change.
+- **Lob API key secret**: already provisioned
+  (`web/lib/secrets/index.ts::getLobSecret`,
+  `infra/lib/stacks/data-stack.ts`) and already granted to the Vercel IAM
+  policy. Only populating the real (test-mode) key out-of-band remains.
+- **Lob webhook verification secret**: none exists yet. Do not guess Lob's
+  current signature-verification method at implementation time — confirm
+  against Lob's live docs, then extend the existing `lob` secret's
+  `jsonKeys` with a `webhookSecret` field (mirrors Stripe's combined
+  `{ secretKey, webhookSecret }` shape).
+- **Webhook Deployment Protection bypass**: reuse the existing
+  `webpresa-{env}-vercel-protection-bypass` secret (already used by the
+  Stripe webhook).
+- **Rendering compute**: extend the existing Stage 14 Playwright/Lambda
+  infrastructure rather than a new rendering stack. A new Lambda
+  deployable (e.g. `infra/lambda/postcard-render/`, sharing
+  `infra/lambda/screenshot-capture/src/browser.ts`'s launch/context
+  helpers) calling Playwright's `page.pdf()` (exact physical dimensions
+  incl. bleed) against a new internal, token-gated render page — not
+  `page.screenshot()`, which isn't print-dimension-accurate. Narrow
+  execution role: `PutObject` scoped to `postcards/*/*/...` only,
+  `GetSecretValue` on the render capture-token secret, no table access.
+  This is genuinely new work, not free reuse.
+  - *Alternative considered and rejected for MVP*: Satori/`@vercel/og`
+    in-process image generation — narrower CSS subset, no precedent in
+    this repo. Reconsider only if the Lambda approach proves too
+    slow/costly at this MVP's low manual volume.
+- **Gate**: `cdk diff` reviewed and explicitly approved by the user before
+  `cdk deploy`. No later-phase code lands ahead of this being deployed.
+
+## Phase 1 — Domain model changes
+
+- `domain/models/postcard.ts`: remove `campaignCode`/`qrDestination`; add
+  `campaignRecipientId?`, `submittedAt?`, `costCents?`, `failureReason?`,
+  `frontArtifactKey?`/`backArtifactKey?` (S3 keys under
+  `postcards/{businessId}/{postcardId}/...`, read by both the admin
+  preview and the Lob submission call, so "preview == submitted artifact"
+  is true by construction), `renderedAt?`, `reviewedAt?`/`reviewedBy?`.
+  Add `'submitting'` to `POSTCARD_STATUSES` as a guard state between
+  `pending` and `submitted` (needed for Phase 4's idempotency
+  transaction). Update the doc comment to point at `CampaignRecipient` as
+  the source of truth for destination.
+- `domain/schemas/postcard.schema.ts` and the factory: mirror the field
+  changes 1:1.
+- New model `domain/models/postcard-webhook-event.ts` (+ schema):
+  `postcardId`, `lobEventId` (dedup key), `eventType`, `receivedAt`,
+  `rawPayload` (full verbatim webhook body), `mappedStatus?`.
+- `lib/db/postcards.ts`: add `getPostcardByCampaignRecipientId` (queries
+  the renamed GSI). Submission needs a conditional-write idempotency
+  helper, not a plain `putPostcard` overwrite — see Phase 4.
+- New `lib/db/postcard-webhook-events.ts` (`server-only`): conditional
+  `putPostcardWebhookEvent` (dedup by `lobEventId`),
+  `listWebhookEventsForPostcard`.
+- New `lib/screenshots/latest-existing-site-screenshot.ts`:
+  `getLatestExistingSiteScreenshots(businessId)` — same shape as the
+  existing `getLatestPreviewScreenshots` but filtering
+  `targetType === 'existing_site'`; this "before" reader doesn't exist yet
+  even though the underlying captures do.
+
+## Phase 2 — Rendering pipeline
+
+- **QR extraction** (independent, no infra dependency, do first): new
+  `web/lib/campaign/qr.ts` with `generateCampaignQrPng(campaignCode,
+  baseUrl)`, lifting the `QRCode.toBuffer(...)` logic verbatim out of the
+  existing admin QR route; update that route to call it.
+- **Internal render pages**:
+  `web/app/internal/postcards/[postcardId]/render/[side]/page.tsx` (`side`
+  = `front`|`back`), server components, no client JS. Front: business
+  name, before/after screenshots
+  (`getLatestExistingSiteScreenshots`/`getLatestPreviewScreenshots`), QR
+  (`generateCampaignQrPng`), campaign copy. Back: recipient address
+  (`Business.address`), sender address (`getLobSenderAddress()`), postal
+  safe-zone margins per Lob's current published spec for the chosen
+  postcard size (confirm at implementation time). Auth: a new
+  `postcard_render` capture-token purpose (extend
+  `web/lib/capture-token.ts`'s `CaptureTokenClaims`), minted only by the
+  render Lambda before navigating — same non-admin-session-gated pattern
+  Stage 14 uses for `generated_preview`.
+- **Rendering orchestration**: `web/lib/postcards/render.ts` —
+  `renderPostcardArtifacts(postcardId)`, invokes the render Lambda
+  synchronously for front and back (a few seconds of admin-facing wait is
+  fine for this manual, low-volume flow — simpler than Stage 14's
+  async+poll pattern, which exists to survive Vercel's ~60s timeout on a
+  *user-facing* action, not an admin one), writes PDFs to S3, sets
+  `frontArtifactKey`/`backArtifactKey`/`renderedAt`.
+- Guard against silent staleness: disallow re-render once
+  `status !== 'pending'` (or require explicit re-approval if a re-render
+  is allowed after edits).
+
+## Phase 3 — Administrative review UI
+
+Fresh build under `web/app/admin/(dashboard)/postcards/`.
+
+- `page.tsx` — list view, filterable by status.
+- `[postcardId]/page.tsx` — review screen rendering the front/back
+  artifact preview (signed S3 URLs) plus an explicit, individually
+  checkable review list: business status/qualification
+  (`Business.qualification`/`leadPriority`/`websiteQualityScore`), mailing
+  address, generated preview, postcard creative, QR destination,
+  trademark/identity-use note, postcard copy, expected cost.
+  `approvePostcardAction(postcardId)` sets `reviewedAt`/`reviewedBy` —
+  approval only unlocks submission, it never triggers it.
+- `new/page.tsx` (or drawer) — single-postcard generation: pick a
+  `Business` (+ `currentPreviewId`) and optionally a `CampaignRecipient`;
+  `createPostcardAction` creates the record and kicks off Phase 2
+  rendering.
+- Campaign batch support: per-recipient "generate postcard" action
+  reachable from the existing Stage 21 campaign admin UI (one
+  `CampaignRecipient` row at a time), not a new multi-select bulk
+  generator — bulk campaign execution stays deferred.
+- Post-submission: a status timeline reading
+  `listWebhookEventsForPostcard`.
+
+**Visual iteration (done, ahead of the rest of Phase 3)**: three rounds of
+work landed the postcard front's actual look before the surrounding data
+plumbing:
+1. Initial visual redesign matching a user-supplied reference image
+   (headline, laptop/phone device mockup of the "after" site, diagonal
+   marketing banner, QR with a Webpresa watermark badge, brand color
+   tokens in `postcard-colors.ts`).
+2. A rebuild after blind CSS iteration didn't converge, adding
+   self-verification via `web/scripts/screenshot.mjs` against a local dev
+   server.
+3. A root-cause fix in `PostcardFrame.tsx`: its `@container` class only
+   sets `container-type: inline-size` (width-axis containment), so every
+   `cqh` (height-based container query unit) value across
+   `PostcardFront.tsx`/`PostcardDiagonalBanner.tsx` had been resolving
+   against an undefined container instead of the card's real height —
+   explaining a string of recurring height-only bugs (oversized footer,
+   content sliding behind the footer, mistuned offsets). Fix:
+   `@container` → `[container-type:size]`, safe here because
+   `PostcardFrame`'s root already gets its size externally (`w-full` +
+   `aspect-[9.25/6.25]`), avoiding the circular-sizing dependency
+   `container-type: size` would otherwise create.
+
+## Phase 4 — Lob submission
+
+- `web/lib/lob/client.ts` (reads `getLobSecret()`) +
+  `web/lib/lob/submit-postcard.ts`: `submitPostcardToLob(postcardId)`
+  builds the request from `frontArtifactKey`/`backArtifactKey`,
+  `Business.address` (recipient), `getLobSenderAddress()` (sender), and
+  Lob's `test: true` flag as a config toggle (not hardcoded, so it can
+  flip for the one explicit production test send named in the acceptance
+  criteria). Confirm Lob's exact artwork-input format (PDF URL vs.
+  upload) and whether Lob expects the address pre-printed vs. overlaid,
+  before finalizing the back template in Phase 2.
+- **Idempotency**: precedent is `web/lib/db/claims.ts`'s `consumeClaim`
+  conditional `TransactWriteItems`. Before calling Lob, conditionally
+  transition `Postcard.status` from `pending` → `submitting`
+  (`ConditionExpression` guarding against a second concurrent call); on
+  success write `submitted`/`providerPostcardId`/`costCents`/
+  `submittedAt`; on failure write `failed`/`failureReason`.
+- `submitPostcardToLobAction(postcardId)` — admin-only, requires
+  `reviewedAt` set (Phase 3 gate) before allowing submission.
+- Cost: store `costCents` from Lob's creation response at submission; if
+  Lob has a separate dry-run cost/estimate call, use it for the Phase 3
+  pre-submission checklist item — otherwise show a static known per-piece
+  price there (confirm which at implementation time).
+
+## Phase 5 — Fulfillment synchronization (webhook)
+
+- New Route Handler `web/app/api/webhooks/lob/route.ts`, structured like
+  the existing `web/app/api/webhooks/stripe/route.ts`: verify signature
+  (Phase 0's confirmed method), look up `Postcard` via the untouched
+  `provider-postcard-id-index`, write a durable `PostcardWebhookEvent`
+  first (conditional put on `lobEventId` — this is what satisfies
+  "duplicate webhooks do not duplicate history"), then update
+  `Postcard`'s rollup fields (`status`, `mailedAt`/`deliveredAt`) only
+  when the event was newly recorded. Map Lob's event vocabulary to
+  `PostcardStatus` in `web/lib/lob/status-mapping.ts` (mirrors
+  `web/lib/stripe/status-mapping.ts`). Return 200 on
+  recognized-but-irrelevant events, 400 only on signature failure, 500
+  only on genuine internal errors.
+- Webhook registration with Lob and the `x-vercel-protection-bypass`
+  query param are out-of-band steps, same class as Stripe's.
+
+## Sequencing (separate PRs, each independently passing lint/typecheck/test/build)
+
+1. **Infra** (Phase 0) — reviewed via `cdk diff`, explicit approval, then
+   `cdk deploy` to dev. Nothing later lands ahead of this.
+2. **QR extraction refactor** (Phase 2's first bullet) — independent, can
+   go first or in parallel with #1.
+3. **Domain model changes** (Phase 1) — depends on #1 being deployed
+   (references the renamed GSI / new table by name).
+4. **Rendering pipeline** (Phase 2 remainder, including the render-Lambda
+   infra sub-component — itself reviewed/deployed before the app-side
+   orchestration action lands) — depends on #1 + #3.
+5. **Admin UI: generation + review** (Phase 3) — depends on #4.
+6. **Lob submission** (Phase 4, including the `'submitting'` status
+   addition) — depends on #5 + a real Lob test-mode key populated
+   out-of-band.
+7. **Webhook receiver** (Phase 5) — depends on #1 (webhook-events table) +
+   #6 (real `providerPostcardId`s to correlate against) + the
+   verification method confirmed + webhook secret populated + webhook
+   registered with Lob, all out-of-band.
 
 ## Implementation requirements
 
@@ -4339,6 +4599,19 @@ Verify webhook authenticity using Lob’s current documented method.
 Do not mail automatically during the MVP.
 
 Avoid unsupported aggressive claims.
+
+## Open questions to resolve at implementation time (do not guess now)
+
+1. Lob's current webhook signature-verification method.
+2. Lob's exact front/back artwork input format, and whether the recipient
+   address is pre-printed by Webpresa or overlaid by Lob.
+3. Lob's current safe-zone/bleed dimensions for the chosen postcard size.
+4. Lob's webhook event-type vocabulary (for `status-mapping.ts`).
+5. Whether Lob exposes a pre-submission cost/dry-run endpoint.
+6. Whether the render Lambda should share code with `screenshot-capture`
+   via a common local package or via duplication.
+7. What admin-identity concept (if any) exists today to populate
+   `Postcard.reviewedBy` meaningfully.
 
 ## Acceptance criteria
 
