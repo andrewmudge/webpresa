@@ -199,7 +199,15 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
 
     this.computeInvokePolicy = new iam.ManagedPolicy(this, 'ComputeInvokePolicy', {
       managedPolicyName: `webpresa-${config.suffix}-vercel-compute-invoke`,
-      description: 'Lambda invoke (Stage 14 screenshots, Stage 22 postcard rendering) and Step Functions StartExecution (Stage 16 scan workflow) for the Vercel-hosted app',
+      // Deliberately NOT updated to mention Stage 22 here even though this
+      // policy now also grants postcard-render invoke — AWS::IAM::ManagedPolicy's
+      // Description requires full resource replacement on any change, and
+      // this policy has a fixed explicit managedPolicyName, so CloudFormation
+      // can't create the replacement before the old one still holds that
+      // name (confirmed the hard way: a real `cdk deploy` failed with IAM's
+      // "already exists" 409 the moment this string changed, auto-rolled
+      // back safely). Only the Statement list is in-place-updatable.
+      description: 'Lambda invoke (Stage 14 screenshots) and Step Functions StartExecution (Stage 16 scan workflow) for the Vercel-hosted app',
       statements: [
         new iam.PolicyStatement({
           sid: 'ScreenshotLambdaInvoke',
