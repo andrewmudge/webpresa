@@ -4,8 +4,12 @@ import { mapLobEventToPostcardStatus } from '../status-mapping';
 const OCCURRED_AT = '2026-08-08T12:00:00.000Z';
 
 describe('mapLobEventToPostcardStatus', () => {
-  it('maps postcard.billed to status mailed with mailedAt (no separate "mailed" event exists in Lob\'s real event set)', () => {
+  it('maps postcard.billed to status mailed with mailedAt (the test-mode stand-in — see file doc comment)', () => {
     expect(mapLobEventToPostcardStatus('postcard.billed', OCCURRED_AT)).toEqual({ status: 'mailed', mailedAt: OCCURRED_AT });
+  });
+
+  it('maps postcard.mailed to status mailed with mailedAt (the real live-mode event — a placeholder until we go live)', () => {
+    expect(mapLobEventToPostcardStatus('postcard.mailed', OCCURRED_AT)).toEqual({ status: 'mailed', mailedAt: OCCURRED_AT });
   });
 
   it('maps postcard.delivered to status delivered with deliveredAt', () => {
@@ -50,9 +54,5 @@ describe('mapLobEventToPostcardStatus', () => {
 
   it('returns an empty mapping for an unrecognized event type (forward-compatible no-op)', () => {
     expect(mapLobEventToPostcardStatus('postcard.something_new', OCCURRED_AT)).toEqual({});
-  });
-
-  it('no longer recognizes postcard.mailed — confirmed against Lob\'s live dashboard that this event does not exist', () => {
-    expect(mapLobEventToPostcardStatus('postcard.mailed', OCCURRED_AT)).toEqual({});
   });
 });

@@ -7,22 +7,35 @@ import type { PostcardStatus } from '@/domain/models/postcard';
  *
  * Event type strings confirmed directly against the live event-type
  * picker in Lob's own dashboard (2026-08-08, screenshotted while creating
- * the actual webhook) — more authoritative than the scraped docs this
- * file originally cited, which turned out to reference a `postcard.mailed`
- * event that **does not actually exist** in the current product. The real
- * full set: `postcard.billed`, `created`, `deleted`, `delivered`,
- * `failed`, `in_local_area`, `in_transit`,
- * `informed_delivery.email_{sent,opened,clicked_through}`,
- * `international_exit`, `processed_for_delivery`, `re-routed`,
- * `rejected`, `rendered_pdf`, `rendered_thumbnails`,
- * `returned_to_sender`, `viewed`.
+ * the actual webhook). `postcard.mailed` **is** a real Lob event (this
+ * file previously and incorrectly said it wasn't) — it just wasn't
+ * offered as a selectable option in that Test-environment webhook's
+ * event-type picker. The likely reason: test-mode postcards are never
+ * actually physically produced or handed to USPS, so live-mailing
+ * lifecycle events (`mailed`, and probably the tracking milestones that
+ * were greyed out for the same reason — `delivered`, `in_transit`,
+ * `in_local_area`, `processed_for_delivery`, `returned_to_sender`) don't
+ * apply to a test webhook and aren't offered there. `postcard.billed`
+ * *was* selectable and *is* what the current dev webhook (test-mode)
+ * actually subscribes to and receives — Lob bills a piece once it's
+ * produced, the closest thing test mode has to a "this would have been
+ * mailed" signal.
  *
- * `billed` is what this maps to `'mailed'` — Lob bills a piece once it's
- * actually been produced and handed to USPS, which is the closest real
- * equivalent to "mailed" in the confirmed event set (there is no separate
- * `postcard.mailed`/`postcard.printed` event). `failed` and `rejected`
- * both map to Webpresa's `'failed'` status — Lob distinguishes
- * pre-production validation failures (`rejected`) from
+ * Both `billed` and `mailed` map to `'mailed'` below, so this is already
+ * correct without a future code change:
+ *   - **Now (test mode)**: `billed` fires, `mailed` never does.
+ *   - **After going live** (a live `apiKey` with a payment method on
+ *     file — see `web/lib/lob/client.ts`'s doc comment): re-open the Lob
+ *     dashboard, create/update the Live-environment webhook, and check
+ *     `postcard.mailed` there (and the other now-real tracking events
+ *     above, if desired) — Lob's real physical-mail lifecycle should
+ *     fire `mailed` instead of/alongside `billed` at that point. No
+ *     change needed here when that happens; `billed`'s case below can be
+ *     removed at that point if it turns out live mode doesn't also send
+ *     it, but there's no harm leaving both mapped to the same outcome.
+ *
+ * `failed` and `rejected` both map to Webpresa's `'failed'` status — Lob
+ * distinguishes pre-production validation failures (`rejected`) from
  * processing/production failures (`failed`), a distinction this stage's
  * internal model doesn't need to preserve, so both collapse to the same
  * outcome (the full raw payload is still preserved verbatim in
@@ -48,6 +61,10 @@ export interface MappedPostcardEvent {
 export function mapLobEventToPostcardStatus(eventType: string, occurredAt: string): MappedPostcardEvent {
   switch (eventType) {
     case 'postcard.billed':
+    // Live-mode-only placeholder — not selectable/received under the
+    // current test-mode webhook, but real once a live API key with a
+    // payment method on file is in use. See this file's doc comment.
+    case 'postcard.mailed':
       return { status: 'mailed', mailedAt: occurredAt };
     case 'postcard.delivered':
       return { status: 'delivered', deliveredAt: occurredAt };
