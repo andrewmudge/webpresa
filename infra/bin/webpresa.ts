@@ -3,6 +3,8 @@ import * as cdk from 'aws-cdk-lib';
 import { WebpresaDataStack } from '../lib/stacks/data-stack';
 import { WebpresaScreenshotRepositoryStack } from '../lib/stacks/screenshot-repository-stack';
 import { WebpresaScreenshotStack } from '../lib/stacks/screenshot-stack';
+import { WebpresaPostcardRenderRepositoryStack } from '../lib/stacks/postcard-render-repository-stack';
+import { WebpresaPostcardRenderStack } from '../lib/stacks/postcard-render-stack';
 import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
@@ -113,6 +115,27 @@ const screenshotStack = new WebpresaScreenshotStack(app, `Webpresa${label}Screen
   appBaseUrl,
 });
 
+// Stage 22 Phase 2 — the postcard-render Lambda's ECR repository, deployed
+// independently and BEFORE the Lambda stack, for the same reason the
+// screenshot repository is split out — see
+// WebpresaPostcardRenderRepositoryStack's doc comment.
+const postcardRenderRepositoryStack = new WebpresaPostcardRenderRepositoryStack(app, `Webpresa${label}PostcardRenderRepositoryStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} postcard-render ECR repository — deployed before the Lambda that references it (Stage 22 Phase 2)`,
+});
+
+const postcardRenderStack = new WebpresaPostcardRenderStack(app, `Webpresa${label}PostcardRenderStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} postcard-render compute layer — Playwright PDF-rendering Lambda managed by CDK (Stage 22 Phase 2)`,
+  repository: postcardRenderRepositoryStack.postcardRenderRepository.repository,
+  assetsBucket: dataStack.assetsBucket,
+  captureTokenSecret: dataStack.captureTokenSecret,
+  vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
+  appBaseUrl,
+});
+
 const scanWorkflowStack = new WebpresaScanWorkflowStack(app, `Webpresa${label}ScanWorkflowStack`, {
   config,
   env,
@@ -167,6 +190,7 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
   internalApiSecret: dataStack.internalApiSecret,
   screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
+  postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
   scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
   customerUserPool: dataStack.customerUserPool,
 });

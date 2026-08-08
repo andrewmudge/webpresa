@@ -39,6 +39,8 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly internalApiSecret: secretsmanager.ISecret;
   readonly screenshotLambdaFunction: lambda.IFunction;
+  /** Stage 22 Phase 2 — invoked synchronously from web/lib/postcards/render.ts. */
+  readonly postcardRenderLambdaFunction: lambda.IFunction;
   readonly scanWorkflowStateMachine: sfn.IStateMachine;
   readonly customerUserPool: cognito.IUserPool;
 }
@@ -197,12 +199,17 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
 
     this.computeInvokePolicy = new iam.ManagedPolicy(this, 'ComputeInvokePolicy', {
       managedPolicyName: `webpresa-${config.suffix}-vercel-compute-invoke`,
-      description: 'Lambda invoke (Stage 14 screenshots) and Step Functions StartExecution (Stage 16 scan workflow) for the Vercel-hosted app',
+      description: 'Lambda invoke (Stage 14 screenshots, Stage 22 postcard rendering) and Step Functions StartExecution (Stage 16 scan workflow) for the Vercel-hosted app',
       statements: [
         new iam.PolicyStatement({
           sid: 'ScreenshotLambdaInvoke',
           actions: ['lambda:InvokeFunction'],
           resources: [props.screenshotLambdaFunction.functionArn],
+        }),
+        new iam.PolicyStatement({
+          sid: 'PostcardRenderLambdaInvoke',
+          actions: ['lambda:InvokeFunction'],
+          resources: [props.postcardRenderLambdaFunction.functionArn],
         }),
         new iam.PolicyStatement({
           sid: 'ScanWorkflowStartExecution',

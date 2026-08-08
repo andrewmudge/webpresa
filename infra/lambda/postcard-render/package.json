@@ -1,0 +1,24 @@
+{
+  "name": "webpresa-postcard-render",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stage 22 Phase 2 (Postcard Rendering Pipeline) — AWS Lambda container image. A standalone deployable, independent of both web/ and infra/'s own npm projects (no workspace tooling exists in this repo — mirrors infra/lambda/screenshot-capture's own constraint).",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/client-secrets-manager": "^3.1085.0",
+    "aws-lambda-ric": "^3.0.0",
+    "jose": "^6.2.3",
+    "playwright-core": "1.49.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}

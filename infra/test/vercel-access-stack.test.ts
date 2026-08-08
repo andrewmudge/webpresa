@@ -4,6 +4,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { WebpresaDataStack } from '../lib/stacks/data-stack';
 import { WebpresaScreenshotRepositoryStack } from '../lib/stacks/screenshot-repository-stack';
 import { WebpresaScreenshotStack } from '../lib/stacks/screenshot-stack';
+import { WebpresaPostcardRenderRepositoryStack } from '../lib/stacks/postcard-render-repository-stack';
+import { WebpresaPostcardRenderStack } from '../lib/stacks/postcard-render-stack';
 import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
@@ -22,6 +24,15 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     businessesTable: dataStack.businessesTable,
     sitePreviewsTable: dataStack.sitePreviewsTable,
     scanEventsTable: dataStack.scanEventsTable,
+    assetsBucket: dataStack.assetsBucket,
+    captureTokenSecret: dataStack.captureTokenSecret,
+    vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
+    appBaseUrl: 'https://app.example-test.invalid',
+  });
+  const postcardRenderRepositoryStack = new WebpresaPostcardRenderRepositoryStack(app, `${appId}PostcardRenderRepositoryStack`, { config });
+  const postcardRenderStack = new WebpresaPostcardRenderStack(app, `${appId}PostcardRenderStack`, {
+    config,
+    repository: postcardRenderRepositoryStack.postcardRenderRepository.repository,
     assetsBucket: dataStack.assetsBucket,
     captureTokenSecret: dataStack.captureTokenSecret,
     vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
@@ -64,6 +75,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
     internalApiSecret: dataStack.internalApiSecret,
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
+    postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
     customerUserPool: dataStack.customerUserPool,
   });
@@ -207,12 +219,13 @@ describe('data-access policy statements', () => {
 });
 
 describe('compute-invoke policy statements', () => {
-  it('grants lambda:InvokeFunction on the screenshot Lambda and states:StartExecution on the scan workflow', () => {
+  it('grants lambda:InvokeFunction on the screenshot Lambda, the postcard-render Lambda, and states:StartExecution on the scan workflow', () => {
     dev.hasResourceProperties('AWS::IAM::ManagedPolicy', {
       ManagedPolicyName: 'webpresa-dev-vercel-compute-invoke',
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({ Sid: 'ScreenshotLambdaInvoke', Action: 'lambda:InvokeFunction' }),
+          Match.objectLike({ Sid: 'PostcardRenderLambdaInvoke', Action: 'lambda:InvokeFunction' }),
           Match.objectLike({ Sid: 'ScanWorkflowStartExecution', Action: 'states:StartExecution' }),
         ]),
       },
