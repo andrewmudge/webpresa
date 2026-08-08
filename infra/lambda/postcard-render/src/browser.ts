@@ -137,6 +137,22 @@ export async function capturePdf(params: {
 
     await page.addStyleTag({ content: DISABLE_ANIMATIONS_CSS }).catch(() => undefined);
 
+    // Playwright's page.pdf() renders under `print` CSS media by default,
+    // not `screen`, unless told otherwise — confirmed the hard way: this
+    // codebase has zero `@media print` rules anywhere, so every postcard
+    // has only ever been designed/approved under `screen` media, while
+    // this pipeline was silently rendering under a media context nobody
+    // tested against. That mismatch — not any individual component's
+    // styling — was the root cause of rectangular artifacts appearing
+    // around box-shadowed footer elements (the QR card, the OR-divider
+    // circle, the access-code pill) in the PDF but not the browser:
+    // Chromium's print/PDF compositor is a genuinely different rendering
+    // path from its screen compositor, and blur+radius box-shadows are a
+    // known case that can render differently there. Forcing `screen`
+    // media makes this pipeline reproduce the approved browser rendering
+    // path exactly, since there's no print stylesheet to diverge from it.
+    await page.emulateMedia({ media: 'screen' });
+
     let pdf: Buffer;
     try {
       pdf = await page.pdf({
