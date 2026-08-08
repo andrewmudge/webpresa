@@ -19,7 +19,7 @@ export interface PostcardWebhookEvent extends TimestampedRecord {
   /** DynamoDB table partition key — Lob's own event id. */
   lobEventId: string;
   postcardId: string;
-  /** Lob's event type string (e.g. `postcard.mailed`, `postcard.delivered`) — enumerate the real set from Lob's current docs at implementation time. */
+  /** Lob's event type string (e.g. `postcard.billed`, `postcard.delivered`) — see `web/lib/lob/status-mapping.ts` for the full confirmed set (taken directly from Lob's own dashboard event-type picker, 2026-08-08). */
   eventType: string;
   /** ISO 8601 timestamp — when this webhook was received (also the sort key on `postcard-id-index`). */
   receivedAt: string;

@@ -44,10 +44,10 @@ function makeRequest(bodyObj: unknown, { validSignature = true, secret = WEBHOOK
   });
 }
 
-function mailedEventPayload(overrides: Record<string, unknown> = {}) {
+function billedEventPayload(overrides: Record<string, unknown> = {}) {
   return {
     id: 'evt_1',
-    event_type: { id: 'postcard.mailed', resource: 'postcards', object: 'event_type' },
+    event_type: { id: 'postcard.billed', resource: 'postcards', object: 'event_type' },
     date_created: '2026-08-08T12:00:00.000Z',
     object: 'event',
     body: { id: PROVIDER_POSTCARD_ID },
@@ -64,14 +64,14 @@ beforeEach(() => {
 
 describe('POST /api/webhooks/lob — signature verification', () => {
   it('rejects an invalid signature with 400 before any DB lookup', async () => {
-    const response = await POST(makeRequest(mailedEventPayload(), { validSignature: false }));
+    const response = await POST(makeRequest(billedEventPayload(), { validSignature: false }));
     expect(response.status).toBe(400);
     expect(mockGetPostcardByProviderPostcardId).not.toHaveBeenCalled();
   });
 
   it('rejects with 400 when no webhookSecret is configured yet (fail closed)', async () => {
     mockGetLobSecret.mockResolvedValue({ apiKey: 'test_x', webhookSecret: '' });
-    const response = await POST(makeRequest(mailedEventPayload()));
+    const response = await POST(makeRequest(billedEventPayload()));
     expect(response.status).toBe(400);
     expect(mockGetPostcardByProviderPostcardId).not.toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe('POST /api/webhooks/lob — unresolvable/unknown', () => {
 
   it('acknowledges (200) an event for a postcard we have no record of', async () => {
     mockGetPostcardByProviderPostcardId.mockResolvedValue(null);
-    const response = await POST(makeRequest(mailedEventPayload()));
+    const response = await POST(makeRequest(billedEventPayload()));
     expect(response.status).toBe(200);
     expect(mockPutPostcardWebhookEvent).not.toHaveBeenCalled();
   });
@@ -94,25 +94,25 @@ describe('POST /api/webhooks/lob — unresolvable/unknown', () => {
 
 describe('POST /api/webhooks/lob — happy path', () => {
   it('records durable history and applies the mapped rollup for a newly-recorded event', async () => {
-    const response = await POST(makeRequest(mailedEventPayload()));
+    const response = await POST(makeRequest(billedEventPayload()));
 
     expect(response.status).toBe(200);
     expect(mockPutPostcardWebhookEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ lobEventId: 'evt_1', postcardId: POSTCARD_ID, eventType: 'postcard.mailed', mappedStatus: 'mailed' }),
+      expect.objectContaining({ lobEventId: 'evt_1', postcardId: POSTCARD_ID, eventType: 'postcard.billed', mappedStatus: 'mailed' }),
     );
     expect(mockApplyPostcardWebhookRollup).toHaveBeenCalledWith(POSTCARD_ID, { status: 'mailed', mailedAt: '2026-08-08T12:00:00.000Z' });
   });
 
   it('does not re-apply the rollup on a duplicate delivery (dedup no-op)', async () => {
     mockPutPostcardWebhookEvent.mockResolvedValue(false);
-    const response = await POST(makeRequest(mailedEventPayload()));
+    const response = await POST(makeRequest(billedEventPayload()));
 
     expect(response.status).toBe(200);
     expect(mockApplyPostcardWebhookRollup).not.toHaveBeenCalled();
   });
 
   it('records history but skips the rollup call for an in-flight tracking event with no mapped change', async () => {
-    const response = await POST(makeRequest(mailedEventPayload({ event_type: { id: 'postcard.in_transit' } })));
+    const response = await POST(makeRequest(billedEventPayload({ event_type: { id: 'postcard.in_transit' } })));
 
     expect(response.status).toBe(200);
     const recordedEvent = mockPutPostcardWebhookEvent.mock.calls[0][0];
@@ -125,7 +125,7 @@ describe('POST /api/webhooks/lob — happy path', () => {
 describe('POST /api/webhooks/lob — internal errors', () => {
   it('returns 500 when the DB write throws (so Lob retries)', async () => {
     mockPutPostcardWebhookEvent.mockRejectedValue(new Error('DynamoDB unavailable'));
-    const response = await POST(makeRequest(mailedEventPayload()));
+    const response = await POST(makeRequest(billedEventPayload()));
     expect(response.status).toBe(500);
   });
 });
