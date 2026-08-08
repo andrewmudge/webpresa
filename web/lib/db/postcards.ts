@@ -54,6 +54,23 @@ export async function getPostcardByCampaignRecipientId(campaignRecipientId: stri
   return PostcardSchema.parse(items[0]);
 }
 
+/** Looks up a Postcard by the mailing provider's own id (`providerPostcardId`, e.g. Lob's `psc_...`) — used by the Phase 5 webhook route via the sparse `provider-postcard-id-index` (only populated once a postcard has been submitted). */
+export async function getPostcardByProviderPostcardId(providerPostcardId: string): Promise<Postcard | null> {
+  const client = getDynamoDBClient();
+  const result = await client.send(
+    new QueryCommand({
+      TableName: TABLE_POSTCARDS(),
+      IndexName: 'provider-postcard-id-index',
+      KeyConditionExpression: 'providerPostcardId = :providerPostcardId',
+      ExpressionAttributeValues: { ':providerPostcardId': providerPostcardId },
+      Limit: 1,
+    }),
+  );
+  const items = result.Items ?? [];
+  if (items.length === 0) return null;
+  return PostcardSchema.parse(items[0]);
+}
+
 export async function getPostcardById(postcardId: string): Promise<Postcard | null> {
   const client = getDynamoDBClient();
   const result = await client.send(
@@ -174,6 +191,55 @@ export async function markPostcardSubmissionFailed(postcardId: string, failureRe
       UpdateExpression: 'SET #status = :failed, failureReason = :failureReason, updatedAt = :now',
       ExpressionAttributeNames: { '#status': 'status' },
       ExpressionAttributeValues: { ':failed': 'failed', ':failureReason': failureReason, ':now': now },
+    }),
+  );
+}
+
+/**
+ * Applies a Phase 5 webhook's mapped rollup fields to `Postcard` —
+ * unconditional (the caller, the webhook route, only calls this once
+ * `putPostcardWebhookEvent` has confirmed the event was newly recorded,
+ * which is the actual dedup guard; nothing here needs its own condition).
+ * A no-op object (`{}`, from an in-flight tracking event `status-mapping.ts`
+ * intentionally doesn't map to a rollup change) results in only
+ * `updatedAt` moving — acceptable, since the durable history record was
+ * still written regardless.
+ */
+export async function applyPostcardWebhookRollup(
+  postcardId: string,
+  mapped: { status?: Postcard['status']; mailedAt?: string; deliveredAt?: string; failureReason?: string },
+): Promise<void> {
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+  const names: Record<string, string> = {};
+  const values: Record<string, unknown> = { ':now': now };
+  const setClauses = ['updatedAt = :now'];
+
+  if (mapped.status !== undefined) {
+    names['#status'] = 'status';
+    values[':status'] = mapped.status;
+    setClauses.push('#status = :status');
+  }
+  if (mapped.mailedAt !== undefined) {
+    values[':mailedAt'] = mapped.mailedAt;
+    setClauses.push('mailedAt = :mailedAt');
+  }
+  if (mapped.deliveredAt !== undefined) {
+    values[':deliveredAt'] = mapped.deliveredAt;
+    setClauses.push('deliveredAt = :deliveredAt');
+  }
+  if (mapped.failureReason !== undefined) {
+    values[':failureReason'] = mapped.failureReason;
+    setClauses.push('failureReason = :failureReason');
+  }
+
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_POSTCARDS(),
+      Key: { postcardId },
+      UpdateExpression: `SET ${setClauses.join(', ')}`,
+      ...(Object.keys(names).length > 0 ? { ExpressionAttributeNames: names } : {}),
+      ExpressionAttributeValues: values,
     }),
   );
 }

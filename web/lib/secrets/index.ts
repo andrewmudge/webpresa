@@ -39,6 +39,23 @@ export interface StripeSecret {
 
 export interface LobSecret {
   apiKey: string;
+  /**
+   * Stage 22 Phase 5 — signs Lob's webhook payloads, one value per
+   * registered webhook (Lob generates it when a webhook is created in
+   * their dashboard — there is no API to create webhooks or fetch this
+   * value programmatically). Populated out-of-band via
+   * `aws secretsmanager put-secret-value`, same as `apiKey` — deliberately
+   * NOT added to this secret's `jsonKeys` in
+   * `infra/lib/stacks/data-stack.ts`: that construct regenerates the
+   * secret's `GenerateSecretString` template on any `jsonKeys` change,
+   * which would reset the already-populated real `apiKey` to a random
+   * placeholder on the next `cdk deploy` touching that stack (see
+   * `infra/lib/constructs/webpresa-secret.ts`'s own doc comment). The
+   * runtime secret value simply has more keys than what CDK's one-time
+   * creation template described, which Secrets Manager has no problem
+   * with.
+   */
+  webhookSecret: string;
 }
 
 /** Stage 14 — HMAC signing key shared with the screenshot Lambda (mints tokens this app only verifies). */
