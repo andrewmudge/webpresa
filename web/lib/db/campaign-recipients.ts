@@ -184,7 +184,7 @@ export async function recordScanHitRollup(params: RecordScanHitRollupParams): Pr
   );
 }
 
-/** Admin/cascade-delete only (business deletion) — never called during normal operation. */
+/** Admin/cascade-delete only (business deletion, campaign deletion) — never called during normal operation. */
 export async function deleteCampaignRecipientById(campaignRecipientId: string): Promise<void> {
   const client = getDynamoDBClient();
   await client.send(

@@ -13,9 +13,13 @@ const {
   mockGetCampaignById,
   mockPutCampaign,
   mockUpdateCampaignStatus,
+  mockDeleteCampaignById,
+  mockListCampaignRecipientsForCampaign,
   mockPutCampaignRecipient,
   mockUpdateCampaignRecipientDestination,
   mockUpdateCampaignRecipientStatus,
+  mockDeleteCampaignRecipientById,
+  mockDeleteAllScanHitsForRecipient,
   mockGenerateCampaignCode,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
@@ -26,9 +30,13 @@ const {
   mockGetCampaignById: vi.fn(),
   mockPutCampaign: vi.fn(),
   mockUpdateCampaignStatus: vi.fn(),
+  mockDeleteCampaignById: vi.fn(),
+  mockListCampaignRecipientsForCampaign: vi.fn(),
   mockPutCampaignRecipient: vi.fn(),
   mockUpdateCampaignRecipientDestination: vi.fn(),
   mockUpdateCampaignRecipientStatus: vi.fn(),
+  mockDeleteCampaignRecipientById: vi.fn(),
+  mockDeleteAllScanHitsForRecipient: vi.fn(),
   mockGenerateCampaignCode: vi.fn(),
 }));
 
@@ -47,17 +55,22 @@ vi.mock('@/lib/db/campaigns', () => ({
   getCampaignById: mockGetCampaignById,
   putCampaign: mockPutCampaign,
   updateCampaignStatus: mockUpdateCampaignStatus,
+  deleteCampaignById: mockDeleteCampaignById,
 }));
 
 vi.mock('@/lib/db/campaign-recipients', () => ({
+  listCampaignRecipientsForCampaign: mockListCampaignRecipientsForCampaign,
   putCampaignRecipient: mockPutCampaignRecipient,
   updateCampaignRecipientDestination: mockUpdateCampaignRecipientDestination,
   updateCampaignRecipientStatus: mockUpdateCampaignRecipientStatus,
+  deleteCampaignRecipientById: mockDeleteCampaignRecipientById,
 }));
+
+vi.mock('@/lib/db/scan-hits', () => ({ deleteAllScanHitsForRecipient: mockDeleteAllScanHitsForRecipient }));
 
 vi.mock('@/lib/campaign/code', () => ({ generateCampaignCode: mockGenerateCampaignCode }));
 
-import { createCampaignAction, updateCampaignStatusAction, addCampaignRecipientAction, updateCampaignRecipientStatusAction } from '../actions';
+import { createCampaignAction, updateCampaignStatusAction, deleteCampaignAction, addCampaignRecipientAction, updateCampaignRecipientStatusAction } from '../actions';
 
 const SESSION = { sub: 'admin_1' };
 const FUTURE = new Date(Date.now() + 60_000).toISOString();
@@ -104,6 +117,50 @@ describe('updateCampaignStatusAction', () => {
     const result = await updateCampaignStatusAction('campaign_1', 'paused');
     expect(result).toEqual({});
     expect(mockUpdateCampaignStatus).toHaveBeenCalledWith('campaign_1', 'paused');
+  });
+});
+
+describe('deleteCampaignAction', () => {
+  beforeEach(() => {
+    mockListCampaignRecipientsForCampaign.mockResolvedValue([]);
+  });
+
+  it('rejects an unauthenticated request', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const result = await deleteCampaignAction('campaign_1');
+    expect(result.error).toBeTruthy();
+    expect(mockDeleteCampaignById).not.toHaveBeenCalled();
+  });
+
+  it('returns an error when the campaign does not exist', async () => {
+    mockGetCampaignById.mockResolvedValueOnce(null);
+    const result = await deleteCampaignAction('campaign_missing');
+    expect(result.error).toBeTruthy();
+    expect(mockDeleteCampaignById).not.toHaveBeenCalled();
+  });
+
+  it('deletes the campaign directly when it has no recipients', async () => {
+    const result = await deleteCampaignAction('campaign_1');
+    expect(result).toEqual({});
+    expect(mockDeleteAllScanHitsForRecipient).not.toHaveBeenCalled();
+    expect(mockDeleteCampaignRecipientById).not.toHaveBeenCalled();
+    expect(mockDeleteCampaignById).toHaveBeenCalledWith('campaign_1');
+  });
+
+  it('cascades through every recipient\'s scan history and the recipient itself before deleting the campaign', async () => {
+    mockListCampaignRecipientsForCampaign.mockResolvedValueOnce([
+      { campaignRecipientId: 'recipient_1' },
+      { campaignRecipientId: 'recipient_2' },
+    ]);
+
+    const result = await deleteCampaignAction('campaign_1');
+
+    expect(result).toEqual({});
+    expect(mockDeleteAllScanHitsForRecipient).toHaveBeenCalledWith('recipient_1');
+    expect(mockDeleteAllScanHitsForRecipient).toHaveBeenCalledWith('recipient_2');
+    expect(mockDeleteCampaignRecipientById).toHaveBeenCalledWith('recipient_1');
+    expect(mockDeleteCampaignRecipientById).toHaveBeenCalledWith('recipient_2');
+    expect(mockDeleteCampaignById).toHaveBeenCalledWith('campaign_1');
   });
 });
 

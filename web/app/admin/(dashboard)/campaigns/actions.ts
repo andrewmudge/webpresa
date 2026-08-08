@@ -11,8 +11,15 @@ import type { CampaignRecipientStatus } from '@/domain/models/campaign-recipient
 import { createCampaign } from '@/domain/factories/campaign.factory';
 import { createCampaignRecipient } from '@/domain/factories/campaign-recipient.factory';
 import { generateCampaignCode } from '@/lib/campaign/code';
-import { getCampaignById, putCampaign, updateCampaignStatus } from '@/lib/db/campaigns';
-import { putCampaignRecipient, updateCampaignRecipientDestination, updateCampaignRecipientStatus } from '@/lib/db/campaign-recipients';
+import { getCampaignById, putCampaign, updateCampaignStatus, deleteCampaignById } from '@/lib/db/campaigns';
+import {
+  listCampaignRecipientsForCampaign,
+  putCampaignRecipient,
+  updateCampaignRecipientDestination,
+  updateCampaignRecipientStatus,
+  deleteCampaignRecipientById,
+} from '@/lib/db/campaign-recipients';
+import { deleteAllScanHitsForRecipient } from '@/lib/db/scan-hits';
 
 /**
  * Admin campaign management (Stage 21). Manual-only — there is no
@@ -66,6 +73,32 @@ export async function updateCampaignStatusAction(campaignId: string, status: Cam
   if (!campaign) return { error: 'Campaign not found.' };
 
   await updateCampaignStatus(campaignId, status);
+  return {};
+}
+
+/**
+ * Permanently deletes a campaign and every recipient it owns, cascading
+ * through each recipient's `ScanHit` history first — mirrors
+ * `deleteCustomerWebsite`'s cascade shape (delete children, then the
+ * parent). Any `Postcard` a recipient generated is deliberately left
+ * alone — see `deleteCampaignById`'s doc comment for why. Irreversible;
+ * there is no undo and no soft-delete/archive step (`updateCampaignStatusAction`
+ * already covers "stop this campaign without destroying its data").
+ */
+export async function deleteCampaignAction(campaignId: string): Promise<{ error?: string }> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const campaign = await getCampaignById(campaignId);
+  if (!campaign) return { error: 'Campaign not found.' };
+
+  const recipients = await listCampaignRecipientsForCampaign(campaignId);
+  for (const recipient of recipients) {
+    await deleteAllScanHitsForRecipient(recipient.campaignRecipientId);
+    await deleteCampaignRecipientById(recipient.campaignRecipientId);
+  }
+  await deleteCampaignById(campaignId);
+
   return {};
 }
 

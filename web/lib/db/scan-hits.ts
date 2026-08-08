@@ -62,9 +62,10 @@ export async function reserveVisitorFingerprint(campaignRecipientId: string, vis
 }
 
 /**
- * Admin/cascade-delete only (business deletion) — deletes every item this
- * recipient owns in this table, both real `ScanHit` rows and its permanent
- * fingerprint reservations. Never called during normal operation; `ScanHit`
+ * Admin/cascade-delete only (business deletion, campaign deletion) —
+ * deletes every item this recipient owns in this table, both real
+ * `ScanHit` rows and its permanent fingerprint reservations. Never called
+ * during normal operation; `ScanHit`
  * history is otherwise preserved indefinitely.
  */
 export async function deleteAllScanHitsForRecipient(campaignRecipientId: string): Promise<void> {

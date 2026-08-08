@@ -8125,3 +8125,90 @@ web/scripts/screenshot.mjs   NEW — CLI: node scripts/screenshot.mjs <url> <out
 ```
 
 No infra/table changes. `~/.cache/webpresa-playwright-libs` and the Playwright browser cache live outside the repo, so nothing to commit there.
+
+---
+
+**Date:** 2026-08-08
+
+**Stage 22 (Webpresa Postcard Generation and Lob Fulfillment) — Phases 0 reconciliation, 2, 4, 5 built, deployed to dev, and verified live end-to-end against the real Lob API. Plus a "Delete campaign" admin action.**
+
+A prior session had left Phase 0's infra code (the `postcards` table GSI rename, the new `postcard-webhook-events` table) genuinely deployed to AWS but never committed to git — `cdk deploy` reads from the working tree, not git, so the two had silently diverged. Verified live against the AWS account (`aws dynamodb describe-table`) that the deployed state matched, then committed the infra as-is (no new deploy needed).
+
+**Phase 2 — rendering pipeline.** New `infra/lambda/postcard-render/`, a second container-image Lambda mirroring Stage 14's `screenshot-capture` closely (same Playwright base image, same Lambda-launch flags) but calling `page.pdf()` instead of `page.screenshot()`, and invoked **synchronously** rather than fire-and-forget — no DynamoDB access, no dead-letter queue. New CDK repository/Lambda stacks, wired into `bin/webpresa.ts` and the Vercel access stack's invoke policy (hit and fixed a real `cdk deploy` failure here — see below). On the app side: a new internal, capture-token-gated render page (`/internal/postcards/[postcardId]/render/[side]`) that deliberately reuses the exact same `PostcardFront`/`PostcardBack` components the admin review screen renders live, rather than a second template — a new `showGuides` prop on `PostcardFrame` strips the admin-only safe-zone guide lines and card chrome out of the actual print artifact. `web/lib/postcards/render.ts` invokes the Lambda for both sides and is now called automatically by `createPostcardAction`.
+
+**A real `cdk deploy` failure, fixed.** Adding the new Lambda's `lambda:InvokeFunction` grant to `WebpresaVercelAccessStack`'s `ComputeInvokePolicy` also touched that policy's `description` field, which — for `AWS::IAM::ManagedPolicy` — requires full resource replacement on any change. Because the policy has a fixed explicit name, CloudFormation couldn't create the replacement while the old one still held that name: `cdk deploy` failed with IAM's `AlreadyExists` 409 and auto-rolled back safely (no damage). Fix: reverted the description wording, keeping only the `Statement` addition (which *is* in-place-updatable) — confirmed via a clean `cdk diff` (no more `replace`) and a successful retry.
+
+**Postal ink-free zone confirmed against Lob's real docs — a genuine correctness fix, not just documentation.** Lob automatically overlays the recipient's address and USPS indicia in a documented 4"×2.375" zone on the postcard back (0.275" from the right edge, 0.25" from the bottom, from the bleed edge) and discards whatever artwork is there. `PostcardBack.tsx` no longer draws real address text into the actual print artifact — it's admin-preview-only context now (dashed-outlined, `showGuides={true}` only); the recipient address is passed structurally to Lob's API instead (the `to` field).
+
+**Phase 4 — Lob submission.** New `web/lib/lob/` module: `client.ts` is a hand-written `fetch` wrapper (HTTP Basic Auth, API key as username, blank password), deliberately not the official `lob` npm package — confirmed against Lob's live API docs that the REST API is simple enough not to need one, keeping every request/response shape visible in this repo. `submit-postcard.ts`'s `submitPostcardToLob` re-validates approval + rendered artifacts + addresses, then guards against double-submission with a new `transitionPostcardToSubmitting` (`lib/db/postcards.ts`) — a single-item conditional `pending`→`submitting` write, the same idempotency shape as `claims.ts`'s `consumeClaim` scaled down to one item. Confirmed against Lob's docs: there is **no request-level "test mode" flag** — safety is purely a function of which API key (`test_*`/`live_*`) is configured, and only a test key is on file (no payment method exists on this Lob account — Lob's own restriction on live keys). Populated the real Lob test-mode API key into the `lob` Secrets Manager secret. New "Submit to Lob" button on the postcard review page.
+
+**Phase 5 — webhook receiver.** New `web/app/api/webhooks/lob/route.ts`, structured like the existing Stripe webhook: verifies Lob's signature (`web/lib/lob/verify-webhook.ts` — HMAC-SHA256 of `{timestamp}.{rawBody}`, hex-encoded, compared against `Lob-Signature`, 5-minute replay tolerance on `Lob-Signature-Timestamp`; confirmed against Lob's live docs), writes durable history via the already-built `putPostcardWebhookEvent` (conditional put on `lobEventId` — the entire dedup mechanism), then applies the mapped rollup via a new `applyPostcardWebhookRollup` only when that write was newly recorded.
+
+**A real event-mapping bug, caught by the user, not by docs.** `web/lib/lob/status-mapping.ts` originally mapped a `postcard.mailed` event based on scraped Lob documentation. The user then registered a real Test-environment webhook in Lob's own dashboard and sent a screenshot of the actual live event-type picker — `postcard.mailed` wasn't offered there at all. Corrected: `postcard.mailed` is real, it's just live-mode-only (test postcards are never physically produced/mailed, so live-mailing lifecycle events don't apply to a test webhook and aren't offered) — `postcard.billed` (Lob bills once a piece is produced) is what the current test-mode webhook actually subscribes to and receives. Both now map to `'mailed'`, so the code needs no further change once a live key is in use — just re-subscribe the Live-environment webhook to `postcard.mailed` at that point (documented in the file's own doc comment). `postcard.rejected` was added alongside `postcard.failed`/`returned_to_sender`, all mapping to `'failed'`.
+
+**Webhook registered and verified live.** The user created the real webhook in Lob's Test-environment dashboard (URL: the deployed dev app's `/api/webhooks/lob`, with `?x-vercel-protection-bypass=<the existing Stage 14 bypass secret>` appended — no new secret), subscribed to the event types actually selectable on the free tier (`billed`, `created`, `deleted`, `failed`, `rejected`, `rendered_pdf`, `rendered_thumbnails` — the tracking-related events were greyed out/unselectable, presumably gated behind a paid plan). Populated the resulting `webhookSecret` into the `lob` secret — deliberately **not** added to that secret's CDK `jsonKeys` in `data-stack.ts`, since changing `jsonKeys` would make the next `cdk deploy` touching the data stack regenerate the secret's `GenerateSecretString` template and reset the already-populated real `apiKey` to a placeholder (see `LobSecret.webhookSecret`'s doc comment). Added all 8 Stage 22 Vercel env vars (render Lambda name, webhook-events table name, sender address) to Production and Preview via the Vercel CLI.
+
+**Live end-to-end verification (real Lob account, test mode).** The user generated a postcard, approved it, and clicked Submit — it was rendered (real PDFs, visible in S3 and Lob's dashboard), submitted (`providerPostcardId: psc_742978167ee8d630`), and the webhook received 3 real deliveries (`postcard.created`, `postcard.rendered_pdf`, `postcard.rendered_thumbnails`). Verified directly in DynamoDB: all 3 events signature-verified, correctly deduped (distinct `lobEventId`s, zero duplicates), correctly left `Postcard.status` at `'submitted'` (all three are informational-only per the mapping above — not a bug). Status will likely never advance further on this account, since a free-tier test postcard is never actually billed/mailed by Lob.
+
+**Known issue, found during this verification, not yet fixed:** the rendered print PDF doesn't pixel-match the live admin preview exactly, despite both rendering from the exact same `PostcardFront`/`PostcardBack` component tree via the "one template, two callers" design. Root cause not yet diagnosed — most likely a `page.pdf()`-specific rendering difference (print CSS, font-loading timing, or container-query resolution under Playwright's PDF media emulation vs. its normal screenshot path), since both callers pass identical props. Flagged as the next thing to investigate.
+
+**Also added: "Delete campaign" admin action**, unrelated to the Lob work above. `deleteCampaignAction` (`app/admin/(dashboard)/campaigns/actions.ts`) cascades through every `CampaignRecipient` a campaign owns and their `ScanHit` history (reusing the existing `deleteCampaignRecipientById`/`deleteAllScanHitsForRecipient`, previously only called from business deletion) before deleting the `Campaign` record itself — mirrors `deleteCustomerWebsite`'s children-then-parent cascade shape. Any `Postcard` a deleted recipient generated is deliberately left alone (a dangling `campaignRecipientId` is already a valid state in that model). UI: a plain "Delete" button with `window.confirm` (no modal — matches the existing admin-tool-simple pattern in `StockImagesPanel.tsx`, not the more elaborate customer-facing `DeleteWebsiteModal`) on `/admin/campaigns/[campaignId]`.
+
+## Files changed
+
+```
+infra/bin/webpresa.ts                                                           MODIFIED — wire postcard-render repo/Lambda stacks + Vercel access grant
+infra/lambda/postcard-render/                                                   NEW — full Lambda source (handler, browser, capture-token, aws, types) + tests + Dockerfile
+infra/lib/constructs/webpresa-postcard-render-lambda.ts                         NEW
+infra/lib/constructs/webpresa-postcard-render-repository.ts                     NEW
+infra/lib/stacks/postcard-render-stack.ts                                       NEW
+infra/lib/stacks/postcard-render-repository-stack.ts                            NEW
+infra/lib/stacks/data-stack.ts                                                  MODIFIED — Phase 0 infra reconciliation (already-deployed GSI rename + webhook-events table)
+infra/lib/stacks/vercel-access-stack.ts                                         MODIFIED — postcardRenderLambdaFunction invoke grant (description-field revert)
+infra/package.json                                                              MODIFIED — diff/deploy npm scripts for the new stacks
+infra/scripts/build-and-push-postcard-render-lambda.sh                          NEW
+infra/test/postcard-render-stack.test.ts                                        NEW
+infra/test/postcard-render-repository-stack.test.ts                             NEW
+infra/test/data-stack.test.ts, vercel-access-stack.test.ts                      MODIFIED
+web/app/internal/postcards/[postcardId]/render/[side]/page.tsx                  NEW — Phase 2 print-render page
+web/lib/postcards/render.ts                                                     NEW — renderPostcardArtifacts orchestration
+web/lib/capture-token.ts                                                        MODIFIED — new postcard_render purpose
+web/app/admin/(dashboard)/postcards/components/PostcardFrame.tsx                MODIFIED — showGuides prop
+web/app/admin/(dashboard)/postcards/components/PostcardFront.tsx                MODIFIED — showGuides passthrough
+web/app/admin/(dashboard)/postcards/components/PostcardBack.tsx                 MODIFIED — ink-free zone, address no longer drawn into the print artifact
+web/app/admin/(dashboard)/postcards/components/postcard-size.ts                 MODIFIED — POSTCARD_INK_FREE_ZONE_* constants
+web/lib/lob/client.ts                                                           NEW — hand-written fetch wrapper
+web/lib/lob/submit-postcard.ts                                                  NEW
+web/lib/lob/status-mapping.ts                                                   NEW (later corrected — postcard.mailed restored as a live-mode placeholder)
+web/lib/lob/verify-webhook.ts                                                   NEW
+web/lib/db/postcards.ts                                                         MODIFIED — transitionPostcardToSubmitting, markPostcardSubmitted/SubmissionFailed, applyPostcardWebhookRollup, getPostcardByProviderPostcardId
+web/lib/secrets/index.ts                                                        MODIFIED — LobSecret.webhookSecret
+web/app/api/webhooks/lob/route.ts                                               NEW
+web/app/admin/(dashboard)/postcards/actions.ts                                  MODIFIED — submitPostcardToLobAction
+web/app/admin/(dashboard)/postcards/[postcardId]/SubmitButton.tsx               NEW
+web/app/admin/(dashboard)/postcards/[postcardId]/page.tsx                       MODIFIED — Submit to Lob wired in, stale copy fixed
+web/app/admin/(dashboard)/postcards/[postcardId]/ApproveButton.tsx              MODIFIED — stale "Phase 4 not yet built" copy removed
+web/domain/models/postcard-webhook-event.ts                                     MODIFIED — doc comment
+web/lib/lambda/client.ts                                                        MODIFIED — getPostcardRenderLambdaFunctionName
+web/.env.local.example                                                          MODIFIED — new Stage 22 env vars
+web/docs/deployment.md                                                          MODIFIED — Stage 22 deployment guidance brought current
+web/docs/architecture.md                                                        MODIFIED — new "Webpresa Postcard Generation and Lob Fulfillment (Stage 22)" section
+web/app/admin/(dashboard)/campaigns/actions.ts                                  MODIFIED — deleteCampaignAction
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx             MODIFIED — Delete button
+web/lib/db/campaigns.ts                                                         MODIFIED — deleteCampaignById
+web/lib/db/campaign-recipients.ts, scan-hits.ts                                 MODIFIED — doc comments (now also cascade-deleted by campaign deletion)
+Plus test files for every new module above (lib/lob/__tests__/, lib/postcards/__tests__/, app/api/webhooks/lob/__tests__/, campaigns/__tests__/actions.test.ts)
+```
+
+## Verification
+
+```
+npx tsc --noEmit     — passes (every round)
+npm run lint         — 0 errors, pre-existing unrelated warnings only
+npm test             — 1207/1207 passing (web); 190/190 passing (infra)
+npm run build        — succeeds; /api/webhooks/lob and /internal/postcards/[postcardId]/render/[side] confirmed in the route manifest
+cdk diff / cdk deploy — WebpresaDevPostcardRenderRepositoryStack, WebpresaDevPostcardRenderStack, WebpresaDevVercelAccessStack all deployed clean, reviewed before each deploy
+Live verification    — real postcard rendered, submitted to Lob (psc_742978167ee8d630), 3 webhook deliveries received and confirmed correct directly in DynamoDB
+```
+
+Infra deployed: `WebpresaDevPostcardRenderRepositoryStack`, `WebpresaDevPostcardRenderStack` (new), `WebpresaDevVercelAccessStack` (updated). Secrets populated: `lob` (`apiKey` + `webhookSecret`). Vercel env vars added (Production + Preview): `POSTCARD_WEBHOOK_EVENTS_TABLE_NAME`, `POSTCARD_RENDER_LAMBDA_FUNCTION_NAME`, `WEBPRESA_LOB_SENDER_{NAME,ADDRESS_LINE1,CITY,STATE,POSTAL_CODE,COUNTRY}`.

@@ -9,6 +9,7 @@ import type { ScanHit } from '@/domain/models/scan-hit';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import {
   updateCampaignStatusAction,
+  deleteCampaignAction,
   addCampaignRecipientAction,
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
@@ -91,6 +92,7 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
   const [status, setStatus] = useState<CampaignStatus>(campaign.status);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
 
   function handleStatusChange(next: CampaignStatus) {
     setError(null);
@@ -107,6 +109,19 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
     });
   }
 
+  function handleDelete() {
+    if (!confirm(`Permanently delete "${campaign.name}" and all of its recipients/scan history? This cannot be undone.`)) return;
+    setError(null);
+    startDeleteTransition(async () => {
+      const result = await deleteCampaignAction(campaign.campaignId);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      router.push('/admin/campaigns');
+    });
+  }
+
   return (
     <div className="rounded-xl border border-(--color-border) bg-white p-5">
       <div className="flex items-start justify-between">
@@ -116,23 +131,33 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
             {campaign.channel} · Created {new Date(campaign.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <div className="text-right">
-          <label htmlFor="campaign-status" className="block text-xs font-medium text-gray-500 mb-1">
-            Status
-          </label>
-          <select
-            id="campaign-status"
-            value={status}
-            disabled={isPending}
-            onChange={(e) => handleStatusChange(e.target.value as CampaignStatus)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 capitalize disabled:opacity-60"
+        <div className="flex items-start gap-3">
+          <div className="text-right">
+            <label htmlFor="campaign-status" className="block text-xs font-medium text-gray-500 mb-1">
+              Status
+            </label>
+            <select
+              id="campaign-status"
+              value={status}
+              disabled={isPending}
+              onChange={(e) => handleStatusChange(e.target.value as CampaignStatus)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 capitalize disabled:opacity-60"
+            >
+              {CAMPAIGN_STATUSES.map((value) => (
+                <option key={value} value={value} className="capitalize">
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="mt-[21px] shrink-0 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
           >
-            {CAMPAIGN_STATUSES.map((value) => (
-              <option key={value} value={value} className="capitalize">
-                {value}
-              </option>
-            ))}
-          </select>
+            {isDeleting ? 'Deleting…' : 'Delete'}
+          </button>
         </div>
       </div>
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
