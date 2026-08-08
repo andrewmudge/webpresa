@@ -8244,3 +8244,35 @@ Downloaded + visually inspected both resulting PDFs from S3             — foot
 ```
 
 No CDK/infra config change — same Lambda, only its container image changed.
+
+---
+
+**Date:** 2026-08-08 (later same day)
+
+**Stage 22 downgraded from "complete" back to "in progress."** The user pushed the app to dev and ran a fresh real submission after the `page.pdf()` media-emulation fix above. The new postcard's provider record (`psc_fffe887f91a4ad82`) still showed rectangular artifacts in Lob's dashboard preview — same symptom as before the fix, at first glance.
+
+Investigated rather than assumed the fix hadn't worked: pulled the actual PDF file this postcard submitted to Lob straight from S3 (not a screenshot, not Lob's preview) and viewed it directly — it's clean, no artifacts, matching what the direct-Lambda-invoke test showed earlier. Confirmed the Lambda that rendered it is running the fixed code (`CodeSha256` matches the deployed digest). Asked the user where their screenshot came from rather than guessing further — confirmed: **Lob's own dashboard preview**, not the submitted file itself.
+
+So there are now two separate, unrelated things:
+1. Our own PDF-generation bug (the `page.pdf()` media mismatch) — genuinely fixed, confirmed by inspecting the real submitted file.
+2. A *new*, separate question: does Lob's dashboard preview reflect their real print pipeline, or is it a cosmetic-only rendering quirk on their end? Can't resolve from our side — generated presigned S3 links so the user could view the actual submitted file directly themselves, then drafted a support email for the user to send Lob (describing the artifact, the postcard reference IDs, and what's already been ruled out on our end) asking specifically whether their preview is representative of the physical print output.
+
+**User sent the email to Lob support.** Per the user's explicit instruction, marked Stage 22 back to "in progress, not complete" in `implementation.md`/`architecture.md` pending two open items:
+1. Lob support's reply on the dashboard-preview question above.
+2. The postcard back's visual design needs an actual polish pass — after the earlier ink-free-zone fix (which correctly stops drawing the recipient's address into the print artifact, since Lob overlays it), the back now only shows the sender's return address in the top-left with the rest of the card blank. Correct behavior for the bug that was being fixed, but not a finished design.
+
+Also resolved and struck through all 7 of the stage's original "open questions to resolve at implementation time" in `implementation.md` — every one was actually answered during Phase 2/4/5 implementation (webhook signature method, artwork format, safe-zone dims, event vocabulary, cost/dry-run endpoint, Lambda code-sharing, admin identity for `reviewedBy`) — and rewrote the acceptance-criteria checklist to reflect what's actually verified (`[x]`) vs. still blocked (`[ ]`) rather than leaving it as an undifferentiated list.
+
+## Files changed
+
+```
+web/docs/implementation.md   MODIFIED — Stage 22 Status rewritten (in progress, 2 open items), open questions resolved/struck through, acceptance criteria checked off
+web/docs/architecture.md     MODIFIED — top Status line + dedicated Stage 22 section both downgraded from "complete" to "in progress" with the same 2 open items
+web/docs/build_log.md        MODIFIED — this entry
+```
+
+No code changes this round — investigation + documentation only. Presigned S3 URLs generated for the user (read-only, no AWS resource changes) were not persisted anywhere; they were 1-hour-expiry links shared directly in conversation, already expired by the time this entry was written.
+
+## Verification
+
+Documentation-only change — no lint/typecheck/test/build impact.

@@ -4297,36 +4297,69 @@ this stage.
 
 ## Status
 
-In progress, sequentially through Phase 0 → 3, per commit history:
+**In progress — all 5 phases are built, deployed to dev, and were verified
+against the real Lob API (through 2026-08-08), but the stage is not
+closed out.** Two open items remain:
 
-- **Phase 0 (Infrastructure)** — written, **not committed, not deployed**.
-  The GSI rename and new `postcard-webhook-events` table exist as
-  uncommitted changes to `infra/lib/stacks/data-stack.ts` /
-  `vercel-access-stack.ts` / `infra/bin/webpresa.ts`. The render Lambda,
-  webhook-secret `jsonKeys` extension, and remaining Phase 0 items below
-  have not been started. Nothing downstream should assume this is
-  deployed until it goes through the `cdk diff` + approval + `cdk deploy`
-  gate.
+1. **Pending Lob support.** A real test postcard was rendered, approved,
+   and submitted (`psc_fffe887f91a4ad82`); Lob's own dashboard preview of
+   that submission shows faint rectangular artifacts around several
+   footer elements (the QR card, the OR divider, the "GO TO"/access-code
+   blocks) that do **not** appear in the actual PDF file this app
+   generated and submitted — confirmed by downloading that exact file
+   from S3 and inspecting it directly. A prior, related bug in our own
+   rendering pipeline (a Playwright `page.pdf()` print/screen CSS-media
+   mismatch) was found and fixed the same day, but this remaining
+   discrepancy lives in Lob's own preview-rendering pipeline, not ours.
+   Emailed Lob support to ask whether their dashboard preview is
+   representative of the actual print output; **awaiting their reply**
+   before deciding whether further changes on our side are warranted.
+2. **Postcard back needs visual polish.** The back template
+   (`PostcardBack.tsx`) is intentionally minimal right now — after
+   confirming Lob automatically overlays the recipient's address and
+   postage indicia and discards whatever artwork sits in that zone, the
+   actual print artifact only shows the sender's return address in the
+   top-left corner; the rest of the card is blank white space. That was
+   the correct fix for the ink-free-zone bug, but it leaves the back
+   without a finished design (no branding, message, or visual treatment
+   filling the remaining space) — flagged as follow-up work, not done.
+
+Per-phase detail, for reference — all built and deployed unless noted:
+
+- **Phase 0 (Infrastructure)** — done, deployed to dev. The `postcards`
+  table GSI rename, `postcard-webhook-events` table, and the render
+  Lambda's own infra (ECR repo, `WebpresaPostcardRenderStack`) are all
+  live in AWS.
 - **Phase 1 (Domain model changes)** — done, committed (`bce3d37`,
   2026-08-05).
-- **Phase 2 (Rendering pipeline)** — partial. QR extraction
-  (`web/lib/campaign/qr.ts`) is done (same commit as Phase 1). The
-  internal render pages, render Lambda, and rendering orchestration are
-  not built — nothing yet writes `Postcard.frontArtifactKey`/
-  `backArtifactKey`.
-- **Phase 3 (Administrative review UI)** — substantially built
-  (`37be755`, 2026-08-05, onward), and the site of all subsequent work:
-  ten-plus commits of visual iteration on `PostcardFrame.tsx`,
-  `PostcardFront.tsx`, `PostcardDiagonalBanner.tsx`,
-  `PostcardFeatureRow.tsx`, `PostcardDeviceMockup.tsx`. This preview
-  renders live from screenshots, not from Phase 2's (unbuilt) rendered
-  artifacts.
-- **Phase 4 (Lob submission)** and **Phase 5 (Webhook)** — not started.
+- **Phase 2 (Rendering pipeline)** — done. The `webpresa-dev-postcard-render`
+  container-image Lambda (calling `page.pdf()`, now with
+  `page.emulateMedia({ media: 'screen' })` — see open item 1 above for
+  why that was added), the internal `/internal/postcards/[postcardId]/render/[side]`
+  page, and `web/lib/postcards/render.ts`'s orchestration are all built,
+  deployed, and confirmed writing real `frontArtifactKey`/`backArtifactKey`
+  values.
+- **Phase 3 (Administrative review UI)** — done. `/admin/postcards` (list)
+  and `/admin/postcards/[postcardId]` (review, approve, submit), plus
+  "Generate postcard" from the Stage 21 campaign admin UI.
+- **Phase 4 (Lob submission)** — done. `web/lib/lob/` — a hand-written
+  `fetch` adapter (confirmed against Lob's live API docs that plain HTTP
+  Basic Auth over simple JSON endpoints doesn't need the official `lob`
+  npm package), idempotent submission, a real test postcard successfully
+  submitted and visible in Lob's dashboard.
+- **Phase 5 (Webhook)** — done. `/api/webhooks/lob`, signature-verified,
+  registered with Lob's Test-environment dashboard, and confirmed
+  receiving and correctly deduping real webhook deliveries.
 
 This specification replaces the original terser Stage 22 draft ("Lob
 Postcard Integration") after the user proposed a detailed rewrite; four
 corrections were confirmed against the real codebase before adopting it
-(see "Guiding decisions").
+(see "Guiding decisions"). See `web/docs/architecture.md`'s "Webpresa
+Postcard Generation and Lob Fulfillment (Stage 22)" section and
+`web/docs/build_log.md`'s 2026-08-08 entries for the full implementation
+record, including corrections found only by testing against the real
+Lob product rather than its docs (`postcard.mailed` isn't offered for a
+Test-environment webhook; there is no request-level Lob "test mode" flag).
 
 ## Objective
 
@@ -4600,30 +4633,62 @@ Do not mail automatically during the MVP.
 
 Avoid unsupported aggressive claims.
 
-## Open questions to resolve at implementation time (do not guess now)
+## Open questions — resolved during implementation (kept for the record)
 
-1. Lob's current webhook signature-verification method.
-2. Lob's exact front/back artwork input format, and whether the recipient
-   address is pre-printed by Webpresa or overlaid by Lob.
-3. Lob's current safe-zone/bleed dimensions for the chosen postcard size.
-4. Lob's webhook event-type vocabulary (for `status-mapping.ts`).
-5. Whether Lob exposes a pre-submission cost/dry-run endpoint.
-6. Whether the render Lambda should share code with `screenshot-capture`
-   via a common local package or via duplication.
-7. What admin-identity concept (if any) exists today to populate
-   `Postcard.reviewedBy` meaningfully.
+1. ~~Lob's current webhook signature-verification method.~~ Resolved:
+   HMAC-SHA256 of `{timestamp}.{rawBody}`, `Lob-Signature`/
+   `Lob-Signature-Timestamp` headers (`web/lib/lob/verify-webhook.ts`).
+2. ~~Lob's exact front/back artwork input format, and whether the
+   recipient address is pre-printed by Webpresa or overlaid by Lob.~~
+   Resolved: artwork submitted as signed URLs; the address is passed
+   structurally (`to`) and Lob overlays it automatically, discarding
+   whatever artwork sits in that zone — see `PostcardBack.tsx`.
+3. ~~Lob's current safe-zone/bleed dimensions for the chosen postcard
+   size.~~ Resolved: already-established `postcard-size.ts` constants
+   (9.25"×6.25" bleed, 0.125" safe zone) confirmed correct against Lob's
+   live docs.
+4. ~~Lob's webhook event-type vocabulary.~~ Resolved against Lob's own
+   dashboard event-type picker (`web/lib/lob/status-mapping.ts`) —
+   notably, `postcard.mailed` is real but not offered for a
+   Test-environment webhook; `postcard.billed` is what test mode sends.
+5. ~~Whether Lob exposes a pre-submission cost/dry-run endpoint.~~
+   Resolved: no.
+6. ~~Whether the render Lambda should share code with
+   `screenshot-capture`.~~ Resolved: duplicated, no shared-package
+   precedent exists between the two independent npm projects.
+7. ~~What admin-identity concept exists to populate `Postcard.reviewedBy`.~~
+   Resolved: `session.sub`, already used by `approvePostcardAction`.
+
+## Currently open (not resolved — see "Status" above)
+
+1. Whether Lob's dashboard-preview rendering artifact indicates a real
+   print-pipeline issue or is cosmetic-only to their dashboard — pending
+   their support team's reply.
+2. The postcard back's visual design — currently just the sender address
+   on blank space, needs a real design pass.
 
 ## Acceptance criteria
 
-- Test postcard renders correctly.
-- Postal safe zones and address placement are correct.
-- QR scans and redirects correctly.
-- A test API request succeeds.
-- Provider ID is saved.
-- Webhook updates internal status.
-- Duplicate webhooks do not duplicate history.
-- No real mail is sent in test mode.
-- A real postcard is sent to the owner only after an explicit production test decision.
+- [x] Test postcard renders correctly (verified — real PDF inspected
+      directly from S3).
+- [ ] Postal safe zones and address placement are correct — dimensions
+      confirmed against Lob's docs, but pending confirmation from Lob
+      support that their dashboard-preview artifact doesn't indicate a
+      real placement/rendering problem on their end.
+- [x] QR scans and redirects correctly (Stage 21 mechanism, unchanged).
+- [x] A test API request succeeds (`psc_fffe887f91a4ad82`,
+      `psc_742978167ee8d630`).
+- [x] Provider ID is saved (`Postcard.providerPostcardId`).
+- [x] Webhook updates internal status (verified — 3 real deliveries
+      received, signature-verified, correctly recorded).
+- [x] Duplicate webhooks do not duplicate history (verified — conditional
+      put on `lobEventId`).
+- [x] No real mail is sent in test mode (only a test API key is on file;
+      no payment method exists on the Lob account).
+- [ ] A real postcard is sent to the owner only after an explicit
+      production test decision — not yet attempted, blocked behind the
+      two open items above by design (no reason to go live with an
+      unresolved rendering question).
 
 ## Deferred work
 
