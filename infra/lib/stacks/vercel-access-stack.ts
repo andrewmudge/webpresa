@@ -16,11 +16,15 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly scanEventsTable: dynamodb.ITable;
   readonly scanExecutionsTable: dynamodb.ITable;
   readonly postcardsTable: dynamodb.ITable;
+  readonly postcardWebhookEventsTable: dynamodb.ITable;
   readonly claimsTable: dynamodb.ITable;
   readonly leadsTable: dynamodb.ITable;
   readonly customerBillingProfilesTable: dynamodb.ITable;
   readonly customerOnboardingTable: dynamodb.ITable;
   readonly domainConnectionsTable: dynamodb.ITable;
+  readonly campaignsTable: dynamodb.ITable;
+  readonly campaignRecipientsTable: dynamodb.ITable;
+  readonly scanHitsTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
@@ -37,15 +41,6 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly screenshotLambdaFunction: lambda.IFunction;
   readonly scanWorkflowStateMachine: sfn.IStateMachine;
   readonly customerUserPool: cognito.IUserPool;
-  /**
-   * Stage 20 — the domain (e.g. `webpresa.com`) the lead-notification
-   * sending identity lives under. Scopes the SES IAM grant below without a
-   * CDK-managed `ses.EmailIdentity` resource: unlike every other stack in
-   * this app, this repo has no Route53-hosted-zone CDK construct to drive
-   * DNS-based domain verification, so the SES identity itself (and DKIM)
-   * is verified manually via the AWS Console — see deployment.md.
-   */
-  readonly sesFromDomain: string;
 }
 
 /**
@@ -98,12 +93,16 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.scanEventsTable,
       props.scanExecutionsTable,
       props.postcardsTable,
+      props.postcardWebhookEventsTable,
       props.claimsTable,
       props.customerBillingProfilesTable,
       props.customerOnboardingTable,
       props.domainConnectionsTable,
       props.stockImagesTable,
       props.leadsTable,
+      props.campaignsTable,
+      props.campaignRecipientsTable,
+      props.scanHitsTable,
     ];
 
     this.dataAccessPolicy = new iam.ManagedPolicy(this, 'DataAccessPolicy', {
@@ -169,12 +168,28 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
         // Stage 20 — lead-notification email. SES authenticates via IAM,
         // not an API key, so (unlike every other third-party integration
         // above) there is deliberately no corresponding Secrets Manager
-        // entry — this grant is the entire credential path. Scoped to the
-        // sending domain's identity ARN, not '*'.
+        // entry — this grant is the entire credential path.
+        //
+        // Bare `Resource: '*'`, not a scoped identity ARN — two narrower
+        // attempts were tried and both proved unreliable in real-world
+        // testing (2026-08-03): a single sending-domain identity ARN, then
+        // an `identity/*` pattern. Both intermittently produced
+        // AccessDeniedException on real calls even though
+        // `iam simulate-principal-policy` said they should be allowed, and
+        // even after confirming (via other calls that got past IAM to a
+        // genuine SES-side MessageRejected) that the pattern-matched
+        // resource *does* work sometimes — a known real-world SES rough
+        // edge with pattern-matched resource ARNs for `ses:SendEmail`,
+        // apparently evaluated inconsistently server-side. A bare `'*'`
+        // routes through IAM's simpler "any resource" path instead of
+        // pattern matching. This does not widen what can actually be sent —
+        // SES itself is still the real boundary, and only ever lets this
+        // account send from identities it has independently verified
+        // (currently just the `webpresa.com` domain).
         new iam.PolicyStatement({
           sid: 'SesSendLeadNotifications',
           actions: ['ses:SendEmail'],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${props.sesFromDomain}`],
+          resources: ['*'],
         }),
       ],
     });

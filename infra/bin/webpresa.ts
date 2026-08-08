@@ -144,11 +144,15 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   scanEventsTable: dataStack.scanEventsTable,
   scanExecutionsTable: dataStack.scanExecutionsTable,
   postcardsTable: dataStack.postcardsTable,
+  postcardWebhookEventsTable: dataStack.postcardWebhookEventsTable,
   claimsTable: dataStack.claimsTable,
   leadsTable: dataStack.leadsTable,
   customerBillingProfilesTable: dataStack.customerBillingProfilesTable,
   customerOnboardingTable: dataStack.customerOnboardingTable,
   domainConnectionsTable: dataStack.domainConnectionsTable,
+  campaignsTable: dataStack.campaignsTable,
+  campaignRecipientsTable: dataStack.campaignRecipientsTable,
+  scanHitsTable: dataStack.scanHitsTable,
   assetsBucket: dataStack.assetsBucket,
   stockImagesBucket: stockImagesStack.bucket,
   stockImagesTable: stockImagesStack.table,
@@ -165,9 +169,4 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
   scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
   customerUserPool: dataStack.customerUserPool,
-  // Stage 20 — no placeholder-URL-style hard fail needed here: unlike
-  // WEBPRESA_APP_BASE_URL, an unset value just falls back to the real
-  // sending domain this app already owns, and the SES identity itself
-  // still needs manual console verification regardless of this value.
-  sesFromDomain: process.env.SES_FROM_DOMAIN ?? 'webpresa.com',
 });

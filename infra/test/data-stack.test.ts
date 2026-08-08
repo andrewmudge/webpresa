@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly ten DynamoDB tables', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 10);
+  it('creates exactly fourteen DynamoDB tables (Stage 22 adds PostcardWebhookEvents)', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 14);
   });
 });
 
@@ -284,6 +284,7 @@ describe('GSI names', () => {
       'webpresa-dev-scan-events',
       'webpresa-dev-scan-executions',
       'webpresa-dev-postcards',
+      'webpresa-dev-postcard-webhook-events',
       'webpresa-dev-customer-billing-profiles',
     ];
     for (const tableName of tableNames) {
@@ -318,14 +319,36 @@ describe('GSI names', () => {
     });
   });
 
-  it('Postcards table has business-id-index, campaign-code-index, provider-postcard-id-index, status-index', () => {
+  it('Postcards table has business-id-index, campaign-recipient-id-index, provider-postcard-id-index, status-index', () => {
     dev.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'webpresa-dev-postcards',
       GlobalSecondaryIndexes: Match.arrayWith([
         Match.objectLike({ IndexName: 'business-id-index' }),
-        Match.objectLike({ IndexName: 'campaign-code-index' }),
+        Match.objectLike({ IndexName: 'campaign-recipient-id-index' }),
         Match.objectLike({ IndexName: 'provider-postcard-id-index' }),
         Match.objectLike({ IndexName: 'status-index' }),
+      ]),
+    });
+  });
+
+  it('PostcardWebhookEvents table has lobEventId as partition key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-postcard-webhook-events',
+      KeySchema: [{ AttributeName: 'lobEventId', KeyType: 'HASH' }],
+    });
+  });
+
+  it('PostcardWebhookEvents table has postcard-id-index with receivedAt as sort key', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-postcard-webhook-events',
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'postcard-id-index',
+          KeySchema: Match.arrayWith([
+            { AttributeName: 'postcardId', KeyType: 'HASH' },
+            { AttributeName: 'receivedAt', KeyType: 'RANGE' },
+          ]),
+        }),
       ]),
     });
   });
@@ -446,9 +469,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 34 outputs — 20 table outputs (Stage 20 adds Leads), 2 bucket outputs, 10 secret ARN outputs (Stage 19.x adds vercel-api), 2 Cognito outputs', () => {
+  it('creates 42 outputs — 28 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(34);
+    expect(Object.keys(outputs)).toHaveLength(42);
   });
 });
 
@@ -508,6 +531,9 @@ describe('prod config (in-memory only — not deployed)', () => {
     });
     prod.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'webpresa-prod-postcards',
+    });
+    prod.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-prod-postcard-webhook-events',
     });
     prod.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'webpresa-prod-scan-executions',

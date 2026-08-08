@@ -61,11 +61,15 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly scanEventsTable: dynamodb.Table;
   public readonly scanExecutionsTable: dynamodb.Table;
   public readonly postcardsTable: dynamodb.Table;
+  public readonly postcardWebhookEventsTable: dynamodb.Table;
   public readonly claimsTable: dynamodb.Table;
   public readonly leadsTable: dynamodb.Table;
   public readonly customerBillingProfilesTable: dynamodb.Table;
   public readonly customerOnboardingTable: dynamodb.Table;
   public readonly domainConnectionsTable: dynamodb.Table;
+  public readonly campaignsTable: dynamodb.Table;
+  public readonly campaignRecipientsTable: dynamodb.Table;
+  public readonly scanHitsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
@@ -240,12 +244,22 @@ export class WebpresaDataStack extends cdk.Stack {
     this.scanExecutionsTable = scanExecutions.table;
 
     // ───────────────────────────────────────────────────────────────────────
-    // Postcards
+    // Postcards (Stage 22 — Webpresa Postcard Generation and Lob Fulfillment)
     //   PK: postcardId
     //   GSIs: business-id-index (SK: createdAt — chronological history)
-    //         campaign-code-index
+    //         campaign-recipient-id-index (sparse — only set when a Postcard
+    //           was generated for a Campaign, Stage 21, recipient; single-
+    //           postcard test sends have no CampaignRecipient at all)
     //         provider-postcard-id-index (sparse — only set after submission)
     //         status-index ⚠
+    //
+    //   Renamed from `campaign-code-index`/`campaignCode` (Stage 5 draft,
+    //   never deployed against real data — table is empty in dev, so this is
+    //   a clean schema change, not a migration). Per Stage 21's own note
+    //   (implementation.md, "Relationship to Postcard"), a Postcard no
+    //   longer owns its own campaign code/destination — it references the
+    //   CampaignRecipient that *is* "one mailed piece" instead of
+    //   duplicating that data.
     // ───────────────────────────────────────────────────────────────────────
     const postcards = new WebpresaTable(this, 'Postcards', {
       config,
@@ -258,8 +272,8 @@ export class WebpresaDataStack extends cdk.Stack {
           sortKey: createdAtSortKey,
         },
         {
-          indexName: 'campaign-code-index',
-          partitionKey: { name: 'campaignCode', type: S },
+          indexName: 'campaign-recipient-id-index',
+          partitionKey: { name: 'campaignRecipientId', type: S },
         },
         {
           // Sparse index — only Postcard items that have been submitted to a
@@ -275,6 +289,39 @@ export class WebpresaDataStack extends cdk.Stack {
       ],
     });
     this.postcardsTable = postcards.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // PostcardWebhookEvents (Stage 22 — Webpresa Postcard Generation and Lob
+    // Fulfillment)
+    //   PK: lobEventId
+    //   GSI: postcard-id-index (SK: receivedAt — chronological delivery
+    //     history per postcard, for the admin status-timeline panel)
+    //
+    //   Immutable log, never deleted or overwritten — "never delete history"
+    //   (see architecture.md), mirroring ScanHit's relationship to
+    //   CampaignRecipient above. `lobEventId` is Lob's own globally-unique
+    //   event id, so a plain conditional PutItem on the partition key
+    //   (`attribute_not_exists(lobEventId)`) is the entire dedup mechanism —
+    //   no secondary uniqueness reservation item needed, unlike ScanHit's
+    //   FINGERPRINT# shape. `Postcard.status`/`mailedAt`/`deliveredAt`
+    //   remain the denormalized rollup, updated in place only when an event
+    //   is newly recorded (never on a dedup no-op) — the same "durable event
+    //   record + denormalized rollup" split used throughout this stack.
+    //   No TTL — webhook history must never auto-expire.
+    // ───────────────────────────────────────────────────────────────────────
+    const postcardWebhookEvents = new WebpresaTable(this, 'PostcardWebhookEvents', {
+      config,
+      tableName: 'postcard-webhook-events',
+      partitionKey: { name: 'lobEventId', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'postcard-id-index',
+          partitionKey: { name: 'postcardId', type: S },
+          sortKey: { name: 'receivedAt', type: S },
+        },
+      ],
+    });
+    this.postcardWebhookEventsTable = postcardWebhookEvents.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Claims (Stage 17 — Website Claim Flow)
@@ -419,6 +466,94 @@ export class WebpresaDataStack extends cdk.Stack {
       ],
     });
     this.domainConnectionsTable = domainConnections.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Campaigns (Stage 21 — Campaign and QR Tracking)
+    //   PK: campaignId
+    //   No GSIs: campaign count stays small under manual creation (Stage
+    //   21's MVP); a createdAt-sortable GSI can be added later without
+    //   restructuring, the same YAGNI reasoning already applied to
+    //   CustomerBillingProfiles/CustomerOnboarding above.
+    // ───────────────────────────────────────────────────────────────────────
+    const campaigns = new WebpresaTable(this, 'Campaigns', {
+      config,
+      tableName: 'campaigns',
+      partitionKey: { name: 'campaignId', type: S },
+    });
+    this.campaignsTable = campaigns.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // CampaignRecipients (Stage 21 — Campaign and QR Tracking)
+    //   PK: campaignRecipientId
+    //   GSIs: campaign-code-index (high-cardinality — the `/r/[campaignCode]`
+    //           redirect route's primary lookup)
+    //         campaign-id-index (SK: createdAt — admin recipient list per campaign)
+    //         business-id-index (SK: createdAt — every campaign a business
+    //           has ever been a recipient of)
+    //   No status-index: CampaignRecipientStatus is only 2 low-cardinality
+    //   values — same reasoning already documented for Claims/Leads above.
+    //
+    //   TTL attribute `ttl` is enabled on this table, but — exactly like
+    //   Claims/Leads above — is populated ONLY by the rate-limit-counter item
+    //   shape this table also carries (PK `RATELIMIT#<ipHash>#<windowBucket>`
+    //   — see web/lib/db/campaign-recipients.ts), the `/r/[campaignCode]`
+    //   route's own abuse/cost protection. Real CampaignRecipient records
+    //   never set `ttl`.
+    // ───────────────────────────────────────────────────────────────────────
+    const campaignRecipients = new WebpresaTable(this, 'CampaignRecipients', {
+      config,
+      tableName: 'campaign-recipients',
+      partitionKey: { name: 'campaignRecipientId', type: S },
+      timeToLiveAttribute: 'ttl',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'campaign-code-index',
+          partitionKey: { name: 'campaignCode', type: S },
+        },
+        {
+          indexName: 'campaign-id-index',
+          partitionKey: { name: 'campaignId', type: S },
+          sortKey: createdAtSortKey,
+        },
+        {
+          indexName: 'business-id-index',
+          partitionKey: { name: 'businessId', type: S },
+          sortKey: createdAtSortKey,
+        },
+      ],
+    });
+    this.campaignRecipientsTable = campaignRecipients.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // ScanHits (Stage 21 — Campaign and QR Tracking)
+    //   PK: campaignRecipientId   SK: sortKey
+    //   No GSIs: this table is deliberately keyed so "recent scans for one
+    //   recipient" is a single ordered Query (PK = campaignRecipientId, SK
+    //   begins_with 'HIT#') with no index needed — see
+    //   implementation.md, Stage 21, "Infrastructure changes".
+    //
+    //   Three item shapes share this table, distinguished by the `sortKey`
+    //   prefix (the same fold-in pattern Claims/Leads use for their own
+    //   rate-limit/fingerprint items):
+    //     `HIT#<isoTimestamp>#<random>`   — real, permanent ScanHit records.
+    //     `FINGERPRINT#<visitorFingerprint>` — atomic uniqueness reservation
+    //       (conditional PutItem) backing CampaignRecipient.estimatedUniqueScans.
+    //       Deliberately NOT TTL'd — unlike Claims'/Leads' own FINGERPRINT#/
+    //       RATELIMIT# items (short-window abuse prevention, meant to
+    //       expire), this backs a lifetime unique-visitor estimate and must
+    //       persist for as long as the recipient does.
+    //   Real ScanHit and FINGERPRINT# items never set a `ttl` attribute, so
+    //   no TTL attribute is enabled on this table at all — unlike Claims/
+    //   Leads/CampaignRecipients above, nothing on this table is ever meant
+    //   to auto-expire.
+    // ───────────────────────────────────────────────────────────────────────
+    const scanHits = new WebpresaTable(this, 'ScanHits', {
+      config,
+      tableName: 'scan-hits',
+      partitionKey: { name: 'campaignRecipientId', type: S },
+      sortKey: { name: 'sortKey', type: S },
+    });
+    this.scanHitsTable = scanHits.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Customer identity (Stage 17 — Website Claim Flow)

@@ -41,11 +41,15 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     scanEventsTable: dataStack.scanEventsTable,
     scanExecutionsTable: dataStack.scanExecutionsTable,
     postcardsTable: dataStack.postcardsTable,
+    postcardWebhookEventsTable: dataStack.postcardWebhookEventsTable,
     claimsTable: dataStack.claimsTable,
     leadsTable: dataStack.leadsTable,
     customerBillingProfilesTable: dataStack.customerBillingProfilesTable,
     customerOnboardingTable: dataStack.customerOnboardingTable,
     domainConnectionsTable: dataStack.domainConnectionsTable,
+    campaignsTable: dataStack.campaignsTable,
+    campaignRecipientsTable: dataStack.campaignRecipientsTable,
+    scanHitsTable: dataStack.scanHitsTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -62,7 +66,6 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
     customerUserPool: dataStack.customerUserPool,
-    sesFromDomain: 'webpresa-test.invalid',
   });
   return Template.fromStack(vercelAccessStack);
 }
@@ -116,7 +119,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), and leads (Stage 20)', () => {
+  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), and postcard-webhook-events (Stage 22)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -126,23 +129,24 @@ describe('data-access policy statements', () => {
     expect(statement.Action).toEqual(
       expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
     );
-    // 11 tables × (table + index/*) = 22 resource entries.
-    expect(statement.Resource).toHaveLength(22);
+    // 15 tables × (table + index/*) = 30 resource entries.
+    expect(statement.Resource).toHaveLength(30);
   });
 
-  it('grants ses:SendEmail scoped to the configured sending domain identity (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
+  it('grants ses:SendEmail with an unscoped resource (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
     const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string | string[]; Resource: unknown }> } } };
     const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SesSendLeadNotifications')!;
 
-    // CloudFormation collapses a single-action/single-resource statement's Action/Resource to a
-    // bare value, not a 1-element array — and the resource itself is a Fn::Join/Fn::Sub intrinsic
-    // (region/account are CDK tokens resolved at synth time), so inspect its serialized form
-    // rather than a plain string.
+    // Bare '*', not a scoped identity ARN — see the PolicyStatement's own comment in
+    // vercel-access-stack.ts for why: two narrower attempts (a single sending-domain identity,
+    // then identity/*) both proved unreliable in real-world testing (2026-08-03), a known SES
+    // rough edge with pattern-matched SendEmail resource ARNs. SES's own identity verification
+    // remains the real boundary regardless of how wide this IAM resource is.
     expect(statement.Action).toEqual('ses:SendEmail');
-    expect(JSON.stringify(statement.Resource)).toContain('webpresa-test.invalid');
+    expect(statement.Resource).toEqual('*');
   });
 
   it('grants S3 GetObject/PutObject/DeleteObject/ListBucket scoped to the assets bucket', () => {
