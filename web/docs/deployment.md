@@ -1148,7 +1148,7 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessS
 
 ## Stage 22 — Webpresa Postcard Generation and Lob Fulfillment deployment guidance
 
-**Infra Phase 0 deployed to dev (2026-08-05); app code not yet deployed.** One new DynamoDB table (`postcard-webhook-events`) plus a GSI rename on the existing `postcards` table (`campaign-code-index`/`campaignCode` → `campaign-recipient-id-index`/`campaignRecipientId`, matching Stage 21's own "Relationship to Postcard" note that a Postcard should reference its `CampaignRecipient` rather than duplicate its code/destination). No new secrets — the `lob` secret (Stage 10) already exists as a placeholder; no new IAM roles yet (the render Lambda described below is still unbuilt).
+**All five phases (0, 1, 2, 4, 5 — Phase 3 admin UI was already built earlier) are now implemented and merged.** Infra Phase 0 (GSI rename + `postcard-webhook-events` table) deployed to dev 2026-08-05. The Phase 2 render Lambda (`webpresa-dev-postcard-render`, its ECR repo, and the Vercel `lambda:InvokeFunction` grant) deployed to dev 2026-08-08. Real Lob test-mode API key populated into the `lob` secret 2026-08-08. **Not yet done**: the Lob webhook itself has never been registered (dashboard-only, see below), so `webhookSecret` on the `lob` secret is still unpopulated and no test postcard has actually been submitted to Lob's live API yet — everything below this point is implemented and unit-tested, but not yet exercised end-to-end against the real Lob account.
 
 ### Deploy sequence — GSI rename requires two deploys, not one
 
@@ -1176,24 +1176,26 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessS
 
 The `postcards` table itself was empty in dev at rename time, so this was a clean schema change, not a data migration — no backfill was needed or performed.
 
-### New Vercel environment variables (not yet added to Vercel)
+### New Vercel environment variables (populated locally in `web/.env.local`; **not yet added to Vercel's actual deployed environment**)
 
 | Variable | Value | Notes |
 |---|---|---|
-| `POSTCARD_WEBHOOK_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-postcard-webhook-events-name` | Deployed 2026-08-05; not yet added to Vercel |
-| `WEBPRESA_LOB_SENDER_NAME` | Webpresa's own company name, e.g. `Webpresa` | Not a secret — printed on every outgoing postcard. Read by `web/lib/env/lob-sender-address.ts`, mirroring `WEBPRESA_APP_BASE_URL`'s plain-env-var (not Secrets Manager) pattern |
-| `WEBPRESA_LOB_SENDER_ADDRESS_LINE1` | Webpresa's own return-mail street address | |
+| `POSTCARD_WEBHOOK_EVENTS_TABLE_NAME` | `webpresa-dev-postcard-webhook-events` (CloudFormation export `webpresa-dev-postcard-webhook-events-name`) | Table deployed 2026-08-05; var still missing from Vercel |
+| `POSTCARD_RENDER_LAMBDA_FUNCTION_NAME` | `webpresa-dev-postcard-render` (CloudFormation export `webpresa-dev-postcard-render-name`) | Lambda deployed 2026-08-08; var still missing from Vercel. Read by `web/lib/lambda/client.ts::getPostcardRenderLambdaFunctionName()` |
+| `WEBPRESA_LOB_SENDER_NAME` | Webpresa's own company name, e.g. `Webpresa` | Not a secret — printed on every outgoing postcard. Read by `web/lib/env/lob-sender-address.ts`, mirroring `WEBPRESA_APP_BASE_URL`'s plain-env-var (not Secrets Manager) pattern. Populated in `.env.local`; still missing from Vercel |
+| `WEBPRESA_LOB_SENDER_ADDRESS_LINE1` | Webpresa's own return-mail street address | Populated in `.env.local`; still missing from Vercel |
 | `WEBPRESA_LOB_SENDER_ADDRESS_LINE2` | Optional — suite/unit | |
-| `WEBPRESA_LOB_SENDER_CITY` | | |
-| `WEBPRESA_LOB_SENDER_STATE` | | |
-| `WEBPRESA_LOB_SENDER_POSTAL_CODE` | | |
-| `WEBPRESA_LOB_SENDER_COUNTRY` | ISO 3166-1 alpha-2, e.g. `US` | |
+| `WEBPRESA_LOB_SENDER_CITY` | | Populated in `.env.local`; still missing from Vercel |
+| `WEBPRESA_LOB_SENDER_STATE` | | Populated in `.env.local`; still missing from Vercel |
+| `WEBPRESA_LOB_SENDER_POSTAL_CODE` | | Populated in `.env.local`; still missing from Vercel |
+| `WEBPRESA_LOB_SENDER_COUNTRY` | ISO 3166-1 alpha-2, e.g. `US` | Populated in `.env.local`; still missing from Vercel |
 
-None of these are populated yet — Phase 4 (Lob submission) needs the sender-address values before any real submission can be attempted; the render pipeline (Phase 2) needs them earlier if the back-template's return address is rendered directly rather than left to Lob's own overlay (see the open question in the implementation plan).
+### Still outstanding before Stage 22 can submit a real postcard end-to-end
 
-### Still outstanding before Stage 22 can submit real postcards
-
-- Populate the real (test-mode) Lob API key: `aws secretsmanager put-secret-value --secret-id webpresa-dev-lob --secret-string '{"apiKey":"..."}' --profile webpresa`.
-- Look up Lob's current webhook signature-verification method and extend the `lob` secret's `jsonKeys` with `webhookSecret` (mirrors the Stripe secret's `{ secretKey, webhookSecret }` shape) — not yet done.
-- Populate the `WEBPRESA_LOB_SENDER_*` Vercel env vars above.
-- Register the Lob webhook URL with `?x-vercel-protection-bypass=<secret>` appended, reusing the existing `webpresa-{env}-vercel-protection-bypass` secret (Stage 14) exactly as the Stripe webhook does — no new bypass secret needed.
+- ~~Populate the real (test-mode) Lob API key~~ — done 2026-08-08 (`aws secretsmanager put-secret-value --secret-id webpresa-dev-lob ...`).
+- ~~Look up Lob's current webhook signature-verification method~~ — confirmed against Lob's live docs 2026-08-08 (`web/lib/lob/verify-webhook.ts`): HMAC-SHA256 of `{timestamp}.{rawBody}`, hex-encoded, compared against the `Lob-Signature` header, 5-minute tolerance on `Lob-Signature-Timestamp`.
+- **Populate `webhookSecret` on the `lob` secret** — still outstanding. Lob only generates this when a webhook is created in their dashboard (no API for it): go to the Lob dashboard → Webhooks → Test environment → Create, point the URL at `https://<real dev app URL>/api/webhooks/lob?x-vercel-protection-bypass=<the webpresa-dev-vercel-protection-bypass secret value>` (reusing the existing Stage 14 bypass secret — no new one needed), select the postcard event types, then:
+  `aws secretsmanager put-secret-value --secret-id webpresa-dev-lob --secret-string '{"apiKey":"<existing>","webhookSecret":"<from Lob dashboard>"}' --profile webpresa`.
+  Deliberately **not** added to `infra/lib/stacks/data-stack.ts`'s `jsonKeys` for this secret — see `web/lib/secrets/index.ts`'s `LobSecret.webhookSecret` doc comment for why that would risk resetting the real `apiKey` on the next `cdk deploy` touching `WebpresaDevDataStack`.
+- Add the four still-missing Vercel env vars in the table above.
+- Submit one real test postcard end-to-end (Lob test mode — no real mail, no payment method on file) to confirm the actual request/response shapes assumed in `web/lib/lob/submit-postcard.ts` are correct, in particular whether Lob's response includes a `price` field (unconfirmed against their docs) and whether `postcard.delivered` is the real webhook event-type string (inferred from their naming convention, not directly confirmed — see `web/lib/lob/status-mapping.ts`).
