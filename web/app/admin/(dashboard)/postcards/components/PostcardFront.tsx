@@ -46,6 +46,13 @@ const EIGHTH_INCH_CQW = ONE_INCH_CQW / 8;
 const BANNER_TOP_INSET_CQH = (0.125 / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
 const HALF_INCH_CQH = (0.5 / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
 const QUARTER_INCH_CQH = (0.25 / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
+// 1/16 real inch off the card's 6.25" height — happens to be an exact 1%,
+// since 0.0625/6.25 = 0.01. Used to nudge the "current site" card group
+// (badge + mat + arrow) up by a physical 1/16" (2026-08-09 feedback) via a
+// `transform`, not a flex/margin change — keeps every sibling's layout
+// (the headline above, the leftover space below) untouched, since
+// `transform` never affects flow, only where the box paints.
+const SIXTEENTH_INCH_CQH = (0.0625 / POSTCARD_BLEED_SIZE_INCHES.height) * 100;
 const FOOTER_HEIGHT_CQH = 23;
 // Where the OR divider's center sits, as a % of the card's full width. Was
 // 33%, then 40% (2026-08-07 feedback), then 38% the next day ("move OR
@@ -247,7 +254,7 @@ export default function PostcardFront({
                 squarely between 4:3 (1.33) and 3:2 (1.5) as asked. Top edge
                 (right below the headline+gap) is unchanged — only the
                 bottom edge moves down, per the request. */}
-            <div className="relative min-h-0 flex-[0_0_52%]">
+            <div className="relative min-h-0 flex-[0_0_52%]" style={{ transform: `translateY(-${SIXTEENTH_INCH_CQH}cqh)` }}>
               <span className="absolute -top-[1.6cqh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-[1.4cqw] py-[0.5cqh] text-[1.1cqw] font-bold text-white shadow-sm">
                 YOUR CURRENT SITE
               </span>
