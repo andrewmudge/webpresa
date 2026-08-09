@@ -65,6 +65,23 @@ const OR_DIVIDER_LEFT_CQW = 38;
 const CARD_ASPECT_W_OVER_H = POSTCARD_BLEED_SIZE_INCHES.width / POSTCARD_BLEED_SIZE_INCHES.height;
 const QR_CONTAINER_CQW = (FOOTER_HEIGHT_CQH - BANNER_TOP_INSET_CQH - POSTCARD_SAFE_ZONE_INSET_PERCENT.y - 1) / CARD_ASPECT_W_OVER_H;
 
+// "YOUR CURRENT SITE" card corner radius (2026-08-08 feedback: "match the
+// radius of the desktop svg you made") — matched to `LaptopMockup.tsx`'s
+// own bezel `rx` (14 SVG units out of its 1030-wide viewBox, i.e. 1.359%
+// of the mockup's own rendered width), not just eyeballed, and not a
+// Tailwind fixed-rem `rounded-xl`/`rounded-2xl` (those don't scale with
+// the postcard's own cqw/cqh system, so they'd look proportionally
+// different at print size than in the small admin thumbnail). Converted
+// to *this* card's own cqw terms via the laptop mockup's actual rendered
+// width on this same layout: showcase column (65% of the row's
+// safe-zone-inset content width) × 86.25% (`LaptopMockup`'s own
+// `maxWidth` fit inside that column) ≈ 52.47cqw rendered laptop width;
+// 1.359% of that ≈ 0.71cqw — applied identically to both the outer navy
+// mat and the inner screenshot card below (not a smaller concentric inset
+// radius) since the ask was a direct visual match, not a nested-corner
+// system.
+const CURRENT_SITE_CARD_RADIUS_CQW = 0.71;
+
 const DOT_GRID_STYLE = {
   backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)',
   backgroundSize: '0.6cqw 0.6cqw',
@@ -215,7 +232,22 @@ export default function PostcardFront({
               </h1>
             </div>
 
-            <div className="relative min-h-0 flex-[0_0_38%]">
+            {/* Grown 38%→52% (2026-08-08 feedback: "looks almost like an
+                iPhone sideways rather than 3:2 or 4:3... extend the bottom
+                down"). At 38%, this card's real physical box worked out to
+                ~3.03in × 1.62in — a ~1.88:1 ratio, wider than a sideways
+                phone screen. 44% (headline) + 2.2cqh (gap) + 38% (card) left
+                ~10cqh of this column's 68cqh totally unused below the card
+                (flex-col's default `justify-start`, flex-grow:0 on both
+                children) — invisible dead space, not a rendering bug. 52% is
+                the column's *entire* remaining budget after the headline and
+                gap (68 − 29.92 − 2.2 ≈ 35.9cqh, i.e. ~52.8%, rounded down a
+                hair for a safety margin) — using all of it, not an arbitrary
+                bump, and it lands the card at ~3.03in × 2.21in ≈ 1.37:1,
+                squarely between 4:3 (1.33) and 3:2 (1.5) as asked. Top edge
+                (right below the headline+gap) is unchanged — only the
+                bottom edge moves down, per the request. */}
+            <div className="relative min-h-0 flex-[0_0_52%]">
               <span className="absolute -top-[1.6cqh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-[1.4cqw] py-[0.5cqh] text-[1.1cqw] font-bold text-white shadow-sm">
                 YOUR CURRENT SITE
               </span>
@@ -226,7 +258,10 @@ export default function PostcardFront({
                   white/gray card inset inside it via padding.
                   `POSTCARD_NAVY`, not `POSTCARD_BLUE`: the lighter blue
                   was "too light" the same day. */}
-              <div className="h-full w-full overflow-hidden rounded-2xl p-[0.6cqw] shadow-[0_3px_10px_rgba(11,30,61,0.08)]" style={{ backgroundColor: POSTCARD_NAVY }}>
+              <div
+                className="h-full w-full overflow-hidden p-[0.6cqw] shadow-[0_3px_10px_rgba(11,30,61,0.08)]"
+                style={{ backgroundColor: POSTCARD_NAVY, borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
+              >
                 {/* No `pt-` here (there used to be one, to clear room for
                     the "YOUR CURRENT SITE" badge poking above): once the
                     navy mat frame was added, that padding left a visible
@@ -234,7 +269,10 @@ export default function PostcardFront({
                     itself (2026-08-09 feedback). The badge has its own
                     opaque background and `z-10`, so it stays legible
                     sitting directly on top of the preview without it. */}
-                <div className="h-full w-full overflow-hidden rounded-xl border border-gray-100 bg-gray-50">
+                <div
+                  className="h-full w-full overflow-hidden border border-gray-100 bg-gray-50"
+                  style={{ borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
+                >
                   {beforeScreenshotSrc ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
