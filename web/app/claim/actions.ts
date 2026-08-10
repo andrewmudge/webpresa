@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth/claim-intent';
 import { signUpCustomer, confirmCustomerSignUp, resendCustomerConfirmationCode, signInCustomer } from '@/lib/auth/customer-cognito';
 import { recordCustomerSubmittedBusinessInfo } from '@/lib/db/claims';
+import { passwordMeetsPolicy } from '@/lib/auth/password-policy';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -104,18 +105,28 @@ export async function submitClaimTokenAction(
 /** 10-digit US phone number, loosely formatted (digits, spaces, dashes, dots, parens all accepted). */
 const US_PHONE_REGEX = /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/;
 
-const SignUpSchema = z.object({
-  firstName: z.string().trim().min(1, 'Enter your first name.').max(100),
-  lastName: z.string().trim().min(1, 'Enter your last name.').max(100),
-  email: z.string().email(),
-  phone: z.string().trim().regex(US_PHONE_REGEX, 'Enter a valid 10-digit US phone number.'),
-  password: z.string().min(8, 'Password must be at least 8 characters.'),
-  businessName: z.string().trim().min(1, 'Enter the business name.').max(200),
-  addressLine1: z.string().trim().min(1, 'Enter the street address.').max(200),
-  addressCity: z.string().trim().min(1, 'Enter the city.').max(100),
-  addressState: z.string().trim().min(1, 'Enter the state.').max(50),
-  addressPostalCode: z.string().trim().min(1, 'Enter the postal code.').max(20),
-});
+const SignUpSchema = z
+  .object({
+    firstName: z.string().trim().min(1, 'Enter your first name.').max(100),
+    lastName: z.string().trim().min(1, 'Enter your last name.').max(100),
+    email: z.string().email(),
+    phone: z.string().trim().regex(US_PHONE_REGEX, 'Enter a valid 10-digit US phone number.'),
+    // Real policy enforced here matches the Cognito User Pool's actual
+    // default password policy exactly — see `lib/auth/password-policy.ts`.
+    // Defense in depth / no-JS fallback for the same live checklist shown
+    // on `/claim/continue` (`PasswordStrengthChecklist`).
+    password: z.string().refine(passwordMeetsPolicy, 'Password does not meet all requirements.'),
+    confirmPassword: z.string(),
+    businessName: z.string().trim().min(1, 'Enter the business name.').max(200),
+    addressLine1: z.string().trim().min(1, 'Enter the street address.').max(200),
+    addressCity: z.string().trim().min(1, 'Enter the city.').max(100),
+    addressState: z.string().trim().min(1, 'Enter the state.').max(50),
+    addressPostalCode: z.string().trim().min(1, 'Enter the postal code.').max(20),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match.",
+    path: ['confirmPassword'],
+  });
 
 export type ClaimSignUpState = { step: 'signup'; error: string } | { step: 'confirm'; email: string } | undefined;
 
@@ -129,6 +140,7 @@ export async function signUpForClaimAction(
     email: formData.get('email'),
     phone: formData.get('phone'),
     password: formData.get('password'),
+    confirmPassword: formData.get('confirmPassword'),
     businessName: formData.get('businessName'),
     addressLine1: formData.get('addressLine1'),
     addressCity: formData.get('addressCity'),

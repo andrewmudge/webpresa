@@ -1,22 +1,28 @@
 'use client';
 import { useActionState, useState } from 'react';
+import { Mail, Phone, KeyRound, UserPlus } from 'lucide-react';
+import { passwordMeetsPolicy } from '@/lib/auth/password-policy';
+import { IconField, PlainField, SubmitButton, ErrorAlert } from '@/components/access/fields';
 import {
   signUpForClaimAction,
   confirmSignUpForClaimAction,
   signInForClaimAction,
   resendConfirmationCodeAction,
 } from '../actions';
+import { PasswordStrengthChecklist } from './PasswordStrengthChecklist';
 
 interface Props {
   businessName: string;
+  accentColor: string;
 }
 
-const inputClassName =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent';
-
-export function ClaimContinueForm({ businessName }: Props) {
+export function ClaimContinueForm({ businessName, accentColor }: Props) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const passwordValid = passwordMeetsPolicy(password);
+  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
 
   const [signUpState, signUpFormAction, signUpPending] = useActionState(signUpForClaimAction, undefined);
   const [confirmState, confirmFormAction, confirmPending] = useActionState(confirmSignUpForClaimAction, undefined);
@@ -27,67 +33,80 @@ export function ClaimContinueForm({ businessName }: Props) {
 
   if (pendingConfirmEmail) {
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-gray-600">
-          We emailed a confirmation code to <span className="font-medium">{pendingConfirmEmail}</span>.
-        </p>
-        {confirmState?.error && (
-          <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {confirmState.error}
-          </div>
-        )}
-        <form action={confirmFormAction} className="space-y-3">
-          <input type="hidden" name="email" value={pendingConfirmEmail} />
-          <input type="hidden" name="password" value={password} />
-          <div>
-            <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-1">
-              Confirmation code
-            </label>
-            <input
-              id="code"
-              name="code"
-              type="text"
-              required
-              autoComplete="one-time-code"
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={confirmPending}
-            className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      <div>
+        <div className="mb-6 flex flex-col items-center text-center">
+          <span
+            className="flex h-14 w-14 items-center justify-center rounded-full"
+            style={{ backgroundColor: `${accentColor}1a`, color: accentColor }}
           >
-            {confirmPending ? 'Confirming…' : 'Confirm'}
-          </button>
-        </form>
-        <form action={resendConfirmationCodeAction}>
-          <input type="hidden" name="email" value={pendingConfirmEmail} />
-          <button type="submit" className="text-xs text-gray-500 underline hover:text-gray-700">
-            Resend code
-          </button>
-        </form>
+            <Mail size={24} />
+          </span>
+          <h2 className="mt-4 text-xl font-bold text-gray-900">Check your email</h2>
+          <p className="mt-1.5 text-sm text-gray-500">
+            We emailed a confirmation code to <span className="font-medium text-gray-700">{pendingConfirmEmail}</span>.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {confirmState?.error && <ErrorAlert>{confirmState.error}</ErrorAlert>}
+          <form action={confirmFormAction} className="space-y-3">
+            <input type="hidden" name="email" value={pendingConfirmEmail} />
+            <input type="hidden" name="password" value={password} />
+            <div>
+              <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-1.5">
+                Confirmation code
+              </label>
+              <PlainField
+                id="code"
+                name="code"
+                type="text"
+                required
+                autoComplete="one-time-code"
+                accentColor={accentColor}
+              />
+            </div>
+            <SubmitButton accentColor={accentColor} pending={confirmPending} pendingLabel="Confirming…" label="Confirm" />
+          </form>
+          <form action={resendConfirmationCodeAction} className="text-center">
+            <input type="hidden" name="email" value={pendingConfirmEmail} />
+            <button type="submit" className="text-xs text-gray-500 underline hover:text-gray-700">
+              Resend code
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        Claiming <span className="font-medium">{businessName}</span>
-      </p>
+    <div>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <span
+          className="flex h-14 w-14 items-center justify-center rounded-full"
+          style={{ backgroundColor: `${accentColor}1a`, color: accentColor }}
+        >
+          <UserPlus size={24} />
+        </span>
+        <h2 className="mt-4 text-xl font-bold text-gray-900">Create your account</h2>
+        <p className="mt-1.5 text-sm text-gray-500">
+          Claiming <span className="font-medium text-gray-700">{businessName}</span>
+        </p>
+      </div>
 
-      <div className="flex gap-3 text-sm border-b border-gray-200 pb-3">
+      <div className="mb-5 flex gap-5 border-b border-gray-200 text-sm">
         <button
           type="button"
           onClick={() => setMode('signup')}
-          className={mode === 'signup' ? 'font-semibold text-(--color-brand)' : 'text-gray-500'}
+          className="-mb-px border-b-2 pb-2.5 font-semibold transition-colors"
+          style={mode === 'signup' ? { borderColor: accentColor, color: accentColor } : { borderColor: 'transparent', color: '#6b7280' }}
         >
           Create account
         </button>
         <button
           type="button"
           onClick={() => setMode('signin')}
-          className={mode === 'signin' ? 'font-semibold text-(--color-brand)' : 'text-gray-500'}
+          className="-mb-px border-b-2 pb-2.5 font-semibold transition-colors"
+          style={mode === 'signin' ? { borderColor: accentColor, color: accentColor } : { borderColor: 'transparent', color: '#6b7280' }}
         >
           Sign in
         </button>
@@ -95,134 +114,78 @@ export function ClaimContinueForm({ businessName }: Props) {
 
       {mode === 'signup' ? (
         <>
-          <p className="text-xs text-gray-500">
-            You&apos;ll use this account to subscribe, edit, and manage your website.
-          </p>
-          {signUpState?.step === 'signup' && signUpState.error && (
-            <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-              {signUpState.error}
-            </div>
-          )}
-          <form action={signUpFormAction} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                name="firstName"
-                type="text"
-                placeholder="First name"
-                required
-                autoComplete="given-name"
-                className={inputClassName}
-              />
-              <input
-                name="lastName"
-                type="text"
-                placeholder="Last name"
-                required
-                autoComplete="family-name"
-                className={inputClassName}
-              />
-            </div>
-            <input
-              name="email"
-              type="email"
-              placeholder="Email"
-              required
-              autoComplete="email"
-              className={inputClassName}
-            />
-            <input
-              name="phone"
-              type="tel"
-              placeholder="Phone number"
-              required
-              autoComplete="tel"
-              className={inputClassName}
-            />
-            <input
-              name="password"
-              type="password"
-              placeholder="Password"
-              required
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className={inputClassName}
-            />
-
-            <div className="pt-2 border-t border-gray-100">
-              <p className="text-xs font-medium text-gray-500 mb-2">Business information</p>
-              <div className="space-y-3">
-                <input
-                  name="businessName"
-                  type="text"
-                  placeholder="Business name"
-                  required
-                  autoComplete="organization"
-                  className={inputClassName}
-                />
-                <input
-                  name="addressLine1"
-                  type="text"
-                  placeholder="Street address"
-                  required
-                  autoComplete="address-line1"
-                  className={inputClassName}
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    name="addressCity"
-                    type="text"
-                    placeholder="City"
-                    required
-                    autoComplete="address-level2"
-                    className={inputClassName}
-                  />
-                  <input
-                    name="addressState"
-                    type="text"
-                    placeholder="State"
-                    required
-                    autoComplete="address-level1"
-                    className={inputClassName}
-                  />
-                </div>
-                <input
-                  name="addressPostalCode"
-                  type="text"
-                  placeholder="ZIP code"
-                  required
-                  autoComplete="postal-code"
-                  className={inputClassName}
-                />
+          <p className="mb-4 text-xs text-gray-500">You&apos;ll use this account to subscribe, edit, and manage your website.</p>
+          <div className="space-y-4">
+            {signUpState?.step === 'signup' && signUpState.error && <ErrorAlert>{signUpState.error}</ErrorAlert>}
+            <form action={signUpFormAction} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <PlainField name="firstName" type="text" placeholder="First name" required autoComplete="given-name" accentColor={accentColor} />
+                <PlainField name="lastName" type="text" placeholder="Last name" required autoComplete="family-name" accentColor={accentColor} />
               </div>
-            </div>
+              <IconField icon={Mail} name="email" type="email" placeholder="Email" required autoComplete="email" accentColor={accentColor} />
+              <IconField icon={Phone} name="phone" type="tel" placeholder="Phone number" required autoComplete="tel" accentColor={accentColor} />
+              <div>
+                <IconField
+                  icon={KeyRound}
+                  name="password"
+                  type="password"
+                  placeholder="Password"
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  accentColor={accentColor}
+                />
+                <PasswordStrengthChecklist password={password} />
+              </div>
 
-            <button
-              type="submit"
-              disabled={signUpPending}
-              className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {signUpPending ? 'Creating account…' : 'Create account'}
-            </button>
-          </form>
+              <div>
+                <IconField
+                  icon={KeyRound}
+                  name="confirmPassword"
+                  type="password"
+                  placeholder="Confirm password"
+                  required
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  accentColor={accentColor}
+                />
+                {confirmPassword.length > 0 && !passwordsMatch && (
+                  <p className="mt-1.5 text-xs text-red-600">Passwords don&apos;t match.</p>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 mb-2.5">Business information</p>
+                <div className="space-y-3">
+                  <PlainField name="businessName" type="text" placeholder="Business name" required autoComplete="organization" accentColor={accentColor} />
+                  <PlainField name="addressLine1" type="text" placeholder="Street address" required autoComplete="address-line1" accentColor={accentColor} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <PlainField name="addressCity" type="text" placeholder="City" required autoComplete="address-level2" accentColor={accentColor} />
+                    <PlainField name="addressState" type="text" placeholder="State" required autoComplete="address-level1" accentColor={accentColor} />
+                  </div>
+                  <PlainField name="addressPostalCode" type="text" placeholder="ZIP code" required autoComplete="postal-code" accentColor={accentColor} />
+                </div>
+              </div>
+
+              <SubmitButton
+                accentColor={accentColor}
+                pending={signUpPending}
+                pendingLabel="Creating account…"
+                label="Create account"
+                disabled={!passwordValid || !passwordsMatch}
+              />
+            </form>
+          </div>
         </>
       ) : (
-        <>
-          {signInState?.error && (
-            <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-              {signInState.error}
-            </div>
-          )}
+        <div className="space-y-4">
+          {signInState?.error && <ErrorAlert>{signInState.error}</ErrorAlert>}
           <form action={signInFormAction} className="space-y-3">
-            <input
-              name="email"
-              type="email"
-              placeholder="Email"
-              required
-              autoComplete="email"
-              className={inputClassName}
-            />
-            <input
+            <IconField icon={Mail} name="email" type="email" placeholder="Email" required autoComplete="email" accentColor={accentColor} />
+            <IconField
+              icon={KeyRound}
               name="password"
               type="password"
               placeholder="Password"
@@ -230,17 +193,11 @@ export function ClaimContinueForm({ businessName }: Props) {
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className={inputClassName}
+              accentColor={accentColor}
             />
-            <button
-              type="submit"
-              disabled={signInPending}
-              className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {signInPending ? 'Signing in…' : 'Sign in'}
-            </button>
+            <SubmitButton accentColor={accentColor} pending={signInPending} pendingLabel="Signing in…" label="Sign in" />
           </form>
-        </>
+        </div>
       )}
     </div>
   );

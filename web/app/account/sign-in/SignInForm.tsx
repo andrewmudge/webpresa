@@ -1,55 +1,45 @@
 'use client';
 import { useActionState } from 'react';
+import { Mail, KeyRound, LogIn } from 'lucide-react';
 import { customerSignInAction } from '@/lib/auth/customer-actions';
+import { IconField, SubmitButton, ErrorAlert } from '@/components/access/fields';
 
 interface Props {
   next?: string;
+  accentColor: string;
 }
 
-export function SignInForm({ next }: Props) {
+export function SignInForm({ next, accentColor }: Props) {
   const [state, formAction, pending] = useActionState(customerSignInAction, undefined);
 
   return (
-    <form action={formAction} className="space-y-4">
-      <input type="hidden" name="next" value={next ?? ''} />
-      {state?.error && (
-        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {state.error}
-        </div>
-      )}
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
-        />
+    <div>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <span
+          className="flex h-14 w-14 items-center justify-center rounded-full"
+          style={{ backgroundColor: `${accentColor}1a`, color: accentColor }}
+        >
+          <LogIn size={24} />
+        </span>
+        <h2 className="mt-4 text-xl font-bold text-gray-900">Sign in</h2>
+        <p className="mt-1.5 text-sm text-gray-500">Enter your email and password to continue.</p>
       </div>
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-          Password
-        </label>
-        <input
-          id="password"
+
+      <form action={formAction} className="space-y-4">
+        <input type="hidden" name="next" value={next ?? ''} />
+        {state?.error && <ErrorAlert>{state.error}</ErrorAlert>}
+        <IconField icon={Mail} name="email" type="email" placeholder="Email" required autoComplete="email" accentColor={accentColor} />
+        <IconField
+          icon={KeyRound}
           name="password"
           type="password"
-          autoComplete="current-password"
+          placeholder="Password"
           required
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand) focus:border-transparent"
+          autoComplete="current-password"
+          accentColor={accentColor}
         />
-      </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-(--color-brand) text-white py-2.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {pending ? 'Signing in…' : 'Sign in'}
-      </button>
-    </form>
+        <SubmitButton accentColor={accentColor} pending={pending} pendingLabel="Signing in…" label="Sign in" />
+      </form>
+    </div>
   );
 }
