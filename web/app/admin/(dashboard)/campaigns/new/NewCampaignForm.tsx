@@ -21,7 +21,7 @@ export function NewCampaignForm() {
         setError(result.error);
         return;
       }
-      if (result.campaignId) router.push(`/admin/campaigns/${result.campaignId}`);
+      if (result.campaignId) router.push(`/admin/campaigns/${result.campaignId}/discover`);
     });
   }
 

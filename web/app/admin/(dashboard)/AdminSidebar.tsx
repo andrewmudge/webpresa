@@ -8,13 +8,13 @@ import { Menu, X } from 'lucide-react';
 import { signOut } from '@/lib/auth/actions';
 
 const NAV_ITEMS = [
+  { href: '/admin/campaigns', label: 'Campaigns' },
   { href: '/admin/businesses', label: 'Businesses' },
   { href: '/admin/discover', label: 'Discover' },
   { href: '/admin/stock-images', label: 'Stock Images' },
   { href: '/admin/previews', label: 'Previews' },
   { href: '/admin/scans', label: 'Scans' },
   { href: '/admin/postcards', label: 'Postcards' },
-  { href: '/admin/campaigns', label: 'Campaigns' },
 ];
 
 function Brand() {

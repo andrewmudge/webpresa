@@ -8276,3 +8276,100 @@ No code changes this round — investigation + documentation only. Presigned S3 
 ## Verification
 
 Documentation-only change — no lint/typecheck/test/build impact.
+
+---
+
+**Date:** 2026-08-09
+
+**Admin campaign workflow redesigned around discover-driven recipients, a campaign-wide scan gate, and bulk postcard finalization.** The user asked to make campaigns the primary admin flow for generating postcard mail: move Campaigns to the top of the nav, discover businesses straight into a campaign (replacing the old manual recipient picker) with selection persisting across multiple industry/location searches, run one scan across every imported business, present an AI qualification summary gating which businesses actually get mailed, then bulk-publish and bulk-generate postcards, and manage approval/submission from the recipient list itself. The user was explicit that this should reuse existing architecture wherever possible, just rearranged — confirmed true throughout: no new domain models, DynamoDB tables, or GSIs were needed anywhere in this change.
+
+**1. Nav reorder.** `AdminSidebar.tsx`'s single `NAV_ITEMS` array (drives both desktop and mobile) reordered so Campaigns is first.
+
+**2. Campaign creation redirect.** `NewCampaignForm.tsx` now pushes to `/admin/campaigns/[campaignId]/discover` instead of the campaign detail page after `createCampaignAction` succeeds — that action itself is unchanged.
+
+**3. Discover-for-campaign screen with cross-search persistent selection.** New `campaigns/[campaignId]/discover/page.tsx` + `CampaignDiscoverPanel.tsx`. The standalone Discover page's `searchPlacesAction` is reused unchanged. Selection is lifted into `CampaignDiscoverPanel`'s own client state as a `Map<placeId, SelectionEntry>` rather than living inside each search's results form (the standalone Discover page's existing pattern) — since the Map is keyed by `placeId` and never cleared by a new search, checking businesses in one industry/location, then searching a different industry/location, keeps all prior picks selected and counted in a sticky "N businesses selected for import" summary bar. Each result row became a controlled checkbox/industry-select instead of the standalone page's uncontrolled hidden-form-field pattern, since that pattern is fundamentally incompatible with state that outlives a single search's results array.
+
+Extracted the per-candidate business-creation logic that was inline in `importSelectedPlacesAction` (`discover/actions.ts`) into a new shared `lib/google-places/import-candidate.ts` (`importGooglePlaceCandidate`) — both the standalone Discover page and the new campaign-scoped import now call the identical helper, so the two paths can't silently drift. Verified behavior-preserving by re-running the existing Discover test suite unchanged after the extraction (all 12 tests still pass, same assertions).
+
+New `campaigns/[campaignId]/discover/actions.ts` (`importSelectedPlacesForCampaignAction`) composes: re-validates each client-supplied search result via the existing `GooglePlaceSearchResultSchema`, re-checks duplicates via the existing `findDuplicateSignalsForBatch`, calls the new shared `importGooglePlaceCandidate`, and — the actual new behavior — immediately calls the existing `addCampaignRecipientAction` for every business that was just created. A recipient-add failure is reported per-row without rolling back the business that was already created, matching the existing per-candidate independence guarantee `importSelectedPlacesAction` already had.
+
+**4. Campaign-wide "Run full scan."** New `campaigns/[campaignId]/scan-actions.ts` (`runCampaignScanAction`) loops the existing single-business `startScanWorkflow` (unchanged — the same function the business detail page's own "Run full scan" button already calls) over every unique `businessId` among the campaign's recipients, aggregating started/conflict/failed counts. No redirect (unlike the single-business action) — there's no one business to land on, so it's called directly from the client via `useTransition` and wired into a new button on `CampaignHeader`. New `CampaignScanAutoRefresh.tsx` polls (`router.refresh()` every 3s) while any recipient's business has an active scan, mirroring the existing `WorkflowAutoRefresh.tsx` on the business detail page exactly.
+
+**5. AI assessment summary + inclusion gate.** New `AssessmentTable.tsx` appears once every recipient's business has a terminal `scanExecutionStatus` and at least one recipient still lacks a postcard — both computed from data the page already loads, no new field needed to track "has this scan round been actioned." Reuses `Business.qualification`/`leadPriority`/`websiteQualityScore` directly (already-existing rollup fields set by the Stage 15 scoring pipeline after every scan) — no new query against `ScanEvent`/`ScanExecution` was needed to build the table. Columns: Business Name, Website Score, Lead Priority (now using shared `LEAD_PRIORITY_LABELS`/`LEAD_PRIORITY_TONE`, see below), Qualification (existing `QUALIFICATION_LABELS`/`QUALIFICATION_TONE`), and a +/trash toggle per row. Qualified businesses default included; everything else defaults excluded until explicitly added.
+
+**6/7/8. "Add Selected Businesses."** Two new actions run in parallel over disjoint recipient sets: `removeCampaignRecipientsAction` (`campaigns/actions.ts`) deletes exactly the excluded recipients, cascading their scan hits first — same order `deleteCampaignAction` already uses — and never touches the underlying `Business`. `publishAndGeneratePostcardsAction` (`campaigns/[campaignId]/postcard-batch-actions.ts`) for every still-included recipient: resolves which `SitePreview` to publish (via the business's `latestScanExecutionId` → `ScanExecution.previewId`, falling back to the newest non-archived entry from `listPreviewsForBusiness`), calls the existing `publishSitePreview`/`updateBusiness` pair directly (the same pair the single-business `publishPreviewAction` uses, just not that redirect-bound action itself) if the business isn't already published, then calls the existing, completely unmodified `createPostcardAction`. Idempotent — skips recipients that already have a postcard.
+
+**9. Recipient card redesign.** Postcard status (not approved / approved / submitted) is derived from `Postcard.reviewedAt`/`status` — a small badge (`lucide-react` `Circle`/`CircleCheck`/`SendHorizontal`) plus inline Approve/Submit buttons that call the existing `approvePostcardAction`/`submitPostcardToLobAction` directly, no navigation to `/admin/postcards/[postcardId]` required (a "Full details →" link remains for the checklist/back-side view). A filter bar above the recipient list scopes by status (client-side, over already-loaded data); "Approve all"/"Submit all" fan out `Promise.all` over the currently visible set using the same two existing actions. The old plain "View postcard →" text link is replaced by a new `PostcardFrontThumbnail.tsx` — turned out to need no scale/transform trick at all: `PostcardFront`'s `cqw`/`cqh` sizing already tracks `PostcardFrame`'s own rendered width (`w-full` + `aspect-[9.25/6.25]`), so a fixed-width wrapper div alone produces a correctly-proportioned small preview. Clicking it opens the actual rendered front PDF in a new tab via a signed S3 URL, resolved server-side in `campaigns/[campaignId]/page.tsx` with the already-existing `getSignedAssetUrl` (`postcards/` was already in its allowed-prefix list — no new S3 access path needed).
+
+**Also removed:** `AddRecipientForm`, the old one-at-a-time business-dropdown recipient picker on the campaign detail page — recipients now come exclusively from the discover-import flow, per the user's explicit intent ("removing the manual select option of recipients inside the campaign").
+
+**Also hoisted:** `LEAD_PRIORITY_LABELS`/`LEAD_PRIORITY_TONE` into `lib/scoring/labels.ts`, replacing an inline, non-exported `PRIORITY_LABELS` constant that previously only existed inside `ScoringSection.tsx` — mirrors the existing `QUALIFICATION_LABELS` pattern so the new assessment table doesn't duplicate it a second time.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/AdminSidebar.tsx                                              MODIFIED — Campaigns moved to top of NAV_ITEMS
+web/app/admin/(dashboard)/campaigns/new/NewCampaignForm.tsx                             MODIFIED — redirects to .../discover after creation
+web/lib/google-places/import-candidate.ts                                               NEW — shared per-candidate business-creation helper
+web/app/admin/(dashboard)/discover/actions.ts                                           MODIFIED — importSelectedPlacesAction now calls the shared helper
+web/app/admin/(dashboard)/campaigns/[campaignId]/discover/page.tsx                      NEW — discover-for-campaign route
+web/app/admin/(dashboard)/campaigns/[campaignId]/discover/CampaignDiscoverPanel.tsx      NEW — cross-search persistent-selection UI
+web/app/admin/(dashboard)/campaigns/[campaignId]/discover/actions.ts                     NEW — importSelectedPlacesForCampaignAction
+web/app/admin/(dashboard)/campaigns/[campaignId]/scan-actions.ts                         NEW — runCampaignScanAction
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignScanAutoRefresh.tsx             NEW — polling component
+web/app/admin/(dashboard)/campaigns/[campaignId]/AssessmentTable.tsx                     NEW — AI assessment summary + inclusion toggle
+web/app/admin/(dashboard)/campaigns/actions.ts                                          MODIFIED — added removeCampaignRecipientsAction
+web/app/admin/(dashboard)/campaigns/[campaignId]/postcard-batch-actions.ts               NEW — publishAndGeneratePostcardsAction
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                       MODIFIED — header scan button, assessment table wiring, removed AddRecipientForm, filter bar, bulk approve/submit, redesigned RecipientCard
+web/app/admin/(dashboard)/campaigns/[campaignId]/page.tsx                                MODIFIED — extended business projection, loads postcards + postcard front assets (screenshots/QR/signed URL)
+web/app/admin/(dashboard)/postcards/components/PostcardFrontThumbnail.tsx                NEW — small clickable postcard-front preview
+web/lib/scoring/labels.ts                                                               MODIFIED — added LEAD_PRIORITY_LABELS/LEAD_PRIORITY_TONE
+web/app/admin/(dashboard)/businesses/[businessId]/ScoringSection.tsx                     MODIFIED — uses the shared lead-priority labels instead of a local constant
+web/docs/architecture.md                                                                 MODIFIED — Status line updated
+web/docs/build_log.md                                                                    MODIFIED — this entry
++ new/updated tests: campaigns/[campaignId]/discover/__tests__/actions.test.ts (new),
+  campaigns/[campaignId]/__tests__/scan-actions.test.ts (new),
+  campaigns/[campaignId]/__tests__/postcard-batch-actions.test.ts (new),
+  campaigns/__tests__/actions.test.ts (extended — removeCampaignRecipientsAction)
+```
+
+## Verification
+
+```
+npm run lint        — 0 errors (2 pre-existing, unrelated warnings)
+npx tsc --noEmit     — clean
+npm test             — 113 test files, 1235 tests, all passing (27 new)
+npm run build        — production build succeeds; /admin/campaigns/[campaignId]/discover registered as a new route
+```
+
+Not yet manually verified in a running browser — per this repo's convention (`AGENTS.md`, "Verification"), the user reviews UI/frontend changes themselves; lint/typecheck/tests/build are the agent-side verification bar. No AWS/infra changes — this is an application-code-only change, no `cdk diff`/`cdk deploy` involved.
+
+---
+
+**Date:** 2026-08-09 (later same day)
+
+**Two bugs fixed in the campaign redesign above, both found from real user testing rather than reasoned about in the abstract.**
+
+**Bug 1 — `ReferenceError: ImportFailure is not defined` on `/admin/campaigns/[campaignId]/discover`.** `campaigns/[campaignId]/discover/actions.ts` had a leftover `export type { ImportFailure };` re-export (a type imported from the standalone Discover actions file but never actually used anywhere in the file). Next's `'use server'` module transform doesn't handle a type-only re-export cleanly in that position and left a broken reference in the compiled server-action bundle, throwing at module evaluation the moment the discover page rendered. Fix: removed the dead re-export and its now-unused import — the file now only exports the one async action plus its own locally-declared types, matching the working pattern the standalone Discover actions file already uses.
+
+**Bug 2 — the AI assessment table never appeared after "Run full scan," so nothing ever got published or had a postcard generated.** The user ran a full scan, saw "2 started," waited, and the assessment/inclusion table never showed up. Root cause: `CampaignDetail.tsx`'s `showAssessmentTable` gate read `Business.scanExecutionStatus` to decide whether any recipient's scan was still active — but that field is never actually written by the scan workflow anywhere in this codebase (confirmed by grep: zero writes outside the domain model/schema declarations and this new campaign code itself). The real, working precedent — the business detail page's own "Scan Workflow" card — reads scan progress from `ScanExecution` records directly via `listScanExecutionsForBusiness`, not from that field on `Business`. So on the campaign page, scan status always looked like `undefined`: `anyScanEverRun` was always false, the table's visibility condition could never become true, and the whole downstream flow (review → "Add Selected Businesses" → publish + generate postcard) was unreachable no matter how long a scan actually ran. Fix: `campaigns/[campaignId]/page.tsx` now queries `listScanExecutionsForBusiness` for each unique business among the campaign's recipients (same function, same pattern as the business detail page) and passes the newest execution's real status down as a new `latestScanStatusByBusiness` prop; `CampaignDetail.tsx`'s gating logic now reads that instead. Also dropped `scanExecutionStatus`/`latestScanExecutionId` from the `BusinessOption` projection since they were unused dead weight once the derivation no longer reads them (`latestScanExecutionId` is left as-is in `postcard-batch-actions.ts`'s preview-resolution fallback chain — it's a currently-unreachable first branch since that field is also never written, but the code already falls through correctly to `listPreviewsForBusiness`, so no functional bug there, just an inert branch documented in the domain model as the intended future path).
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/campaigns/[campaignId]/discover/actions.ts   MODIFIED — removed dead `export type { ImportFailure }` re-export
+web/app/admin/(dashboard)/campaigns/[campaignId]/page.tsx              MODIFIED — sources scan status from ScanExecution records, not Business.scanExecutionStatus
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx    MODIFIED — new latestScanStatusByBusiness prop drives the assessment-table gate; BusinessOption trimmed
+web/docs/build_log.md                                                  MODIFIED — this entry
+```
+
+## Verification
+
+```
+npx tsc --noEmit   — clean
+npm run lint        — 0 errors (2 pre-existing, unrelated warnings)
+npm test             — 113 test files, 1235 tests, all passing
+npm run build        — production build succeeds
+```
+
+Not yet re-verified against the real deployed scan workflow by the user — next step is re-running "Run full scan" on a real campaign and confirming the assessment table now appears once scans reach a terminal state.

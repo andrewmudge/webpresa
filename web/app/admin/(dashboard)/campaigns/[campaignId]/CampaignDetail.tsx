@@ -2,24 +2,47 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { Circle, CircleCheck, SendHorizontal } from 'lucide-react';
 import type { Campaign, CampaignStatus } from '@/domain/models/campaign';
 import { CAMPAIGN_STATUSES } from '@/domain/models/campaign';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
 import type { ScanHit } from '@/domain/models/scan-hit';
+import type { Postcard } from '@/domain/models/postcard';
+import type { QualificationResult, LeadPriority } from '@/domain/models/website-assessment';
+import type { ScanWorkflowStatus } from '@/domain/models/scan-execution';
+import { isActiveWorkflowStatus } from '@/lib/workflow/labels';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import {
   updateCampaignStatusAction,
   deleteCampaignAction,
-  addCampaignRecipientAction,
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
 } from '../actions';
-import { createPostcardAction } from '../../postcards/actions';
+import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction } from '../../postcards/actions';
+import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actions';
+import { CampaignScanAutoRefresh } from './CampaignScanAutoRefresh';
+import { AssessmentTable } from './AssessmentTable';
+import PostcardFrontThumbnail from '../../postcards/components/PostcardFrontThumbnail';
 
-interface BusinessOption {
+export interface BusinessOption {
   businessId: string;
   name: string;
   slug: string;
+  qualification?: QualificationResult;
+  leadPriority?: LeadPriority;
+  websiteQualityScore?: number;
+  currentPreviewId?: string;
+}
+
+export interface RecipientPostcardAssets {
+  businessName: string;
+  beforeScreenshotSrc?: string;
+  afterDesktopScreenshotSrc?: string;
+  afterMobileScreenshotSrc?: string;
+  qrDataUri?: string;
+  accessCodeDisplay?: string;
+  /** Signed S3 URL for the rendered front PDF — absent until rendering completes. */
+  frontUrl?: string;
 }
 
 interface Props {
@@ -27,23 +50,55 @@ interface Props {
   recipients: CampaignRecipient[];
   businesses: BusinessOption[];
   recentScansByRecipient: Record<string, ScanHit[]>;
+  postcardsByRecipient: Record<string, Postcard | null>;
+  postcardAssetsByRecipient: Record<string, RecipientPostcardAssets>;
+  /** Newest `ScanExecution.status` per business — `Business.scanExecutionStatus` itself is never actually written by the scan workflow, so this is sourced from `listScanExecutionsForBusiness` instead (same as the business detail page's own "Scan Workflow" card). */
+  latestScanStatusByBusiness: Record<string, ScanWorkflowStatus | undefined>;
+}
+
+type RecipientPostcardStatus = 'no_postcard' | 'not_approved' | 'approved' | 'submitted';
+
+function derivePostcardStatus(postcard: Postcard | null | undefined): RecipientPostcardStatus {
+  if (!postcard) return 'no_postcard';
+  if (postcard.status === 'submitted' || postcard.status === 'mailed' || postcard.status === 'delivered') return 'submitted';
+  if (postcard.reviewedAt) return 'approved';
+  return 'not_approved';
 }
 
 /**
- * Admin campaign detail view (Stage 21) — campaign details, recipient list
- * with an add-recipient form, per-recipient scan rollups + recent scans +
- * QR preview/download, and campaign-wide totals. No charts, no funnels —
- * counts and a recent-activity list only (see implementation.md, Stage 21,
- * "Admin experience").
+ * Admin campaign detail view (Stage 21, redesigned) — recipients now come
+ * exclusively from the discover-import flow (`campaigns/[campaignId]/discover`),
+ * not a manual business picker here. This view adds a campaign-wide "Run
+ * full scan" trigger, the AI assessment gate before recipients are
+ * finalized (`AssessmentTable`), and per-recipient postcard status/approval
+ * management without navigating to each postcard's own page.
  */
-export function CampaignDetail({ campaign, recipients, businesses, recentScansByRecipient }: Props) {
+export function CampaignDetail({
+  campaign,
+  recipients,
+  businesses,
+  recentScansByRecipient,
+  postcardsByRecipient,
+  postcardAssetsByRecipient,
+  latestScanStatusByBusiness,
+}: Props) {
   const businessById = new Map(businesses.map((b) => [b.businessId, b]));
   const totalScans = recipients.reduce((sum, r) => sum + r.totalScans, 0);
   const totalEstimatedUnique = recipients.reduce((sum, r) => sum + r.estimatedUniqueScans, 0);
 
+  const anyScanEverRun = recipients.some((r) => latestScanStatusByBusiness[r.businessId]);
+  const anyScanActive = recipients.some((r) => {
+    const status = latestScanStatusByBusiness[r.businessId];
+    return status ? isActiveWorkflowStatus(status) : false;
+  });
+  const anyPendingFinalization = recipients.some((r) => !r.postcardId);
+  const showAssessmentTable = anyScanEverRun && !anyScanActive && anyPendingFinalization && recipients.length > 0;
+
   return (
     <div className="space-y-6 max-w-4xl">
-      <CampaignHeader campaign={campaign} />
+      <CampaignScanAutoRefresh active={anyScanActive} />
+
+      <CampaignHeader campaign={campaign} anyRecipients={recipients.length > 0} anyScanActive={anyScanActive} />
 
       <div className="rounded-xl border border-(--color-border) bg-white p-5">
         <h3 className="text-sm font-semibold text-gray-900 mb-3">Campaign analytics</h3>
@@ -59,40 +114,32 @@ export function CampaignDetail({ campaign, recipients, businesses, recentScansBy
         </div>
       </div>
 
-      <div className="rounded-xl border border-(--color-border) bg-white p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Recipients</h3>
+      {showAssessmentTable && <AssessmentTable campaignId={campaign.campaignId} recipients={recipients} businesses={businesses} />}
 
-        {recipients.length === 0 ? (
-          <p className="text-sm text-gray-500 mb-4">No recipients yet — add one below to test the full flow end to end.</p>
-        ) : (
-          <ul className="space-y-4 mb-6">
-            {recipients.map((recipient) => (
-              <RecipientCard
-                key={recipient.campaignRecipientId}
-                recipient={recipient}
-                business={businessById.get(recipient.businessId)}
-                recentScans={recentScansByRecipient[recipient.campaignRecipientId] ?? []}
-              />
-            ))}
-          </ul>
-        )}
-
-        <AddRecipientForm campaignId={campaign.campaignId} businesses={businesses} />
-      </div>
+      <RecipientsSection
+        campaignId={campaign.campaignId}
+        recipients={recipients}
+        businessById={businessById}
+        recentScansByRecipient={recentScansByRecipient}
+        postcardsByRecipient={postcardsByRecipient}
+        postcardAssetsByRecipient={postcardAssetsByRecipient}
+      />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Campaign header + status control
+// Campaign header + status control + campaign-wide "Run full scan"
 // ---------------------------------------------------------------------------
 
-function CampaignHeader({ campaign }: { campaign: Campaign }) {
+function CampaignHeader({ campaign, anyRecipients, anyScanActive }: { campaign: Campaign; anyRecipients: boolean; anyScanActive: boolean }) {
   const router = useRouter();
   const [status, setStatus] = useState<CampaignStatus>(campaign.status);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
+  const [isScanning, startScanTransition] = useTransition();
+  const [scanSummary, setScanSummary] = useState<RunCampaignScanSummary | null>(null);
 
   function handleStatusChange(next: CampaignStatus) {
     setError(null);
@@ -119,6 +166,15 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
         return;
       }
       router.push('/admin/campaigns');
+    });
+  }
+
+  function handleRunFullScan() {
+    setScanSummary(null);
+    startScanTransition(async () => {
+      const result = await runCampaignScanAction(campaign.campaignId);
+      setScanSummary(result);
+      router.refresh();
     });
   }
 
@@ -160,23 +216,172 @@ function CampaignHeader({ campaign }: { campaign: Campaign }) {
           </button>
         </div>
       </div>
+
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+
+      <div className="mt-4 flex items-center gap-3 border-t border-gray-100 pt-4">
+        <button
+          type="button"
+          onClick={handleRunFullScan}
+          disabled={isScanning || anyScanActive || !anyRecipients}
+          className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isScanning || anyScanActive ? 'Running…' : 'Run full scan'}
+        </button>
+        {!anyRecipients && <p className="text-xs text-gray-400">Import businesses first to run a scan.</p>}
+        {scanSummary && (
+          <p className="text-xs text-gray-500">
+            Started {scanSummary.started} · Conflict {scanSummary.conflict} · Failed {scanSummary.failed}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// One recipient — destination edit, status toggle, rollups, QR, recent scans
+// Recipients — filter bar, bulk approve/submit, recipient cards
+// ---------------------------------------------------------------------------
+
+type StatusFilterValue = 'all' | 'not_approved' | 'approved' | 'submitted';
+
+const STATUS_FILTERS: { value: StatusFilterValue; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'not_approved', label: 'Not approved' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'submitted', label: 'Submitted' },
+];
+
+function RecipientsSection({
+  campaignId,
+  recipients,
+  businessById,
+  recentScansByRecipient,
+  postcardsByRecipient,
+  postcardAssetsByRecipient,
+}: {
+  campaignId: string;
+  recipients: CampaignRecipient[];
+  businessById: Map<string, BusinessOption>;
+  recentScansByRecipient: Record<string, ScanHit[]>;
+  postcardsByRecipient: Record<string, Postcard | null>;
+  postcardAssetsByRecipient: Record<string, RecipientPostcardAssets>;
+}) {
+  const router = useRouter();
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
+  const [isBulkPending, startBulkTransition] = useTransition();
+
+  const statuses = new Map(recipients.map((r) => [r.campaignRecipientId, derivePostcardStatus(postcardsByRecipient[r.campaignRecipientId])]));
+
+  const counts = {
+    all: recipients.length,
+    not_approved: recipients.filter((r) => statuses.get(r.campaignRecipientId) === 'not_approved').length,
+    approved: recipients.filter((r) => statuses.get(r.campaignRecipientId) === 'approved').length,
+    submitted: recipients.filter((r) => statuses.get(r.campaignRecipientId) === 'submitted').length,
+  };
+
+  const visibleRecipients = recipients.filter((r) => statusFilter === 'all' || statuses.get(r.campaignRecipientId) === statusFilter);
+
+  function handleApproveAll() {
+    startBulkTransition(async () => {
+      const targets = visibleRecipients.filter((r) => statuses.get(r.campaignRecipientId) === 'not_approved' && r.postcardId);
+      await Promise.all(targets.map((r) => approvePostcardAction(r.postcardId!)));
+      router.refresh();
+    });
+  }
+
+  function handleSubmitAll() {
+    startBulkTransition(async () => {
+      const targets = visibleRecipients.filter((r) => statuses.get(r.campaignRecipientId) === 'approved' && r.postcardId);
+      await Promise.all(targets.map((r) => submitPostcardToLobAction(r.postcardId!)));
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-(--color-border) bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h3 className="text-sm font-semibold text-gray-900">Recipients</h3>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleApproveAll}
+            disabled={isBulkPending || counts.not_approved === 0}
+            className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Approve all
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmitAll}
+            disabled={isBulkPending || counts.approved === 0}
+            className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Submit all
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {STATUS_FILTERS.map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            onClick={() => setStatusFilter(filter.value)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              statusFilter === filter.value ? 'border-(--color-brand) bg-(--color-brand)/10 text-(--color-brand)' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {filter.label} ({counts[filter.value]})
+          </button>
+        ))}
+      </div>
+
+      {recipients.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          No recipients yet —{' '}
+          <a href={`/admin/campaigns/${campaignId}/discover`} className="text-(--color-brand) hover:underline">
+            discover and import businesses
+          </a>{' '}
+          to add some.
+        </p>
+      ) : visibleRecipients.length === 0 ? (
+        <p className="text-sm text-gray-500">No recipients match this filter.</p>
+      ) : (
+        <ul className="space-y-4">
+          {visibleRecipients.map((recipient) => (
+            <RecipientCard
+              key={recipient.campaignRecipientId}
+              recipient={recipient}
+              business={businessById.get(recipient.businessId)}
+              recentScans={recentScansByRecipient[recipient.campaignRecipientId] ?? []}
+              postcard={postcardsByRecipient[recipient.campaignRecipientId]}
+              assets={postcardAssetsByRecipient[recipient.campaignRecipientId]}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One recipient — destination edit, status toggle, rollups, QR, recent
+// scans, postcard status/thumbnail and inline approve/submit
 // ---------------------------------------------------------------------------
 
 function RecipientCard({
   recipient,
   business,
   recentScans,
+  postcard,
+  assets,
 }: {
   recipient: CampaignRecipient;
   business?: BusinessOption;
   recentScans: ScanHit[];
+  postcard: Postcard | null | undefined;
+  assets: RecipientPostcardAssets | undefined;
 }) {
   const router = useRouter();
   const [destinationUrl, setDestinationUrl] = useState(recipient.destinationUrl ?? '');
@@ -282,7 +487,7 @@ function RecipientCard({
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
 
       <div className="mt-3">
-        <GeneratePostcardControl campaignRecipientId={recipient.campaignRecipientId} postcardId={recipient.postcardId} />
+        <PostcardControl campaignRecipientId={recipient.campaignRecipientId} postcard={postcard} postcardId={recipient.postcardId} assets={assets} />
       </div>
 
       <div className="mt-3">
@@ -350,22 +555,34 @@ function RecipientCard({
 }
 
 // ---------------------------------------------------------------------------
-// Generate postcard (Stage 22) — reachable per-recipient rather than a
-// separate bulk-selection flow, matching this stage's manual-only workflow.
+// Postcard status/thumbnail/inline approve+submit (Stage 21 redesign) —
+// replaces the old plain "Generate postcard" / "View postcard →" control.
 // ---------------------------------------------------------------------------
 
-function GeneratePostcardControl({ campaignRecipientId, postcardId }: { campaignRecipientId: string; postcardId?: string }) {
+const STATUS_BADGE: Record<RecipientPostcardStatus, { label: string; className: string; Icon: typeof Circle }> = {
+  no_postcard: { label: 'No postcard', className: 'bg-gray-50 text-gray-500 border-gray-200', Icon: Circle },
+  not_approved: { label: 'Not approved', className: 'bg-gray-50 text-gray-700 border-gray-200', Icon: Circle },
+  approved: { label: 'Approved', className: 'bg-amber-50 text-amber-700 border-amber-200', Icon: CircleCheck },
+  submitted: { label: 'Submitted', className: 'bg-green-50 text-green-700 border-green-200', Icon: SendHorizontal },
+};
+
+function PostcardControl({
+  campaignRecipientId,
+  postcard,
+  postcardId,
+  assets,
+}: {
+  campaignRecipientId: string;
+  postcard: Postcard | null | undefined;
+  postcardId?: string;
+  assets: RecipientPostcardAssets | undefined;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  if (postcardId) {
-    return (
-      <a href={`/admin/postcards/${postcardId}`} className="text-xs text-(--color-brand) hover:underline">
-        View postcard →
-      </a>
-    );
-  }
+  const statusValue = derivePostcardStatus(postcard);
+  const badge = STATUS_BADGE[statusValue];
 
   function handleGenerate() {
     setError(null);
@@ -375,132 +592,81 @@ function GeneratePostcardControl({ campaignRecipientId, postcardId }: { campaign
         setError(result.error);
         return;
       }
-      router.push(`/admin/postcards/${result.postcardId}`);
-    });
-  }
-
-  return (
-    <div>
-      <button type="button" onClick={handleGenerate} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
-        {isPending ? 'Generating…' : 'Generate postcard'}
-      </button>
-      {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Add recipient
-// ---------------------------------------------------------------------------
-
-function AddRecipientForm({ campaignId, businesses }: { campaignId: string; businesses: BusinessOption[] }) {
-  const router = useRouter();
-  const [businessId, setBusinessId] = useState('');
-  const [showOverride, setShowOverride] = useState(false);
-  const [destinationUrl, setDestinationUrl] = useState('');
-  const [destinationLabel, setDestinationLabel] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [generatedToken, setGeneratedToken] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setError(null);
-    startTransition(async () => {
-      const result = await addCampaignRecipientAction(campaignId, {
-        businessId,
-        ...(showOverride && destinationUrl ? { destinationUrl, destinationLabel } : {}),
-      });
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (result.rawToken) setGeneratedToken(result.rawToken);
-      setBusinessId('');
-      setShowOverride(false);
-      setDestinationUrl('');
-      setDestinationLabel('');
       router.refresh();
     });
   }
 
-  return (
-    <form onSubmit={handleSubmit} className="pt-4 border-t border-gray-100 space-y-3">
-      <p className="text-xs font-medium text-gray-500">Add recipient</p>
-      {error && (
-        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-          {error}
-        </div>
-      )}
-      {generatedToken && (
-        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
-          <p className="text-xs font-semibold text-amber-800 mb-1">
-            A new claim code was generated for this recipient — copy it now, it won&apos;t be shown again:
-          </p>
-          <code className="block text-sm font-mono text-amber-900 break-all">{generatedToken}</code>
-        </div>
-      )}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="w-56">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Business</label>
-          <select
-            value={businessId}
-            onChange={(e) => setBusinessId(e.target.value)}
-            required
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-          >
-            <option value="" disabled>
-              Select a business…
-            </option>
-            {businesses.map((b) => (
-              <option key={b.businessId} value={b.businessId}>
-                {b.name} ({b.slug})
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          type="submit"
-          disabled={isPending}
-          className="rounded-lg bg-(--color-brand) text-white px-3 py-1.5 text-sm font-medium hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60"
-        >
-          {isPending ? 'Adding…' : 'Add recipient'}
-        </button>
-      </div>
-      <p className="text-xs text-gray-400">
-        By default, the QR wires straight into this business&apos;s claim flow — reusing a usable claim
-        if one already exists, generating a new one otherwise. No manual code entry needed.
-      </p>
+  function handleApprove() {
+    if (!postcard) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await approvePostcardAction(postcard.postcardId);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
 
+  function handleSubmit() {
+    if (!postcard) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await submitPostcardToLobAction(postcard.postcardId);
+      if (result.status !== 'submitted') {
+        setError(result.message);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  if (!postcardId || !postcard) {
+    return (
       <div>
-        <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
-          {showOverride ? 'Hide advanced' : 'Advanced: override destination'}
+        <button type="button" onClick={handleGenerate} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
+          {isPending ? 'Generating…' : 'Generate postcard'}
         </button>
-        {showOverride && (
-          <div className="mt-2 flex flex-wrap items-end gap-2">
-            <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs font-medium text-gray-500 mb-1">Destination URL</label>
-              <input
-                type="text"
-                value={destinationUrl}
-                onChange={(e) => setDestinationUrl(e.target.value)}
-                placeholder="https://webpresa.com/pricing"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-              />
-            </div>
-            <div className="w-40">
-              <label className="block text-xs font-medium text-gray-500 mb-1">Label (optional)</label>
-              <input
-                type="text"
-                value={destinationLabel}
-                onChange={(e) => setDestinationLabel(e.target.value)}
-                placeholder="e.g. pricing"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-(--color-brand)"
-              />
-            </div>
-          </div>
-        )}
+        {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
       </div>
-    </form>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-3">
+      <PostcardFrontThumbnail
+        businessName={assets?.businessName ?? ''}
+        beforeScreenshotSrc={assets?.beforeScreenshotSrc}
+        afterDesktopScreenshotSrc={assets?.afterDesktopScreenshotSrc}
+        afterMobileScreenshotSrc={assets?.afterMobileScreenshotSrc}
+        qrDataUri={assets?.qrDataUri}
+        accessCodeDisplay={assets?.accessCodeDisplay}
+        href={assets?.frontUrl}
+        width={128}
+      />
+      <div className="min-w-[140px] space-y-1.5">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium border ${badge.className}`}>
+          <badge.Icon size={12} />
+          {badge.label}
+        </span>
+        <div className="flex flex-col items-start gap-1">
+          {statusValue === 'not_approved' && (
+            <button type="button" onClick={handleApprove} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
+              {isPending ? 'Approving…' : 'Approve'}
+            </button>
+          )}
+          {statusValue === 'approved' && (
+            <button type="button" onClick={handleSubmit} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
+              {isPending ? 'Submitting…' : 'Submit to Lob'}
+            </button>
+          )}
+          <a href={`/admin/postcards/${postcardId}`} className="text-xs text-gray-500 hover:underline">
+            Full details →
+          </a>
+        </div>
+        {error && <p className="text-xs text-red-700">{error}</p>}
+      </div>
+    </div>
   );
 }

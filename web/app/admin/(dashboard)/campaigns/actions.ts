@@ -14,6 +14,7 @@ import { generateCampaignCode } from '@/lib/campaign/code';
 import { getCampaignById, putCampaign, updateCampaignStatus, deleteCampaignById } from '@/lib/db/campaigns';
 import {
   listCampaignRecipientsForCampaign,
+  getCampaignRecipientById,
   putCampaignRecipient,
   updateCampaignRecipientDestination,
   updateCampaignRecipientStatus,
@@ -226,4 +227,34 @@ export async function updateCampaignRecipientStatusAction(
 
   await updateCampaignRecipientStatus(campaignRecipientId, status);
   return {};
+}
+
+/**
+ * Syncs the campaign's recipient set to an admin's inclusion decisions from
+ * the AI assessment summary (Stage 21 redesign) — deletes exactly the
+ * recipients the admin excluded, cascading their scan hits first (same
+ * order `deleteCampaignAction` already uses for a full campaign delete).
+ * The underlying `Business` record is never touched — only its membership
+ * in this campaign.
+ */
+export async function removeCampaignRecipientsAction(
+  campaignId: string,
+  campaignRecipientIds: string[],
+): Promise<{ error?: string; removed: number }> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized', removed: 0 };
+
+  const campaign = await getCampaignById(campaignId);
+  if (!campaign) return { error: 'Campaign not found.', removed: 0 };
+
+  let removed = 0;
+  for (const id of campaignRecipientIds) {
+    const recipient = await getCampaignRecipientById(id);
+    if (!recipient || recipient.campaignId !== campaignId) continue;
+    await deleteAllScanHitsForRecipient(id);
+    await deleteCampaignRecipientById(id);
+    removed += 1;
+  }
+
+  return { removed };
 }

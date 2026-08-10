@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
 import type { ScanEvent } from '@/domain/models/scan-event';
 import { ASSESSMENT_CATEGORIES, QUALIFICATION_RESULTS, type AssessmentCategory } from '@/domain/models/website-assessment';
-import { QUALIFICATION_LABELS, QUALIFICATION_TONE } from '@/lib/scoring/labels';
+import { QUALIFICATION_LABELS, QUALIFICATION_TONE, LEAD_PRIORITY_LABELS } from '@/lib/scoring/labels';
 import { scoreWebsiteAction, overrideScoreAction, clearScoreOverrideAction } from './scoring-actions';
 
 /**
@@ -26,7 +26,6 @@ const CATEGORY_LABELS: Record<AssessmentCategory, string> = {
   overallUserExperience: 'Overall User Experience',
 };
 
-const PRIORITY_LABELS: Record<string, string> = { high: 'High', medium: 'Medium', low: 'Low' };
 
 const SCAN_STATUS_LABELS: Record<ScanEvent['status'], string> = {
   queued: 'Queued',
@@ -75,7 +74,7 @@ export function ScoringSection({ business, scans, resultQuery, overrideQuery }: 
         </div>
         <div>
           <div className="text-xs text-gray-400">Lead priority</div>
-          <div className="text-gray-900">{business.leadPriority ? PRIORITY_LABELS[business.leadPriority] : '—'}</div>
+          <div className="text-gray-900">{business.leadPriority ? LEAD_PRIORITY_LABELS[business.leadPriority] : '—'}</div>
         </div>
         <div>
           <div className="text-xs text-gray-400">Qualification</div>
