@@ -10,14 +10,14 @@
 
 ```bash
 # 1. Authenticate
-aws sso login --profile webpresa
+aws sso login --profile webpresa-dev
 
 # 2. Preview changes (safe — no AWS writes)
 cd infra
-npx cdk diff WebpresaDevDataStack --profile webpresa
+npx cdk diff WebpresaDevDataStack --profile webpresa-dev
 
 # 3. Deploy (requires explicit approval — see below)
-npx cdk deploy WebpresaDevDataStack --profile webpresa --require-approval never
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev --require-approval never
 ```
 
 ---
@@ -26,19 +26,19 @@ npx cdk deploy WebpresaDevDataStack --profile webpresa --require-approval never
 
 | Profile | Account | Purpose |
 |---|---|---|
-| `webpresa` | `539898341083` | Development — the only deployed environment |
-| `webpresa-prod` | TBD | Production — not yet created |
+| `webpresa-dev` | `539898341083` | Development — renamed from the original bare `webpresa` profile in Stage 22.5 |
+| `webpresa-prod` | `994748688217` | Production — account created and CDK-bootstrapped (Stage 22.5); no application stacks deployed yet |
 
 Both profiles use AWS SSO. Sessions expire; re-authenticate when you see `Token has expired and refresh failed`.
 
 ```bash
-aws sso login --profile webpresa
+aws sso login --profile webpresa-dev
 ```
 
 Verify the active session at any time:
 
 ```bash
-aws sts get-caller-identity --profile webpresa
+aws sts get-caller-identity --profile webpresa-dev
 ```
 
 ---
@@ -49,16 +49,18 @@ Bootstrap is a one-time operation per account/region that creates the `CDKToolki
 
 **Development account:** Already bootstrapped (`539898341083 / us-east-1`).
 
-**Production account:** Run this once before the first production deployment:
+**Production account:** Already bootstrapped (`994748688217 / us-east-1`, Stage 22.5). The command used:
 
 ```bash
-npx cdk bootstrap --profile webpresa-prod
+WEBPRESA_APP_BASE_URL=https://webpresa.com npx cdk bootstrap --profile webpresa-prod
 ```
+
+Note the `WEBPRESA_APP_BASE_URL` prefix — `cdk bootstrap` still loads the whole CDK app to discover environments, which trips `bin/webpresa.ts`'s hard-fail guard even though bootstrap itself never uses the value. Any `cdk` command in this app, not just `synth`/`diff`/`deploy`, needs it set.
 
 To verify whether an account is already bootstrapped:
 
 ```bash
-aws cloudformation describe-stacks --stack-name CDKToolkit --profile webpresa \
+aws cloudformation describe-stacks --stack-name CDKToolkit --profile webpresa-dev \
   --query "Stacks[0].StackStatus" --output text
 ```
 
@@ -116,7 +118,7 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet added to Vercel; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
 | `CUSTOMER_ONBOARDING_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-onboarding-name` | Stage 19.x, Part 1 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
 | `DOMAIN_CONNECTIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-domain-connections-name` | Stage 19.x, Part 2 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
-| `VERCEL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-vercel-api` | Secrets Manager (Stage 19.x, Part 2) — deployed 2026-07-31, real `{ accessToken, teamId, projectId }` populated (`teamId`/`projectId` sourced from `web/.vercel/project.json`). **The `accessToken` is a personal access token scoped to the `andrew-mudges-projects` team and expires 2026-10-29** — rotate it before then (generate a new token at vercel.com/account/tokens, then `aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa`) or domain-connection calls in `lib/vercel/client.ts` will start failing with `VercelApiError('auth', ...)`. |
+| `VERCEL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-vercel-api` | Secrets Manager (Stage 19.x, Part 2) — deployed 2026-07-31, real `{ accessToken, teamId, projectId }` populated (`teamId`/`projectId` sourced from `web/.vercel/project.json`). **The `accessToken` is a personal access token scoped to the `andrew-mudges-projects` team and expires 2026-10-29** — rotate it before then (generate a new token at vercel.com/account/tokens, then `aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa-dev`) or domain-connection calls in `lib/vercel/client.ts` will start failing with `VercelApiError('auth', ...)`. |
 | `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` | `dev` | Stage 19.x, Part 2 (added 2026-07-31) — added to Vercel's **Preview environment only** (left unset in Production). Passed as `gitBranch` on every `addProjectDomain()` call so a newly connected customer domain serves this app's `dev` branch instead of silently falling through to Vercel's Production default — see "Domain-to-branch targeting" below. Must be removed (or the whole mechanism revisited) once Stage 17+ is genuinely deployed to Production. |
 
 Never put these in client-side code or commit `.env` files that contain real values.
@@ -127,16 +129,16 @@ Never put these in client-side code or commit `.env` files that contain real val
 
 ### Local development
 
-The CDK CLI and AWS CLI use the `webpresa` SSO profile, which resolves to temporary credentials from the SSO token. These credentials are never embedded in code.
+The CDK CLI and AWS CLI use the `webpresa-dev` SSO profile (or `webpresa-prod` for production), which resolves to temporary credentials from the SSO token. These credentials are never embedded in code.
 
 ```bash
 # All infra commands pass the profile explicitly:
-npx cdk synth --profile webpresa
-npx cdk diff  --profile webpresa
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+npx cdk synth --profile webpresa-dev
+npx cdk diff  --profile webpresa-dev
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 ```
 
-When running the Next.js application locally against real DynamoDB tables, set `AWS_PROFILE=webpresa` in `.env.local`. The AWS SDK resolves SSO credentials automatically from the active session.
+When running the Next.js application locally against real DynamoDB tables, set `AWS_PROFILE=webpresa-dev` in `.env.local`. The AWS SDK resolves SSO credentials automatically from the active session.
 
 ### Deployed (Vercel)
 
@@ -146,16 +148,16 @@ Vercel has no IAM role concept, so a dedicated **IAM user** (`webpresa-vercel-de
 
 ## AWS credentials for Vercel
 
-Create a least-privilege IAM user once and store its keys in Vercel. Do not use root credentials or the personal `webpresa` SSO user.
+Create a least-privilege IAM user once and store its keys in Vercel. Do not use root credentials or the personal `webpresa-dev`/`webpresa-prod` SSO user.
 
 ### Create the IAM user (one-time, manual — not CDK)
 
 ```bash
 # Create user (no console access)
-aws iam create-user --user-name webpresa-vercel-dev --profile webpresa
+aws iam create-user --user-name webpresa-vercel-dev --profile webpresa-dev
 
 # Generate access keys
-aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa
+aws iam create-access-key --user-name webpresa-vercel-dev --profile webpresa-dev
 ```
 
 The `create-access-key` response contains `AccessKeyId` and `SecretAccessKey`. Add both to Vercel immediately and do not store them anywhere else.
@@ -235,7 +237,7 @@ Secrets are created by CDK with a random placeholder only — never a real value
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-openai \
   --secret-string '{"apiKey":"sk-..."}' \
-  --profile webpresa
+  --profile webpresa-dev
 ```
 
 For the two-key Stripe secret, include both keys:
@@ -244,7 +246,7 @@ For the two-key Stripe secret, include both keys:
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-stripe \
   --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
-  --profile webpresa
+  --profile webpresa-dev
 ```
 
 Google Places (Stage 12) follows the same one-key shape as OpenAI, Firecrawl, and Lob:
@@ -253,7 +255,7 @@ Google Places (Stage 12) follows the same one-key shape as OpenAI, Firecrawl, an
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-google-places \
   --secret-string '{"apiKey":"AIza..."}' \
-  --profile webpresa
+  --profile webpresa-dev
 ```
 
 The claim-token secret (Stage 17) is generated locally, not obtained from a third party — same pattern as `capture-token`/`internal-api` (see "Stage 17" above for the full command).
@@ -264,7 +266,7 @@ Because CloudFormation only touches a secret's value when the CDK construct's `j
 
 ## Stage 12 — Google Places Discovery deployment guidance
 
-**Application code is implemented and manually verified** (see `build_log.md`, "Stage 12 — Google Places Discovery"). The `webpresa-dev-google-places` secret now holds a real API key (populated via the standard `aws secretsmanager put-secret-value --profile webpresa` command below — no other AWS resource was created or modified). **No Google Cloud project configuration, IAM key-restriction setup, quota, or budget alert has been performed** — the guidance below (API key restrictions, quota limits, budget alerts) still describes required setup, not completed setup. No Vercel change or deployment was performed.
+**Application code is implemented and manually verified** (see `build_log.md`, "Stage 12 — Google Places Discovery"). The `webpresa-dev-google-places` secret now holds a real API key (populated via the standard `aws secretsmanager put-secret-value --profile webpresa-dev` command below — no other AWS resource was created or modified). **No Google Cloud project configuration, IAM key-restriction setup, quota, or budget alert has been performed** — the guidance below (API key restrictions, quota limits, budget alerts) still describes required setup, not completed setup. No Vercel change or deployment was performed.
 
 ### Google Cloud project and API setup
 
@@ -302,7 +304,7 @@ Populate the real API key with the same pattern used for every other secret — 
 ### Local development requirements
 
 - `GOOGLE_PLACES_SECRET_NAME=webpresa-dev-google-places` in `.env.local` (already present in `.env.local.example`).
-- `AWS_PROFILE=webpresa` so the local Secrets Manager client can resolve the secret via SSO credentials, matching every other integration.
+- `AWS_PROFILE=webpresa-dev` so the local Secrets Manager client can resolve the secret via SSO credentials, matching every other integration.
 - No other local environment variable is needed — application code reads only the secret's *name* from the environment; the key value itself always comes from Secrets Manager.
 
 ### Verifying the key is not exposed
@@ -336,7 +338,7 @@ There is no `FIRECRAWL_API_KEY` environment variable anywhere in this app, by de
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-firecrawl \
   --secret-string '{"apiKey":"fc-..."}' \
-  --profile webpresa
+  --profile webpresa-dev
 ```
 
 Never paste the real key into a commit, a CDK construct prop, this document, or any other file in the repo.
@@ -355,7 +357,7 @@ No new environment variable, no new IAM policy, no new S3 prefix registration be
 The real end-to-end smoke test was run as a local script (not committed) that: loads `.env.local`, creates a throwaway dev `Business` with `websiteUrl: 'https://www.firecrawl.dev'` (Firecrawl's own marketing site — stable, scrape-friendly, and unambiguously permitted to be scraped by their own API) and a minimal `servicesOffered` value, calls `enrichBusinessWebsite()` directly, and logs only non-sensitive fields (status, scanId, previewId, S3 key names, image counts) — never the API key, never raw page content. Result: `status: 'completed'`, real HTTP 200 from Firecrawl, both `crawl.json`/`extracted.json` artifacts written to the correct S3 keys, 9 candidate images discovered with 3 accepted and uploaded, a real OpenAI-generated `SitePreview` v1 with `generationMetadata.source: 'firecrawl_enriched'`, and `Business.enrichmentStatus: 'enrichment_completed'`.
 
 To repeat this smoke test:
-1. Ensure `.env.local` has `FIRECRAWL_SECRET_NAME`, `AWS_PROFILE=webpresa` (or Vercel's AWS keys), and the other standard variables set (see the environment-variable table above).
+1. Ensure `.env.local` has `FIRECRAWL_SECRET_NAME`, `AWS_PROFILE=webpresa-dev` (or Vercel's AWS keys), and the other standard variables set (see the environment-variable table above).
 2. Create a throwaway `Business` via the admin UI (`/admin/businesses/new`) with a real, safe public `websiteUrl` and at least a minimal value in "Services offered" (or accept that Stage 13 can supply services itself when the business has none — see `implementation.md`, Stage 13).
 3. Click "Enrich Website" on that business's detail page.
 4. Confirm a new `SitePreview` draft appears, the "Website Enrichment" card shows `Enrichment completed`, and (optionally) inspect the S3 console under `scans/{businessId}/` for the artifacts — `crawl.json`/`extracted.json` are private (no console "make public" action needed or wanted); accepted images are viewable directly via their `/api/assets/scans/...` proxy URL.
@@ -382,8 +384,8 @@ To repeat this smoke test:
 
 ```bash
 # 1. Data stack — adds the one new capture-token secret. Review first:
-cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Populate the real signing key (same pattern as every other secret —
 #    this one is generated locally, not obtained from a third party):
@@ -391,14 +393,14 @@ openssl rand -base64 48 | tr -d '\n' > /tmp/capture-token-key.txt
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-capture-token \
   --secret-string "{\"signingKey\":\"$(cat /tmp/capture-token-key.txt)\"}" \
-  --profile webpresa
+  --profile webpresa-dev
 rm /tmp/capture-token-key.txt
 
 # 3. Screenshot repository stack — creates only the ECR repo. Must be
 #    deployed and exist before step 4 can push an image, and before step 5
 #    deploys the Lambda that references it as a cross-stack import.
-npx cdk diff WebpresaDevScreenshotRepositoryStack --profile webpresa
-npx cdk deploy WebpresaDevScreenshotRepositoryStack --profile webpresa
+npx cdk diff WebpresaDevScreenshotRepositoryStack --profile webpresa-dev
+npx cdk deploy WebpresaDevScreenshotRepositoryStack --profile webpresa-dev
 
 # 4. Build and push the container image (the Lambda in step 5 will fail to
 #    find an image if this hasn't run yet):
@@ -417,7 +419,7 @@ npm run deploy:screenshot
 
 # 7. Verify the deploy actually took the real URL, not a placeholder:
 aws lambda get-function-configuration --function-name webpresa-dev-screenshot-capture \
-  --profile webpresa --query "Environment.Variables.WEBPRESA_APP_BASE_URL"
+  --profile webpresa-dev --query "Environment.Variables.WEBPRESA_APP_BASE_URL"
 # Must NOT contain "REPLACE_WITH" or ".invalid" — see the 2026-07-28 incident below.
 ```
 
@@ -444,10 +446,10 @@ Once the stack existed, a real end-to-end `existing_site` capture (invoked direc
 aws lambda update-function-code \
   --function-name webpresa-dev-screenshot-capture \
   --image-uri <account>.dkr.ecr.<region>.amazonaws.com/webpresa-dev-screenshot-capture:latest \
-  --profile webpresa --region us-east-1
-aws lambda wait function-updated --function-name webpresa-dev-screenshot-capture --profile webpresa --region us-east-1
+  --profile webpresa-dev --region us-east-1
+aws lambda wait function-updated --function-name webpresa-dev-screenshot-capture --profile webpresa-dev --region us-east-1
 # Confirm it actually picked up the new image:
-aws lambda get-function --function-name webpresa-dev-screenshot-capture --profile webpresa --region us-east-1 \
+aws lambda get-function --function-name webpresa-dev-screenshot-capture --profile webpresa-dev --region us-east-1 \
   --query 'Configuration.CodeSha256' --output text
 ```
 
@@ -498,7 +500,7 @@ aws iam put-user-policy \
       "Action": ["lambda:InvokeFunction"],
       "Resource": "arn:aws:lambda:us-east-1:539898341083:function:webpresa-dev-screenshot-capture"
     }]
-  }' --profile webpresa
+  }' --profile webpresa-dev
 ```
 
 The existing `webpresa-dev-secrets` inline policy (not a new one) was extended to add the capture-token secret's ARN pattern (`arn:aws:secretsmanager:us-east-1:539898341083:secret:webpresa-dev-capture-token-*`) alongside the other five — see "Adding a new secret" below. Both grants verified via `aws iam get-user-policy`.
@@ -533,8 +535,8 @@ Unlike every other stage in this app (plain Vercel Server Actions — pushing to
 
 ```bash
 # 1. Data stack — adds the scan-executions table and the internal-api secret. Review first:
-cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Populate the real shared secret (generated locally, not obtained from a third party —
 #    same pattern as capture-token in Stage 14):
@@ -542,7 +544,7 @@ openssl rand -base64 48 | tr -d '\n' > /tmp/internal-api-secret.txt
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-internal-api \
   --secret-string "{\"sharedSecret\":\"$(cat /tmp/internal-api-secret.txt)\"}" \
-  --profile webpresa
+  --profile webpresa-dev
 rm /tmp/internal-api-secret.txt
 
 # 3. Scan workflow stack — state machine + EventBridge Connection. Always use
@@ -557,7 +559,7 @@ npm run deploy:scan-workflow
 #    ApiEndpoint in the state machine definition must show the real host:
 aws stepfunctions describe-state-machine \
   --state-machine-arn arn:aws:states:us-east-1:<account-id>:stateMachine:webpresa-dev-scan-workflow \
-  --profile webpresa --query definition --output text | grep -o "https://[^']*" | sort -u
+  --profile webpresa-dev --query definition --output text | grep -o "https://[^']*" | sort -u
 ```
 
 ### Extending `webpresa-vercel-dev`
@@ -588,8 +590,8 @@ Add `INTERNAL_API_SECRET_NAME` (`webpresa-dev-internal-api`), `SCAN_EXECUTIONS_T
 ```bash
 # 1. Data stack — adds the claims table, the owner-user-id-index GSI on
 #    businesses, the claim-token secret, and the customer User Pool. Review first:
-cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Populate the real HMAC pepper (generated locally, not obtained from a
 #    third party — same pattern as capture-token/internal-api in Stages 14/16):
@@ -597,13 +599,13 @@ openssl rand -base64 48 | tr -d '\n' > /tmp/claim-token-secret.txt
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-claim-token \
   --secret-string "{\"hmacSecret\":\"$(cat /tmp/claim-token-secret.txt)\"}" \
-  --profile webpresa
+  --profile webpresa-dev
 rm /tmp/claim-token-secret.txt
 
 # 3. Vercel access stack — grants Claims table access, claim-token secret
 #    access, and the Cognito actions:
-npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
 ```
 
 No Lambda, no ECR repo, no container image — unlike Stage 14, this stage adds no compute at all; every new capability is either a DynamoDB table/GSI, a Secrets Manager secret, or a Cognito User Pool called directly from Next.js Server Actions/Route Handlers.
@@ -633,13 +635,13 @@ Add all six new Stage 17 variables from "Required environment variables" above: 
 ```bash
 # 1. Data stack — adds the customer-billing-profiles table and the
 #    stripe-subscription-id-index GSI on businesses. Review first:
-cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Vercel access stack — grants the new table and GSI ARNs (the Stripe
 #    secret is already granted from Stage 10):
-npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
 ```
 
 ### Stripe setup via CLI (not the Dashboard) — the actual recipe used for dev, and the recipe for prod later
@@ -681,7 +683,7 @@ npx --yes @stripe/cli post /v1/webhook_endpoints \
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-stripe \
   --secret-string '{"secretKey":"sk_test_...","webhookSecret":"whsec_..."}' \
-  --profile webpresa
+  --profile webpresa-dev
 ```
 
 **Why the webhook URL carries a `?x-vercel-protection-bypass=` query parameter**: this `dev` deployment has Vercel Deployment Protection enabled, which redirects *every* unauthenticated request — including Stripe's webhook POSTs — to Vercel's own SSO login page at the edge, before Next.js ever runs (confirmed directly: a `curl -X POST` to `/api/webhooks/stripe` returned a `302` to `vercel.com/sso-api`). Stripe (like Slack, GitHub, and any third-party webhook sender) can't attach the `x-vercel-protection-bypass` HTTP header Playwright uses (Stage 14) — there's no custom-header support in Stripe's webhook delivery config, and no persistent cookie jar between deliveries anyway. Vercel's own docs name this exact scenario and document the fix: append the bypass secret as a **query parameter** on the registered URL instead — this is checked per-request, statelessly, with no cookie needed, so every individual Stripe delivery independently passes. Reuses the existing `webpresa-{env}-vercel-protection-bypass` secret (Stage 14) — do not generate a second one, or the copy the screenshot Lambda reads goes stale. This query parameter has zero effect on this app's own webhook signature verification, which is based only on the raw POST body + `Stripe-Signature` header, never the URL.
@@ -758,13 +760,13 @@ None beyond a normal `git push` to the branch Vercel tracks. If Stage 17/18 aren
 ### Deploy sequence
 
 ```
-1. cdk diff WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa   (review, purely additive)
-2. cdk deploy WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa
+1. cdk diff WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa-dev   (review, purely additive)
+2. cdk deploy WebpresaDevDataStack WebpresaDevVercelAccessStack --profile webpresa-dev
 3. npx vercel env add CUSTOMER_ONBOARDING_TABLE_NAME / DOMAIN_CONNECTIONS_TABLE_NAME /
    VERCEL_API_SECRET_NAME  production,preview  (values are the CFN output table/secret names)
 4. npx vercel env add WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH  preview   (value: dev — Production left unset)
 5. aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api \
-     --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa
+     --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa-dev
    (teamId/projectId sourced from web/.vercel/project.json; accessToken is a personal access
    token scoped to the andrew-mudges-projects team — expires 2026-10-29, see the env var table
    above for the rotation command)
@@ -886,7 +888,7 @@ Read a specific output value:
 ```bash
 aws cloudformation describe-stacks \
   --stack-name WebpresaDevDataStack \
-  --profile webpresa \
+  --profile webpresa-dev \
   --query "Stacks[0].Outputs[?ExportName=='webpresa-dev-businesses-name'].OutputValue" \
   --output text
 ```
@@ -905,14 +907,14 @@ These commands make no changes to AWS:
 
 ```bash
 # Authenticate / verify session
-aws sso login --profile webpresa
-aws sts get-caller-identity --profile webpresa
+aws sso login --profile webpresa-dev
+aws sts get-caller-identity --profile webpresa-dev
 
 # Synthesise CloudFormation template (local only)
-cd infra && npx cdk synth --profile webpresa
+cd infra && npx cdk synth --profile webpresa-dev
 
 # Preview changes
-cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk diff WebpresaDevDataStack --profile webpresa-dev
 
 # Run tests (no AWS required)
 cd infra && npm test
@@ -925,13 +927,13 @@ These commands make real changes to the AWS account:
 
 ```bash
 # Bootstrap (one-time, but creates real AWS resources)
-npx cdk bootstrap --profile webpresa
+npx cdk bootstrap --profile webpresa-dev
 
 # Deploy
-npx cdk deploy WebpresaDevDataStack --profile webpresa
+npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # Destroy (IRREVERSIBLE for prod — DeletionPolicy is RETAIN)
-npx cdk destroy WebpresaDevDataStack --profile webpresa
+npx cdk destroy WebpresaDevDataStack --profile webpresa-dev
 ```
 
 **Before running `cdk deploy`**, always show the output of `cdk diff` and wait for explicit confirmation. The deployment gate in `AGENTS.md` applies to all agents.
@@ -949,7 +951,7 @@ To manually roll back to the previous template:
 ```bash
 # Redeploy the last known-good commit
 git checkout <good-commit>
-cd infra && npx cdk deploy WebpresaDevDataStack --profile webpresa
+cd infra && npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 ```
 
 ### DynamoDB tables
@@ -986,7 +988,7 @@ aws dynamodb restore-table-to-point-in-time \
 3. Add the Zod schema in `web/domain/schemas/`.
 4. Add the factory in `web/domain/factories/`.
 5. Add the corresponding `CfnOutput` export name to this document.
-6. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying.
+6. Run `cd infra && npx cdk diff --profile webpresa-dev` and confirm before deploying.
 
 ## Adding a new S3 prefix (existing assets bucket)
 
@@ -995,7 +997,7 @@ Stage 9 provisions one bucket (`webpresa-{env}-assets`) shared across scan, prev
 1. Document the new key pattern under the "S3 asset storage" section of `architecture.md`.
 2. Add the prefix to `ALLOWED_PREFIXES` in `web/lib/s3/assets.ts` if application code will write to it directly.
 3. If a new runtime (e.g. a Stage 13/14/22 Lambda) needs access, grant it a least-privilege policy scoped to that prefix only — do not reuse the broad `webpresa-vercel-dev` policy.
-4. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying if the IAM policy or bucket construct itself changed.
+4. Run `cd infra && npx cdk diff --profile webpresa-dev` and confirm before deploying if the IAM policy or bucket construct itself changed.
 
 A genuinely new bucket (rather than a prefix) would instead follow the `WebpresaBucket` construct pattern in `infra/lib/constructs/webpresa-bucket.ts`, mirroring the steps above.
 
@@ -1006,7 +1008,7 @@ A genuinely new bucket (rather than a prefix) would instead follow the `Webpresa
 3. Add the corresponding `*_SECRET_NAME` env var to `.env.local.example` and this document's env var table.
 4. Add a typed wrapper in `web/lib/secrets/index.ts` if application code will read it.
 5. Extend the `webpresa-dev-secrets` IAM policy above with the new secret's ARN.
-6. Run `cd infra && npx cdk diff --profile webpresa` and confirm before deploying.
+6. Run `cd infra && npx cdk diff --profile webpresa-dev` and confirm before deploying.
 7. After deploy, populate the real value with `aws secretsmanager put-secret-value` (see above) once the owning stage actually needs it — not before.
 
 ---
@@ -1019,18 +1021,18 @@ The Settings page's Account card ("Edit Account," name/phone editing) calls Cogn
 
 ```bash
 cd infra
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa --require-approval never
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev --require-approval never
 ```
 
 Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-access` — the `CognitoCustomerAuth` statement's `Action` list includes `AdminUpdateUserAttributes`. "Edit Account" name/phone editing is fully functional against the real dev pool.
 
 ### `AdminDeleteUser` — deployed 2026-08-02
 
-The Delete Account feature (`build_log.md`, "Settings Page Redesign — Delete Account") calls Cognito's `AdminDeleteUser` as its last cascade step. The same `CognitoCustomerAuth` statement now also includes `cognito-idp:AdminDeleteUser`. First deploy attempt hit an expired SSO session (`aws sso login --profile webpresa` needed interactively, `cdk`'s own SDK credential resolution failed with `Unable to resolve AWS account to use` even though `aws sts get-caller-identity` still returned a cached-valid identity) — resolved by re-running `aws sso login --profile webpresa`, after which `cdk diff` showed exactly the expected single additive IAM action (no other changes) and was deployed:
+The Delete Account feature (`build_log.md`, "Settings Page Redesign — Delete Account") calls Cognito's `AdminDeleteUser` as its last cascade step. The same `CognitoCustomerAuth` statement now also includes `cognito-idp:AdminDeleteUser`. First deploy attempt hit an expired SSO session (`aws sso login --profile webpresa-dev` needed interactively, `cdk`'s own SDK credential resolution failed with `Unable to resolve AWS account to use` even though `aws sts get-caller-identity` still returned a cached-valid identity) — resolved by re-running `aws sso login --profile webpresa-dev`, after which `cdk diff` showed exactly the expected single additive IAM action (no other changes) and was deployed:
 
 ```bash
 cd infra
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa --require-approval never
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev --require-approval never
 ```
 
 Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-access` — the `CognitoCustomerAuth` statement's `Action` list includes both `AdminDeleteUser` and `AdminUpdateUserAttributes`. Delete Account's full cascade, including the final Cognito step, is now fully functional against the real dev pool — no known partial-failure gap remains.
@@ -1047,15 +1049,15 @@ Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-acce
 cd infra
 
 # 1. Data stack — adds the leads table (PK leadId, business-id-index GSI, ttl attribute):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Vercel access stack — grants the leads table + indexes, and the new
 #    SesSendLeadNotifications IAM statement (bare Resource: '*' — see
 #    architecture.md for why two narrower, pattern-matched scopes both
 #    proved unreliable in practice):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
 ```
 
 ### SES setup (manual — not CDK-managed)
@@ -1107,13 +1109,13 @@ This repo has no Route53-hosted-zone CDK construct, so unlike every other integr
 cd infra
 
 # 1. Data stack — adds campaigns, campaign-recipients, and scan-hits:
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 2. Vercel access stack — grants the 3 new tables + their indexes on the
 #    existing DynamoDbTables IAM statement (no new statement, no new policy):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
 ```
 
 ### New Vercel environment variables
@@ -1160,18 +1162,18 @@ cd infra
 # Step 1 — additive only: create postcard-webhook-events, add
 # campaign-recipient-id-index to postcards (old campaign-code-index index
 # temporarily left in place):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # Step 2 — after step 1 succeeds, remove the old campaign-code-index GSI
 # (deletion only):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
 
 # 3. Vercel access stack — grants the new table + its index on the existing
 #    DynamoDbTables IAM statement (no new statement, no new policy):
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa
-WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
 ```
 
 The `postcards` table itself was empty in dev at rename time, so this was a clean schema change, not a data migration — no backfill was needed or performed.

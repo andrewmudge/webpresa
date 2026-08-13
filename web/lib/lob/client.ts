@@ -1,5 +1,6 @@
 import 'server-only';
 import { getLobSecret } from '@/lib/secrets';
+import { assertLiveModeAllowed } from '@/lib/env/runtime-environment';
 
 /**
  * Stage 22 Phase 4 — thin Lob REST client. Deliberately a hand-written
@@ -19,6 +20,12 @@ import { getLobSecret } from '@/lib/secrets';
  * on file for this account, per Lob's own restriction that live keys need
  * one), so nothing in this module can cause a real postcard to be mailed
  * until that key is deliberately swapped out-of-band.
+ *
+ * Stage 22.5 — `assertLiveModeAllowed` below is a defense-in-depth check
+ * on top of that: even once a `live_*` key exists, this module refuses to
+ * use it unless the resolved runtime environment is genuinely
+ * `'production'`, so a live key configured on a non-production deployment
+ * can't be exercised.
  */
 
 const LOB_API_BASE_URL = 'https://api.lob.com/v1';
@@ -35,6 +42,7 @@ export class LobApiError extends Error {
 
 export async function lobRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { apiKey } = await getLobSecret();
+  assertLiveModeAllowed('Lob', apiKey.startsWith('live_'));
   const authorization = `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`;
 
   const response = await fetch(`${LOB_API_BASE_URL}${path}`, {

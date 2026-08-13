@@ -6,7 +6,7 @@ import { S3Client } from '@aws-sdk/client-s3';
  *
  * The AWS region is read from the AWS_REGION environment variable.
  * Credentials are resolved from the default SDK credential chain:
- *   - Local dev:  IAM Identity Center SSO profile (AWS_PROFILE=webpresa)
+ *   - Local dev:  IAM Identity Center SSO profile (AWS_PROFILE=webpresa-dev)
  *   - Vercel:     AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY env vars
  *                 (dedicated least-privilege IAM user — see deployment.md)
  *

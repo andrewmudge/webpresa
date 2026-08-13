@@ -206,6 +206,8 @@ All configuration is centralised in `infra/lib/config/environments.ts`. The CDK 
 
 No account IDs are hard-coded. The CDK app resolves `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` from the active CLI profile at synth time.
 
+**Dev/prod separation (Stage 22.5):** a separate `prod` AWS account (`994748688217`) is live — all 8 application stacks are deployed there (`Webpresa{Dev,Prod}{Stack}` naming, `--context env=prod --profile webpresa-prod`), with real (non-placeholder) values in all 10 prod Secrets Manager secrets. `assertAccountMatchesEnvironment()` in `infra/lib/config/environments.ts` cross-checks the resolved AWS account against the active `--context env=` at synth time, rejecting a mismatched `--profile` before any CloudFormation call. `web/lib/env/runtime-environment.ts`'s `assertLiveModeAllowed()` refuses to use a live-mode Stripe/Lob key outside a verified production deployment. What's still open: Vercel's Production environment variables still point at the same `webpresa-dev-*` resources Preview uses — the Vercel dashboard hasn't been reconfigured yet, which is what actually creates the dev/prod separation on Vercel's side. See Stage 22.5 in `implementation.md` and `22.5-manual-updates.md` for the current checklist state.
+
 ### Reusable constructs
 
 `WebpresaTable` (`infra/lib/constructs/webpresa-table.ts`) wraps `dynamodb.Table` and automatically applies billing mode, encryption, removal policy, PITR, deletion protection, and two CloudFormation outputs (`TableName`, `TableArn`) for every table. Adding a new table requires only a name, partition key, and optional GSI list.

@@ -1,6 +1,9 @@
 import 'server-only';
 import type Stripe from 'stripe';
 import type { BillingPurpose, WebpresaPlan } from '@/domain/constants/plans';
+import { resolveRuntimeEnvironment } from '@/lib/env/runtime-environment';
+
+export { resolveRuntimeEnvironment };
 
 /**
  * Trusted metadata attached to every Checkout Session/Subscription this
@@ -35,13 +38,6 @@ export function buildTrustedMetadata(input: TrustedCheckoutMetadata): Stripe.Met
   if (input.termsVersion) metadata.termsVersion = input.termsVersion;
   if (input.acceptedTermsAt) metadata.acceptedTermsAt = input.acceptedTermsAt;
   return metadata;
-}
-
-/** The runtime environment tag attached to Checkout metadata — a diagnostic
- *  safety net, not an authorization boundary, for detecting a dev-mode event
- *  ever reaching a prod deployment's webhook or vice versa. */
-export function resolveRuntimeEnvironment(): string {
-  return process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'unknown';
 }
 
 /** Reads `metadata.businessId` off a Stripe object — never trusted alone for

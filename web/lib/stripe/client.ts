@@ -1,6 +1,7 @@
 import 'server-only';
 import Stripe from 'stripe';
 import { getStripeSecret } from '@/lib/secrets';
+import { assertLiveModeAllowed } from '@/lib/env/runtime-environment';
 
 /**
  * Singleton Stripe client (Stage 18).
@@ -25,6 +26,7 @@ export async function getStripeClient(): Promise<Stripe> {
   if (client) return client;
 
   const { secretKey } = await getStripeSecret();
+  assertLiveModeAllowed('Stripe', secretKey.startsWith('sk_live_'));
   client = new Stripe(secretKey, {
     apiVersion: STRIPE_API_VERSION,
   });

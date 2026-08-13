@@ -4701,6 +4701,79 @@ Avoid unsupported aggressive claims.
 
 ---
 
+# Stage 22.5 — Development / Production Environment Separation
+
+## Objective
+
+Prepare Webpresa for a clean development-to-production deployment workflow before beginning Stage 23. Development and production must use the same application code and the same CDK stack definitions, with environment-specific AWS accounts, resource names, secrets, and provider modes cleanly separated. Production must be deployable but remain inactive/safe until explicitly enabled.
+
+## Status
+
+**Infrastructure deployed, secrets populated, Vercel Production/Preview fully separated. Only provider live-mode activation and DNS/domain items remain, all manual.** All 8 prod CDK stacks (`WebpresaProdDataStack`, `WebpresaProdScreenshotRepositoryStack`, `WebpresaProdPostcardRenderRepositoryStack`, `WebpresaProdScanWorkflowStack`, `WebpresaProdStockImagesStack`, `WebpresaProdScreenshotStack`, `WebpresaProdPostcardRenderStack`, `WebpresaProdVercelAccessStack`) are deployed and `CREATE_COMPLETE` in the new prod AWS account (`994748688217`/`us-east-1`); all 10 Secrets Manager secrets hold real values. Every Vercel environment variable previously shared between Production and Preview (53 of them) is now split into independent per-environment bindings with correct values on each side — including freshly rotated AWS access keys and session-signing secrets for *both* environments (true secrets can't be safely split without destroying the other side's copy once deleted, so both were regenerated rather than just prod's). Matches the "exists but inactive" objective: empty tables, no live provider keys, no real customer data. The screenshot Lambda's `reservedConcurrentExecutions: 5` — temporarily omitted in prod pending an AWS Lambda concurrency quota increase — was restored and redeployed on 2026-08-12 once AWS approved the increase to 1000; verified live. Every item Claude Code can execute for this stage is now done. See `web/docs/22.5-manual-updates.md` for the remaining manual/external checklist (Stripe/Lob live-mode activation, SES production-access approval, DNS, Vercel API token rotation before 2026-10-29) and its notes on two Vercel CLI operational gotchas discovered along the way (shared-binding deletion semantics, and `npx vercel`'s intermittent registry-resolution flakiness). Named `22.5` rather than `22.x` to avoid colliding with Stage 22 (Lob/postcard fulfillment) — this stage is unrelated to postcards and doesn't extend it.
+
+## Current state (verified in code)
+
+Most of the environment-configuration groundwork already exists:
+
+- `infra/lib/config/environments.ts` already defines both `dev` and `prod` `EnvironmentConfig` objects (suffix, billing mode, PITR, deletion protection, removal policy). Only `dev` has ever been deployed.
+- `infra/bin/webpresa.ts` already resolves environment from `--context env=` (default `dev`) and account/region from the active CLI profile (`CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION`, set automatically by the CDK CLI from `--profile`). No AWS account IDs are hard-coded anywhere in `infra/` or `web/lib`.
+- Every construct threads `webpresa-{env}-{resource}` naming and the per-environment `RemovalPolicy`/PITR/deletion-protection through `config` — verified with no exceptions.
+- Secrets Manager already uses the `webpresa-{env}-{name}` convention for all 10 secrets, with real values always populated out-of-band (never via CDK).
+- Cognito's user pool/client are already suffix-parameterized (`webpresa-{suffix}-customers`) — prod-ready by construction.
+
+Gaps identified by the original audit, now resolved in code:
+
+1. ~~No account-ID safety validation.~~ Fixed — `assertAccountMatchesEnvironment()` in `environments.ts`, called from `bin/webpresa.ts`; live-verified to reject a mismatched `--profile`/`--context env=` combo before touching CloudFormation.
+2. ~~No code-level guard on Stripe/Lob test-vs-live mode.~~ Fixed — `web/lib/env/runtime-environment.ts`'s `assertLiveModeAllowed()`, wired into `getStripeClient()` and `lobRequest()`.
+3. ~~`infra/package.json` hardcoded `--profile webpresa` and `Dev`-only stack names.~~ Fixed — all scripts use `webpresa-dev`/`webpresa-prod` explicitly with `--context env=`, and every dev script has a `:prod` counterpart.
+
+Still open (tracked in `web/docs/22.5-manual-updates.md`):
+
+4. **Vercel Production is not actually isolated from dev today.** Every environment variable added since Stage 19 was documented as added to both Preview and Production, with dev-suffixed values — Vercel's Production environment still points at dev DynamoDB tables and dev Secrets Manager secrets until the Vercel dashboard is reconfigured (checklist §6).
+5. Two documented dev-only hacks (`WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH`, the hardcoded dev Preview URL in `infra/package.json`'s dev scripts) still need resolving before `dev` → `main` is ever promoted — deliberately deferred, not part of this stage.
+
+See `web/docs/22.5-manual-updates.md` for the full manual (non-code) checklist.
+
+## Major deliverables
+
+- CDK account-ID/environment cross-check safety assertion (`infra/bin/webpresa.ts` + `infra/lib/config/environments.ts`).
+- Generalized `infra/package.json` deploy/diff scripts (env-parameterized, no hardcoded dev URL).
+- Runtime guard in `web/lib/stripe` and `web/lib/lob` refusing a live-mode key outside a verified production deployment (using the existing `resolveRuntimeEnvironment()` in `web/lib/stripe/metadata.ts`).
+- A real, separate `webpresa-prod` AWS account with all base stacks deployed (data, screenshot repo/Lambda, postcard-render repo/Lambda, scan-workflow, stock-images, vercel-access) — infrastructure only, empty tables, no live provider keys.
+- A genuinely separate Vercel Production environment-variable set pointing at `webpresa-prod-*` resources, distinct from Preview's `webpresa-dev-*` values.
+- Updated `deployment.md` environment matrix and production setup checklist.
+
+## Implementation requirements
+
+- Do not introduce environment branching in application code (`if (env === 'dev')`); every difference must be expressed as a different value for the same `process.env.X` name.
+- Preserve the existing `webpresa-{env}-{resource}` naming convention; do not introduce a new one.
+- The account-ID safety check must fail loudly at synth time, before any CloudFormation interaction.
+- Merging `dev` → `main` and activating any live provider mode (Stripe live keys, Lob live keys, SES production access) are explicit, later, separate decisions — not automatically triggered by anything in this stage.
+- Every `cdk deploy` still requires showing account, region, stack name, and full `cdk diff` output, then waiting for explicit approval, per the existing rule in `web/AGENTS.md`.
+
+## Acceptance criteria
+
+- `cdk deploy --context env=prod` with a profile resolving to the wrong AWS account fails before touching CloudFormation.
+- Development remains fully functional throughout — no regressions to any existing dev stack or flow.
+- `webpresa-dev` and `webpresa-prod` CLI profiles both resolve to their correct, distinct AWS accounts.
+- The same application code and same CDK stack definitions produce both environments.
+- A real prod AWS account exists with all base stacks deployed, tables/buckets empty, Cognito pool available, no live provider keys yet.
+- Vercel Production's environment variables point at `webpresa-prod-*` resources, distinct from Preview's `webpresa-dev-*` values.
+- A live-mode Stripe or Lob key cannot be exercised from a non-production deployment (new runtime guard, unit-tested).
+- No secret values appear in any commit, doc, or chat output.
+- `deployment.md` contains a clear environment matrix and a production setup checklist.
+- A production smoke test (infra reachability only — no real charges, postcards, or emails) can be run safely and passes.
+
+## Deferred work
+
+- Merging `dev` → `main`.
+- Activating any provider's live mode (Stripe, Lob, SES).
+- OpenSRS domain-purchase integration (not implemented yet — separate stage).
+- Route 53/WAF/CloudTrail (not part of the current architecture).
+- Stage 23 (EventBridge automation) itself.
+
+---
+
 # Stage 23 — EventBridge Controlled Automation
 
 ## Objective
