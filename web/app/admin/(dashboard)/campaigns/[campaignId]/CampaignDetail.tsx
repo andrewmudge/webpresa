@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Circle, CircleCheck, SendHorizontal } from 'lucide-react';
+import { Circle, CircleCheck, CircleAlert, SendHorizontal } from 'lucide-react';
 import type { Campaign, CampaignStatus } from '@/domain/models/campaign';
 import { CAMPAIGN_STATUSES } from '@/domain/models/campaign';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
@@ -18,7 +18,7 @@ import {
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
 } from '../actions';
-import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction } from '../../postcards/actions';
+import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction, retryRenderPostcardAction } from '../../postcards/actions';
 import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actions';
 import { CampaignScanAutoRefresh } from './CampaignScanAutoRefresh';
 import { AssessmentTable } from './AssessmentTable';
@@ -56,12 +56,17 @@ interface Props {
   latestScanStatusByBusiness: Record<string, ScanWorkflowStatus | undefined>;
 }
 
-type RecipientPostcardStatus = 'no_postcard' | 'not_approved' | 'approved' | 'submitted';
+type RecipientPostcardStatus = 'no_postcard' | 'render_failed' | 'not_approved' | 'approved' | 'submitted';
 
 function derivePostcardStatus(postcard: Postcard | null | undefined): RecipientPostcardStatus {
   if (!postcard) return 'no_postcard';
   if (postcard.status === 'submitted' || postcard.status === 'mailed' || postcard.status === 'delivered') return 'submitted';
   if (postcard.reviewedAt) return 'approved';
+  // Rendering runs synchronously right after creation (`renderPostcardArtifacts`)
+  // and silently leaves the record at `pending` with no artifact keys on
+  // failure — indistinguishable from a normal "awaiting approval" postcard
+  // without this check. See `retryRenderPostcardAction`.
+  if (postcard.status === 'pending' && !postcard.frontArtifactKey) return 'render_failed';
   return 'not_approved';
 }
 
@@ -561,6 +566,7 @@ function RecipientCard({
 
 const STATUS_BADGE: Record<RecipientPostcardStatus, { label: string; className: string; Icon: typeof Circle }> = {
   no_postcard: { label: 'No postcard', className: 'bg-gray-50 text-gray-500 border-gray-200', Icon: Circle },
+  render_failed: { label: 'Render failed', className: 'bg-red-50 text-red-700 border-red-200', Icon: CircleAlert },
   not_approved: { label: 'Not approved', className: 'bg-gray-50 text-gray-700 border-gray-200', Icon: Circle },
   approved: { label: 'Approved', className: 'bg-amber-50 text-amber-700 border-amber-200', Icon: CircleCheck },
   submitted: { label: 'Submitted', className: 'bg-green-50 text-green-700 border-green-200', Icon: SendHorizontal },
@@ -588,6 +594,22 @@ function PostcardControl({
     setError(null);
     startTransition(async () => {
       const result = await createPostcardAction(campaignRecipientId);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (result.renderWarning) {
+        setError(result.renderWarning);
+      }
+      router.refresh();
+    });
+  }
+
+  function handleRetryRender() {
+    if (!postcard) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await retryRenderPostcardAction(postcard.postcardId);
       if (result.error) {
         setError(result.error);
         return;
@@ -651,6 +673,11 @@ function PostcardControl({
           {badge.label}
         </span>
         <div className="flex flex-col items-start gap-1">
+          {statusValue === 'render_failed' && (
+            <button type="button" onClick={handleRetryRender} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
+              {isPending ? 'Retrying…' : 'Retry render'}
+            </button>
+          )}
           {statusValue === 'not_approved' && (
             <button type="button" onClick={handleApprove} disabled={isPending} className="text-xs text-(--color-brand) hover:underline disabled:opacity-60">
               {isPending ? 'Approving…' : 'Approve'}

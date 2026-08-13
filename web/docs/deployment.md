@@ -427,6 +427,17 @@ aws lambda get-function-configuration --function-name webpresa-dev-screenshot-ca
 # Must NOT contain "REPLACE_WITH" or ".invalid" — see the 2026-07-28 incident below.
 ```
 
+### Redeploy after rotating internal-api/capture-token/vercel-protection-bypass (2026-08-12 prod incident)
+
+`internal-api`, `capture-token`, and `vercel-protection-bypass` are all read once and cached indefinitely by their consumers — `web/lib/secrets.ts` caches for the Next.js process lifetime, and the screenshot Lambda's `getSecretJson()` (`infra/lambda/screenshot-capture/src/aws.ts`) caches per execution environment with no TTL, same "fetch once, cache forever" convention used everywhere in this codebase. **Populating or rotating any of these three secrets does nothing for a resource that already read the old value and hasn't been redeployed since.**
+
+Two real prod incidents on 2026-08-12 came from exactly this: the real secret values were populated (`06:27 CDT`) *after* the scan-workflow EventBridge Connection and the screenshot Lambda had already been created/deployed with the placeholder.
+
+- **EventBridge Connection** (`webpresa-{env}-internal-api`) bakes its credential into its own AWS-managed secret at deploy time — it never re-reads the source secret on its own. A stale credential shows up as `States.Http.StatusCode.401` on the first task, then `Events.ConnectionResource.InvalidConnectionState` on every retry after EventBridge marks itself `DEAUTHORIZED`. Fix: `aws events update-connection` with the current secret values (no CDK change needed — the Connection resource itself doesn't change, just its live credential).
+- **Screenshot Lambda** kept minting capture tokens with the stale `capture-token` signing key from whichever warm execution environments predated the rotation — `generated_preview` captures still reported `status: completed` (a screenshot genuinely was taken and uploaded), but the artifact was a screenshot of the app's own 404 page, because the stale token failed `verifyCaptureToken()` and `resolvePreview()` fell through to `notFound()`. Nothing about this is visible from the ScanEvent status alone — the only way to catch it is opening the actual image. Fix: redeploy the screenshot stack (any Lambda config/code change forces new execution environments, which re-fetch the current secret on cold start) — `npm run deploy:screenshot[:prod]`.
+
+**Takeaway:** after populating or rotating any of these three secrets, redeploy every stack that depends on them (`WebpresaScanWorkflowStack` for `internal-api`, `WebpresaScreenshotStack` for `capture-token/vercel-protection-bypass`) even if nothing else about those stacks changed — a no-op `cdk deploy` won't force this since CDK only pushes secret values into new/changed resources, so you may need to bump something trivial (an env var, a description) to force it through, or use the AWS CLI directly against the affected resource (as done for the EventBridge Connection above).
+
 ### Account-quota fixes (hit during the 2026-07-23 dev deploy)
 
 Two `cdk deploy WebpresaDevScreenshotStack` attempts failed at the AWS API level (not a CDK/synth error) and auto-rolled back cleanly before the fix:

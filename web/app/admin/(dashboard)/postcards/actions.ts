@@ -72,6 +72,24 @@ export async function createPostcardAction(campaignRecipientId: string): Promise
 }
 
 /**
+ * Retries rendering for a postcard whose initial render failed (still
+ * `pending`, never got its artifact keys — see `CreatePostcardResult`'s
+ * `renderWarning` above). `renderPostcardArtifacts` already guards on
+ * `status === 'pending'` and is safe to call again — it only ever creates
+ * new S3 artifacts and records their keys, no new `Postcard` record.
+ */
+export async function retryRenderPostcardAction(postcardId: string): Promise<{ error?: string }> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  const result = await renderPostcardArtifacts(postcardId);
+  if (result.status !== 'rendered') {
+    return { error: result.message ?? 'Rendering the postcard artwork failed.' };
+  }
+  return {};
+}
+
+/**
  * Records explicit admin approval. Approval only unlocks submission (Phase
  * 4, not yet built) — it never triggers mailing by itself. No automatic
  * approval path exists.
