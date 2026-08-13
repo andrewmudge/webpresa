@@ -29,17 +29,17 @@ export async function ContactTab({ businessId, business, isReadOnly }: Props) {
     <div className="space-y-6">
       <Card title="Contact information" description="Your phone, email, and address as shown to customers.">
         <dl className="grid gap-3 sm:grid-cols-2 text-sm">
-          <div>
+          <div className="min-w-0">
             <dt className="text-gray-500">Phone</dt>
-            <dd className="text-gray-900">{business.phone || '—'}</dd>
+            <dd className="text-gray-900 break-words">{business.phone || '—'}</dd>
           </div>
-          <div>
+          <div className="min-w-0">
             <dt className="text-gray-500">Email</dt>
-            <dd className="text-gray-900">{business.email || '—'}</dd>
+            <dd className="text-gray-900 break-words">{business.email || '—'}</dd>
           </div>
-          <div className="sm:col-span-2">
+          <div className="min-w-0 sm:col-span-2">
             <dt className="text-gray-500">Address</dt>
-            <dd className="text-gray-900">
+            <dd className="text-gray-900 break-words">
               {business.address ? `${business.address.line1}, ${business.address.city}, ${business.address.state} ${business.address.postalCode}` : '—'}
             </dd>
           </div>

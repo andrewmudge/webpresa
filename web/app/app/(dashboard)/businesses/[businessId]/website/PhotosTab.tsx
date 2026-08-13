@@ -10,15 +10,54 @@ interface Props {
   isReadOnly: boolean;
 }
 
+/**
+ * The theme fields below are resolved once at generation time
+ * (`lib/ai/generate-preview.ts`'s `resolvePhotoSlot`/`resolveHeroImages`)
+ * from a priority chain that isn't limited to `business.photoUrls` — a slot
+ * with no matching upload falls back to a Firecrawl-scan-accepted image (or,
+ * for hero, a curated stock photo). This card shows what's actually
+ * rendering per slot right now, read-only, labeled by whether it's one of
+ * the customer's own uploads or was pulled in automatically — customers
+ * otherwise had no visibility into non-uploaded images the site was using.
+ */
+const SITE_IMAGE_SLOT_LABELS = {
+  heroImageUrl: 'Hero',
+  heroImageUrlMobile: 'Hero (mobile)',
+  aboutImageUrl: 'Why Choose Us',
+  aboutSectionImageUrl: 'About Us',
+  servicesImageUrl: 'Services',
+} as const;
+
 export async function PhotosTab({ businessId, business, isReadOnly }: Props) {
   const previews = await getCachedPreviews(businessId);
   const content = previews[0]?.content;
+  const theme = previews[0]?.theme;
   const photoUrls = business.photoUrls ?? [];
   const galleryImages = content?.gallerySection?.images ?? [];
   const captionFor = (url: string) => galleryImages.find((g) => g.url === url)?.caption ?? '';
 
+  const siteImageSlots = (Object.entries(SITE_IMAGE_SLOT_LABELS) as [keyof typeof SITE_IMAGE_SLOT_LABELS, string][])
+    .map(([field, label]) => ({ label, url: theme?.[field] }))
+    .filter((slot): slot is { label: string; url: string } => !!slot.url);
+
   return (
     <div className="space-y-6">
+      {siteImageSlots.length > 0 && (
+        <Card title="Photos on your site" description="What's currently showing in each section — read-only.">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {siteImageSlots.map(({ label, url }) => (
+              <div key={label} className="space-y-1">
+                <div className="relative rounded-lg overflow-hidden border border-gray-200 aspect-square">
+                  <Image src={url} alt={label} fill className="object-cover" unoptimized />
+                </div>
+                <p className="text-xs font-medium text-gray-700">{label}</p>
+                <p className="text-[11px] text-gray-400">{photoUrls.includes(url) ? 'Uploaded by you' : 'Pulled from your website'}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card title="Your photos" description={`Up to 6 photos. ${photoUrls.length}/6 used.`}>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {photoUrls.map((url) => (
@@ -40,13 +79,13 @@ export async function PhotosTab({ businessId, business, isReadOnly }: Props) {
         </div>
 
         {!isReadOnly && photoUrls.length < 6 && (
-          <form action={addPhotosActionCustomer.bind(null, businessId)} className="mt-4 flex items-center gap-3">
+          <form action={addPhotosActionCustomer.bind(null, businessId)} className="mt-4 flex flex-wrap items-center gap-3">
             <input
               type="file"
               name="photos"
               accept="image/*"
               multiple
-              className="text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-(--color-brand-muted) file:text-(--color-brand) file:px-3 file:py-1.5 file:text-sm file:font-medium"
+              className="min-w-0 max-w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-(--color-brand-muted) file:text-(--color-brand) file:px-3 file:py-1.5 file:text-sm file:font-medium"
             />
             <SaveButton label="Upload" />
           </form>
