@@ -22,6 +22,8 @@ interface Props {
   hasMatchingClaimIntent: boolean;
   isDraft: boolean;
   isAdmin: boolean;
+  /** Whether this request is the screenshot Lambda capturing this preview for a postcard — never shown the claim banner, regardless of draft/published status. */
+  isCapture: boolean;
   /** Stage 20 — whether this business's plan includes lead capture (`hasPlanCapability`, computed by the caller). */
   leadCaptureEnabled: boolean;
 }
@@ -36,6 +38,7 @@ export function GeneratedWebsite({
   hasMatchingClaimIntent,
   isDraft,
   isAdmin,
+  isCapture,
   leadCaptureEnabled,
 }: Props) {
   const { content, theme } = preview;
@@ -89,7 +92,7 @@ export function GeneratedWebsite({
             claimed-but-unpaid business still shows a softer message rather
             than losing the banner entirely (see implementation.md, Stage 17,
             "Public claim-banner behavior"). */}
-        {claimBannerState !== 'active' && !isDraft && (
+        {claimBannerState !== 'active' && !isDraft && !isCapture && (
           <ClaimBanner
             businessName={businessName}
             state={claimBannerState}

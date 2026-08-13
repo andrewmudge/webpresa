@@ -173,6 +173,14 @@ export default async function PreviewPage({ params, searchParams }: Props) {
   const business = await getBusinessById(preview.businessId);
   if (!business) notFound();
 
+  // Independent of how `resolvePreview` resolved the preview (e.g. a
+  // republish makes "published wins" short-circuit past the capture-token
+  // branch below) — the screenshot Lambda always sends this cookie, so this
+  // is the one reliable "is this actually the capture Lambda" signal,
+  // regardless of the preview's current draft/published status. Used to
+  // suppress the claim banner in postcard screenshot artifacts.
+  const isCapture = await hasValidCaptureToken(preview.previewId);
+
   const claimBannerState = getClaimBannerState(business);
 
   const cookieStore = await cookies();
@@ -196,6 +204,7 @@ export default async function PreviewPage({ params, searchParams }: Props) {
       hasMatchingClaimIntent={hasMatchingClaimIntent}
       isDraft={preview.status === 'draft' || preview.status === 'ready'}
       isAdmin={isAdmin}
+      isCapture={isCapture}
       leadCaptureEnabled={leadCaptureEnabled}
     />
   );
