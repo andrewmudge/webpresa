@@ -233,7 +233,13 @@ export async function generatePreviewContent(
   // for each of phone/email/address (see buildGenerationContext) — this is
   // generation-input only, never a write-back to Business. ---
   const contact = generationContext.contact;
-  const serviceAreas = generationContext.serviceAreaLines;
+  // Capped to match `PreviewContentSchema` (`serviceAreas: max 10 items,
+  // each max 80 chars`) — the Firecrawl snapshot alone allows up to 20, and
+  // the admin free-text field has no line-count cap, so either source can
+  // exceed the preview schema's limit. Same treatment `socialLinks` gets a
+  // few lines below, and the same slice/truncate `section-content.ts`
+  // already applies on the customer-editing side.
+  const serviceAreas = generationContext.serviceAreaLines.slice(0, 10).map((area) => area.slice(0, 80));
 
   // --- CTA: a durable business-level decision, like theme — once an admin
   // has an edited (or a first-generation-seeded) CTA on file, every

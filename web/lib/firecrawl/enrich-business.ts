@@ -33,6 +33,8 @@ export interface EnrichmentOutcome {
   status: 'completed' | 'manual_approval_required' | 'failed' | 'conflict' | 'not_eligible_for_retry';
   scanId?: string;
   previewId?: string;
+  /** Set whenever `status` is `'failed'` — the Step Functions scan workflow's `CrawlOutcomeChoice` state branches on this (see `infra/lib/stacks/scan-workflow-stack.ts`) to decide whether a website-unavailable failure should still proceed to scoring. */
+  failureCategory?: ScanFailureCategory;
   /** Safe, admin-facing summary — never a raw provider error. */
   message?: string;
 }
@@ -125,7 +127,7 @@ async function markFailed(
   message: string,
 ): Promise<EnrichmentOutcome> {
   await saveScan({ ...scan, status: 'failed', failureCategory: category, failureMessage: message, completedAt: nowIso() });
-  return { status: 'failed', scanId: scan.scanId, message };
+  return { status: 'failed', scanId: scan.scanId, failureCategory: category, message };
 }
 
 /** The core scrape → normalize → store → generate → persist pipeline for one running ScanEvent. */

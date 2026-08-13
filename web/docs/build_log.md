@@ -7949,6 +7949,74 @@ No infra change, no `cdk diff`/deploy needed — pure application-code change to
 
 ---
 
+# Stage 22.5 — Development / Production Environment Separation
+
+**Date:** 2026-08-11 – 2026-08-12
+
+A full audit against the actual repository (not just documentation) found the environment-configuration groundwork was already mostly in place — `infra/lib/config/environments.ts` already defined both `dev` and `prod` `EnvironmentConfig` objects, `infra/bin/webpresa.ts` already resolved environment from `--context env=` and account/region from the active CLI profile, and every construct already threaded `webpresa-{env}-{resource}` naming through `config`. The real gaps were: no account-ID safety validation, no code-level guard on Stripe/Lob test-vs-live mode, `infra/package.json` hardcoding `--profile webpresa` (a profile name the user was mid-way through renaming to `webpresa-dev`), and Vercel's Production environment pointing at the same dev-suffixed AWS resources as Preview. Planned and executed as its own stage (named `22.5` rather than `22.x` to avoid colliding with Stage 22, Lob/postcard fulfillment — this stage is unrelated to postcards).
+
+**Code changes:**
+1. `assertAccountMatchesEnvironment()` (`environments.ts`, called from `bin/webpresa.ts`) rejects a mismatched `--profile`/`--context env=` combo before touching CloudFormation — live-verified against the real accounts (`webpresa-prod --context env=dev` correctly throws; the legitimate combo synths clean).
+2. `assertLiveModeAllowed()` (`web/lib/env/runtime-environment.ts`) refuses a live-mode Stripe (`sk_live_`) or Lob (`live_`) key unless the resolved runtime environment (`VERCEL_ENV`/`NODE_ENV`) is genuinely `production` — wired into `getStripeClient()` and `lobRequest()`.
+3. `infra/package.json` scripts fixed to `webpresa-dev`/`webpresa-prod` with explicit `--context env=`, with full `:prod` counterparts added for every existing dev script. Also fixed a pre-existing, unrelated bug found during verification: the base `diff`/`deploy:dev` scripts never had `WEBPRESA_APP_BASE_URL` set, even though `bin/webpresa.ts` requires it unconditionally for any `cdk` command (including `bootstrap` — this is exactly what broke the user's first `cdk bootstrap` attempt on the new prod account).
+4. `screenshotLambdaReservedConcurrency` made config-driven (`environments.ts`) rather than hardcoded — needed because the prod account hit the identical Lambda-concurrency-quota-of-10 issue dev hit back on 2026-07-23 (a brand-new AWS account's default quota is too low to support any `reservedConcurrentExecutions` reservation). Deployed prod without the reservation initially, requested a quota increase (AWS case, not auto-approved — went to manual review), and restored it to `5` once approved.
+
+**AWS infrastructure:** a real, separate prod AWS account (`994748688217`) was bootstrapped and all 8 CDK stacks deployed (`WebpresaProdDataStack` through `WebpresaProdVercelAccessStack`), matching dev's architecture exactly — 14 empty DynamoDB tables, Cognito pool, S3 buckets, 10 Secrets Manager secrets, both Lambda functions (images built and pushed via the existing `build-and-push-*.sh` scripts), Step Functions workflow, CloudFront-fronted stock-images bucket. Two CloudFormation rollback artifacts (an empty log group and an empty SQS queue, both `DELETE_SKIPPED` during the failed first screenshot-stack deploy caused by the concurrency quota issue above) had to be manually deleted before the retry would succeed — worth knowing if a future deploy in this account ever hits `AlreadyExists` on a resource that should be fresh.
+
+All 10 prod secrets were populated with real values: OpenAI/Firecrawl/Google Places/Vercel-API keys copied from dev as-is (decided: shared across environments, not split — no code-level reason to separate them); Stripe/Lob API keys copied from dev's test-mode keys (their `webhookSecret` fields deliberately left as CDK's placeholder, since prod had no registered webhook endpoint yet); `claim-token`/`capture-token`/`internal-api`/`vercel-protection-bypass` freshly generated, never shared with dev.
+
+**Vercel environment-variable split:** the actual mechanism that separates Production from Preview. All 53 variables that had been added identically to both environments since Stage 19 (confirmed via `vercel env ls production`/`ls preview` — same value, same `Production, Preview` binding) were split into independent per-environment bindings with correct values on each side, done entirely via the Vercel CLI (`npx vercel env add/rm`) rather than the dashboard.
+
+Two real operational discoveries along the way, worth remembering for any future Vercel env var work (also documented in `deployment.md`'s "Vercel CLI" section):
+- `vercel env rm NAME production` on a variable whose value is bound to both Production and Preview as one shared entry deletes it from **both** environments, not just the target one — confirmed the hard way on `TERMS_VERSION`, which had to be restored immediately after. Vercel env values are also write-only once stored (`vercel env pull` masks everything as `[SENSITIVE]`), so there's no way to read a value back before deleting it — the only safe way to split a shared variable is to know (or be willing to regenerate) both sides' values *before* touching `rm`.
+- `npx vercel` (unpinned) intermittently failed resolving its own "latest" version against the npm registry (`npm error ETARGET`), which caused several silent failures mid-batch — the CLI's exit code didn't reliably reflect the failure even under `set -o pipefail`, so batch-script "success" output couldn't be fully trusted; had to re-verify the actual end state with `vercel env ls` and pin the version (`npx vercel@58.9.5`) for reliability afterward. Separately, `vercel env add NAME preview` can hang on an interactive `? Git branch?` prompt when stdin is already consumed by a piped value — `--yes` auto-accepts it.
+
+Because true secrets (AWS access keys, session-signing secrets, admin password) can't be safely split without destroying the other side's copy once `rm` is run, both dev's and prod's copies were rotated fresh rather than just prod's: new IAM access-key pairs minted directly for `webpresa-vercel-dev` and `webpresa-vercel-prod` (old ones deactivated, not deleted), new `SESSION_SECRET`/`CUSTOMER_SESSION_SECRET`/`CLAIM_ATTEMPT_SECRET` for both environments, and distinct new `ADMIN_PASSWORD_HASH` values chosen locally by the user (passwords never left their terminal — only the resulting hash was piped into Vercel). `SES_FROM_EMAIL` and the six `WEBPRESA_LOB_SENDER_*` fields (the real business mailing address) were set on Production from values the user provided directly, since they're identity info rather than something that legitimately differs by AWS environment.
+
+**Promoting to production:** with Vercel Production now correctly pointed at prod AWS resources, the user asked to merge `dev` into `main` so they could start testing on the real production site. `main` (67d5fdb) turned out to be a strict ancestor of `dev`'s history, so the merge fast-forwarded cleanly with zero conflicts — `main` and `dev` are now identical (3e7fc09). Pushed to `origin/main`, which triggered Vercel's Production auto-deploy; confirmed live within ~2 minutes (`webpresa.com`/`www.webpresa.com` aliased to the new deployment, verified via `vercel alias ls` and the deployment's `created` timestamp). Provider credentials remain test-mode throughout — no live charges, postcards, or emails were or are triggered by this deploy.
+
+## Files changed
+
+```
+infra/bin/webpresa.ts                                       MODIFIED — account-ID safety check call site
+infra/lib/config/environments.ts                             MODIFIED — expectedAccountId, screenshotLambdaReservedConcurrency, assertAccountMatchesEnvironment()
+infra/lib/constructs/webpresa-screenshot-lambda.ts            MODIFIED — reservedConcurrentExecutions reads from config
+infra/package.json                                            MODIFIED — webpresa-dev/webpresa-prod profiles, explicit --context env=, new :prod scripts
+infra/scripts/build-and-push-screenshot-lambda.sh             MODIFIED — default profile webpresa-dev
+infra/scripts/build-and-push-postcard-render-lambda.sh        MODIFIED — default profile webpresa-dev
+infra/test/environments.test.ts                               ADDED — assertAccountMatchesEnvironment() tests
+web/lib/env/runtime-environment.ts                            ADDED — resolveRuntimeEnvironment() (moved from stripe/metadata.ts), assertLiveModeAllowed()
+web/lib/env/__tests__/runtime-environment.test.ts              ADDED
+web/lib/stripe/metadata.ts                                    MODIFIED — re-exports resolveRuntimeEnvironment() from the new shared module
+web/lib/stripe/client.ts                                       MODIFIED — assertLiveModeAllowed() call
+web/lib/stripe/__tests__/client.test.ts                        ADDED
+web/lib/lob/client.ts                                          MODIFIED — assertLiveModeAllowed() call
+web/lib/lob/__tests__/client.test.ts                            ADDED
+web/AGENTS.md                                                  MODIFIED — profile names, account-ID carve-out note
+web/docs/deployment.md                                         MODIFIED — profile references, prod account ID, CDK bootstrap section, Vercel CLI gotchas
+web/docs/architecture.md                                       MODIFIED — Stage 22.5 environment-model note
+web/docs/implementation.md                                     MODIFIED — Stage 22.5 spec
+web/lib/{db,s3,secrets}/client.ts                               MODIFIED — stale AWS_PROFILE doc-comment fix
+web/.env.local / web/.env.local.example                        MODIFIED — AWS_PROFILE=webpresa-dev
+```
+
+No changes to domain models, Zod schemas, or DynamoDB table shapes — this stage is entirely infrastructure/deployment/configuration.
+
+## Verification
+
+```
+npx tsc --noEmit (web)     — passes
+npx tsc --noEmit (infra)   — passes
+npm run lint (web)         — 0 errors, 2 pre-existing unrelated warnings
+npm test (web)             — 116 files, 1248 tests passed
+npm test (infra)           — 9 files, 198 tests passed
+npm run build (web)        — succeeds
+```
+
+Live-verified, not just unit-tested: the account-safety check against real `webpresa-dev`/`webpresa-prod` profiles; all 8 prod stacks' `cdk diff` output before each deploy (every one purely additive); the restored Lambda concurrency setting via `aws lambda get-function --query Concurrency`; the full Vercel env var split via `vercel env ls production`/`ls preview` (zero remaining shared bindings); and the live production deployment at `webpresa.com` post-merge.
+
+---
+
 # Campaign recipients auto-wire to the claim flow (no manual destination entry)
 
 **Date:** 2026-08-03

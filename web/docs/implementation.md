@@ -4709,7 +4709,7 @@ Prepare Webpresa for a clean development-to-production deployment workflow befor
 
 ## Status
 
-**Infrastructure deployed, secrets populated, Vercel Production/Preview fully separated. Only provider live-mode activation and DNS/domain items remain, all manual.** All 8 prod CDK stacks (`WebpresaProdDataStack`, `WebpresaProdScreenshotRepositoryStack`, `WebpresaProdPostcardRenderRepositoryStack`, `WebpresaProdScanWorkflowStack`, `WebpresaProdStockImagesStack`, `WebpresaProdScreenshotStack`, `WebpresaProdPostcardRenderStack`, `WebpresaProdVercelAccessStack`) are deployed and `CREATE_COMPLETE` in the new prod AWS account (`994748688217`/`us-east-1`); all 10 Secrets Manager secrets hold real values. Every Vercel environment variable previously shared between Production and Preview (53 of them) is now split into independent per-environment bindings with correct values on each side — including freshly rotated AWS access keys and session-signing secrets for *both* environments (true secrets can't be safely split without destroying the other side's copy once deleted, so both were regenerated rather than just prod's). Matches the "exists but inactive" objective: empty tables, no live provider keys, no real customer data. The screenshot Lambda's `reservedConcurrentExecutions: 5` — temporarily omitted in prod pending an AWS Lambda concurrency quota increase — was restored and redeployed on 2026-08-12 once AWS approved the increase to 1000; verified live. Every item Claude Code can execute for this stage is now done. See `web/docs/22.5-manual-updates.md` for the remaining manual/external checklist (Stripe/Lob live-mode activation, SES production-access approval, DNS, Vercel API token rotation before 2026-10-29) and its notes on two Vercel CLI operational gotchas discovered along the way (shared-binding deletion semantics, and `npx vercel`'s intermittent registry-resolution flakiness). Named `22.5` rather than `22.x` to avoid colliding with Stage 22 (Lob/postcard fulfillment) — this stage is unrelated to postcards and doesn't extend it.
+**Done — infrastructure deployed, secrets populated, Vercel Production/Preview fully separated, and `dev` merged into `main`.** All 8 prod CDK stacks (`WebpresaProdDataStack`, `WebpresaProdScreenshotRepositoryStack`, `WebpresaProdPostcardRenderRepositoryStack`, `WebpresaProdScanWorkflowStack`, `WebpresaProdStockImagesStack`, `WebpresaProdScreenshotStack`, `WebpresaProdPostcardRenderStack`, `WebpresaProdVercelAccessStack`) are deployed and `CREATE_COMPLETE` in the new prod AWS account (`994748688217`/`us-east-1`); all 10 Secrets Manager secrets hold real values; the screenshot Lambda's `reservedConcurrentExecutions: 5` is live in both environments (the prod Lambda-concurrency quota increase was approved 2026-08-12). Every Vercel environment variable previously shared between Production and Preview (53 of them) is now split into independent per-environment bindings with correct values on each side, including freshly rotated AWS access keys and session-signing secrets for *both* environments (true secrets can't be safely split without destroying the other side's copy once deleted, so both were regenerated rather than just prod's). `dev` was fast-forward-merged into `main` and pushed on 2026-08-12 at the user's request, so they could begin testing on the real production site — `webpresa.com`/`www.webpresa.com` now serve the current app. Provider credentials remain test-mode; no live charges, postcards, or emails are triggered. Full narrative, the two Vercel CLI operational gotchas discovered along the way, and the complete file list are in `build_log.md`'s Stage 22.5 entry. Named `22.5` rather than `22.x` to avoid colliding with Stage 22 (Lob/postcard fulfillment) — this stage is unrelated to postcards and doesn't extend it.
 
 ## Current state (verified in code)
 
@@ -4727,12 +4727,10 @@ Gaps identified by the original audit, now resolved in code:
 2. ~~No code-level guard on Stripe/Lob test-vs-live mode.~~ Fixed — `web/lib/env/runtime-environment.ts`'s `assertLiveModeAllowed()`, wired into `getStripeClient()` and `lobRequest()`.
 3. ~~`infra/package.json` hardcoded `--profile webpresa` and `Dev`-only stack names.~~ Fixed — all scripts use `webpresa-dev`/`webpresa-prod` explicitly with `--context env=`, and every dev script has a `:prod` counterpart.
 
-Still open (tracked in `web/docs/22.5-manual-updates.md`):
+Both items below are now resolved:
 
-4. **Vercel Production is not actually isolated from dev today.** Every environment variable added since Stage 19 was documented as added to both Preview and Production, with dev-suffixed values — Vercel's Production environment still points at dev DynamoDB tables and dev Secrets Manager secrets until the Vercel dashboard is reconfigured (checklist §6).
-5. Two documented dev-only hacks (`WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH`, the hardcoded dev Preview URL in `infra/package.json`'s dev scripts) still need resolving before `dev` → `main` is ever promoted — deliberately deferred, not part of this stage.
-
-See `web/docs/22.5-manual-updates.md` for the full manual (non-code) checklist.
+4. ~~Vercel Production was not actually isolated from dev.~~ Fixed — all 53 previously-shared Production+Preview variables are now independent, correctly-valued bindings (see `build_log.md`'s Stage 22.5 entry for how, including two real CLI gotchas hit along the way).
+5. ~~Two dev-only hacks needed resolving before `dev` → `main`.~~ `infra/package.json`'s dev scripts still hardcode the dev Preview URL by design (matching every `:prod` script's equivalent hardcoded prod URL — this is the established per-environment pattern, not a bug). `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` remains set on Preview only; now that `main` carries current code too, it's worth revisiting whether this override is still needed for new customer domain connections during continued `dev` testing — not resolved as part of this stage, flagged for whoever picks it up next.
 
 ## Major deliverables
 
@@ -4766,8 +4764,12 @@ See `web/docs/22.5-manual-updates.md` for the full manual (non-code) checklist.
 
 ## Deferred work
 
-- Merging `dev` → `main`.
-- Activating any provider's live mode (Stripe, Lob, SES).
+Manual/external items, all the user's, none blocking anything:
+
+- **Stripe live mode** — generate live API keys, live Price IDs (Basic/Growth), register the live webhook at `https://webpresa.com/api/webhooks/stripe`. Test-mode keys already work for infra smoke-testing.
+- **Lob live mode** — production credentials (requires a payment method on file with Lob), register the production webhook in Lob's dashboard (no API for this — dashboard only) pointing at `https://webpresa.com/api/webhooks/lob`, including the Vercel protection-bypass query param.
+- **SES production access** — AWS approval still pending (sandbox mode); gates real email sends to arbitrary business addresses regardless of anything else in this stage.
+- **Vercel API token rotation** — the token behind the `vercel-api` secrets (both environments) expires 2026-10-29.
 - OpenSRS domain-purchase integration (not implemented yet — separate stage).
 - Route 53/WAF/CloudTrail (not part of the current architecture).
 - Stage 23 (EventBridge automation) itself.

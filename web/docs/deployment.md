@@ -211,7 +211,11 @@ npx vercel env add MY_VAR_NAME production
 npx vercel env add MY_VAR_NAME preview
 ```
 
-Prompts for the value (or pipe it: `echo -n "value" | npx vercel env add MY_VAR_NAME production`). This project sets each var on both `production` and `preview` — see "Required environment variables" above for the full list and what each one is for. `development` is not used; local dev reads `.env.local` directly (see "Local vs deployed AWS credentials" above).
+Prompts for the value (or pipe it: `echo -n "value" | npx vercel env add MY_VAR_NAME production`). Through Stage 22, this project set most vars identically on both `production` and `preview`; as of Stage 22.5, every variable that differs between dev and prod AWS resources is a separate, independently-valued binding per environment (see "Required environment variables" above for the full list). `development` is not used; local dev reads `.env.local` directly (see "Local vs deployed AWS credentials" above).
+
+**Gotcha (hit 2026-08-12, Stage 22.5):** `vercel env rm NAME production` on a variable whose value is bound to **both** Production and Preview as one shared entry deletes it from both environments, not just the target one — confirmed on `TERMS_VERSION`, which had to be restored immediately after. Values are also write-only once stored (`vercel env pull` masks everything as `[SENSITIVE]`), so there is no way to read one back before deleting it. When splitting a shared variable into independent per-environment values, know (or be willing to regenerate) both sides' values *before* touching `rm` — once it's gone, it's gone.
+
+**Gotcha (hit 2026-08-12, Stage 22.5):** `npx vercel` (unpinned) intermittently fails to resolve its own "latest" version against the npm registry (`npm error ETARGET`), and the CLI's exit code doesn't reliably reflect the failure even under `set -o pipefail` — a batch of `env add`/`env rm` calls can print "success" while some silently didn't happen. Pin the version explicitly (`npx vercel@58.9.5`, or whatever is currently cached/working) for any scripted batch of env var changes, and always re-verify the end state with `vercel env ls` rather than trusting script output alone. Separately, `vercel env add NAME preview` can hang on an interactive `? Git branch?` prompt when stdin is already consumed by a piped value — add `--yes` to auto-accept it (applies to all Preview branches).
 
 ### Remove a variable
 
