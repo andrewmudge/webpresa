@@ -56,6 +56,7 @@ export type GooglePlaceApiResult = z.infer<typeof GooglePlaceApiResultSchema>;
 
 export const GooglePlacesTextSearchResponseSchema = z.object({
   places: z.array(GooglePlaceApiResultSchema).optional(),
+  nextPageToken: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------

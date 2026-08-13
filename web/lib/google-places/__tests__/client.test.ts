@@ -38,8 +38,58 @@ describe('searchPlacesText', () => {
     expect(url).toBe('https://places.googleapis.com/v1/places:searchText');
     expect(init.headers['X-Goog-Api-Key']).toBe('test-key');
     expect(init.headers['X-Goog-FieldMask']).not.toMatch(/photo/i);
-    expect(JSON.parse(init.body)).toEqual({ textQuery: 'plumbers in Austin, TX' });
+    expect(JSON.parse(init.body)).toEqual({ textQuery: 'plumbers in Austin, TX', pageSize: 20 });
 
+    vi.unstubAllGlobals();
+  });
+
+  it('follows nextPageToken across multiple pages and combines the results', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ places: [{ id: 'place_1' }], nextPageToken: 'token_1' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ places: [{ id: 'place_2' }], nextPageToken: 'token_2' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ places: [{ id: 'place_3' }] }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
+
+    const resultsPromise = searchPlacesText('plumbers in Austin, TX');
+    await vi.runAllTimersAsync();
+    const results = await resultsPromise;
+
+    expect(results.map((r) => r.id)).toEqual(['place_1', 'place_2', 'place_3']);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ pageToken: 'token_1' });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ pageToken: 'token_2' });
+
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('stops after 3 pages even if Google keeps returning a nextPageToken', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ places: [{ id: 'place_x' }], nextPageToken: 'always_more' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
+
+    const resultsPromise = searchPlacesText('plumbers in Austin, TX');
+    await vi.runAllTimersAsync();
+    const results = await resultsPromise;
+
+    expect(results).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 

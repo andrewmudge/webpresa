@@ -133,12 +133,26 @@ async function requestPlacesApi<Schema extends z.ZodTypeAny>(
   return parsed.data;
 }
 
+/** Places API (New) Text Search page size — 20 is the documented maximum. */
+const TEXT_SEARCH_PAGE_SIZE = 20;
+
+export interface PlacesTextSearchPage {
+  places: GooglePlaceApiResult[];
+  nextPageToken?: string;
+}
+
 /**
- * Runs a Google Places (New) Text Search request.
+ * Runs a single page of a Google Places (New) Text Search request. `pageSize`
+ * is capped at 20 by the API itself, so a query with more matches than that
+ * only surfaces the rest via `nextPageToken` — see `searchPlacesText` below,
+ * which pages through all of them.
  * Never called from the browser — see `web/lib/google-places/search.ts`
  * for the caller, invoked only from admin Server Actions.
  */
-export async function searchPlacesText(textQuery: string): Promise<GooglePlaceApiResult[]> {
+export async function searchPlacesTextPage(
+  textQuery: string,
+  pageToken?: string,
+): Promise<PlacesTextSearchPage> {
   const { apiKey } = await getGooglePlacesSecret();
 
   const parsed = await requestPlacesApi(
@@ -150,12 +164,58 @@ export async function searchPlacesText(textQuery: string): Promise<GooglePlaceAp
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': FIELD_MASK,
       },
-      body: JSON.stringify({ textQuery }),
+      body: JSON.stringify({
+        textQuery,
+        pageSize: TEXT_SEARCH_PAGE_SIZE,
+        ...(pageToken ? { pageToken } : {}),
+      }),
     },
     GooglePlacesTextSearchResponseSchema,
   );
 
-  return parsed.places ?? [];
+  return { places: parsed.places ?? [], nextPageToken: parsed.nextPageToken };
+}
+
+/**
+ * Google enforces a short delay before a freshly issued `nextPageToken`
+ * becomes valid — requesting it immediately reliably 400s. This is the same
+ * ~2s documented for the legacy Places API and still necessary here.
+ */
+const NEXT_PAGE_TOKEN_DELAY_MS = 2000;
+/**
+ * Text Search cap: Google stops returning `nextPageToken` after 60 results
+ * (3 pages of 20) regardless of how many more places actually match — a
+ * documented API ceiling, not a choice made here.
+ */
+const MAX_TEXT_SEARCH_PAGES = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Runs a Google Places (New) Text Search request, following `nextPageToken`
+ * up to Google's own 60-result ceiling. Without this, a single unpaginated
+ * call silently truncates to the first 20 matches for any query — most
+ * cities easily have more than 20 businesses per industry.
+ * Never called from the browser — see `web/lib/google-places/search.ts`
+ * for the caller, invoked only from admin Server Actions.
+ */
+export async function searchPlacesText(textQuery: string): Promise<GooglePlaceApiResult[]> {
+  const allPlaces: GooglePlaceApiResult[] = [];
+  let pageToken: string | undefined;
+
+  for (let page = 0; page < MAX_TEXT_SEARCH_PAGES; page += 1) {
+    if (page > 0) {
+      await sleep(NEXT_PAGE_TOKEN_DELAY_MS);
+    }
+    const { places, nextPageToken } = await searchPlacesTextPage(textQuery, pageToken);
+    allPlaces.push(...places);
+    if (!nextPageToken) break;
+    pageToken = nextPageToken;
+  }
+
+  return allPlaces;
 }
 
 /**
