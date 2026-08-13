@@ -3649,13 +3649,11 @@ existing `claims` table's approach.
 - Include the lead's details, source page, and submission time. Use the
   submitter's own validated email as `Reply-To` only when supplied.
 - Never expose SES delivery results to the public visitor.
-- **SES sandbox mode**: production access has been requested but is not yet
-  approved. Only two recipient addresses are currently verified for testing
-  (`andrew@webpresa.com`, `mudge.andrew+test@gmail.com`) — any
-  `Business.email` outside the verified set will bounce every notification
-  until production access is granted. This is an expected, temporary
-  deployment constraint, not a bug, and is called out again in
-  `deployment.md`.
+- **SES production access — approved 2026-08-13** (AWS case
+  `178644604200524`). Any `Business.email` can now receive notifications;
+  `andrew@webpresa.com`/`mudge.andrew+test@gmail.com` were only the
+  sandbox-era test-verified addresses, not a current restriction. Called out
+  again in `deployment.md`.
 
 ## Public UX
 
@@ -4768,7 +4766,6 @@ Manual/external items, all the user's, none blocking anything:
 
 - **Stripe live mode** — generate live API keys, live Price IDs (Basic/Growth), register the live webhook at `https://webpresa.com/api/webhooks/stripe`. Test-mode keys already work for infra smoke-testing.
 - **Lob live mode** — production credentials (requires a payment method on file with Lob), register the production webhook in Lob's dashboard (no API for this — dashboard only) pointing at `https://webpresa.com/api/webhooks/lob`, including the Vercel protection-bypass query param.
-- **SES production access** — AWS approval still pending (sandbox mode); gates real email sends to arbitrary business addresses regardless of anything else in this stage.
 - **Vercel API token rotation** — the token behind the `vercel-api` secrets (both environments) expires 2026-10-29.
 - OpenSRS domain-purchase integration (not implemented yet — separate stage).
 - Route 53/WAF/CloudTrail (not part of the current architecture).

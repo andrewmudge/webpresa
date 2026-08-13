@@ -8441,3 +8441,30 @@ npm run build        — production build succeeds
 ```
 
 Not yet re-verified against the real deployed scan workflow by the user — next step is re-running "Run full scan" on a real campaign and confirming the assessment table now appears once scans reach a terminal state.
+
+---
+
+**Date:** 2026-08-13
+
+**SES production access approved — documentation updated.** AWS approved production access (sandbox exit) for the SES account behind Stage 20's lead-notification emails, AWS case `178644604200524`. Verified live via `aws sesv2 get-account`/`get-email-identity` in both AWS accounts before updating docs: `ProductionAccessEnabled: true` in both dev (`539898341083`) and prod (`994748688217`); the `webpresa.com` domain identity is independently verified with DKIM signing (`DkimStatus: SUCCESS`) in prod, not just carried over from dev; real production sending quota is live (`Max24HourSend: 50000`, `MaxSendRate: 14`), well above sandbox's 200/day, 1/sec ceiling. No infra or application-code behavior change was needed — the only sandbox-specific logic anywhere in the codebase was documentation and one code comment describing the AWS-account-level restriction; nothing in the app itself gated recipients by an allowlist. Updated every place that documented this as a pending/blocking constraint: `architecture.md`'s Stage 20 section, `implementation.md`'s Stage 20 spec and Stage 22.5's "Deferred work" list (item removed — resolved), `deployment.md`'s SES setup/manual-verification/expected-failure-behavior sections for Stage 20, and the code comment in `lib/ses/send-lead-notification.ts`.
+
+Flagged, not acted on without further direction: `web/.env.local.example` is still missing `SES_FROM_EMAIL`/`LEADS_TABLE_NAME`/`CRON_SECRET` despite `deployment.md` documenting them as required; no bounce/complaint (SNS) handling or suppression-list setup exists anywhere in the repo, which wasn't a real concern under sandbox's tiny curated recipient list but is worth considering now that arbitrary `Business.email` addresses can receive mail at real volume; no custom MAIL FROM domain is configured (optional SPF-alignment hardening, not required).
+
+## Files changed
+
+```
+web/docs/architecture.md                MODIFIED — Stage 20 SES sandbox paragraph rewritten to reflect production access approval
+web/docs/implementation.md              MODIFIED — Stage 20 spec's SES sandbox paragraph rewritten; Stage 22.5 "Deferred work" SES bullet removed (resolved)
+web/docs/deployment.md                  MODIFIED — Stage 20 deployment guidance: sandbox→production framing throughout (setup steps, manual verification procedure, expected-failure-behavior table), stale "not yet deployed"/"not yet run" headings fixed
+web/lib/ses/send-lead-notification.ts   MODIFIED — sandbox-mode code comment updated to reflect production access
+web/docs/build_log.md                   MODIFIED — this entry
+```
+
+## Verification
+
+```
+npx tsc --noEmit   — clean
+npm run lint        — 0 errors (2 pre-existing, unrelated warnings)
+```
+
+Documentation-only change (plus one code comment, no logic change) — no test/build impact expected; `npm test`/`npm run build` not re-run for this entry.

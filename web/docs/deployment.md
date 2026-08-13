@@ -1056,7 +1056,7 @@ Verified live via `aws iam get-policy-version` on `webpresa-dev-vercel-data-acce
 
 ## Stage 20 — Contact Forms and Lead Delivery deployment guidance
 
-**Application code implemented; not yet deployed.** Unlike Stage 19, this stage has real infrastructure to deploy: one new DynamoDB table, one new IAM statement, several new environment variables, a manually-verified SES sending identity, and — the first time this repo has needed it — a Vercel Cron schedule.
+**Deployed and live in both dev and prod.** Unlike Stage 19, this stage has real infrastructure: one new DynamoDB table, one new IAM statement, several new environment variables, a manually-verified SES sending identity, and — the first time this repo has needed it — a Vercel Cron schedule.
 
 ### Deploy sequence
 
@@ -1080,7 +1080,7 @@ WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessS
 This repo has no Route53-hosted-zone CDK construct, so unlike every other integration here, the SES sending identity itself is verified entirely through the AWS Console/CLI, not `cdk deploy`:
 
 1. In the SES console (same region as `AWS_REGION`), verify the sending identity — either the `webpresa.com` domain (add the DKIM CNAME records SES provides to wherever `webpresa.com`'s DNS is actually managed) or a single email address (e.g. `leads@webpresa.com`, a simple confirmation-link click).
-2. **The account is in sandbox mode.** Production access has been requested but is not yet approved. Until it is, SES will only deliver to individually verified recipient addresses — currently `andrew@webpresa.com` and `mudge.andrew+test@gmail.com`. Any `Business.email` outside that set will bounce every notification (`notificationStatus` will read `'failed'`) — expected, not a bug. To manually verify the send path end-to-end, use a dev Business whose `Business.email` is set to one of those two addresses.
+2. **Production access approved 2026-08-13** (AWS case `178644604200524`) for both the dev and prod accounts — SES now delivers to any recipient, not just individually-verified addresses. `andrew@webpresa.com`/`mudge.andrew+test@gmail.com` remain verified from the sandbox-testing era but are no longer required for a send to succeed. Verify current status any time with `aws sesv2 get-account --profile <dev|prod> --query 'ProductionAccessEnabled'`.
 3. Set `SES_FROM_EMAIL` in Vercel to the verified sending address.
 
 ### New Vercel environment variables
@@ -1095,21 +1095,21 @@ This repo has no Route53-hosted-zone CDK construct, so unlike every other integr
 
 `web/vercel.json` (new file — no `vercel.json` existed anywhere in this repo before this stage) schedules `GET /api/internal/leads/retry-notifications` **once daily** (`0 6 * * *` — 06:00 UTC, arbitrary off-peak hour). This was originally every 15 minutes, but the project is on Vercel's Hobby plan, which hard-caps cron jobs at once/day — a `vercel deploy` with a sub-daily schedule fails outright with `Hobby accounts are limited to daily cron jobs`. Daily is the fastest this can run without upgrading to Pro; upgrading later is a one-line schedule change, no code change. Vercel picks the cron up automatically on deploy — no separate `vercel cron` command exists. Confirm it's registered under the project's Cron Jobs dashboard tab after the first deploy that includes this file, and check its invocation history there to confirm `verifyVercelCronRequest` is accepting real requests (a misconfigured `CRON_SECRET` would show every invocation failing with a 401).
 
-### Manual verification procedure (not yet run)
+### Manual verification procedure
 
-1. Using a real Growth-plan dev Business (Stage 18 test-mode Checkout) whose `Business.email` is one of the two SES-sandbox-verified addresses above, open its public `/b/[slug]` page and confirm the "Request Service" CTA renders.
+1. Using a real Growth-plan dev Business (Stage 18 test-mode Checkout), open its public `/b/[slug]` page and confirm the "Request Service" CTA renders. Any `Business.email` now works as the notification recipient — no longer restricted to the sandbox-era test addresses.
 2. Submit the form with a valid name + phone. Confirm the success state renders and no error appears.
 3. In the customer dashboard, sign in as that business's owner and open `/app/businesses/{id}/leads` — confirm the new lead appears with `status: 'new'`.
 4. Check the verified inbox for the notification email; confirm it renders the submitted fields and that "Reply-To" is unset (no email was supplied in step 2) or set correctly (if one was).
 5. In the admin business-detail page, confirm the Leads section shows `notificationStatus: 'sent'` and 1 attempt.
 6. Repeat the submission against a Basic-plan dev Business — confirm the "Request Service" CTA does not render at all, and that a crafted direct POST to `submitLeadAction` (bypassing the UI) still returns the generic success response without creating a `Lead` row (check DynamoDB directly, not just the response).
-7. Temporarily point a test Business's `email` at an unverified address, submit a lead, confirm `notificationStatus` becomes `'failed'` with a short SES exception name in `lastNotificationError`, and that the admin's manual "Retry notification" button re-attempts it.
+7. To exercise the failure path now that production access is live (any well-formed address will actually deliver), point a test Business's `email` at a malformed/nonexistent address, submit a lead, confirm `notificationStatus` becomes `'failed'` with a short SES exception name in `lastNotificationError`, and that the admin's manual "Retry notification" button re-attempts it.
 
 ### Expected failure behavior
 
 | Condition | Expected behavior |
 |---|---|
-| `Business.email` not verified in the SES sandbox | The send fails; `notificationStatus` is recorded `'failed'` with the SES exception name; the `Lead` itself remains persisted and visible in both dashboards |
+| `Business.email` is malformed or the domain doesn't exist | The send fails; `notificationStatus` is recorded `'failed'` with the SES exception name; the `Lead` itself remains persisted and visible in both dashboards |
 | A Basic-plan business's slug is submitted directly (bypassing the UI, which never renders the CTA) | `submitLeadAction` re-checks `hasPlanCapability` server-side and returns the generic success response without writing a `Lead` |
 | Same visitor submits the same form twice within the fingerprint window | The second submission's `reserveLeadFingerprint` conditional write fails; a generic success response is returned, no second `Lead` is created |
 | Vercel Cron's `CRON_SECRET` is unset or wrong in the deployed environment | `/api/internal/leads/retry-notifications` returns 401 for every scheduled invocation; failed leads accumulate unretried until fixed — visible via the Cron dashboard's invocation history and the admin Leads section's growing `notificationAttempts` staying flat |

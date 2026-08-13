@@ -22,9 +22,9 @@ export type SendLeadNotificationResult = { ok: true } | { ok: false; error: stri
  * result rather than throwing — the caller (`lib/leads/notify.ts`) always
  * records the outcome on the Lead record regardless of success/failure.
  *
- * Note: while AWS SES account is in sandbox mode, `to` must be one of the
- * addresses verified in the SES console (see deployment.md) or the send
- * will fail — expected, not a bug, until production access is approved.
+ * SES production access was approved 2026-08-13 (see deployment.md) — `to`
+ * can be any well-formed address, no longer restricted to sandbox-verified
+ * recipients.
  */
 export async function sendLeadNotificationEmail(params: {
   to: string;
