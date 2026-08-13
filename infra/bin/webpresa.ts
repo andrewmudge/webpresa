@@ -8,7 +8,7 @@ import { WebpresaPostcardRenderStack } from '../lib/stacks/postcard-render-stack
 import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
-import { getEnvironmentConfig } from '../lib/config/environments';
+import { assertAccountMatchesEnvironment, getEnvironmentConfig } from '../lib/config/environments';
 
 const app = new cdk.App();
 
@@ -21,13 +21,21 @@ const config = getEnvironmentConfig(envName);
 const label = envName.charAt(0).toUpperCase() + envName.slice(1);
 
 // Resolve account and region from the active CLI profile at synth time.
-// This means `cdk synth --profile webpresa` targets the dev account, and
+// This means `cdk synth --profile webpresa-dev` targets the dev account, and
 // `cdk synth --profile webpresa-prod` targets the production account —
 // without any hard-coded account IDs in application code.
 const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
   region: process.env.CDK_DEFAULT_REGION,
 };
+
+// Stage 22.5 — refuse to proceed if the resolved account doesn't match what
+// this environment expects. Without this, `--context env=prod` combined with
+// the wrong `--profile` would silently deploy prod-named, RemovalPolicy.RETAIN
+// resources into the dev account (or vice versa) — see environments.ts for
+// why the expected account IDs live there rather than being resolved at
+// runtime (they can't be: that's the whole point of checking them).
+assertAccountMatchesEnvironment(envName, config, env.account);
 
 const dataStack = new WebpresaDataStack(app, `Webpresa${label}DataStack`, {
   config,

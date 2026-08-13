@@ -8,7 +8,7 @@
 # Usage:
 #   ./scripts/build-and-push-screenshot-lambda.sh [env] [profile]
 #
-# Defaults: env=dev, profile=webpresa
+# Defaults: env=dev, profile=webpresa-dev
 #
 # Prerequisites:
 #   - Docker running locally
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ENV_NAME="${1:-dev}"
-PROFILE="${2:-webpresa}"
+PROFILE="${2:-webpresa-dev}"
 REPO_NAME="webpresa-${ENV_NAME}-screenshot-capture"
 IMAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lambda/screenshot-capture" && pwd)"
 

@@ -118,12 +118,17 @@ export class WebpresaScreenshotLambda extends Construct {
       // implementation.md specs reservedConcurrentExecutions: 2-5 — also a
       // backstop against the narrow duplicate-execution race described in
       // "Idempotency and status transitions" (conditional transitions
-      // remain the primary guard either way). Initially omitted on first
-      // deploy because this AWS account's total Lambda concurrency quota
-      // was only 10 (the account minimum) and AWS requires >=10 unreserved
-      // concurrency to remain account-wide, leaving no room for any
-      // reservation; restored once the account's quota was raised to 1000.
-      reservedConcurrentExecutions: 5,
+      // remain the primary guard either way). Read from `config` rather
+      // than hardcoded because a brand-new AWS account's total Lambda
+      // concurrency quota defaults to 10 (the account minimum), and AWS
+      // requires >=10 unreserved concurrency to remain account-wide — with
+      // a quota of exactly 10, no reservation above 0 is possible until
+      // the account's quota itself is raised. Dev hit this on 2026-07-23
+      // (quota later raised to 1000, reservation restored same day); prod
+      // hit the identical issue on first deploy (Stage 22.5, 2026-08-11) —
+      // see `environments.ts`'s `screenshotLambdaReservedConcurrency` doc
+      // comment for how to restore it once prod's quota increase clears.
+      reservedConcurrentExecutions: props.config.screenshotLambdaReservedConcurrency,
       logGroup,
       environment: {
         BUSINESSES_TABLE_NAME: props.businessesTable.tableName,
