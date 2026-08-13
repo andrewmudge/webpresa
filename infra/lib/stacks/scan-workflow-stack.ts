@@ -386,6 +386,16 @@ export class WebpresaScanWorkflowStack extends cdk.Stack {
       .when(
         sfn.Condition.and(
           sfn.Condition.stringEquals('$.crawlResult.ResponseBody.status', 'failed'),
+          // `failureCategory` is only ever present on a `'failed'` outcome
+          // that actually reached a category-producing failure branch (see
+          // `EnrichmentOutcome` in `web/lib/firecrawl/enrich-business.ts`) —
+          // a couple of early-exit failures (e.g. business not found) omit
+          // it. Path-based conditions error out (`States.Runtime`) rather
+          // than evaluating false when the referenced field is absent, so
+          // this guard must come first — without it, those early-exit
+          // failures crash the whole execution here instead of falling
+          // through to `.otherwise()` below.
+          sfn.Condition.isPresent('$.crawlResult.ResponseBody.failureCategory'),
           sfn.Condition.or(
             ...WEBSITE_UNAVAILABLE_CATEGORIES.map((category) =>
               sfn.Condition.stringEquals('$.crawlResult.ResponseBody.failureCategory', category),
