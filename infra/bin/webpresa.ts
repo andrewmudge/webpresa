@@ -8,6 +8,7 @@ import { WebpresaPostcardRenderStack } from '../lib/stacks/postcard-render-stack
 import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
+import { WebpresaMonitoringStack } from '../lib/stacks/monitoring-stack';
 import { assertAccountMatchesEnvironment, getEnvironmentConfig } from '../lib/config/environments';
 
 const app = new cdk.App();
@@ -184,6 +185,7 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   campaignsTable: dataStack.campaignsTable,
   campaignRecipientsTable: dataStack.campaignRecipientsTable,
   scanHitsTable: dataStack.scanHitsTable,
+  stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
   assetsBucket: dataStack.assetsBucket,
   stockImagesBucket: stockImagesStack.bucket,
   stockImagesTable: stockImagesStack.table,
@@ -201,4 +203,24 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
   scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
   customerUserPool: dataStack.customerUserPool,
+  screenshotDlqQueue: screenshotStack.screenshotLambda.deadLetterQueue,
+});
+
+// Stage 24 — CloudWatch dashboards/alarms. No WEBPRESA_APP_BASE_URL
+// dependency (only references already-instantiated resources above), so no
+// dedicated npm script — deployed via a plain `cdk diff/deploy
+// WebpresaDevMonitoringStack --profile webpresa-dev`, the same precedent
+// VercelAccessStack/StockImagesStack already established.
+new WebpresaMonitoringStack(app, `Webpresa${label}MonitoringStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} operational monitoring — CloudWatch dashboards and alarms (Stage 24)`,
+  screenshotFunction: screenshotStack.screenshotLambda.function,
+  screenshotDlq: screenshotStack.screenshotLambda.deadLetterQueue,
+  postcardRenderFunction: postcardRenderStack.postcardRenderLambda.function,
+  scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
+  scanEventsTable: dataStack.scanEventsTable,
+  scanExecutionsTable: dataStack.scanExecutionsTable,
+  postcardsTable: dataStack.postcardsTable,
+  businessesTable: dataStack.businessesTable,
 });

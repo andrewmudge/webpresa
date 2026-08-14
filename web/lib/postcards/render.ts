@@ -2,6 +2,7 @@ import 'server-only';
 import { InvokeCommand } from '@aws-sdk/client-lambda';
 import { getPostcardById, markPostcardRendered } from '@/lib/db/postcards';
 import { getLambdaClient, getPostcardRenderLambdaFunctionName } from '@/lib/lambda/client';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 22 Phase 2 — invokes the postcard-render Lambda **synchronously**
@@ -79,9 +80,27 @@ export async function renderPostcardArtifacts(postcardId: string): Promise<Rende
 
     await markPostcardRendered(postcardId, { frontArtifactKey: front.storageKey, backArtifactKey: back.storageKey });
 
+    log({
+      event: 'postcard.render.completed',
+      component: 'postcard-render',
+      businessId: postcard.businessId,
+      postcardId,
+      provider: 'internal',
+      status: 'rendered',
+    });
     return { status: 'rendered' };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to render postcard artifacts.';
+    log({
+      level: 'error',
+      event: 'postcard.render.failed',
+      component: 'postcard-render',
+      businessId: postcard.businessId,
+      postcardId,
+      provider: 'internal',
+      status: 'failed',
+      message,
+    });
     return { status: 'failed', message };
   }
 }

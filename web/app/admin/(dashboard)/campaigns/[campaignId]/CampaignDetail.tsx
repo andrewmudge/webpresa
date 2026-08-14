@@ -11,6 +11,7 @@ import type { Postcard } from '@/domain/models/postcard';
 import type { QualificationResult, LeadPriority } from '@/domain/models/website-assessment';
 import type { ScanWorkflowStatus } from '@/domain/models/scan-execution';
 import { isActiveWorkflowStatus } from '@/lib/workflow/labels';
+import { derivePostcardStatus, type RecipientPostcardStatus } from '@/lib/postcards/status';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import {
   updateCampaignStatusAction,
@@ -54,20 +55,6 @@ interface Props {
   postcardAssetsByRecipient: Record<string, RecipientPostcardAssets>;
   /** Newest `ScanExecution.status` per business — `Business.scanExecutionStatus` itself is never actually written by the scan workflow, so this is sourced from `listScanExecutionsForBusiness` instead (same as the business detail page's own "Scan Workflow" card). */
   latestScanStatusByBusiness: Record<string, ScanWorkflowStatus | undefined>;
-}
-
-type RecipientPostcardStatus = 'no_postcard' | 'render_failed' | 'not_approved' | 'approved' | 'submitted';
-
-function derivePostcardStatus(postcard: Postcard | null | undefined): RecipientPostcardStatus {
-  if (!postcard) return 'no_postcard';
-  if (postcard.status === 'submitted' || postcard.status === 'mailed' || postcard.status === 'delivered') return 'submitted';
-  if (postcard.reviewedAt) return 'approved';
-  // Rendering runs synchronously right after creation (`renderPostcardArtifacts`)
-  // and silently leaves the record at `pending` with no artifact keys on
-  // failure — indistinguishable from a normal "awaiting approval" postcard
-  // without this check. See `retryRenderPostcardAction`.
-  if (postcard.status === 'pending' && !postcard.frontArtifactKey) return 'render_failed';
-  return 'not_approved';
 }
 
 /**

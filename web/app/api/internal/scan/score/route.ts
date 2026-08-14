@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyInternalRequest } from '@/lib/internal-auth';
 import { scoreBusinessWebsite } from '@/lib/scoring/score-business';
 import { getBusinessById } from '@/lib/db/businesses';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — wraps the existing, already-tested Stage 15 pipeline
@@ -19,7 +20,9 @@ interface ScoreRequestBody {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   if (!(await verifyInternalRequest(request))) {
+    log({ level: 'warn', event: 'internal.scan.unauthorized', component: 'internal-api', operation: 'score', requestId });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -28,6 +31,7 @@ export async function POST(request: Request) {
 
   const business = await getBusinessById(businessId);
 
+  log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'score', requestId, businessId, status: outcome.status });
   return NextResponse.json({
     ...outcome,
     qualification: business?.qualification ?? null,

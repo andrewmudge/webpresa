@@ -5,6 +5,7 @@ import { getPostcardById, transitionPostcardToSubmitting, markPostcardSubmitted,
 import { getBusinessById } from '@/lib/db/businesses';
 import { getLobSenderAddress } from '@/lib/env/lob-sender-address';
 import { getSignedAssetUrl } from '@/lib/s3/assets';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 22 Phase 4 — submits an approved, rendered postcard to Lob.
@@ -116,10 +117,33 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
     const costCents = typeof response.price === 'number' ? Math.round(response.price * 100) : undefined;
     await markPostcardSubmitted(postcardId, { providerPostcardId: response.id, costCents });
 
+    log({
+      event: 'postcard.submission.completed',
+      component: 'lob-submission',
+      businessId: postcard.businessId,
+      postcardId,
+      provider: 'lob',
+      status: 'submitted',
+    });
     return { status: 'submitted', providerPostcardId: response.id };
   } catch (err) {
     const message = err instanceof LobApiError ? err.message : err instanceof Error ? err.message : 'Failed to submit postcard to Lob.';
     await markPostcardSubmissionFailed(postcardId, message);
+    // No retry path exists for a failed submission (see SubmitButton.tsx —
+    // a new postcard must be generated instead), so this is logged as an
+    // error for CloudWatch/Operations visibility but never auto-retried.
+    log({
+      level: 'error',
+      event: 'postcard.submission.failed',
+      component: 'lob-submission',
+      businessId: postcard.businessId,
+      postcardId,
+      provider: 'lob',
+      status: 'failed',
+      errorCategory: err instanceof LobApiError ? (err.status === 401 || err.status === 403 ? 'lob_auth' : `lob_http_${err.status}`) : 'unknown',
+      retryable: false,
+      message,
+    });
     return { status: 'failed', message };
   }
 }

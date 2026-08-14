@@ -61,6 +61,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     campaignsTable: dataStack.campaignsTable,
     campaignRecipientsTable: dataStack.campaignRecipientsTable,
     scanHitsTable: dataStack.scanHitsTable,
+    stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -78,6 +79,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
     customerUserPool: dataStack.customerUserPool,
+    screenshotDlqQueue: screenshotStack.screenshotLambda.deadLetterQueue,
   });
   return Template.fromStack(vercelAccessStack);
 }
@@ -131,7 +133,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), and postcard-webhook-events (Stage 22)', () => {
+  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), and stripe-webhook-failures (Stage 24)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -141,8 +143,8 @@ describe('data-access policy statements', () => {
     expect(statement.Action).toEqual(
       expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
     );
-    // 15 tables × (table + index/*) = 30 resource entries.
-    expect(statement.Resource).toHaveLength(30);
+    // 16 tables × (table + index/*) = 32 resource entries.
+    expect(statement.Resource).toHaveLength(32);
   });
 
   it('grants ses:SendEmail with an unscoped resource (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
@@ -219,7 +221,7 @@ describe('data-access policy statements', () => {
 });
 
 describe('compute-invoke policy statements', () => {
-  it('grants lambda:InvokeFunction on the screenshot Lambda, the postcard-render Lambda, and states:StartExecution on the scan workflow', () => {
+  it('grants lambda:InvokeFunction on the screenshot Lambda, the postcard-render Lambda, states:StartExecution on the scan workflow, and read-only sqs:GetQueueAttributes on the screenshot DLQ (Stage 24)', () => {
     dev.hasResourceProperties('AWS::IAM::ManagedPolicy', {
       ManagedPolicyName: 'webpresa-dev-vercel-compute-invoke',
       PolicyDocument: {
@@ -227,9 +229,19 @@ describe('compute-invoke policy statements', () => {
           Match.objectLike({ Sid: 'ScreenshotLambdaInvoke', Action: 'lambda:InvokeFunction' }),
           Match.objectLike({ Sid: 'PostcardRenderLambdaInvoke', Action: 'lambda:InvokeFunction' }),
           Match.objectLike({ Sid: 'ScanWorkflowStartExecution', Action: 'states:StartExecution' }),
+          Match.objectLike({ Sid: 'ScreenshotDlqDepthRead', Action: 'sqs:GetQueueAttributes' }),
         ]),
       },
     });
+  });
+
+  it('never grants sqs:ReceiveMessage/DeleteMessage on the DLQ — the app only reports depth, never drains it', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-compute-invoke' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string | string[] }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'ScreenshotDlqDepthRead')!;
+    expect(statement.Action).toEqual('sqs:GetQueueAttributes');
   });
 });
 

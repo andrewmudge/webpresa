@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly fourteen DynamoDB tables (Stage 22 adds PostcardWebhookEvents)', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 14);
+  it('creates exactly fifteen DynamoDB tables (Stage 24 adds StripeWebhookFailures)', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 15);
   });
 });
 
@@ -277,7 +277,22 @@ describe('GSI names', () => {
     });
   });
 
-  it('no table other than Claims and Leads has a TTL attribute', () => {
+  it('StripeWebhookFailures table has id as partition key, no GSI, and a TTL attribute populated on every item (diagnostics-only, unlike Claims/Leads TTL which only ever touches a secondary item shape)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-stripe-webhook-failures',
+      KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+    });
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-stripe-webhook-failures' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes?: unknown[] };
+    };
+    expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('no table other than Claims, Leads, and StripeWebhookFailures has a TTL attribute', () => {
     const tableNames = [
       'webpresa-dev-businesses',
       'webpresa-dev-site-previews',
@@ -469,9 +484,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 42 outputs — 28 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
+  it('creates 44 outputs — 30 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(42);
+    expect(Object.keys(outputs)).toHaveLength(44);
   });
 });
 

@@ -5,6 +5,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listScanExecutionsForBusiness, putScanExecution } from '@/lib/db/scan-executions';
 import { createScanExecution } from '@/domain/factories/scan-execution.factory';
 import type { ScanExecution } from '@/domain/models/scan-execution';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — starts (or reruns) the scan workflow for a business. Creates a
@@ -61,9 +62,30 @@ async function startExecution(execution: ScanExecution, businessId: string): Pro
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    log({
+      level: 'error',
+      event: 'scan.workflow.start_failed',
+      component: 'scan-workflow',
+      businessId,
+      scanExecutionId: execution.scanExecutionId,
+      provider: 'internal',
+      operation: 'initializing',
+      errorCategory: 'internal',
+      retryable: true,
+      attempt: execution.attemptNumber,
+      message,
+    });
     return { status: 'failed', scanExecutionId: execution.scanExecutionId, message };
   }
 
+  log({
+    event: 'scan.workflow.started',
+    component: 'scan-workflow',
+    businessId,
+    scanExecutionId: execution.scanExecutionId,
+    status: 'running',
+    attempt: execution.attemptNumber,
+  });
   return { status: 'started', scanExecutionId: execution.scanExecutionId };
 }
 

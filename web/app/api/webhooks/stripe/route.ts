@@ -4,6 +4,9 @@ import { getStripeSecret } from '@/lib/secrets';
 import { mapStripeSubscriptionToAppState } from '@/lib/stripe/status-mapping';
 import { extractBusinessId, extractBillingPurpose } from '@/lib/stripe/metadata';
 import { getBusinessById, getBusinessByStripeSubscriptionId, updateBusiness } from '@/lib/db/businesses';
+import { log } from '@/lib/logging/log';
+import { createStripeWebhookFailure } from '@/domain/factories/stripe-webhook-failure.factory';
+import { putStripeWebhookFailure } from '@/lib/db/stripe-webhook-failures';
 
 /**
  * Stripe webhook Route Handler (Stage 18) — the first Route Handler in this
@@ -65,9 +68,18 @@ function resolveEventTarget(event: Stripe.Event): ResolvedEventTarget {
   }
 }
 
-/** Structured, safe logging — never the full Stripe payload, never card/payment details. */
-function logSafely(event: string, context: Record<string, unknown>): void {
-  console.log(`[stripe webhook] ${event}`, context);
+/**
+ * Stage 24 — best-effort write of a `StripeWebhookFailure` diagnostic
+ * record (see `domain/models/stripe-webhook-failure.ts`). Never throws —
+ * losing the diagnostic record must never turn an otherwise-handled webhook
+ * failure into a second, unrelated failure.
+ */
+async function recordFailure(input: { errorCategory: string; errorMessage: string; eventId?: string; eventType?: string; businessId?: string }): Promise<void> {
+  try {
+    await putStripeWebhookFailure(createStripeWebhookFailure(input));
+  } catch (err) {
+    log({ level: 'error', event: 'stripe.webhook.failure_record_write_failed', message: err instanceof Error ? err.message : 'unknown' });
+  }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -81,7 +93,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature ?? '', webhookSecret);
   } catch (err) {
-    logSafely('invalid_signature', { message: err instanceof Error ? err.message : 'unknown' });
+    const message = err instanceof Error ? err.message : 'unknown';
+    log({ level: 'warn', event: 'stripe.webhook.invalid_signature', message, component: 'stripe-webhook' });
+    await recordFailure({ errorCategory: 'invalid_signature', errorMessage: message });
     return new Response('Invalid signature', { status: 400 });
   }
 
@@ -96,7 +110,7 @@ export async function POST(request: Request): Promise<Response> {
   // website-subscription event.
   const billingPurpose = extractBillingPurpose(metadata);
   if (billingPurpose && billingPurpose !== 'website_subscription') {
-    logSafely('ignored_purpose', { eventId: event.id, purpose: billingPurpose });
+    log({ event: 'stripe.webhook.ignored_purpose', component: 'stripe-webhook', operation: event.type, message: billingPurpose });
     return new Response(null, { status: 200 });
   }
 
@@ -108,18 +122,18 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!businessId) {
     // Do not 500 — Stripe would retry forever on a permanently unresolvable event.
-    logSafely('unresolved_business', { eventId: event.id, eventType: event.type });
+    log({ level: 'warn', event: 'stripe.webhook.unresolved_business', component: 'stripe-webhook', operation: event.type });
     return new Response(null, { status: 200 });
   }
 
   const business = await getBusinessById(businessId);
   if (!business) {
-    logSafely('unknown_business', { eventId: event.id, businessId });
+    log({ level: 'warn', event: 'stripe.webhook.unknown_business', component: 'stripe-webhook', businessId });
     return new Response(null, { status: 200 });
   }
 
   if (!subscriptionId) {
-    logSafely('no_subscription_id', { eventId: event.id, eventType: event.type, businessId });
+    log({ level: 'warn', event: 'stripe.webhook.no_subscription_id', component: 'stripe-webhook', operation: event.type, businessId });
     return new Response(null, { status: 200 });
   }
 
@@ -141,12 +155,14 @@ export async function POST(request: Request): Promise<Response> {
       lastStripeSyncAt: new Date().toISOString(),
     });
 
-    logSafely('processed', { eventId: event.id, eventType: event.type, businessId });
+    log({ event: 'stripe.webhook.processed', component: 'stripe-webhook', operation: event.type, businessId, status: mapped.subscriptionStatus });
     return new Response(null, { status: 200 });
   } catch (err) {
     // Unexpected internal error (DynamoDB/Stripe API failure) — 500 so
     // Stripe retries per its standard backoff.
-    console.error('[stripe webhook] processing_failed', { eventId: event.id, eventType: event.type, businessId, err });
+    const message = err instanceof Error ? err.message : 'unknown';
+    log({ level: 'error', event: 'stripe.webhook.processing_failed', component: 'stripe-webhook', operation: event.type, businessId, message });
+    await recordFailure({ errorCategory: 'processing_failed', errorMessage: message, eventId: event.id, eventType: event.type, businessId });
     return new Response(null, { status: 500 });
   }
 }

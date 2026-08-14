@@ -8542,3 +8542,167 @@ npm run build        — production build succeeds
 ```
 
 Not yet visually verified in a running browser — per this repo's convention, that's left to the user (`AGENTS.md`, "Verification").
+
+---
+
+**Date:** 2026-08-14
+
+**Stage 24 — Operational Monitoring, Failure Recovery, and Operations Center.** Requirements came as a detailed task prompt that explicitly superseded the older, generic "Stage 24 — Monitoring and Error Recovery" draft already in `implementation.md`. Per the task's own instruction, this began with a feasibility cross-reference against the real codebase (two parallel Explore-agent research passes plus direct reading of `architecture.md`/`deployment.md`/`implementation.md`) before writing any code — see `implementation.md`'s Stage 24 "Architecture corrections" for the eight places the original generic spec didn't match reality, two of which were confirmed with the user via explicit questions before implementation (Stripe webhook durability, deferring synthetic uptime monitoring) and one more (Vercel→CloudWatch log drain doesn't exist) discovered mid-implementation and corrected in the docs before building the CDK stack around it.
+
+### Structured logging
+
+New `web/lib/logging/log.ts` — `log(fields: LogFields)`, where `LogFields` is a closed TypeScript interface (no `payload`/`headers`/`rawResponse` field exists) that also gets runtime-filtered by `serializeLogFields()`, so redaction is a real guarantee rather than a documented convention a caller could bypass. Generalizes the `logSafely()` helper previously duplicated in both webhook routes. Integrated at the highest-value points — not a mechanical rewrite of every `console.log`: `lib/firecrawl/enrich-business.ts`, `lib/screenshots/capture.ts`, `lib/workflow/run-scan-workflow.ts`, `lib/scoring/score-business.ts`, `lib/leads/notify.ts`, `lib/postcards/render.ts`, `lib/lob/submit-postcard.ts`, both webhook routes, and all seven `/api/internal/scan/*` routes (which also generate a per-request `requestId` for log-only correlation).
+
+### `ScanExecution` staleness — a real, confirmed gap
+
+Research (via a dedicated Explore-agent pass) confirmed `ScanEvent` has had staleness detection (`isStaleScan`/`markStaleScanFailed`) since Stage 14, but `ScanExecution` never got the equivalent — a Step Functions execution that silently died had no admin-visible recovery path at all. New `web/lib/workflow/stale.ts` mirrors the existing pattern exactly (20-minute threshold, checked on page render, no cron); recovery goes through the existing `claimScanExecutionStatus()` conditional primitive. New `markStaleExecutionFailedAction` in `workflow-actions.ts`. New `listAllScanExecutions()` in `lib/db/scan-executions.ts` (mirrors `listAllScans()`).
+
+### `StripeWebhookFailure` — closing the one real durability gap found
+
+Confirmed via research: Lob webhooks have full durable history (`PostcardWebhookEvent`); Stripe webhooks have none at all — `Business.lastStripeEventId`/etc. are explicitly diagnostics-only. New `stripe-webhook-failures` DynamoDB table (PK `id`, TTL populated on every item — ~90 days, unlike Lob's/Claims'/Leads' TTL patterns), full model/schema/factory/repository quartet, written only from the two existing Stripe webhook failure paths in `app/api/webhooks/stripe/route.ts`. This was one of the two points explicitly confirmed with the user via `AskUserQuestion` before implementation (recommended option chosen: add the narrow diagnostic table, not a generic Failures table).
+
+### Screenshot DLQ visibility
+
+The Stage 14 DLQ has existed with zero consumers/visibility since it was built. New `web/lib/sqs/dlq.ts` (`getScreenshotDlqDepth()`) — read-only `sqs:GetQueueAttributes` only, new `@aws-sdk/client-sqs` dependency, one new IAM statement (`ScreenshotDlqDepthRead`) scoped to exactly this queue's ARN.
+
+### `/admin/operations`
+
+New `web/app/admin/(dashboard)/operations/page.tsx`, added as the first item in `AdminSidebar.tsx`'s nav (ahead of Campaigns — the primary "start here" surface per the spec's own framing). System Status / Needs Attention / Recent Operations / credential-expiration warning card. `web/lib/operations/needs-attention.ts` aggregates failed/stale `ScanEvent`s, `ScanExecution`s, `Postcard`s, `Lead` notifications, and `StripeWebhookFailure`s using the same bounded-`Scan`-with-safety-cap pattern already established by `listAllScans()`/`listAllPostcards()` — deliberately not the `status-index` GSIs that exist on several tables but are unused by any application code and explicitly flagged in `data-stack.ts` as a pre-production hot-partition anti-pattern. `manual_approval_required` `ScanEvent`s are excluded outright (an expected, frequent disposition, not a failure — including it would flood the page). Every recovery button on the page is a thin wrapper (`.bind()`) around an **existing** Server Action — `retryEnrichmentAction`, `markStaleScanFailedAction`, `markStaleExecutionFailedAction`, `rerunScanWorkflowAction`, `retryRenderPostcardAction` (via a small inline wrapper to reconcile its `{error?}` return with `<form action>`'s expected `void`), `retryLeadNotificationAction` — no new recovery mechanism was invented anywhere. Postcard submission failures and provider-auth/config failures get no button at all, since `SubmitButton.tsx` already documents there's no safe retry path for a failed Lob submission — this was the other point confirmed with the user up front.
+
+`web/lib/postcards/status.ts` extracts `derivePostcardStatus()` out of `CampaignDetail.tsx` (previously page-local) so both surfaces share one render-failure inference. `web/lib/operations/recent.ts` is a capped, bounded Recent Operations feed from the same already-established list functions (lead-delivery events deliberately omitted — no existing "recently sent" query, and adding one would mean a new GSI for a nice-to-have). `web/lib/operations/credential-expirations.ts` is a static config list (currently the Vercel API token, expires 2026-10-29) checked against `resolveRuntimeEnvironment()`'s real values (`'preview'` for the dev deployment, not literally `'dev'` — caught and fixed before it became a silent bug).
+
+### CloudWatch — `WebpresaMonitoringStack`
+
+The first CloudWatch dashboard/alarm resources in this project. Original plan (per the task prompt and the first pass of `implementation.md`) called for CloudWatch Logs metric filters over the new structured logs for provider-usage counts and Stripe/Lob webhook-failure alarms — discovered infeasible mid-implementation: those logs are emitted by Vercel-hosted Next.js code, and this repo has no Vercel→CloudWatch log drain (confirmed via a repo-wide grep before proceeding — a real, separate infrastructure integration, not something to build opportunistically inside this stage). Corrected `implementation.md` before writing the stack rather than building a dashboard widget that would silently never populate. The dashboard/alarms instead cover only genuinely AWS-native metrics with zero new log-shipping work: screenshot Lambda (Errors/Throttles/Duration), postcard-render Lambda (Errors/Duration), Step Functions execution outcomes, the screenshot DLQ's depth, and DynamoDB throttled-requests on the four highest-traffic tables. Hit and fixed one real CDK gotcha along the way: `metricThrottledRequestsForOperations()`'s default (all 14 `dynamodb.Operation` values) produces a math expression that exceeds CloudWatch's 10-metric-per-alarm limit — scoped to exactly the six operations `webpresa-vercel-{env}` is actually granted. Also hit and fixed a metric-id collision when graphing multiple tables' throttle metrics in one combined widget (each `metricThrottledRequestsForOperations()` result reuses default per-operation sub-metric ids like `"getitem"` internally) — split into one widget per table. 9 alarms total, identical in dev and prod (no SNS/pager target exists in either to justify differentiating). `infra/test/monitoring-stack.test.ts`, 12 new tests.
+
+### Runbooks
+
+New `web/docs/operations.md` — all 16 failure modes from the task's numbered list, plus credential-expiration/rotation, each with Symptoms/Likely cause/How to verify/Safe recovery/Retry-vs-replay-vs-rerun/Confirm recovery. Links to (never duplicates) the real incidents `deployment.md` already documents in full — the 2026-08-12 EventBridge-Connection-deauthorized incident, the stale-capture-token incident, the `:latest`-tag-doesn't-force-redeploy gotcha, etc.
+
+## Files changed
+
+```
+web/lib/logging/log.ts                                                                          NEW — shared structured logger
+web/lib/logging/__tests__/log.test.ts                                                            NEW
+web/lib/workflow/stale.ts                                                                        NEW — ScanExecution staleness
+web/lib/workflow/__tests__/stale.test.ts                                                         NEW
+web/lib/db/scan-executions.ts                                                                    MODIFIED — added listAllScanExecutions()
+web/domain/models/stripe-webhook-failure.ts                                                      NEW
+web/domain/schemas/stripe-webhook-failure.schema.ts                                              NEW
+web/domain/factories/stripe-webhook-failure.factory.ts                                           NEW
+web/lib/db/stripe-webhook-failures.ts                                                             NEW
+web/lib/db/client.ts                                                                              MODIFIED — added TABLE_STRIPE_WEBHOOK_FAILURES
+web/app/api/webhooks/stripe/route.ts                                                              MODIFIED — shared logger + StripeWebhookFailure writes
+web/app/api/webhooks/stripe/__tests__/route.test.ts                                               MODIFIED — 2 new tests
+web/app/api/webhooks/lob/route.ts                                                                 MODIFIED — shared logger (logSafely removed)
+web/lib/sqs/client.ts                                                                             NEW
+web/lib/sqs/dlq.ts                                                                                NEW
+web/lib/sqs/__tests__/dlq.test.ts                                                                 NEW
+web/lib/postcards/status.ts                                                                       NEW — derivePostcardStatus extracted
+web/lib/postcards/__tests__/status.test.ts                                                        NEW
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx                                MODIFIED — imports derivePostcardStatus instead of a local copy
+web/lib/operations/needs-attention.ts                                                             NEW
+web/lib/operations/recent.ts                                                                      NEW
+web/lib/operations/credential-expirations.ts                                                      NEW
+web/lib/operations/__tests__/needs-attention.test.ts                                              NEW — 22 tests
+web/lib/operations/__tests__/recent.test.ts                                                       NEW
+web/lib/operations/__tests__/credential-expirations.test.ts                                       NEW
+web/app/admin/(dashboard)/operations/page.tsx                                                     NEW
+web/app/admin/(dashboard)/AdminSidebar.tsx                                                        MODIFIED — added Operations nav item
+web/app/admin/(dashboard)/businesses/[businessId]/workflow-actions.ts                              MODIFIED — added markStaleExecutionFailedAction
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/workflow-actions.test.ts               MODIFIED — 2 new tests
+web/lib/firecrawl/enrich-business.ts                                                               MODIFIED — logging integration
+web/lib/screenshots/capture.ts                                                                     MODIFIED — logging integration
+web/lib/scoring/score-business.ts                                                                  MODIFIED — logging integration
+web/lib/leads/notify.ts                                                                            MODIFIED — logging integration
+web/lib/postcards/render.ts                                                                        MODIFIED — logging integration
+web/lib/lob/submit-postcard.ts                                                                     MODIFIED — logging integration
+web/app/api/internal/scan/{crawl,capture-screenshot,generate-preview,load-business,scan-status,score,update-execution}/route.ts   MODIFIED — logging + requestId (7 files)
+web/app/api/internal/scan/*/__tests__/route.test.ts                                                MODIFIED — added server-only mock (7 files)
+web/package.json, package-lock.json                                                                MODIFIED — added @aws-sdk/client-sqs
+infra/lib/stacks/data-stack.ts                                                                     MODIFIED — added StripeWebhookFailures table
+infra/lib/stacks/vercel-access-stack.ts                                                            MODIFIED — added table grant + ScreenshotDlqDepthRead statement
+infra/lib/stacks/monitoring-stack.ts                                                               NEW — WebpresaMonitoringStack
+infra/bin/webpresa.ts                                                                               MODIFIED — wired MonitoringStack + new props
+infra/test/data-stack.test.ts                                                                       MODIFIED — table count + new table assertions
+infra/test/vercel-access-stack.test.ts                                                              MODIFIED — new grant assertions
+infra/test/monitoring-stack.test.ts                                                                 NEW — 12 tests
+web/docs/implementation.md                                                                          MODIFIED — Stage 24 section replaced with finalized, corrected spec
+web/docs/architecture.md                                                                            MODIFIED — new Stage 24 section, table/stack/env-var/repository-pattern updates
+web/docs/deployment.md                                                                              MODIFIED — new Stage 24 deployment guidance section
+web/docs/operations.md                                                                              NEW — 16 runbooks + credential-expiration tracking
+web/docs/build_log.md                                                                               MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/:
+  npx tsc --noEmit   — clean
+  npm run lint        — 0 errors (3 pre-existing, unrelated warnings)
+  npm test             — 123 test files, 1311 tests, all passing
+  npm run build        — production build succeeds; /admin/operations registered as a dynamic route
+
+infra/:
+  npm run build (tsc) — clean
+  npm test             — 10 test files, 212 tests, all passing
+  npx cdk synth        — succeeds for the whole app, including WebpresaDevMonitoringStack
+  npx cdk diff WebpresaDevMonitoringStack --profile webpresa-dev   — clean, purely additive
+    (new table in WebpresaDevDataStack; output-only changes in WebpresaDevScreenshotStack/
+    WebpresaDevPostcardRenderStack; no differences in WebpresaDevScanWorkflowStack; a new stack)
+  npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev — clean, purely additive
+    (one new table grant, one new read-only SQS statement)
+```
+
+Not deployed — `cdk diff` output was reviewed but no `cdk deploy` was run for any stack, per the standing deployment gate in `AGENTS.md`. Not yet visually verified in a running browser — per this repo's convention, that's left to the user (`AGENTS.md`, "Verification").
+
+---
+
+**Date:** 2026-08-14 (same day, follow-up session)
+
+**Stage 24 — deployed to both dev and prod; added an AWS Budget spend alarm; corrected a stale doc.** The user approved the `cdk deploy` reviewed above, asked for the two new Vercel env vars to be set, and asked for a CDK-provisioned spend alarm.
+
+**Deploy (dev):** `WebpresaDevDataStack` → `WebpresaDevVercelAccessStack` → `WebpresaDevMonitoringStack`, in that order, all `--require-approval never` (approval already obtained from the user on the reviewed diff; the flag only avoids the CLI hanging with no interactive terminal attached). All three completed clean — `webpresa-dev-stripe-webhook-failures` table live, IAM grants applied, dashboard + 9 alarms created.
+
+**Vercel env vars:** `STRIPE_WEBHOOK_FAILURES_TABLE_NAME`/`SCREENSHOT_DLQ_URL` added to Preview with the real deployed values (`webpresa-dev-stripe-webhook-failures`, the dev DLQ's real queue URL from the deploy output). A stray `vercel link` accidentally ran from `infra/` instead of `web/` mid-session (shell cwd had drifted) — it resolved to the same real project (confirmed by comparing `projectId` in both `.vercel/project.json` files), so no duplicate Vercel project was created, but it did leave an unwanted `infra/.vercel/` + `infra/.env.local` (both already gitignored); removed both and redid the two `env add` calls with the `cd` and command in the same shell invocation to avoid the ambiguity recurring.
+
+**AWS Budget (spend alarm), added by request:** `CfnBudget` (the only construct level `aws-budgets` offers) added to `WebpresaMonitoringStack` — one per environment, `webpresa-{env}-monthly-spend`, `$25/month` (user's choice), two email notifications (`ACTUAL` breach + `FORECASTED` heads-up, both at 100% of threshold) to the account owner's email. Threshold/email now live in `EnvironmentConfig` (`infra/lib/config/environments.ts`) as `monthlyBudgetUsd`/`budgetAlertEmail`, alongside every other per-environment value there. `infra/test/monitoring-stack.test.ts` gained 3 new tests (15 total) covering the budget's resource shape, naming, and notification configuration.
+
+**Prod correction:** the user flagged that `architecture.md`'s Stacks table was wrong — it listed every `WebpresaProd*` stack as "❌ not deployed," but Stage 22.5's own status note (elsewhere in the same file) already correctly said all 8 prod stacks were live. Verified directly (`aws cloudformation list-stacks --profile webpresa-prod`): confirmed all 8 prod app stacks genuinely exist and are `CREATE_COMPLETE`/`UPDATE_COMPLETE`. This was a real, pre-existing internal contradiction in the docs, not a fabrication — fixed the Stacks table to match reality (including adding two previously-missing rows, `WebpresaProdPostcardRenderRepositoryStack`/`WebpresaProdPostcardRenderStack`, which had no row at all in either dev or prod despite being deployed).
+
+**Deploy (prod):** confirmed with the user first, since deploying the budget meant deploying the *entire* Stage 24 chain to production (the monitoring stack had never been deployed there at all) — not just the budget. Same three-stack sequence as dev: `WebpresaProdDataStack` → `WebpresaProdVercelAccessStack` → `WebpresaProdMonitoringStack`, all clean/additive. `webpresa-prod-stripe-webhook-failures` table live, prod IAM grants applied, prod dashboard + 9 alarms + budget created. Also had to deploy dev's `WebpresaDevMonitoringStack` a second time in this session — the budget code was written after dev's monitoring stack had already been deployed once (in the original Stage 24 session), so the first dev deploy didn't include it; caught via `cdk diff` still showing the budget as pending and fixed before moving to prod.
+
+**Vercel env vars (prod):** same two variables added to the Production environment with prod's real values (`webpresa-prod-stripe-webhook-failures`, prod's real DLQ queue URL).
+
+## Files changed
+
+```
+infra/lib/config/environments.ts        MODIFIED — added monthlyBudgetUsd/budgetAlertEmail to EnvironmentConfig
+infra/lib/stacks/monitoring-stack.ts    MODIFIED — added CfnBudget (AWS Budgets spend alarm)
+infra/test/monitoring-stack.test.ts     MODIFIED — 3 new tests for the budget
+web/docs/architecture.md                MODIFIED — corrected stale prod-stack deployment status, documented the budget, marked Stage 24 as deployed
+web/docs/deployment.md                  MODIFIED — Stage 24 section rewritten to reflect the actual deploy (both accounts) and the budget
+web/docs/build_log.md                   MODIFIED — this entry
+```
+
+## Verification
+
+```
+infra/:
+  npx tsc --noEmit (npm run build)   — clean
+  npm test                            — 10 test files, 215 tests, all passing
+```
+
+## Live AWS state confirmed
+
+```
+Dev  (539898341083): WebpresaDevDataStack, WebpresaDevVercelAccessStack, WebpresaDevMonitoringStack — all UPDATE_COMPLETE/CREATE_COMPLETE
+Prod (994748688217): WebpresaProdDataStack, WebpresaProdVercelAccessStack, WebpresaProdMonitoringStack — all UPDATE_COMPLETE/CREATE_COMPLETE
+aws budgets describe-budgets --account-id 539898341083 --profile webpresa-dev   → webpresa-dev-monthly-spend, $25 USD
+aws budgets describe-budgets --account-id 994748688217 --profile webpresa-prod  → webpresa-prod-monthly-spend, $25 USD
+Vercel: STRIPE_WEBHOOK_FAILURES_TABLE_NAME, SCREENSHOT_DLQ_URL — present on both Preview and Production
+```
+
+No app code (`web/`) changed in this session — infra-only plus documentation. `npm run build`/lint/test for `web/` were not re-run since nothing there changed; the Stage 24 entry above already covers that verification.
+
+**Redeploy, same session:** the two new Vercel env vars only take effect on a fresh deployment, so both environments were redeployed via `npx vercel redeploy <url> --target <preview|production>` (rebuilds the existing deployment/commit, no code change) — the documented Stage 18 pattern. Preview: `webpresa-bdqi53j07-...` → `webpresa-3ftpfgx4s-...`, `Ready`. Production: `webpresa-5k4h62cyr-...` → `webpresa-rnpb1tu5n-...`, `Ready`, confirmed aliased to `webpresa.com`/`www.webpresa.com`/`fitreppro.com` via `vercel inspect`.

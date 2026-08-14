@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyInternalRequest } from '@/lib/internal-auth';
 import { enrichBusinessWebsite } from '@/lib/firecrawl/enrich-business';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — wraps the existing, already-tested Stage 13 pipeline
@@ -17,11 +18,14 @@ interface CrawlRequestBody {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   if (!(await verifyInternalRequest(request))) {
+    log({ level: 'warn', event: 'internal.scan.unauthorized', component: 'internal-api', operation: 'crawl', requestId });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { businessId } = (await request.json()) as CrawlRequestBody;
   const outcome = await enrichBusinessWebsite(businessId);
+  log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'crawl', requestId, businessId, status: outcome.status });
   return NextResponse.json(outcome);
 }

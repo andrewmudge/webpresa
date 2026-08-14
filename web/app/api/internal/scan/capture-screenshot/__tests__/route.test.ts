@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('server-only', () => ({}));
+
 const mockVerifyInternalRequest = vi.hoisted(() => vi.fn());
 const mockCaptureExistingSiteScreenshot = vi.hoisted(() => vi.fn());
 const mockCaptureGeneratedPreviewScreenshot = vi.hoisted(() => vi.fn());

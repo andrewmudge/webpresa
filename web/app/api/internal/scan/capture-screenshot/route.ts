@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyInternalRequest } from '@/lib/internal-auth';
 import { captureExistingSiteScreenshot, captureGeneratedPreviewScreenshot } from '@/lib/screenshots/capture';
 import type { ScanTargetType } from '@/domain/models/scan-event';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — one route serving both Step Functions states
@@ -20,7 +21,9 @@ interface CaptureScreenshotRequestBody {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   if (!(await verifyInternalRequest(request))) {
+    log({ level: 'warn', event: 'internal.scan.unauthorized', component: 'internal-api', operation: 'capture-screenshot', requestId });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -31,5 +34,6 @@ export async function POST(request: Request) {
       ? await captureExistingSiteScreenshot(businessId)
       : await captureGeneratedPreviewScreenshot(businessId);
 
+  log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'capture-screenshot', requestId, businessId, status: outcome.status });
   return NextResponse.json(outcome);
 }

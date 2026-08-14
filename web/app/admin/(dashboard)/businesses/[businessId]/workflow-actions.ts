@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { startScanWorkflow, rerunScanWorkflow } from '@/lib/workflow/run-scan-workflow';
+import { markStaleExecutionFailed } from '@/lib/workflow/stale';
 
 /**
  * Stage 16 (Step Functions Scan and Preview Workflow) admin actions — kept in
@@ -30,5 +31,18 @@ export async function rerunScanWorkflowAction(businessId: string, previousScanEx
   if (!session) throw new Error('Unauthorized');
 
   const outcome = await rerunScanWorkflow(businessId, previousScanExecutionId, session.sub, 'Rerun requested by admin');
+  redirect(`/admin/businesses/${businessId}${outcomeQueryParam(outcome.status)}`);
+}
+
+/**
+ * Stage 24 — admin override for a `ScanExecution` stuck past the staleness
+ * threshold (see `lib/workflow/stale.ts`'s `isStaleExecution`), mirroring
+ * `screenshot-actions.ts`'s `markStaleScanFailedAction` for `ScanEvent`.
+ */
+export async function markStaleExecutionFailedAction(businessId: string, scanExecutionId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) throw new Error('Unauthorized');
+
+  const outcome = await markStaleExecutionFailed(businessId, scanExecutionId);
   redirect(`/admin/businesses/${businessId}${outcomeQueryParam(outcome.status)}`);
 }

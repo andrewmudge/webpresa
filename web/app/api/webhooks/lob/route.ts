@@ -4,6 +4,7 @@ import { mapLobEventToPostcardStatus } from '@/lib/lob/status-mapping';
 import { getPostcardByProviderPostcardId, applyPostcardWebhookRollup } from '@/lib/db/postcards';
 import { putPostcardWebhookEvent } from '@/lib/db/postcard-webhook-events';
 import { createPostcardWebhookEvent } from '@/domain/factories/postcard-webhook-event.factory';
+import { log } from '@/lib/logging/log';
 
 /**
  * Lob webhook Route Handler (Stage 22 Phase 5) — structured like
@@ -17,11 +18,6 @@ import { createPostcardWebhookEvent } from '@/domain/factories/postcard-webhook-
  * existing Stage 14 bypass secret — see `web/docs/deployment.md`, "Stage
  * 22 — ... deployment guidance", "Still outstanding".
  */
-
-/** Safe, structured logging — never the full raw payload (may contain PII in the mailpiece body). */
-function logSafely(event: string, context: Record<string, unknown>): void {
-  console.log(`[lob webhook] ${event}`, context);
-}
 
 function extractEventType(payload: Record<string, unknown>): string | undefined {
   const raw = payload.event_type;
@@ -50,13 +46,13 @@ export async function POST(request: Request): Promise<Response> {
     // Fail closed — no webhook has been registered with a real secret yet
     // (see LobSecret.webhookSecret's doc comment), so no request can be
     // trusted regardless of what it claims.
-    logSafely('webhook_secret_not_configured', {});
+    log({ level: 'warn', event: 'lob.webhook.webhook_secret_not_configured', component: 'lob-webhook' });
     return new Response('Invalid signature', { status: 400 });
   }
 
   const valid = verifyLobWebhookSignature({ rawBody, signatureHeader: signature, timestampHeader: timestamp, webhookSecret });
   if (!valid) {
-    logSafely('invalid_signature', {});
+    log({ level: 'warn', event: 'lob.webhook.invalid_signature', component: 'lob-webhook' });
     return new Response('Invalid signature', { status: 400 });
   }
 
@@ -64,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     payload = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
-    logSafely('invalid_json', {});
+    log({ level: 'warn', event: 'lob.webhook.invalid_json', component: 'lob-webhook' });
     return new Response('Invalid payload', { status: 400 });
   }
 
@@ -75,13 +71,13 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!lobEventId || !eventType || !providerPostcardId) {
     // Recognized-but-unusable shape — acknowledge, don't retry forever.
-    logSafely('unresolvable_payload', { lobEventId, eventType, providerPostcardId });
+    log({ level: 'warn', event: 'lob.webhook.unresolvable_payload', component: 'lob-webhook', operation: eventType, message: lobEventId });
     return new Response(null, { status: 200 });
   }
 
   const postcard = await getPostcardByProviderPostcardId(providerPostcardId);
   if (!postcard) {
-    logSafely('unknown_postcard', { lobEventId, eventType, providerPostcardId });
+    log({ level: 'warn', event: 'lob.webhook.unknown_postcard', component: 'lob-webhook', operation: eventType, message: lobEventId });
     return new Response(null, { status: 200 });
   }
 
@@ -102,10 +98,18 @@ export async function POST(request: Request): Promise<Response> {
       await applyPostcardWebhookRollup(postcard.postcardId, mapped);
     }
 
-    logSafely('processed', { lobEventId, eventType, postcardId: postcard.postcardId, newlyRecorded });
+    log({
+      event: 'lob.webhook.processed',
+      component: 'lob-webhook',
+      operation: eventType,
+      postcardId: postcard.postcardId,
+      status: mapped.status,
+      message: newlyRecorded ? 'newly_recorded' : 'dedup_no_op',
+    });
     return new Response(null, { status: 200 });
   } catch (err) {
-    console.error('[lob webhook] processing_failed', { lobEventId, eventType, postcardId: postcard.postcardId, err });
+    const message = err instanceof Error ? err.message : 'unknown';
+    log({ level: 'error', event: 'lob.webhook.processing_failed', component: 'lob-webhook', operation: eventType, postcardId: postcard.postcardId, message });
     return new Response(null, { status: 500 });
   }
 }

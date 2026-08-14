@@ -4846,85 +4846,94 @@ Suggested initial execution:
 
 ---
 
-# Stage 24 — Monitoring and Error Recovery
+# Stage 24 — Operational Monitoring, Failure Recovery, and Operations Center
+
+**Supersedes the original "Stage 24 — Monitoring and Error Recovery" draft above.** That draft was written before Stages 16–22.5 existed and predates this codebase's real retry/recovery architecture; this version was cross-referenced against the actual repository (domain models, existing retry functions, CDK stacks, admin UI conventions) before being finalized — see "Architecture corrections" below for the specific places the original framing didn't match reality.
 
 ## Objective
 
-Make failures observable, diagnosable, and recoverable.
+Make Webpresa failures observable, diagnosable, and safely recoverable, with one place inside the admin app — `/admin/operations` — for the administrator to see anything requiring attention, without routinely needing CloudWatch, Lambda logs, Step Functions, SQS, DynamoDB, or the AWS Console. Those remain the underlying diagnostic infrastructure; the Operations page is an exception-management surface, not a replacement for them.
 
 ## Dependencies
 
-All active backend stages.
+All active backend stages, in particular Stage 13 (Firecrawl), Stage 14 (Playwright screenshots), Stage 15 (scoring), Stage 16 (Step Functions scan workflow), Stage 17 (claims), Stage 18 (Stripe), Stage 20 (leads/SES), Stage 21 (campaigns), Stage 22 (Lob postcards), and Stage 22.5 (dev/prod separation). Does not depend on Stage 23 (EventBridge automation), which has not been built.
+
+## Architecture corrections (found during Phase 1 research, confirmed with the user before implementation)
+
+1. **Stripe webhooks have no durable record at all** — unlike Lob's `postcard-webhook-events` table (full immutable history + `postcard-id-index` timeline), a Stripe webhook only ever leaves `Business.lastStripeEventId/lastStripeEventAt/lastStripeSyncAt`, explicitly documented in code as diagnostics-only and never gating a write. Resolution: add one small, narrowly-scoped `StripeWebhookFailure` record (new `stripe-webhook-failures` table, TTL ~90 days, written only from the existing `processing_failed`/`invalid_signature` catch paths in `app/api/webhooks/stripe/route.ts`) — not a generic Failures table, not a full event mirror.
+2. **Minimal availability monitoring for `/` and `/account/sign-in` (e.g. CloudWatch Synthetics) is deferred**, not built. Zero synthetic-monitoring precedent exists anywhere in this repo, Vercel's own deployment dashboard already gives basic reachability signal, and this stage's own spec allows deferring it when it would add infrastructure cost/complexity disproportionate to MVP value.
+3. **The `status-index` GSIs on `scan-events`, `scan-executions`, and `postcards` are unused by any application code today and are explicitly flagged in `infra/lib/stacks/data-stack.ts` as a pre-production hot-partition anti-pattern.** The Operations page's "Needs Attention" aggregation uses bounded `Scan` + app-side filtering instead — the same dev-scale pattern already established by `listAllScans()`, `listAllPostcards()`, and `listLeadsNeedingNotificationRetry()` — rather than activating the flagged GSIs.
+4. **Postcard submission failures get no retry button.** `SubmitButton.tsx` already states there is no retry path for a failed Lob submission — a new postcard must be generated. The Operations page shows these as "Requires manual review" with a link to the business/campaign only. Postcard *render* failures are different — a real, working retry (`retryRenderPostcardAction`, shipped 2026-08-13) already exists and gets a button.
+5. **`ScanExecution` has no staleness detection today**, unlike `ScanEvent` (`isStaleScan`/`markStaleScanFailed`, 10-minute threshold, computed at page-render, no cron). This stage adds the equivalent for `ScanExecution`, mirroring the existing pattern rather than inventing a new one.
+6. **No shared structured-logging utility exists anywhere in `web/`.** The closest precedent is a small private `logSafely()` helper duplicated in both `app/api/webhooks/{stripe,lob}/route.ts`. This stage generalizes it into one shared logger.
+7. **No admin-facing environment switcher is added.** Dev/prod separation already comes entirely from Vercel's per-deployment environment variables (Preview → `webpresa-dev-*`, Production → `webpresa-prod-*`); as long as new code reads resource identifiers from `process.env` like every other stage, cross-environment access is structurally impossible without a new mechanism to bypass.
+8. **Provider usage/cost counts (OpenAI, Firecrawl, Google Places, Lob, SES) do not appear on a CloudWatch dashboard.** The original plan was CloudWatch Logs metric filters over the new structured logs — infeasible because those logs come from Vercel-hosted Next.js code and this repo has no Vercel→CloudWatch log drain (a real, separate infrastructure integration, not something to build opportunistically inside this stage). Resolution found during implementation: `/admin/operations` and Vercel's own log viewer cover this instead — see "CloudWatch dashboards" below for the full correction.
 
 ## Major deliverables
 
-- Structured logging
-- Correlation identifiers
-- CloudWatch dashboards
-- CloudWatch alarms
-- Dead-letter queues
-- Admin failure visibility
-- Retry controls
-- Cost and usage monitoring
-- Operational runbooks
+- Shared structured logging (`web/lib/logging/log.ts`) with a fixed, typed set of allowed fields (redaction-by-construction) and stable `event` names, integrated at the highest-value workflow/failure points — not a mechanical rewrite of every `console.log`.
+- Lightweight per-request correlation (`requestId`) threaded through the Stage 16 internal API routes and both webhook handlers; reuses existing domain IDs (`scanId`, `scanExecutionId`, `postcardId`, `leadId`, `campaignId`, `businessId`) everywhere else — no new tracing infrastructure.
+- `Webpresa{Dev,Prod}MonitoringStack` (new CDK stack) — environment-specific CloudWatch dashboards and alarms; the first CloudWatch resources anywhere in this repo.
+- `ScanExecution` staleness detection (`isStaleExecution`/`markStaleExecutionFailed`), mirroring the existing `ScanEvent` pattern.
+- Screenshot DLQ depth visibility (`getScreenshotDlqDepth()`) — the DLQ has existed since Stage 14 with zero consumers or visibility until now.
+- `StripeWebhookFailure` durable failure log (new table).
+- `/admin/operations` — System Status, Needs Attention (cross-business aggregation), Recent Operations, and a credential-expiration warning card — added to the existing admin nav/auth, no new design system.
+- Recovery actions on the Operations page are thin wrappers around **existing** Server Actions (`retryEnrichmentAction`, `markStaleScanFailedAction`, the new `markStaleExecutionFailedAction`, `rerunScanWorkflowAction`, `retryRenderPostcardAction`, `retryLeadNotificationAction`) — no new recovery mechanisms invented.
+- `web/docs/operations.md` — 16 failure-mode runbooks plus credential-expiration/rotation, linking to (not duplicating) incidents already documented in `deployment.md`.
+- Controlled failure-injection tests against dev-only/mocked resources.
 
 ## Required log context
 
-Where applicable:
+Where applicable — the exact fields accepted by `web/lib/logging/log.ts`'s `LogFields` type:
 
-- service
-- environment
-- business ID
-- scan ID
-- preview ID
-- postcard ID
-- claim ID
-- execution ID
-- request ID
-- status
-- error category
+- service, component, environment, event, message
+- requestId, businessId, scanId, scanExecutionId, previewId, postcardId, campaignId, campaignRecipientId, claimId, leadId
+- provider, operation, status, errorCategory, retryable, attempt, durationMs
 
 Never log:
 
-- API keys
-- passwords
-- auth tokens
-- full card data
-- raw Secrets Manager responses
-- unnecessarily sensitive customer information
+- API keys, passwords, Cognito/session tokens, Stripe secrets/card data, capture tokens, Vercel bypass credentials, Secrets Manager responses, raw `Authorization` headers, unnecessary customer PII, raw website content, raw provider payloads/stack traces to the browser.
+
+Because `LogFields` is a closed, typed interface, there is no field to put a raw secret or payload into in the first place — the type is the redaction boundary, not a denylist scan.
+
+## CloudWatch dashboards
+
+**Correction found during Phase 5 implementation (supersedes decision #8 above):** structured logs from `web/lib/logging/log.ts` are emitted by Next.js Server Actions/Route Handlers running on Vercel, not inside any AWS-managed compute — and this repo has no Vercel→CloudWatch log drain (confirmed: no such integration exists anywhere in this codebase, and setting one up is a genuine new infrastructure integration, not "using infrastructure Webpresa already has"). CloudWatch Logs metric filters can therefore only ever see the two real Lambdas' own log groups (`screenshot-capture`, `postcard-render` — independent codebases in `infra/lambda/*`, per architecture.md, that never call `web/lib/logging/log.ts`), not Vercel-side events like `stripe.webhook.processing_failed` or provider call counts. Building metric filters against a log group those events never reach would silently produce empty, non-functional dashboard widgets.
+
+**Resolution:** the dashboard covers only what's genuinely AWS-side and already emits real CloudWatch metrics without any new log-shipping work — Step Functions execution metrics, screenshot Lambda (Errors/Throttles/Duration), postcard-render Lambda (Errors/Duration), screenshot DLQ depth, and DynamoDB throttling on the highest-traffic tables (scan-events, scan-executions, postcards, businesses — not all 15 tables). Provider usage/cost visibility (OpenAI, Firecrawl, Google Places, Lob, SES) and Stripe/Lob webhook failure visibility instead come from `/admin/operations` (reads `StripeWebhookFailure`/`Postcard`/`Lead` records directly from DynamoDB — no CloudWatch dependency) and Vercel's own log viewer (`vercel logs` / the Vercel dashboard) for raw structured-log inspection — see `operations.md`'s runbooks, which reference the Vercel log viewer explicitly for this reason. A real Vercel-to-CloudWatch log drain remains a legitimate future enhancement, not attempted here.
 
 ## Alarm coverage
 
-- Lambda failures
-- Lambda throttles
-- Step Functions failures
-- API 5xx responses
-- DynamoDB throttling
-- Stripe webhook failures
-- Lob webhook failures
-- high spend
-- unusual OpenAI usage
-- screenshot timeouts
-- dead-letter queue depth
+- Step Functions execution failures
+- Screenshot/postcard-render Lambda errors and throttles
+- Screenshot DLQ depth > 0
+- DynamoDB throttling on high-traffic tables
+
+Provider/webhook-failure-category alarms (Stripe, Lob, OpenAI, Firecrawl, Google Places, SES auth/config failures) are deferred pending the log-drain gap above — `/admin/operations` is the real-time surface for those today, without an alarm's added latency/noise tradeoff.
+
+Same alarm set in both environments — there is no SNS/Slack/PagerDuty target in either (chat/pager integration is explicitly deferred, see below), so "dev alarms lighter to avoid noise" has no real effect until a notification target exists; alarms fire and are visible in the CloudWatch console/dashboard for both dev and prod today, which is what "a test failure produces a structured log" and "relevant alarms trigger in a controlled test" require.
 
 ## Acceptance criteria
 
-- A test failure produces a structured log.
-- Relevant alarms trigger in a controlled test.
-- Async failures reach a DLQ where configured.
-- An admin can identify the affected business and step.
-- Recoverable work can be retried safely.
-- Secrets and sensitive data do not appear in logs.
-- Cost visibility exists for major third-party services.
+- A test failure produces a structured log with the correct fields and no secret leakage.
+- Relevant alarms trigger in a controlled test against dev-only resources.
+- The screenshot DLQ's depth is observable from both CloudWatch and `/admin/operations`.
+- An admin can identify the affected business/scan/execution/postcard/lead from the Operations page without opening AWS.
+- Recoverable work can be retried/rerun through existing, reused Server Actions; unsafe actions (postcard submission failure, provider auth/config failures) never render a button.
+- Secrets and sensitive data do not appear in logs (automated redaction tests pass).
+- Provider usage is visible on the CloudWatch dashboard; no fabricated precision where a provider doesn't report exact cost.
+- `web/docs/operations.md` exists with the 16+1 runbooks, `cdk diff` was reviewed before any deploy, and dev/prod environment separation holds throughout (verified by construction — see correction #7).
 
 ## Deferred work
 
-- Centralized log analytics
-- Pager integration
+- Centralized log analytics, distributed tracing, OpenTelemetry
+- Pager/Slack/SMS integration
 - SLOs and error budgets
-- Distributed tracing
 - Automated incident response
 - Customer-facing status page
+- Minimal availability/synthetic monitoring for `/` and `/account/sign-in` (see correction #2)
+- Full provider cost accounting / per-business unit economics
+- Multi-admin incident assignment
 
 ---
 

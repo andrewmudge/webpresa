@@ -74,3 +74,4 @@ export const TABLE_DOMAIN_CONNECTIONS = () => getTableName('DOMAIN_CONNECTIONS_T
 export const TABLE_CAMPAIGNS = () => getTableName('CAMPAIGNS_TABLE_NAME');
 export const TABLE_CAMPAIGN_RECIPIENTS = () => getTableName('CAMPAIGN_RECIPIENTS_TABLE_NAME');
 export const TABLE_SCAN_HITS = () => getTableName('SCAN_HITS_TABLE_NAME');
+export const TABLE_STRIPE_WEBHOOK_FAILURES = () => getTableName('STRIPE_WEBHOOK_FAILURES_TABLE_NAME');

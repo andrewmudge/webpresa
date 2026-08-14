@@ -11,6 +11,7 @@ import { getAsset, putAsset, getSignedAssetUrl } from '@/lib/s3/assets';
 import { scoreWebsite } from '@/lib/ai/score-website';
 import { computeDeterministicMetrics } from './deterministic-metrics';
 import { applyQualificationOverrides } from './qualification-rules';
+import { log } from '@/lib/logging/log';
 
 /**
  * Orchestrates one Stage 15 (AI Prospect Qualification & Website Analysis)
@@ -78,6 +79,18 @@ function classifyAiError(err: unknown): ScanFailureCategory {
 
 async function finishFailed(scan: ScanEvent, category: ScanFailureCategory, message: string): Promise<ScoringOutcome> {
   await saveScan({ ...scan, status: 'failed', failureCategory: category, failureMessage: message, completedAt: nowIso() });
+  log({
+    level: 'error',
+    event: 'scan.score.failed',
+    component: 'ai-scoring',
+    businessId: scan.businessId,
+    scanId: scan.scanId,
+    provider: 'openai',
+    operation: 'score',
+    status: 'failed',
+    errorCategory: category,
+    message,
+  });
   return { status: 'failed', scanId: scan.scanId, message };
 }
 
@@ -190,6 +203,15 @@ async function runScoringAttempt(
     websiteQualityScore: scored.assessment.overallScore,
   });
 
+  log({
+    event: 'scan.score.completed',
+    component: 'ai-scoring',
+    businessId: business.businessId,
+    scanId: scan.scanId,
+    provider: 'openai',
+    operation: 'score',
+    status: 'completed',
+  });
   return { status: 'completed', scanId: scan.scanId };
 }
 

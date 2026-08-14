@@ -3,6 +3,7 @@ import type { Lead } from '@/domain/models/lead';
 import type { Business } from '@/domain/models/business';
 import { sendLeadNotificationEmail } from '@/lib/ses/send-lead-notification';
 import { updateLeadNotificationOutcome } from '@/lib/db/leads';
+import { log } from '@/lib/logging/log';
 
 /**
  * Sends the owner-notification email for one lead and records the outcome
@@ -27,6 +28,17 @@ export async function sendLeadNotificationAndRecordOutcome(
       status: 'failed',
       error: 'business_has_no_notification_email',
     });
+    log({
+      level: 'warn',
+      event: 'lead.notification.failed',
+      component: 'lead-notification',
+      businessId: lead.businessId,
+      leadId: lead.leadId,
+      provider: 'ses',
+      status: 'failed',
+      errorCategory: 'business_has_no_notification_email',
+      attempt: lead.notificationAttempts + 1,
+    });
     return;
   }
 
@@ -41,4 +53,16 @@ export async function sendLeadNotificationAndRecordOutcome(
     lead.leadId,
     result.ok ? { status: 'sent' } : { status: 'failed', error: result.error },
   );
+
+  log({
+    level: result.ok ? 'info' : 'error',
+    event: result.ok ? 'lead.notification.sent' : 'lead.notification.failed',
+    component: 'lead-notification',
+    businessId: lead.businessId,
+    leadId: lead.leadId,
+    provider: 'ses',
+    status: result.ok ? 'sent' : 'failed',
+    ...(result.ok ? {} : { errorCategory: result.error }),
+    attempt: lead.notificationAttempts + 1,
+  });
 }

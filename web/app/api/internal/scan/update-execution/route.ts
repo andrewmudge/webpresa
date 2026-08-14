@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyInternalRequest } from '@/lib/internal-auth';
 import { claimScanExecutionStatus } from '@/lib/db/scan-executions';
 import type { ScanExecution } from '@/domain/models/scan-execution';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — the one generic ScanExecution transition endpoint, called by
@@ -20,7 +21,9 @@ interface UpdateExecutionRequestBody {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   if (!(await verifyInternalRequest(request))) {
+    log({ level: 'warn', event: 'internal.scan.unauthorized', component: 'internal-api', operation: 'update-execution', requestId });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -35,5 +38,16 @@ export async function POST(request: Request) {
     updates: body.updates ?? {},
   });
 
+  if (!claimed) {
+    log({
+      level: 'warn',
+      event: 'scan.workflow.transition_lost_race',
+      component: 'internal-api',
+      operation: 'update-execution',
+      requestId,
+      scanExecutionId: body.scanExecutionId,
+      status: body.expectedCurrentStatus,
+    });
+  }
   return NextResponse.json({ claimed });
 }

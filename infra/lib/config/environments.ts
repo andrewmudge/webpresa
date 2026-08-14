@@ -57,6 +57,16 @@ export interface EnvironmentConfig {
    * deploy, then restore it to `5` once the account's quota is raised.
    */
   readonly screenshotLambdaReservedConcurrency: number | undefined;
+  /**
+   * Monthly AWS spend threshold (USD) for this account's CloudWatch/Budgets
+   * cost alarm (Stage 24) — `WebpresaMonitoringStack`'s `CfnBudget`. Not a
+   * secret or account identifier, just a per-environment operational
+   * threshold, so it lives alongside every other per-environment value here
+   * rather than as a separate config source.
+   */
+  readonly monthlyBudgetUsd: number;
+  /** Email address notified when `monthlyBudgetUsd` is forecasted/actually exceeded (Stage 24). */
+  readonly budgetAlertEmail: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +92,8 @@ export const ENVIRONMENTS: Record<string, EnvironmentConfig> = {
     removalPolicy: cdk.RemovalPolicy.DESTROY,
     expectedAccountId: '539898341083',
     screenshotLambdaReservedConcurrency: 5,
+    monthlyBudgetUsd: 25,
+    budgetAlertEmail: 'mudge.andrew@gmail.com',
   },
 
   // ── Production config: base infra deployed in Stage 22.5; application
@@ -98,6 +110,8 @@ export const ENVIRONMENTS: Record<string, EnvironmentConfig> = {
     // CASE_CLOSED), matching dev. See the field's doc comment above for
     // the incident history.
     screenshotLambdaReservedConcurrency: 5,
+    monthlyBudgetUsd: 25,
+    budgetAlertEmail: 'mudge.andrew@gmail.com',
   },
 };
 

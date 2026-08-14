@@ -1209,3 +1209,98 @@ The `postcards` table itself was empty in dev at rename time, so this was a clea
 Only one item left, everything else above is done:
 
 - **Submit one real test postcard** (Lob test mode — no real mail, no payment method on file) to confirm the actual request/response shapes assumed in `web/lib/lob/submit-postcard.ts` are correct, in particular whether Lob's response includes a `price` field (unconfirmed against their docs).
+
+---
+
+## Stage 24 — Operational Monitoring, Failure Recovery, and Operations Center deployment guidance
+
+**Deployed to both dev and prod, 2026-08-14, at the user's explicit request following a reviewed, clean `cdk diff` in each account.** See `architecture.md`, "Operational Monitoring, Failure Recovery, and Operations Center (Stage 24)" for the full architecture record, and `web/docs/operations.md` for the operational runbooks this stage produced.
+
+Note: prod's application stacks (`WebpresaProdDataStack`/`WebpresaProdVercelAccessStack`/etc.) were already live from Stage 22.5 — this stage's prod deploy only added Stage 24's own additions (the new table, the new IAM grants, and the brand-new `WebpresaProdMonitoringStack`) on top of that already-deployed base.
+
+### What `cdk diff` showed (both accounts, reviewed 2026-08-14, before deploying)
+
+```
+WebpresaDataStack             [+] AWS::DynamoDB::Table StripeWebhookFailures (+ 3 outputs)
+WebpresaScreenshotStack       outputs only — new cross-stack exports for the DLQ ARN/queue name
+                               and function ref, now referenced by WebpresaMonitoringStack
+WebpresaPostcardRenderStack   outputs only — new cross-stack export for the function ref
+WebpresaScanWorkflowStack     no differences
+WebpresaVercelAccessStack     [~] DataAccessPolicy: +1 table grant (stripe-webhook-failures)
+                               [~] ComputeInvokePolicy: +1 statement (sqs:GetQueueAttributes,
+                                   scoped to exactly the screenshot DLQ's ARN)
+WebpresaMonitoringStack       new stack — 9 CloudWatch alarms + 1 dashboard + 1 AWS Budget,
+                               no compute/data resources of its own
+```
+
+No deletions, no replacements, anywhere, in either account. `WebpresaMonitoringStack` has no `WEBPRESA_APP_BASE_URL` dependency (it only references already-instantiated resources from other stacks via typed props), so it has no dedicated npm script — deployed via plain `cdk` commands like `WebpresaVercelAccessStack`/`WebpresaStockImagesStack` already were.
+
+### Deploy sequence actually used (both accounts)
+
+```bash
+cd infra
+
+# 1. Data stack — adds the stripe-webhook-failures table. Review first:
+WEBPRESA_APP_BASE_URL=<real app URL> npx cdk diff WebpresaDataStack --profile webpresa-{dev,prod} --context env={dev,prod}
+WEBPRESA_APP_BASE_URL=<real app URL> npx cdk deploy WebpresaDataStack --profile webpresa-{dev,prod} --context env={dev,prod} --require-approval never
+
+# 2. Vercel access stack — grants the new table + the read-only DLQ-depth
+#    permission:
+WEBPRESA_APP_BASE_URL=<real app URL> npx cdk diff WebpresaVercelAccessStack --profile webpresa-{dev,prod} --context env={dev,prod}
+WEBPRESA_APP_BASE_URL=<real app URL> npx cdk deploy WebpresaVercelAccessStack --profile webpresa-{dev,prod} --context env={dev,prod} --require-approval never
+
+# 3. Monitoring stack — dashboard + alarms + budget. No WEBPRESA_APP_BASE_URL
+#    needed, but harmless to leave set:
+npx cdk diff WebpresaMonitoringStack --profile webpresa-{dev,prod} --context env={dev,prod}
+npx cdk deploy WebpresaMonitoringStack --profile webpresa-{dev,prod} --context env={dev,prod} --require-approval never
+```
+
+`--require-approval never` was used since this ran non-interactively after the user's explicit go-ahead on the reviewed diff (per `AGENTS.md`'s deployment gate — approval was obtained first, this flag just avoids the CLI hanging on a y/n prompt with no interactive terminal attached). No secret to populate — `stripe-webhook-failures` carries no credential, only diagnostic records the app itself writes.
+
+### AWS Budget (monthly spend alarm)
+
+Added the same day, at the user's explicit request, as an extra `AWS::Budgets::Budget` resource inside `WebpresaMonitoringStack` (see `architecture.md`'s Stage 24 section). `EnvironmentConfig.monthlyBudgetUsd`/`budgetAlertEmail` (`infra/lib/config/environments.ts`) hold the per-environment threshold ($25/month, both dev and prod) and notification email — both confirmed live:
+
+```bash
+aws budgets describe-budgets --account-id 539898341083 --profile webpresa-dev   # webpresa-dev-monthly-spend
+aws budgets describe-budgets --account-id 994748688217 --profile webpresa-prod  # webpresa-prod-monthly-spend
+```
+
+To change the threshold or email later: edit `ENVIRONMENTS.{dev,prod}` in `environments.ts`, review the diff, redeploy `WebpresaMonitoringStack` for the affected environment.
+
+### New Vercel environment variables — added to Preview and Production, 2026-08-14
+
+| Variable | Preview (dev) value | Production (prod) value |
+|---|---|---|
+| `STRIPE_WEBHOOK_FAILURES_TABLE_NAME` | `webpresa-dev-stripe-webhook-failures` | `webpresa-prod-stripe-webhook-failures` |
+| `SCREENSHOT_DLQ_URL` | `https://sqs.us-east-1.amazonaws.com/539898341083/webpresa-dev-screenshot-capture-dlq` | `https://sqs.us-east-1.amazonaws.com/994748688217/webpresa-prod-screenshot-capture-dlq` |
+
+Added via `npx vercel@58.9.5 env add <NAME> <preview|production> --yes` (values piped in via `echo -n ... |`, per this doc's own Vercel CLI gotchas above — pin the version, verify with `vercel env ls` afterward). **Newly added env vars only take effect on a fresh deployment** — the currently-running Preview/Production deployments won't pick these up until the next push or a manual `vercel redeploy`.
+
+### Verifying the deploy
+
+```bash
+# Confirm the table exists:
+aws dynamodb describe-table --table-name webpresa-{env}-stripe-webhook-failures --profile webpresa-{dev,prod} --query 'Table.TableStatus'
+
+# Confirm the dashboard exists and view it:
+aws cloudformation describe-stacks --stack-name Webpresa{Dev,Prod}MonitoringStack --profile webpresa-{dev,prod} \
+  --query "Stacks[0].Outputs[?ExportName=='webpresa-{env}-operations-dashboard-url'].OutputValue" --output text
+
+# Confirm all 9 alarms exist:
+aws cloudwatch describe-alarms --alarm-name-prefix webpresa-{env}- --profile webpresa-{dev,prod} --query 'MetricAlarms[].AlarmName'
+
+# Confirm the budget exists:
+aws budgets describe-budgets --account-id <account-id> --profile webpresa-{dev,prod}
+```
+
+After the next fresh deployment picks up the two Vercel env vars above, visit `/admin/operations` and confirm it loads without the `loadError` banner.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `STRIPE_WEBHOOK_FAILURES_TABLE_NAME` unset or wrong | Every `putStripeWebhookFailure`/`listRecentStripeWebhookFailures` call throws; the webhook route's `recordFailure()` wrapper swallows the write error and logs it (never turns a handled webhook failure into an unrelated 500) — the Operations page's own `try/catch` shows a `loadError` banner instead of a partial/broken page if the read side is affected |
+| `SCREENSHOT_DLQ_URL` unset or wrong | `getScreenshotDlqDepth()` returns `null` (never throws) — the Operations page simply omits the DLQ item and shows `screenshotDlqDepth: null` rather than failing to load |
+| `webpresa-vercel-{env}` missing `sqs:GetQueueAttributes` | Same as above — an `AccessDeniedException` from the SQS call is caught the same way, returns `null` |
+| `webpresa-vercel-{env}` missing the new table grant | `AccessDeniedException` from DynamoDB — same `try/catch` behavior as any other missing-permission case elsewhere in this app |

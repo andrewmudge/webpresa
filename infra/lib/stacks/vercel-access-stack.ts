@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 
@@ -25,6 +26,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly campaignsTable: dynamodb.ITable;
   readonly campaignRecipientsTable: dynamodb.ITable;
   readonly scanHitsTable: dynamodb.ITable;
+  readonly stripeWebhookFailuresTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
@@ -43,6 +45,8 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly postcardRenderLambdaFunction: lambda.IFunction;
   readonly scanWorkflowStateMachine: sfn.IStateMachine;
   readonly customerUserPool: cognito.IUserPool;
+  /** Stage 24 — read-only depth check for the Operations page's DLQ visibility (see web/lib/sqs/dlq.ts). */
+  readonly screenshotDlqQueue: sqs.IQueue;
 }
 
 /**
@@ -105,6 +109,7 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.campaignsTable,
       props.campaignRecipientsTable,
       props.scanHitsTable,
+      props.stripeWebhookFailuresTable,
     ];
 
     this.dataAccessPolicy = new iam.ManagedPolicy(this, 'DataAccessPolicy', {
@@ -223,6 +228,15 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
           sid: 'ScanWorkflowStartExecution',
           actions: ['states:StartExecution'],
           resources: [props.scanWorkflowStateMachine.stateMachineArn],
+        }),
+        // Stage 24 — read-only depth check for the Operations page (see
+        // web/lib/sqs/dlq.ts). Deliberately GetQueueAttributes only, never
+        // ReceiveMessage/DeleteMessage — the app only ever reports the
+        // queue's depth, it never drains or consumes DLQ messages.
+        new iam.PolicyStatement({
+          sid: 'ScreenshotDlqDepthRead',
+          actions: ['sqs:GetQueueAttributes'],
+          resources: [props.screenshotDlqQueue.queueArn],
         }),
       ],
     });

@@ -70,6 +70,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly campaignsTable: dynamodb.Table;
   public readonly campaignRecipientsTable: dynamodb.Table;
   public readonly scanHitsTable: dynamodb.Table;
+  public readonly stripeWebhookFailuresTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
@@ -554,6 +555,41 @@ export class WebpresaDataStack extends cdk.Stack {
       sortKey: { name: 'sortKey', type: S },
     });
     this.scanHitsTable = scanHits.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // StripeWebhookFailures (Stage 24 — Operational Monitoring, Failure
+    // Recovery, and Operations Center)
+    //   PK: id
+    //   No GSI — write-rare (failures only), TTL-bounded, and read only via
+    //   a small bounded Scan for the admin Operations page (see
+    //   web/lib/db/stripe-webhook-failures.ts).
+    //
+    //   Unlike PostcardWebhookEvents above (Stage 22's permanent, complete
+    //   Lob delivery history), this table is diagnostics-only: Stripe
+    //   webhook processing has no durable record of any kind today
+    //   (reconciliation is snapshot-first — see architecture.md, "Stripe
+    //   Subscriptions (Stage 18)" — and Business.lastStripeEventId/
+    //   lastStripeEventAt/lastStripeSyncAt are explicitly diagnostics-only,
+    //   never gating a write), so a failed/malformed webhook was previously
+    //   invisible outside raw logs. Records only the two failure paths
+    //   (invalid signature, processing error) — never a successfully
+    //   processed event, never the raw request body or signature.
+    //
+    //   TTL attribute `ttl` is enabled and populated on EVERY item (~90
+    //   days out from creation) — deliberately different from Claims'/
+    //   Leads'/CampaignRecipients' TTL, which only ever touches a
+    //   secondary rate-limit/fingerprint item shape while the "real"
+    //   record on those tables is preserved indefinitely. Here the "real"
+    //   record itself is meant to expire, since this is a short-window
+    //   diagnostic log, not a permanent fulfillment record.
+    // ───────────────────────────────────────────────────────────────────────
+    const stripeWebhookFailures = new WebpresaTable(this, 'StripeWebhookFailures', {
+      config,
+      tableName: 'stripe-webhook-failures',
+      partitionKey: { name: 'id', type: S },
+      timeToLiveAttribute: 'ttl',
+    });
+    this.stripeWebhookFailuresTable = stripeWebhookFailures.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Customer identity (Stage 17 — Website Claim Flow)

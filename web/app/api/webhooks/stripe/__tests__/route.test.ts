@@ -12,12 +12,14 @@ const {
   mockGetBusinessById,
   mockGetBusinessByStripeSubscriptionId,
   mockUpdateBusiness,
+  mockPutStripeWebhookFailure,
 } = vi.hoisted(() => ({
   mockConstructEvent: vi.fn(),
   mockSubscriptionsRetrieve: vi.fn(),
   mockGetBusinessById: vi.fn(),
   mockGetBusinessByStripeSubscriptionId: vi.fn(),
   mockUpdateBusiness: vi.fn(),
+  mockPutStripeWebhookFailure: vi.fn(),
 }));
 
 vi.mock('@/lib/stripe/client', () => ({
@@ -37,6 +39,10 @@ vi.mock('@/lib/db/businesses', () => ({
   updateBusiness: mockUpdateBusiness,
 }));
 
+vi.mock('@/lib/db/stripe-webhook-failures', () => ({
+  putStripeWebhookFailure: mockPutStripeWebhookFailure,
+}));
+
 import { POST } from '@/app/api/webhooks/stripe/route';
 
 function makeRequest(): Request {
@@ -53,6 +59,8 @@ beforeEach(() => {
   mockGetBusinessById.mockReset();
   mockGetBusinessByStripeSubscriptionId.mockReset();
   mockUpdateBusiness.mockReset();
+  mockPutStripeWebhookFailure.mockReset();
+  mockPutStripeWebhookFailure.mockResolvedValue(undefined);
 });
 
 describe('POST /api/webhooks/stripe', () => {
@@ -65,6 +73,30 @@ describe('POST /api/webhooks/stripe', () => {
 
     expect(response.status).toBe(400);
     expect(mockGetBusinessById).not.toHaveBeenCalled();
+  });
+
+  it('records a StripeWebhookFailure diagnostic on an invalid signature (Stage 24)', async () => {
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error('bad signature');
+    });
+
+    await POST(makeRequest());
+
+    expect(mockPutStripeWebhookFailure).toHaveBeenCalledTimes(1);
+    const failure = mockPutStripeWebhookFailure.mock.calls[0][0];
+    expect(failure.errorCategory).toBe('invalid_signature');
+    expect(failure.errorMessage).toBe('bad signature');
+  });
+
+  it('never fails the response even if writing the StripeWebhookFailure diagnostic itself throws', async () => {
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error('bad signature');
+    });
+    mockPutStripeWebhookFailure.mockRejectedValueOnce(new Error('dynamodb down'));
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(400);
   });
 
   it('acknowledges (200) and ignores an unlisted event type', async () => {
@@ -193,6 +225,29 @@ describe('POST /api/webhooks/stripe', () => {
     const response = await POST(makeRequest());
 
     expect(response.status).toBe(500);
+  });
+
+  it('records a StripeWebhookFailure diagnostic on an internal processing error (Stage 24)', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_6b',
+      type: 'customer.subscription.updated',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockSubscriptionsRetrieve.mockRejectedValueOnce(new Error('stripe api down'));
+
+    await POST(makeRequest());
+
+    expect(mockPutStripeWebhookFailure).toHaveBeenCalledTimes(1);
+    const failure = mockPutStripeWebhookFailure.mock.calls[0][0];
+    expect(failure).toMatchObject({
+      errorCategory: 'processing_failed',
+      errorMessage: 'stripe api down',
+      eventId: 'evt_6b',
+      eventType: 'customer.subscription.updated',
+      businessId: 'biz_1',
+    });
   });
 
   it('duplicate delivery of the same event is a harmless repeat write, not an error', async () => {

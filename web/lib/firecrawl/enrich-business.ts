@@ -13,6 +13,7 @@ import { normalizeFirecrawlResponse } from './normalize';
 import { ingestScanImages } from './images';
 import { generatePreviewContent } from '@/lib/ai/generate-preview';
 import { isRetryableFailureCategory, computeAutomaticRetryDelayMs, MAX_AUTOMATIC_RETRIES } from './retry';
+import { log } from '@/lib/logging/log';
 
 /**
  * Orchestrates one Firecrawl website-enrichment attempt end to end — the
@@ -212,7 +213,15 @@ async function runAttempt(business: Business, queuedScan: ScanEvent, sourceUrl: 
   try {
     images = await ingestScanImages({ businessId: business.businessId, scanId: scan.scanId, candidateUrls: snapshot.imageReferences.map((i) => i.url) });
   } catch (error) {
-    console.error('Scan image ingestion failed:', error instanceof Error ? error.message : error);
+    log({
+      level: 'warn',
+      event: 'scan.enrichment.image_ingestion_failed',
+      component: 'firecrawl-enrichment',
+      businessId: business.businessId,
+      scanId: scan.scanId,
+      provider: 'firecrawl',
+      message: error instanceof Error ? error.message : 'unknown',
+    });
     images = [];
   }
   const hasAcceptedImages = images.some((img) => img.status === 'accepted');
@@ -250,6 +259,17 @@ async function runAttempt(business: Business, queuedScan: ScanEvent, sourceUrl: 
   }
 
   scan = await saveScan({ ...scan, status: 'completed', generatedPreviewId: preview.previewId, completedAt: nowIso() });
+  log({
+    event: 'scan.enrichment.completed',
+    component: 'firecrawl-enrichment',
+    businessId: business.businessId,
+    scanId: scan.scanId,
+    previewId: preview.previewId,
+    provider: 'firecrawl',
+    operation: 'scrape',
+    status: 'completed',
+    attempt: scan.attempt,
+  });
 
   // `manualApprovalReason`/`manualApprovalNote` can be meaningful even on a
   // completed run — a successful text scrape with no usable images still
@@ -275,6 +295,20 @@ async function finishFailed(
 ): Promise<EnrichmentOutcome> {
   const outcome = await markFailed(scan, category, message);
   await updateBusiness(business.businessId, { enrichmentStatus: 'enrichment_failed' });
+  log({
+    level: 'error',
+    event: 'scan.enrichment.failed',
+    component: 'firecrawl-enrichment',
+    businessId: business.businessId,
+    scanId: scan.scanId,
+    provider: 'firecrawl',
+    operation: 'scrape',
+    status: 'failed',
+    errorCategory: category,
+    retryable: isRetryableFailureCategory(category),
+    attempt: scan.attempt,
+    message,
+  });
   return outcome;
 }
 

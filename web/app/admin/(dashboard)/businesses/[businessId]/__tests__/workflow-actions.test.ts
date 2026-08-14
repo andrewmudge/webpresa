@@ -5,10 +5,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGetSession, mockStartScanWorkflow, mockRerunScanWorkflow } = vi.hoisted(() => ({
+const { mockGetSession, mockStartScanWorkflow, mockRerunScanWorkflow, mockMarkStaleExecutionFailed } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockStartScanWorkflow: vi.fn(),
   mockRerunScanWorkflow: vi.fn(),
+  mockMarkStaleExecutionFailed: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({ getSession: mockGetSession }));
@@ -16,6 +17,7 @@ vi.mock('@/lib/workflow/run-scan-workflow', () => ({
   startScanWorkflow: mockStartScanWorkflow,
   rerunScanWorkflow: mockRerunScanWorkflow,
 }));
+vi.mock('@/lib/workflow/stale', () => ({ markStaleExecutionFailed: mockMarkStaleExecutionFailed }));
 
 vi.mock('next/navigation', () => ({
   redirect: (url: string) => {
@@ -23,7 +25,7 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-import { runScanWorkflowAction, rerunScanWorkflowAction } from '@/app/admin/(dashboard)/businesses/[businessId]/workflow-actions';
+import { runScanWorkflowAction, rerunScanWorkflowAction, markStaleExecutionFailedAction } from '@/app/admin/(dashboard)/businesses/[businessId]/workflow-actions';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -64,5 +66,21 @@ describe('rerunScanWorkflowAction', () => {
     await expect(rerunScanWorkflowAction('biz_1', 'scanexec_1')).rejects.toThrow('workflowResult=started');
 
     expect(mockRerunScanWorkflow).toHaveBeenCalledWith('biz_1', 'scanexec_1', 'admin', 'Rerun requested by admin');
+  });
+});
+
+describe('markStaleExecutionFailedAction', () => {
+  it('throws Unauthorized when there is no session, without marking anything failed', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    await expect(markStaleExecutionFailedAction('biz_1', 'scanexec_1')).rejects.toThrow('Unauthorized');
+    expect(mockMarkStaleExecutionFailed).not.toHaveBeenCalled();
+  });
+
+  it('marks the execution failed and redirects with the outcome status', async () => {
+    mockMarkStaleExecutionFailed.mockResolvedValueOnce({ status: 'marked_failed' });
+
+    await expect(markStaleExecutionFailedAction('biz_1', 'scanexec_1')).rejects.toThrow('workflowResult=marked_failed');
+
+    expect(mockMarkStaleExecutionFailed).toHaveBeenCalledWith('biz_1', 'scanexec_1');
   });
 });

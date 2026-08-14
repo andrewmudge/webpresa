@@ -6,6 +6,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { listScansForBusiness, putScanEvent } from '@/lib/db/scan-events';
 import { getLambdaClient, getScreenshotLambdaFunctionName } from '@/lib/lambda/client';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 14 (Playwright Screenshots) — starts an asynchronous screenshot
@@ -107,6 +108,17 @@ export async function captureExistingSiteScreenshot(businessId: string): Promise
     // nothing ever having been dispatched.
     const message = err instanceof Error ? err.message : 'Failed to start the screenshot capture.';
     await putScanEvent({ ...scan, status: 'failed', failureCategory: 'unknown', failureMessage: message, completedAt: new Date().toISOString() });
+    log({
+      level: 'error',
+      event: 'scan.screenshot.invoke_failed',
+      component: 'screenshot-capture',
+      businessId,
+      scanId: scan.scanId,
+      provider: 'playwright',
+      operation: 'existing_site',
+      errorCategory: 'unknown',
+      message,
+    });
     return { status: 'failed', scanId: scan.scanId, message };
   }
 
@@ -151,6 +163,17 @@ export async function captureGeneratedPreviewScreenshot(businessId: string): Pro
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to start the screenshot capture.';
     await putScanEvent({ ...scan, status: 'failed', failureCategory: 'unknown', failureMessage: message, completedAt: new Date().toISOString() });
+    log({
+      level: 'error',
+      event: 'scan.screenshot.invoke_failed',
+      component: 'screenshot-capture',
+      businessId,
+      scanId: scan.scanId,
+      provider: 'playwright',
+      operation: 'generated_preview',
+      errorCategory: 'unknown',
+      message,
+    });
     return { status: 'failed', scanId: scan.scanId, message };
   }
 
@@ -180,6 +203,16 @@ export async function markStaleScanFailed(businessId: string, scanId: string): P
     failureCategory: 'unknown',
     failureMessage: 'Marked failed by an admin after exceeding the staleness threshold with no response from the Lambda.',
     completedAt: new Date().toISOString(),
+  });
+  log({
+    level: 'warn',
+    event: 'scan.screenshot.marked_stale',
+    component: 'screenshot-capture',
+    businessId,
+    scanId,
+    provider: 'playwright',
+    status: 'failed',
+    errorCategory: 'unknown',
   });
   return { status: 'marked_failed' };
 }

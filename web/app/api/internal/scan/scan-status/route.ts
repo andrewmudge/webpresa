@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyInternalRequest } from '@/lib/internal-auth';
 import { getScanEventById } from '@/lib/db/scan-events';
+import { log } from '@/lib/logging/log';
 
 /**
  * Stage 16 — polled by the Wait/Choice loop in `scan-workflow-stack.ts`
@@ -13,6 +14,13 @@ import { getScanEventById } from '@/lib/db/scan-events';
 
 export async function GET(request: Request) {
   if (!(await verifyInternalRequest(request))) {
+    // Deliberately not logged at the same verbosity as the other internal
+    // routes' success path — this endpoint is polled up to 40 times per
+    // in-flight capture (see scan-workflow-stack.ts's Wait/Choice loop), so
+    // logging every successful poll would be noise; scanId already
+    // correlates this back to the relevant ScanEvent in scan.screenshot.*
+    // logs without a separate requestId here.
+    log({ level: 'warn', event: 'internal.scan.unauthorized', component: 'internal-api', operation: 'scan-status' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

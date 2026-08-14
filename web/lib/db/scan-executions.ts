@@ -1,9 +1,42 @@
 import 'server-only';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
-import { GetCommand, PutCommand, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, UpdateCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import type { ScanExecution } from '@/domain/models/scan-execution';
 import { ScanExecutionSchema } from '@/domain/schemas/scan-execution.schema';
 import { getDynamoDBClient, TABLE_SCAN_EXECUTIONS } from './client';
+
+/**
+ * Retrieve every scan execution across every business, newest-first — the
+ * Stage 24 Operations page's cross-business aggregation. Mirrors
+ * `listAllScans`' documented dev-scale tradeoff exactly: no GSI supports a
+ * global "all executions, sorted by date" query, so this scans the whole
+ * table and sorts in application code, bounded by the same safety cap.
+ */
+const LIST_ALL_SCAN_EXECUTIONS_SAFETY_CAP_PAGES = 40;
+
+export async function listAllScanExecutions(): Promise<ScanExecution[]> {
+  const client = getDynamoDBClient();
+  const items: ScanExecution[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  let pages = 0;
+
+  do {
+    const result = await client.send(
+      new ScanCommand({
+        TableName: TABLE_SCAN_EXECUTIONS(),
+        Limit: 200,
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+      }),
+    );
+    for (const item of result.Items ?? []) {
+      items.push(ScanExecutionSchema.parse(item));
+    }
+    exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    pages += 1;
+  } while (exclusiveStartKey && pages < LIST_ALL_SCAN_EXECUTIONS_SAFETY_CAP_PAGES);
+
+  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
 
 export async function getScanExecutionById(scanExecutionId: string): Promise<ScanExecution | null> {
   const client = getDynamoDBClient();
