@@ -4,6 +4,7 @@ import { listAllScanExecutions } from '@/lib/db/scan-executions';
 import { listAllPostcards } from '@/lib/db/postcards';
 import { listLeadsNeedingNotificationRetry } from '@/lib/db/leads';
 import { listRecentStripeWebhookFailures } from '@/lib/db/stripe-webhook-failures';
+import { listDismissedItemIds } from '@/lib/db/operations-dismissals';
 import { listAllBusinesses } from '@/lib/db/businesses';
 import { isStaleScan } from '@/lib/screenshots/capture';
 import { isStaleExecution } from '@/lib/workflow/stale';
@@ -90,7 +91,7 @@ function looksLikeAuthFailure(message: string): boolean {
 }
 
 export async function aggregateNeedsAttention(): Promise<NeedsAttentionResult> {
-  const [businesses, scans, scanExecutions, postcards, failedLeadCandidates, stripeFailures, dlqDepth] = await Promise.all([
+  const [businesses, scans, scanExecutions, postcards, failedLeadCandidates, stripeFailures, dlqDepth, dismissedIds] = await Promise.all([
     listAllBusinesses(),
     listAllScans(),
     listAllScanExecutions(),
@@ -98,6 +99,7 @@ export async function aggregateNeedsAttention(): Promise<NeedsAttentionResult> {
     listLeadsNeedingNotificationRetry(MAX_LEAD_NOTIFICATION_ATTEMPTS),
     listRecentStripeWebhookFailures(),
     getScreenshotDlqDepth(),
+    listDismissedItemIds(),
   ]);
 
   const businessNames = new Map(businesses.map((b) => [b.businessId, b.name]));
@@ -271,7 +273,14 @@ export async function aggregateNeedsAttention(): Promise<NeedsAttentionResult> {
     });
   }
 
-  items.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  // Dismissed items (see lib/db/operations-dismissals.ts) are a snooze, not
+  // a delete — nothing above is skipped or mutated because of a dismissal;
+  // this is purely a display-layer filter applied last, so a dismissed
+  // item's underlying record is always still fully aggregated and would
+  // reappear the moment its dismissal expires (~30 days) or is cleared.
+  const visibleItems = items.filter((item) => !dismissedIds.has(item.id));
 
-  return { items, screenshotDlqDepth: dlqDepth?.approximateMessageCount ?? null };
+  visibleItems.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+
+  return { items: visibleItems, screenshotDlqDepth: dlqDepth?.approximateMessageCount ?? null };
 }

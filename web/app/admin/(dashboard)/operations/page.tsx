@@ -8,6 +8,7 @@ import { markStaleScanFailedAction } from '../businesses/[businessId]/screenshot
 import { rerunScanWorkflowAction, markStaleExecutionFailedAction } from '../businesses/[businessId]/workflow-actions';
 import { retryLeadNotificationAction } from '../businesses/[businessId]/lead-actions';
 import { retryRenderPostcardAction } from '../postcards/actions';
+import { dismissNeedsAttentionItemAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +106,23 @@ function RecoveryButton({ recovery }: { recovery: NonNullable<NeedsAttentionItem
   }
 }
 
+/**
+ * Dismisses one item from the queue — a snooze, not a delete (see
+ * `lib/db/operations-dismissals.ts`). Available on every item regardless of
+ * `recommendedAction`, including ones with no safe recovery button, so the
+ * admin can always clear something they've already investigated/handled
+ * manually.
+ */
+function DismissButton({ itemId }: { itemId: string }) {
+  return (
+    <form action={dismissNeedsAttentionItemAction.bind(null, itemId)}>
+      <button type="submit" className="text-xs font-medium text-gray-400 hover:text-gray-600" title="Hide this from the queue for ~30 days">
+        Dismiss
+      </button>
+    </form>
+  );
+}
+
 function NeedsAttentionCard({ item }: { item: NeedsAttentionItem }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -128,6 +146,7 @@ function NeedsAttentionCard({ item }: { item: NeedsAttentionItem }) {
               </Link>
             )}
             {item.recovery && <RecoveryButton recovery={item.recovery} />}
+            <DismissButton itemId={item.id} />
           </div>
         </div>
       </div>

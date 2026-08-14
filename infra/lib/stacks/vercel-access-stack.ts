@@ -27,6 +27,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly campaignRecipientsTable: dynamodb.ITable;
   readonly scanHitsTable: dynamodb.ITable;
   readonly stripeWebhookFailuresTable: dynamodb.ITable;
+  readonly operationsDismissalsTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
@@ -110,6 +111,7 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.campaignRecipientsTable,
       props.scanHitsTable,
       props.stripeWebhookFailuresTable,
+      props.operationsDismissalsTable,
     ];
 
     this.dataAccessPolicy = new iam.ManagedPolicy(this, 'DataAccessPolicy', {

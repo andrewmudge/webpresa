@@ -1296,6 +1296,10 @@ aws budgets describe-budgets --account-id <account-id> --profile webpresa-{dev,p
 
 After the next fresh deployment picks up the two Vercel env vars above, visit `/admin/operations` and confirm it loads without the `loadError` banner.
 
+### `operations-dismissals` table (Dismiss button) — added same day, both accounts
+
+Added at the user's request after the initial Stage 24 rollout — the "Dismiss" button on `/admin/operations`' Needs Attention items. Same deploy shape as everything else in this stage: `WebpresaDataStack` (new table) → `WebpresaVercelAccessStack` (new grant), both accounts, both clean/additive. New Vercel env var `OPERATIONS_DISMISSALS_TABLE_NAME` (`webpresa-{env}-operations-dismissals`) added to Preview and Production. No secret — the table carries no credential, only which item ids an admin has snoozed.
+
 ### Expected failure behavior
 
 | Condition | Expected behavior |

@@ -186,6 +186,7 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   campaignRecipientsTable: dataStack.campaignRecipientsTable,
   scanHitsTable: dataStack.scanHitsTable,
   stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
+  operationsDismissalsTable: dataStack.operationsDismissalsTable,
   assetsBucket: dataStack.assetsBucket,
   stockImagesBucket: stockImagesStack.bucket,
   stockImagesTable: stockImagesStack.table,

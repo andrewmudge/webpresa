@@ -382,6 +382,16 @@ Two item shapes share this table, distinguished by the `sortKey` prefix (the sam
 | GSI | none — write-rare (failures only), read via a small bounded `Scan` for `/admin/operations` |
 | TTL attribute: `ttl` | Populated on **every** item (~90 days) — deliberately different from Claims'/Leads' TTL, which only ever touches a secondary rate-limit item shape while the real record is preserved indefinitely. This table's record itself is meant to expire; it's a short diagnostic log, not a permanent fulfillment record like `postcard-webhook-events`. |
 
+### `webpresa-dev-operations-dismissals` (Stage 24)
+
+| | |
+|---|---|
+| Partition key | `itemId` (S) — matches `NeedsAttentionItem.id` exactly (e.g. `"scan:scan_abc123"`) |
+| GSI | none — direct GetItem/PutItem, and a small bounded `Scan` (projecting only `itemId`) to build the full dismissed-id set for `/admin/operations` |
+| TTL attribute: `ttl` | Populated on **every** item (~30 days) |
+
+Backs the Operations page's "Dismiss" button (added at the user's request, 2026-08-14). A dismiss is a snooze, not a delete — it never touches the underlying `ScanEvent`/`ScanExecution`/`Postcard`/`Lead`/`StripeWebhookFailure` record, only what `aggregateNeedsAttention()` displays; a dismissed item resurfaces automatically after ~30 days if the same underlying problem is still unresolved. No model/schema/factory quartet — a table-agnostic utility item, the same treatment `lib/db/rate-limit.ts`'s counter items already get.
+
 Diagnostics-only for Stripe webhook processing failures (invalid signature, internal error) — see "Operational Monitoring, Failure Recovery, and Operations Center (Stage 24)" below for why this exists (Stripe had no durable failure record of any kind before this).
 
 ### `webpresa-dev-stock-image-metadata` (Phase 1 stock image repository)
@@ -906,6 +916,7 @@ The homepage requires no environment variables. The admin dashboard requires all
 | `SCAN_HITS_TABLE_NAME` | CloudFormation export `webpresa-dev-scan-hits-name` | ScanHit repository (`web/lib/db/scan-hits.ts`) — Stage 21 |
 | `STRIPE_WEBHOOK_FAILURES_TABLE_NAME` | CloudFormation export `webpresa-{env}-stripe-webhook-failures-name` | StripeWebhookFailure repository (`web/lib/db/stripe-webhook-failures.ts`) — Stage 24; added to Vercel Preview + Production 2026-08-14 |
 | `SCREENSHOT_DLQ_URL` | CloudFormation export `webpresa-{env}-screenshot-capture-dlq-url` (already exported since Stage 14) | Read-only DLQ depth check (`web/lib/sqs/dlq.ts`) — Stage 24; added to Vercel Preview + Production 2026-08-14 |
+| `OPERATIONS_DISMISSALS_TABLE_NAME` | CloudFormation export `webpresa-{env}-operations-dismissals-name` | Needs Attention dismissal repository (`web/lib/db/operations-dismissals.ts`) — Stage 24; added to Vercel Preview + Production 2026-08-14 |
 | `ADMIN_USERNAME` | Set manually | Admin sign-in |
 | `ADMIN_PASSWORD_HASH` | scrypt hash — see `.env.local.example` for generation command | Admin sign-in |
 | `SESSION_SECRET` | `openssl rand -base64 32` | JWT session signing |
@@ -1210,6 +1221,8 @@ The screenshot Lambda's dead-letter queue has existed since Stage 14 with zero c
 
 **Needs Attention aggregation** (`web/lib/operations/needs-attention.ts`) composes existing/lightly-extended repository functions — `listAllScans()`, a new `listAllScanExecutions()` (mirrors `listAllScans()` exactly), `listAllPostcards()`, `listLeadsNeedingNotificationRetry()`, `listRecentStripeWebhookFailures()`, `getScreenshotDlqDepth()` — all bounded `Scan` + app-side filter, deliberately the same dev-scale pattern already established rather than activating the flagged, unused `status-index` GSIs. `manual_approval_required` `ScanEvent`s (e.g. every business with no website) are explicitly excluded — an expected, frequent disposition, not a failure, and including it would flood the page. Each item carries a `recommendedAction` (`safe_retry | requires_configuration_fix | requires_manual_review | investigate`) derived from already-known fields (`isRetryableFailureCategory()`, `ScanWorkflowFailure.retryEligible`, a small `firecrawl_auth`-style auth-category set) — no new heuristics beyond what already exists. Recovery buttons are thin wrappers around **existing** Server Actions only (`retryEnrichmentAction`, `markStaleScanFailedAction`, `markStaleExecutionFailedAction`, `rerunScanWorkflowAction`, `retryRenderPostcardAction`, `retryLeadNotificationAction`) — postcard submission failures and provider-auth/config failures render "View Business" only, no button, since no safe retry path exists for those today (`SubmitButton.tsx` already says a new postcard must be generated).
 
+**Dismiss, added 2026-08-14 at the user's request.** Every Needs Attention item, regardless of `recommendedAction`, also gets a "Dismiss" button (`dismissNeedsAttentionItemAction`, `operations/actions.ts`) so the admin can clear something they've already investigated/handled outside the recovery-button flow. Backed by the new `operations-dismissals` table (`lib/db/operations-dismissals.ts`) — a snooze, not a delete: `aggregateNeedsAttention()` fetches and classifies every item exactly as before, then filters the final list against the dismissed-id set as the very last step, so a dismissal can never suppress the underlying record from being recomputed or hide a genuinely still-open problem forever (the dismissal's own `ttl`, ~30 days, expires and the item reappears if it's still unresolved by then).
+
 **`web/lib/postcards/status.ts`** — `derivePostcardStatus()` extracted out of `CampaignDetail.tsx` (previously page-local) so the campaign admin page and the Operations aggregation share one implementation of the render-failure inference (`status === 'pending' && !frontArtifactKey`) instead of a second, driftable copy.
 
 **Recent Operations** (`web/lib/operations/recent.ts`) — a bounded, capped-at-15 merge of completed scans/executions/postcards from the same already-established list functions above. Lead-delivery events are deliberately omitted — `lib/db/leads.ts` has no "recently sent" query, only per-business and needs-retry queries, and adding one would mean a new GSI for a nice-to-have feed item (see implementation.md's own "omit rather than introduce a bad table scan or unnecessary GSI" guidance).
@@ -1300,6 +1313,8 @@ web/lib/
     scan-executions.ts    ScanExecution repository — get, listForBusiness, listAll (Stage 24), put,
                            claimScanExecutionStatus (atomic conditional transition) — Stage 16/24
     stripe-webhook-failures.ts  StripeWebhookFailure repository — put, listRecent — Stage 24
+    operations-dismissals.ts    dismissNeedsAttentionItem, listDismissedItemIds — table-agnostic
+                                 utility item, no domain model quartet (mirrors rate-limit.ts) — Stage 24
   lob/
     client.ts             Hand-written fetch wrapper (HTTP Basic Auth), not the official lob npm package — Stage 22
     submit-postcard.ts     submitPostcardToLob — builds the /postcards request, idempotent submission — Stage 22

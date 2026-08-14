@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly fifteen DynamoDB tables (Stage 24 adds StripeWebhookFailures)', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 15);
+  it('creates exactly sixteen DynamoDB tables (Stage 24 adds StripeWebhookFailures and OperationsDismissals)', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 16);
   });
 });
 
@@ -292,7 +292,22 @@ describe('GSI names', () => {
     expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
   });
 
-  it('no table other than Claims, Leads, and StripeWebhookFailures has a TTL attribute', () => {
+  it('OperationsDismissals table has itemId as partition key, no GSI, and a TTL attribute (a dismiss is a snooze, not a delete — the underlying scan/postcard/lead record is never touched, and a dismissal expires so an unresolved problem resurfaces)', () => {
+    dev.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'webpresa-dev-operations-dismissals',
+      KeySchema: [{ AttributeName: 'itemId', KeyType: 'HASH' }],
+      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+    });
+    const resources = dev.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'webpresa-dev-operations-dismissals' },
+    });
+    const table = Object.values(resources)[0] as {
+      Properties: { GlobalSecondaryIndexes?: unknown[] };
+    };
+    expect(table.Properties.GlobalSecondaryIndexes).toBeUndefined();
+  });
+
+  it('no table other than Claims, Leads, StripeWebhookFailures, and OperationsDismissals has a TTL attribute', () => {
     const tableNames = [
       'webpresa-dev-businesses',
       'webpresa-dev-site-previews',
@@ -484,9 +499,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 44 outputs — 30 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
+  it('creates 46 outputs — 32 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(44);
+    expect(Object.keys(outputs)).toHaveLength(46);
   });
 });
 

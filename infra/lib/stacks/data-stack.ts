@@ -71,6 +71,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly campaignRecipientsTable: dynamodb.Table;
   public readonly scanHitsTable: dynamodb.Table;
   public readonly stripeWebhookFailuresTable: dynamodb.Table;
+  public readonly operationsDismissalsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
@@ -590,6 +591,31 @@ export class WebpresaDataStack extends cdk.Stack {
       timeToLiveAttribute: 'ttl',
     });
     this.stripeWebhookFailuresTable = stripeWebhookFailures.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // OperationsDismissals (Stage 24 — Operational Monitoring, Failure
+    // Recovery, and Operations Center)
+    //   PK: itemId — matches NeedsAttentionItem.id exactly (e.g.
+    //     "scan:scan_abc123", "postcard:postcard_xyz:submission"), computed
+    //     by web/lib/operations/needs-attention.ts.
+    //   No GSI — direct GetItem/PutItem by itemId only.
+    //
+    //   A dismiss is a snooze, not a delete: the underlying ScanEvent/
+    //   ScanExecution/Postcard/Lead/StripeWebhookFailure record is never
+    //   touched, so nothing here can destroy business/scan history — it
+    //   only controls what the admin's Needs Attention list shows. TTL
+    //   attribute `ttl` is enabled and populated on every item (~30 days),
+    //   so a dismissed item resurfaces automatically if the same underlying
+    //   problem is still unresolved after that window, rather than being
+    //   silently hidden forever.
+    // ───────────────────────────────────────────────────────────────────────
+    const operationsDismissals = new WebpresaTable(this, 'OperationsDismissals', {
+      config,
+      tableName: 'operations-dismissals',
+      partitionKey: { name: 'itemId', type: S },
+      timeToLiveAttribute: 'ttl',
+    });
+    this.operationsDismissalsTable = operationsDismissals.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Customer identity (Stage 17 — Website Claim Flow)

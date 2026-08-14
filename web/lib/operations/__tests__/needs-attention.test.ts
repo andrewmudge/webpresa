@@ -15,6 +15,7 @@ const mockListLeadsNeedingNotificationRetry = vi.hoisted(() => vi.fn());
 const mockListRecentStripeWebhookFailures = vi.hoisted(() => vi.fn());
 const mockListAllBusinesses = vi.hoisted(() => vi.fn());
 const mockGetScreenshotDlqDepth = vi.hoisted(() => vi.fn());
+const mockListDismissedItemIds = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db/scan-events', () => ({ listAllScans: mockListAllScans }));
 vi.mock('@/lib/db/scan-executions', () => ({ listAllScanExecutions: mockListAllScanExecutions }));
@@ -23,6 +24,7 @@ vi.mock('@/lib/db/leads', () => ({ listLeadsNeedingNotificationRetry: mockListLe
 vi.mock('@/lib/db/stripe-webhook-failures', () => ({ listRecentStripeWebhookFailures: mockListRecentStripeWebhookFailures }));
 vi.mock('@/lib/db/businesses', () => ({ listAllBusinesses: mockListAllBusinesses }));
 vi.mock('@/lib/sqs/dlq', () => ({ getScreenshotDlqDepth: mockGetScreenshotDlqDepth }));
+vi.mock('@/lib/db/operations-dismissals', () => ({ listDismissedItemIds: mockListDismissedItemIds }));
 
 import { aggregateNeedsAttention } from '../needs-attention';
 import type { ScanEvent } from '@/domain/models/scan-event';
@@ -113,6 +115,7 @@ beforeEach(() => {
   mockListLeadsNeedingNotificationRetry.mockResolvedValue([]);
   mockListRecentStripeWebhookFailures.mockResolvedValue([]);
   mockGetScreenshotDlqDepth.mockResolvedValue(null);
+  mockListDismissedItemIds.mockResolvedValue(new Set());
 });
 
 describe('scan events', () => {
@@ -306,5 +309,39 @@ describe('sorting', () => {
 
     const { items } = await aggregateNeedsAttention();
     expect(items.map((i) => i.id)).toEqual(['stripe:stripefail_new', 'scan:scan_old']);
+  });
+});
+
+describe('dismissals', () => {
+  it('omits an item whose id has been dismissed', async () => {
+    mockListAllScans.mockResolvedValue([scan({ status: 'failed', failureCategory: 'invalid_url' })]);
+    mockListDismissedItemIds.mockResolvedValue(new Set(['scan:scan_1']));
+
+    const { items } = await aggregateNeedsAttention();
+
+    expect(items).toHaveLength(0);
+  });
+
+  it('never mutates or skips computing an item because it is dismissed — only filters the final list', async () => {
+    mockListAllScans.mockResolvedValue([
+      scan({ scanId: 'scan_1', status: 'failed', failureCategory: 'invalid_url' }),
+      scan({ scanId: 'scan_2', status: 'failed', failureCategory: 'firecrawl_timeout' }),
+    ]);
+    mockListDismissedItemIds.mockResolvedValue(new Set(['scan:scan_1']));
+
+    const { items } = await aggregateNeedsAttention();
+
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe('scan:scan_2');
+  });
+
+  it('dismissing one category does not affect unrelated items', async () => {
+    mockListAllScans.mockResolvedValue([scan({ status: 'failed', failureCategory: 'invalid_url' })]);
+    mockListRecentStripeWebhookFailures.mockResolvedValue([stripeFailure()]);
+    mockListDismissedItemIds.mockResolvedValue(new Set(['stripe:stripefail_1']));
+
+    const { items } = await aggregateNeedsAttention();
+
+    expect(items.map((i) => i.id)).toEqual(['scan:scan_1']);
   });
 });

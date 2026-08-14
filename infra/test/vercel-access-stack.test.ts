@@ -62,6 +62,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     campaignRecipientsTable: dataStack.campaignRecipientsTable,
     scanHitsTable: dataStack.scanHitsTable,
     stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
+    operationsDismissalsTable: dataStack.operationsDismissalsTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -133,7 +134,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), and stripe-webhook-failures (Stage 24)', () => {
+  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), and stripe-webhook-failures/operations-dismissals (Stage 24)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -143,8 +144,8 @@ describe('data-access policy statements', () => {
     expect(statement.Action).toEqual(
       expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
     );
-    // 16 tables × (table + index/*) = 32 resource entries.
-    expect(statement.Resource).toHaveLength(32);
+    // 17 tables × (table + index/*) = 34 resource entries.
+    expect(statement.Resource).toHaveLength(34);
   });
 
   it('grants ses:SendEmail with an unscoped resource (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
