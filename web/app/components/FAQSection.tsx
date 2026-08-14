@@ -6,9 +6,14 @@ import { Plus, Minus } from "lucide-react";
 
 const faqs = [
   {
-    question: "I received a postcard. What does that mean?",
+    question: "I received a postcard or email. What does that mean?",
     answer:
-      "It means we noticed your current website could be improved, so we created a modern preview version for your business. You can view the preview, and if you like what you see, we can have it live quickly. There's no obligation — we just want you to see what's possible.",
+      "It means we noticed your current website could be improved, so we created a modern preview version for your business. Click your email link, or enter the access code from your postcard, to view the preview — if you like what you see, we can have it live quickly. There's no obligation — we just want you to see what's possible.",
+  },
+  {
+    question: "I lost my postcard, or I can't find my code. What do I do?",
+    answer:
+      "Email us at hello@webpresa.com with your business name and we'll help you locate your access code.",
   },
   {
     question: "What is Webpresa?",

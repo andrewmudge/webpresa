@@ -3,7 +3,7 @@ import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Check, Lock, ShieldCheck, Star, Tag, RefreshCw } from 'lucide-react';
 import { createCheckoutSessionAction, type CheckoutActionState } from '@/app/account/checkout/actions';
-import { WEBPRESA_PLANS, PLAN_CATALOG, type WebpresaPlan } from '@/domain/constants/plan-catalog';
+import { PLAN_CATALOG, type WebpresaPlan } from '@/domain/constants/plan-catalog';
 import { cn } from '@/lib/utils';
 import { TrustRow } from '../_components/TrustRow';
 
@@ -107,10 +107,14 @@ export function PlanSelectionForm({ businessId }: Props) {
       <form action={formAction} className="mt-4">
         <input type="hidden" name="businessId" value={businessId} />
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {WEBPRESA_PLANS.map((plan) => (
-            <PlanCard key={plan} plan={plan} defaultChecked={plan === 'basic'} />
-          ))}
+        {/*
+          Growth is intentionally not offered at MVP launch — only Basic is
+          purchasable. WEBPRESA_PLANS/PLAN_CATALOG.growth still exist and
+          remain fully functional; reinstate `WEBPRESA_PLANS.map(...)` here
+          (and restore the two-column grid) to offer both plans again.
+        */}
+        <div className="grid grid-cols-1 gap-6 max-w-md mx-auto md:mx-0">
+          <PlanCard plan="basic" defaultChecked />
         </div>
 
         <div className="mt-6 flex flex-col gap-5 rounded-2xl border border-(--color-border) bg-white p-5 sm:flex-row sm:items-center sm:justify-between">

@@ -5,6 +5,7 @@ const footerLinks = [
   {
     heading: "Company",
     links: [
+      { label: "Enter My Code", href: "/r" },
       { label: "How It Works", href: "#how-it-works" },
       { label: "Pricing", href: "#pricing" },
       { label: "About", href: "#about" },
@@ -16,7 +17,7 @@ const footerLinks = [
     links: [
       { label: "Privacy Policy", href: "#contact" },
       { label: "Terms of Service", href: "#contact" },
-      { label: "Contact", href: "#contact" },
+      { label: "Contact", href: "mailto:hello@webpresa.com" },
     ],
   },
 ];

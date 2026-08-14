@@ -96,26 +96,19 @@ export default function PricingSection() {
                 ))}
               </ul>
 
-              {/* Growth upsell */}
-              <p className="text-xs text-gray-400 mb-6 pb-6 border-b border-gray-100">
-                Need more visibility? {PLAN_CATALOG.growth.label} (
-                {PLAN_CATALOG.growth.priceDisplay}) adds multi-city SEO pages
-                and lead forms — upgrade anytime from your dashboard.
-              </p>
-
               {/* CTA */}
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link
-                  href="#contact"
+                  href="/r"
                   className="flex w-full items-center justify-center bg-brand text-white font-bold text-base py-4 rounded-xl shadow-md hover:bg-brand-dark transition-colors duration-200"
                 >
-                  Claim Your Website
+                  Enter My Code
                 </Link>
               </motion.div>
 
               <p className="text-center text-xs text-gray-400 mt-4">
                 Questions?{" "}
-                <a href="#contact" className="underline text-brand hover:text-brand-dark">
+                <a href="mailto:hello@webpresa.com" className="underline text-brand hover:text-brand-dark">
                   Talk to us first
                 </a>
               </p>

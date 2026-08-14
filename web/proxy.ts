@@ -42,7 +42,7 @@ const ADMIN_SIGN_IN_PATH = '/admin/sign-in';
 const DEFAULT_ADMIN_PATH = '/admin/businesses';
 
 const CUSTOMER_SIGN_IN_PATH = '/account/sign-in';
-const DEFAULT_CUSTOMER_PATH = '/account/claim-status';
+const DEFAULT_CUSTOMER_PATH = '/app';
 
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

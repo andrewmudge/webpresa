@@ -15,10 +15,10 @@ interface Props {
  * (`lib/ai/generate-preview.ts`'s `resolvePhotoSlot`/`resolveHeroImages`)
  * from a priority chain that isn't limited to `business.photoUrls` — a slot
  * with no matching upload falls back to a Firecrawl-scan-accepted image (or,
- * for hero, a curated stock photo). This card shows what's actually
- * rendering per slot right now, read-only, labeled by whether it's one of
- * the customer's own uploads or was pulled in automatically — customers
- * otherwise had no visibility into non-uploaded images the site was using.
+ * for hero, a curated stock photo). The "Your photos" grid below folds these
+ * in alongside the customer's own uploads (deduped by URL) so it always
+ * reflects what's actually showing on the site, not just what they've
+ * uploaded — a non-uploaded slot image is labeled and not removable.
  */
 const SITE_IMAGE_SLOT_LABELS = {
   heroImageUrl: 'Hero',
@@ -36,46 +36,50 @@ export async function PhotosTab({ businessId, business, isReadOnly }: Props) {
   const galleryImages = content?.gallerySection?.images ?? [];
   const captionFor = (url: string) => galleryImages.find((g) => g.url === url)?.caption ?? '';
 
-  const siteImageSlots = (Object.entries(SITE_IMAGE_SLOT_LABELS) as [keyof typeof SITE_IMAGE_SLOT_LABELS, string][])
-    .map(([field, label]) => ({ label, url: theme?.[field] }))
-    .filter((slot): slot is { label: string; url: string } => !!slot.url);
+  const slotLabelsByUrl = new Map<string, string[]>();
+  for (const [field, label] of Object.entries(SITE_IMAGE_SLOT_LABELS) as [keyof typeof SITE_IMAGE_SLOT_LABELS, string][]) {
+    const url = theme?.[field];
+    if (!url) continue;
+    slotLabelsByUrl.set(url, [...(slotLabelsByUrl.get(url) ?? []), label]);
+  }
+
+  // Uploaded photos first (in upload order), then any site-slot images not
+  // already among them (e.g. a Firecrawl-sourced hero photo) — one unified
+  // grid rather than a separate "what's live" card, deduped by URL.
+  const allPhotoUrls = [...photoUrls, ...[...slotLabelsByUrl.keys()].filter((url) => !photoUrls.includes(url))];
 
   return (
     <div className="space-y-6">
-      {siteImageSlots.length > 0 && (
-        <Card title="Photos on your site" description="What's currently showing in each section — read-only.">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {siteImageSlots.map(({ label, url }) => (
-              <div key={label} className="space-y-1">
-                <div className="relative rounded-lg overflow-hidden border border-gray-200 aspect-square">
-                  <Image src={url} alt={label} fill className="object-cover" unoptimized />
-                </div>
-                <p className="text-xs font-medium text-gray-700">{label}</p>
-                <p className="text-[11px] text-gray-400">{photoUrls.includes(url) ? 'Uploaded by you' : 'Pulled from your website'}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <Card title="Your photos" description={`Up to 6 photos. ${photoUrls.length}/6 used.`}>
+      <Card title="Your photos" description={`${photoUrls.length}/6 uploaded — plus any photos pulled from your website.`}>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {photoUrls.map((url) => (
-            <div key={url} className="relative rounded-lg overflow-hidden border border-gray-200 aspect-square">
-              <Image src={url} alt="" fill className="object-cover" unoptimized />
-              {!isReadOnly && (
-                <form action={deletePhotoActionCustomer.bind(null, businessId)} className="absolute top-1 right-1">
-                  <input type="hidden" name="photoUrl" value={url} />
-                  <button
-                    type="submit"
-                    className="bg-black/60 text-white text-xs px-2 py-1 rounded-md hover:bg-black/80 transition-colors"
-                  >
-                    Remove
-                  </button>
-                </form>
-              )}
-            </div>
-          ))}
+          {allPhotoUrls.map((url) => {
+            const isUploaded = photoUrls.includes(url);
+            const slotLabels = slotLabelsByUrl.get(url);
+            return (
+              <div key={url} className="space-y-1">
+                <div className="relative rounded-lg overflow-hidden border border-gray-200 aspect-square">
+                  <Image src={url} alt={slotLabels?.join(', ') ?? ''} fill className="object-cover" unoptimized />
+                  {isUploaded && !isReadOnly && (
+                    <form action={deletePhotoActionCustomer.bind(null, businessId)} className="absolute top-1 right-1">
+                      <input type="hidden" name="photoUrl" value={url} />
+                      <button
+                        type="submit"
+                        className="bg-black/60 text-white text-xs px-2 py-1 rounded-md hover:bg-black/80 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </form>
+                  )}
+                </div>
+                {slotLabels && (
+                  <>
+                    <p className="text-xs font-medium text-gray-700">{slotLabels.join(', ')}</p>
+                    <p className="text-[11px] text-gray-400">{isUploaded ? 'Uploaded by you' : 'Pulled from your website'}</p>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {!isReadOnly && photoUrls.length < 6 && (

@@ -37,20 +37,20 @@ export default function CTASection() {
               id="cta-heading"
               className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white leading-tight tracking-tight mb-6 max-w-3xl mx-auto"
             >
-              Ready to see what your website could look like?
+              Ready to see your website?
             </h2>
             <p className="text-lg text-white/75 max-w-xl mx-auto mb-10 leading-relaxed">
-              Join local businesses across the country that trust Webpresa to manage their online presence.
+              Follow your email link, or enter the access code from your postcard, to view your site and make it yours.
               Simple pricing, everything included, and we handle all the technical work.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                 <Link
-                  href="#contact"
-                  className="inline-flex items-center justify-center bg-accent text-white font-bold text-base px-8 py-4 rounded-xl shadow-lg hover:bg-accent-dark transition-colors duration-200"
+                  href="/r"
+                  className="inline-flex items-center justify-center bg-[#3AB9FD] text-white font-bold text-base px-8 py-4 rounded-xl shadow-lg hover:bg-[#3AB9FD] transition-colors duration-200"
                 >
-                  Claim Your Website
+                  Enter Your Code
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>

@@ -8468,3 +8468,77 @@ npm run lint        — 0 errors (2 pre-existing, unrelated warnings)
 ```
 
 Documentation-only change (plus one code comment, no logic change) — no test/build impact expected; `npm test`/`npm run build` not re-run for this entry.
+
+---
+
+**Date:** 2026-08-13
+
+**MVP pricing: hide the $79 Growth plan, move lead capture into Basic.** For MVP launch, only the $39/month Basic plan should be purchasable/visible to customers. Investigation found exactly two sources of truth for the Basic/Growth split: `WEBPRESA_PLANS` (`domain/constants/plans.ts`, which plan values are valid) and `CAPABILITY_REQUIRED_PLAN` (`lib/auth/customer-authorization.ts`, what Growth used to unlock — `lead_capture`, the Stage 20 "Request Service" form). Kept the change minimal and reversible: the backend remains fully capable of Growth (`WEBPRESA_PLANS`, `PLAN_CATALOG.growth`, `resolvePriceId()`, `STRIPE_PRICE_ID_GROWTH`, and the Stripe webhook's plan reconciliation are all untouched), only the customer-facing *selection* surface changed.
+
+- `PlanSelectionForm.tsx` (`/account/claim-status`) now renders only the Basic plan card instead of mapping over `WEBPRESA_PLANS`; a code comment documents how to reinstate the two-plan grid later.
+- `PricingSection.tsx` (marketing homepage) — removed the "Growth upsell" paragraph that literally quoted `$79/month`.
+- `hasPlanCapability()` (`lib/auth/customer-authorization.ts`) — simplified from `access.mode === 'full' && access.plan === 'growth'` to `access.mode === 'full'`, removing the now-meaningless `CAPABILITY_REQUIRED_PLAN` map. This single change fixed every lead-capture gate at once (public CTA visibility, `submitLeadAction`, `RequestServiceModal`, the `/leads` dashboard page, and its mark-read/archive actions) — none of those call sites needed touching.
+- `plan-catalog.ts` — moved `'Lead forms to capture new customers'` from `growth.features` into `basic.features` so the Basic card/marketing page correctly advertises it.
+- Reworded the leads-dashboard upsell card (`leads/page.tsx`) from "Upgrade to Growth to unlock lead capture" to "Activate your subscription to unlock lead capture" — accurate now that any active plan (not just Growth) grants the capability; the card is now only reachable for `billing_recovery`/`none` businesses.
+- Updated stale Growth-only framing in doc comments (`leads/actions.ts`, `leads/page.tsx`) and `docs/architecture.md`/`docs/implementation.md` (Stage 18 "Approved plans", Stage 20 "Entitlement" and "Customer lead inbox").
+- Updated `lib/auth/__tests__/customer-authorization.test.ts`'s `hasPlanCapability` suite to assert Basic now grants `lead_capture` (previously asserted it was denied).
+
+No CDK/infra changes — Stripe price IDs are plain Vercel env vars, not CDK-managed. No changes to `WEBPRESA_PLANS`, the Billing page, or the dashboard's `PLAN_LABELS` display maps.
+
+## Files changed
+
+```
+web/app/account/claim-status/PlanSelectionForm.tsx                                 MODIFIED — render only the Basic plan card
+web/app/components/PricingSection.tsx                                              MODIFIED — removed $79/Growth upsell paragraph
+web/lib/auth/customer-authorization.ts                                             MODIFIED — hasPlanCapability no longer plan-differentiated
+web/app/app/(dashboard)/businesses/[businessId]/leads/page.tsx                     MODIFIED — upsell copy no longer references Growth
+web/app/app/(dashboard)/businesses/[businessId]/leads/actions.ts                   MODIFIED — doc comment updated
+web/domain/constants/plan-catalog.ts                                               MODIFIED — lead-forms feature moved from Growth to Basic
+web/lib/auth/__tests__/customer-authorization.test.ts                              MODIFIED — hasPlanCapability test cases updated
+web/docs/architecture.md                                                           MODIFIED — Stage 20 section updated, MVP pricing note added
+web/docs/implementation.md                                                         MODIFIED — Stage 18/20 spec updated
+web/docs/build_log.md                                                              MODIFIED — this entry
+```
+
+## Verification
+
+```
+npx tsc --noEmit   — clean
+npm run lint        — 0 errors (3 warnings: 1 new — intentionally-unused `_capability` param, same underscore convention as 2 pre-existing warnings elsewhere)
+npm test             — 116 test files, 1250 tests, all passing
+npm run build        — production build succeeds
+```
+
+Not yet visually verified in a running browser — per this repo's convention, that's left to the user (`AGENTS.md`, "Verification").
+
+---
+
+**Date:** 2026-08-14
+
+**Bug fix: returning customers no longer land on `/account/claim-status` after sign-in.** Reported symptom: a user who already claimed and paid for a business, then signed out and signed back in, was shown the "You've claimed X" claim-status screen (with "Go to dashboard"/"Manage billing" buttons) instead of going straight to their dashboard — an unnecessary extra step for anyone who isn't mid-claim.
+
+Root cause: two hardcoded default post-login redirect targets, both left over from before `/app` (Stage 19's dashboard) existed, and never updated when Stage 19 shipped:
+- `lib/auth/customer-actions.ts`'s `DEFAULT_REDIRECT` — used by `customerSignInAction` whenever the sign-in form's hidden `next` field is empty (the normal case, i.e. not a bounce-back from a protected page).
+- `proxy.ts`'s `DEFAULT_CUSTOMER_PATH` — used when an already-authenticated customer session hits `/account/sign-in` directly.
+
+Both were `/account/claim-status`. `/app` (`app/app/(dashboard)/page.tsx`) already had exactly the right branching logic for a universal post-login landing target — zero owned businesses redirects to `/account/claim-status` (no claim yet, unchanged), one business redirects straight to `/app/businesses/{id}`, multiple businesses show a picker — so the fix was changing both defaults to `/app` and letting that existing logic decide. `/app` was already an allowed `next` prefix (`ALLOWED_REDIRECT_PREFIXES`, added in Stage 19), so no other code needed to change. `claim-status`'s own intentional redirects (post-claim, resume-unpaid-claim in `app/claim/actions.ts`) were left untouched.
+
+## Files changed
+
+```
+web/lib/auth/customer-actions.ts        MODIFIED — DEFAULT_REDIRECT changed from '/account/claim-status' to '/app'
+web/proxy.ts                            MODIFIED — DEFAULT_CUSTOMER_PATH changed from '/account/claim-status' to '/app'
+web/docs/architecture.md                MODIFIED — Stage 19 section note + top status line
+web/docs/build_log.md                   MODIFIED — this entry
+```
+
+## Verification
+
+```
+npx tsc --noEmit   — clean
+npm run lint        — 0 errors (3 pre-existing, unrelated warnings)
+npm test             — 116 test files, 1250 tests; 1 test timed out on the full run (overview-status.test.ts) but passed cleanly (36/36) when rerun in isolation — confirmed pre-existing flake, unrelated to this change
+npm run build        — production build succeeds
+```
+
+Not yet visually verified in a running browser — per this repo's convention, that's left to the user (`AGENTS.md`, "Verification").

@@ -39,6 +39,7 @@ export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
       'Mobile optimized',
       'Local SEO for your city',
       'Unlimited edits to your website',
+      'Lead forms to capture new customers',
       'Email & phone support',
     ],
   },
@@ -49,7 +50,6 @@ export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
     featuresIntro: 'Everything in Basic, plus:',
     features: [
       'Multiple city-specific SEO pages',
-      'Lead forms to capture new customers',
       'Advanced on-page SEO',
       'Priority support',
     ],

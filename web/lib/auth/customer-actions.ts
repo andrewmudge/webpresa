@@ -25,7 +25,7 @@ export type CustomerSignInState = { error?: string } | undefined;
  * the dashboard, not just `/account/*`.
  */
 const ALLOWED_REDIRECT_PREFIXES = ['/account', '/app'];
-const DEFAULT_REDIRECT = '/account/claim-status';
+const DEFAULT_REDIRECT = '/app';
 
 /** No open redirect — only an internal `/account/*` or `/app/*` path is ever honored. */
 function safeNextPath(next: FormDataEntryValue | null): string {

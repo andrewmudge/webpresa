@@ -2,29 +2,29 @@
 
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
-import { ClipboardList, Layout, RefreshCw } from "lucide-react";
+import { Layout, Mail, RefreshCw } from "lucide-react";
 
 const steps = [
   {
     number: "01",
-    icon: ClipboardList,
-    title: "Tell Us About Your Business",
+    icon: Layout,
+    title: "We Build Your Preview First",
     description:
-      "A quick onboarding gives us everything we need — your services, location, and how you want customers to reach you. Simple and fast.",
+      "We noticed your business could use a better website, so we built a modern one for you — no forms to fill out, no onboarding call required.",
   },
   {
     number: "02",
-    icon: Layout,
-    title: "We Prepare Your Website",
+    icon: Mail,
+    title: "You Get a Postcard or Email",
     description:
-      "We create a modern, professional website ready for your review. You'll see exactly what your customers will see before anything goes live.",
+      "We mail you a postcard with an access code, or email you a direct link — either way, you can see your new website and decide if you want it.",
   },
   {
     number: "03",
     icon: RefreshCw,
-    title: "You're in Control",
+    title: "View Your Site & Make It Yours",
     description:
-      "Log in anytime to update your content, photos, services, and theme — changes go live instantly, no waiting on us. Meanwhile, we handle hosting, security, and uptime in the background.",
+      "Follow your email link, or enter your postcard code, to view your site — then update your content, photos, services, and theme yourself. Changes go live instantly.",
   },
 ];
 

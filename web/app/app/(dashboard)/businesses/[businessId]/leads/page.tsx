@@ -12,9 +12,9 @@ interface Props {
 /**
  * Stage 20 — the customer lead inbox. Unlike most of this dashboard's
  * editing surfaces (gated by `requireActiveSubscription`, which redirects
- * to `/account/claim-status`), a Basic-plan owner who navigates here sees
- * an upsell card rather than being bounced elsewhere — the failure mode is
- * "upgrade", not "access denied".
+ * to `/account/claim-status`), an owner without an active subscription who
+ * navigates here sees an upsell card rather than being bounced elsewhere —
+ * the failure mode is "upgrade", not "access denied".
  */
 export default async function LeadsPage({ params }: Props) {
   const { businessId } = await params;
@@ -29,16 +29,16 @@ export default async function LeadsPage({ params }: Props) {
           <h1 className="text-2xl font-bold text-gray-900">Leads</h1>
           <p className="mt-1 text-sm text-gray-500">Service requests submitted through your website.</p>
         </div>
-        <Card title="Upgrade to Growth to unlock lead capture">
+        <Card title="Activate your subscription to unlock lead capture">
           <p className="text-sm text-gray-600">
-            The Growth plan adds a &quot;Request Service&quot; form to your website and delivers every submission here, with an
+            An active subscription adds a &quot;Request Service&quot; form to your website and delivers every submission here, with an
             email notification the moment it arrives.
           </p>
           <a
             href={`/app/businesses/${businessId}/billing`}
             className="mt-4 inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium bg-(--color-brand) text-white hover:bg-(--color-brand-dark) transition-colors"
           >
-            View plans
+            View billing
           </a>
         </Card>
       </div>

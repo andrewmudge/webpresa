@@ -2,7 +2,7 @@
 
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
-import { Paintbrush, Smartphone, PenLine, TrendingDown } from "lucide-react";
+import { Paintbrush, Smartphone, PenLine } from "lucide-react";
 
 const problems = [
   {
@@ -22,12 +22,6 @@ const problems = [
     title: "Impossible to Update",
     description:
       "Changing your hours, services, or pricing shouldn't require a developer. Your website should work for you, not the other way around.",
-  },
-  {
-    icon: TrendingDown,
-    title: "Invisible on Google",
-    description:
-      "A website without the basics won't show up in local search results. If customers can't find you, they'll find someone else.",
   },
 ];
 
@@ -81,7 +75,7 @@ export default function ProblemSection() {
           variants={containerVariants}
           initial="hidden"
           animate={inView ? "visible" : "hidden"}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
         >
           {problems.map((problem) => {
             const Icon = problem.icon;

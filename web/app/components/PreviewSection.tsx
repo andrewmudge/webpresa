@@ -28,16 +28,16 @@ function PreviewMockup() {
       <div className="bg-white">
         {/* Nav */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50">
-          <div className="h-3 w-24 bg-[#11455E] rounded-sm opacity-80" />
-          <div className="h-5 w-16 bg-[#CE9059] rounded-md opacity-90" />
+          <div className="h-3 w-24 bg-[#0D3AD9] rounded-sm opacity-80" />
+          <div className="h-5 w-16 bg-[#3AB9FD] rounded-md opacity-90" />
         </div>
 
         {/* Hero */}
-        <div className="bg-gradient-to-br from-[#11455E] to-[#1a5f80] px-5 py-6">
+        <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-6">
           <div className="h-2 w-20 bg-white/30 rounded-sm mb-2" />
           <div className="h-5 w-48 bg-white/65 rounded-sm mb-1.5" />
           <div className="h-2.5 w-40 bg-white/30 rounded-sm mb-4" />
-          <div className="h-7 w-24 bg-[#CE9059] rounded-lg" />
+          <div className="h-7 w-24 bg-[#3AB9FD] rounded-lg" />
         </div>
 
         {/* Services */}
@@ -45,7 +45,7 @@ function PreviewMockup() {
           <div className="grid grid-cols-3 gap-2">
             {[1, 2, 3].map((i) => (
               <div key={i} className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
-                <div className="w-5 h-5 bg-[#11455E]/15 rounded-md mx-auto mb-1.5" />
+                <div className="w-5 h-5 bg-[#0D3AD9]/15 rounded-md mx-auto mb-1.5" />
                 <div className="h-2 bg-gray-300 rounded-sm w-full" />
               </div>
             ))}
@@ -76,7 +76,7 @@ export default function PreviewSection() {
       aria-labelledby="preview-heading"
     >
       {/* Navy gradient background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#0c3245] via-[#11455E] to-[#1a5f80]" aria-hidden="true" />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#092A9E] via-[#0D3AD9] to-[#5D7AE2]" aria-hidden="true" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(206,144,89,0.12)_0%,_transparent_60%)]" aria-hidden="true" />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -100,25 +100,25 @@ export default function PreviewSection() {
           >
             <div className="inline-flex items-center gap-2 bg-white/10 text-white/80 text-xs font-semibold px-4 py-1.5 rounded-full mb-6">
               <Mail size={12} />
-              For Postcard Recipients
+              For Postcard &amp; Email Recipients
             </div>
 
             <h2
               id="preview-heading"
               className="text-4xl sm:text-5xl font-bold text-white leading-tight tracking-tight mb-6"
             >
-              Sometimes we build your website{" "}
-              <span className="text-[#CE9059]">before you ask.</span>
+              We build your website{" "}
+              <span className="text-[#3AB9FD]">before you ask.</span>
             </h2>
 
             <p className="text-lg text-white/70 leading-relaxed mb-5">
-              When we come across a local business with an outdated website, we occasionally
+              When we come across a local business with an outdated website, we
               create a modern version as a preview — so you can see exactly what&apos;s possible
               before committing to anything.
             </p>
 
             <p className="text-lg text-white/70 leading-relaxed mb-8">
-              If you found us through a postcard, your preview is likely already waiting.
+              If you found us through a postcard or email, your preview is already waiting.
               No obligation to move forward — we just want you to see what your business
               could look like online.
             </p>
@@ -126,8 +126,8 @@ export default function PreviewSection() {
             <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link
-                  href="#contact"
-                  className="inline-flex items-center justify-center bg-[#CE9059] text-white font-semibold text-base px-7 py-3.5 rounded-xl shadow-md hover:bg-[#b87a45] transition-colors duration-200"
+                  href="/r"
+                  className="inline-flex items-center justify-center bg-[#3AB9FD] text-white font-semibold text-base px-7 py-3.5 rounded-xl shadow-md hover:bg-[#3AB9FD] transition-colors duration-200"
                 >
                   View My Preview
                 </Link>

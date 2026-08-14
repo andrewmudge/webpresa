@@ -62,7 +62,7 @@ function WebsiteMockup() {
           </div>
 
           {/* Fake hero */}
-          <div className="bg-gradient-to-br from-[#11455E] to-[#1a5f80] px-5 py-6">
+          <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-6">
             <div className="h-3 w-40 bg-white/30 rounded-sm mb-2" />
             <div className="h-5 w-52 bg-white/60 rounded-sm mb-1.5" />
             <div className="h-3 w-44 bg-white/25 rounded-sm mb-4" />
@@ -175,7 +175,7 @@ export default function Hero() {
               className="inline-flex items-center gap-2 bg-brand-muted text-brand text-xs font-semibold px-4 py-1.5 rounded-full mb-6"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-brand" />
-              Managed Website Service for Local Businesses
+              For businesses we&apos;ve already built a site for
             </motion.div>
 
             {/* Headline */}
@@ -187,8 +187,8 @@ export default function Hero() {
               variants={fadeUp}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold text-gray-900 leading-[1.05] tracking-tight mb-6"
             >
-              We replace outdated websites{" "}
-              <span className="text-brand">for local businesses.</span>
+              Your website is already built.{" "}
+              <span className="text-brand">Go see it.</span>
             </motion.h1>
 
             {/* Subheadline */}
@@ -199,8 +199,10 @@ export default function Hero() {
               variants={fadeUp}
               className="text-lg sm:text-xl text-gray-500 leading-relaxed mb-8 max-w-lg mx-auto lg:mx-0"
             >
-              A professional, managed website — built, hosted, and maintained
-              for you. Everything included. No agency process required.
+              We noticed your business could use a better website, so we built
+              one and sent you a postcard or an email. Click your email link,
+              or enter your postcard code below, to see your site and make it
+              yours.
             </motion.p>
 
             {/* CTAs */}
@@ -213,10 +215,10 @@ export default function Hero() {
             >
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link
-                  href="#contact"
+                  href="/r"
                   className="inline-flex items-center justify-center bg-brand text-white font-semibold text-base px-7 py-3.5 rounded-xl shadow-md hover:bg-brand-dark transition-colors duration-200"
                 >
-                  Claim Your Website
+                  Enter My Code
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
@@ -248,23 +250,6 @@ export default function Hero() {
                 </li>
               ))}
             </motion.ul>
-
-            {/* Postcard note */}
-            <motion.p
-              custom={5}
-              initial="hidden"
-              animate="visible"
-              variants={fadeUp}
-              className="text-sm text-gray-400 text-center lg:text-left mt-2"
-            >
-              Received a postcard?{" "}
-              <Link
-                href="#contact"
-                className="text-brand hover:text-brand-dark underline underline-offset-2 transition-colors"
-              >
-                Your preview may already be ready.
-              </Link>
-            </motion.p>
           </div>
 
           {/* Right column — mockup */}

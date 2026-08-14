@@ -11,12 +11,12 @@ const columns = [
     ],
   },
   {
-    title: "Search & Visibility",
+    title: "Editing & Control",
     items: [
-      "Local search optimization",
-      "Analytics dashboard",
-      "Google indexing",
-      "Proper content structure",
+      "Edit your text, photos, and services yourself",
+      "Change your theme and logo anytime",
+      "Reorder or hide page sections",
+      "Connect your own custom domain",
     ],
   },
   {
@@ -25,7 +25,6 @@ const columns = [
       "Managed hosting",
       "Security monitoring",
       "Ongoing maintenance",
-      "Edit content yourself, anytime",
       "Monthly performance review",
     ],
   },

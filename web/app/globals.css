@@ -10,14 +10,24 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
 
+/*
+ * Plain (non-inline) theme block — unlike `@theme inline` above, this emits
+ * real `:root` custom properties that utilities reference via `var(...)`,
+ * so descendant elements (e.g. the homepage's brand-color override in
+ * `app/page.tsx`) can actually override them at runtime. `@theme inline`
+ * bakes literal values directly into each utility at build time instead,
+ * which silently defeated any attempt to override brand colors per-subtree.
+ */
+@theme {
   /* Brand */
   --color-brand: #11455E;
   --color-brand-dark: #0c3245;
   --color-brand-light: #1a5f80;
   --color-brand-muted: #e8f2f7;
   --color-accent: #CE9059;
-  --color-accent-dark: #b87a45;
+  --color-accent-dark: #3AB9FD;
 
   /* Page-background gradient (claim-status, checkout success, onboarding) —
      solid stops (no alpha) so it never blends with body's dark-mode

@@ -72,10 +72,10 @@ export default function Navbar() {
           </Link>
           <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
             <Link
-              href="#contact"
+              href="/r"
               className="inline-flex items-center gap-2 bg-brand text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm hover:bg-brand-dark transition-colors duration-200"
             >
-              Claim Your Website
+              Enter My Code
             </Link>
           </motion.div>
         </div>
@@ -121,11 +121,11 @@ export default function Navbar() {
               Log In
             </Link>
             <Link
-              href="#contact"
+              href="/r"
               onClick={() => setMobileOpen(false)}
               className="block text-center py-2.5 px-4 rounded-xl bg-brand text-white text-sm font-semibold hover:bg-brand-dark transition-colors"
             >
-              Claim Your Website
+              Enter My Code
             </Link>
           </div>
         </motion.div>

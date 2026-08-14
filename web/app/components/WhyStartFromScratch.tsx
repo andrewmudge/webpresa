@@ -74,7 +74,7 @@ function NewWebsiteMockup() {
       <div className="bg-white">
         {/* Modern nav */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50">
-          <div className="h-3 w-20 bg-[#11455E] rounded-sm opacity-80" />
+          <div className="h-3 w-20 bg-[#0D3AD9] rounded-sm opacity-80" />
           <div className="flex gap-2">
             <div className="h-2.5 w-8 bg-gray-200 rounded-sm" />
             <div className="h-2.5 w-10 bg-gray-200 rounded-sm" />
@@ -84,7 +84,7 @@ function NewWebsiteMockup() {
         </div>
 
         {/* Modern hero */}
-        <div className="bg-gradient-to-br from-[#11455E] to-[#1a5f80] px-5 py-5">
+        <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-5">
           <div className="h-2.5 w-32 bg-white/30 rounded-sm mb-1.5" />
           <div className="h-4 w-44 bg-white/70 rounded-sm mb-1" />
           <div className="h-2.5 w-36 bg-white/30 rounded-sm mb-3.5" />
@@ -96,7 +96,7 @@ function NewWebsiteMockup() {
           <div className="grid grid-cols-3 gap-2">
             {["Drain Repair", "Water Heaters", "Emergency"].map((s) => (
               <div key={s} className="bg-gray-50 rounded-lg p-2.5 text-center border border-gray-100">
-                <div className="w-5 h-5 bg-[#11455E]/15 rounded-md mx-auto mb-1.5" />
+                <div className="w-5 h-5 bg-[#0D3AD9]/15 rounded-md mx-auto mb-1.5" />
                 <div className="h-2 bg-gray-300 rounded-sm w-full" />
                 <div className="h-1.5 bg-gray-200 rounded-sm w-3/4 mx-auto mt-1" />
               </div>

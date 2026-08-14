@@ -4,9 +4,7 @@ import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import {
   Globe,
-  MapPin,
   Star,
-  Building2,
   MessageSquare,
   Users,
 } from "lucide-react";
@@ -19,21 +17,9 @@ const products = [
     available: true,
   },
   {
-    icon: MapPin,
-    title: "Local SEO",
-    description: "Dominate local search results and bring in nearby customers.",
-    available: false,
-  },
-  {
     icon: Star,
     title: "Reviews",
     description: "Automate review requests and manage your reputation.",
-    available: false,
-  },
-  {
-    icon: Building2,
-    title: "Google Business",
-    description: "Keep your Google Business Profile optimized and up to date.",
     available: false,
   },
   {
@@ -78,12 +64,12 @@ export default function FutureSection() {
             Your website is just the beginning.
           </h2>
           <p className="text-lg text-gray-500 max-w-xl mx-auto">
-            Webpresa is expanding to help local businesses manage their entire online presence — from search visibility to customer reviews.
+            Webpresa is expanding to help local businesses manage their entire online presence — from customer reviews to lead tracking.
           </p>
         </motion.div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {products.map((product, i) => {
             const Icon = product.icon;
             return (

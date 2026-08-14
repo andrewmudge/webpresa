@@ -2246,7 +2246,7 @@ No new compute (no Lambda, no API Gateway). Show `cdk diff` for the affected sta
    - Claims condition failed but `consumedByUserId` already equals this user (a double-submit) → treat as success, continue.
    - Claims condition failed otherwise, or the Businesses condition failed → generic error; no ownership or token state changes.
 9. On success, establish the `webpresa_customer_session` cookie (populated from Cognito's authentication response), clear the `claim_attempt` cookie, and redirect to `/account/claim-status`.
-10. `/account/claim-status` shows the claimed business and a call-to-action toward Stage 18's checkout. Returning, still-unpaid owners reach the same screen by signing in directly at `/account/sign-in` — no new token is ever required to resume, and no restriction prevents the same account from later claiming a different business.
+10. `/account/claim-status` shows the claimed business and a call-to-action toward Stage 18's checkout. Returning, still-unpaid owners reach the same screen by signing in directly at `/account/sign-in` — no new token is ever required to resume, and no restriction prevents the same account from later claiming a different business. (Updated 2026-08-14: since Stage 19 added `/app` and the sign-in default was later pointed there — see `architecture.md`, Stage 19 — an owner with zero claimed businesses still lands on claim-status directly, but an owner with exactly one already-claimed, still-unpaid business now reaches it one hop later, via `/app` → `/app/businesses/{id}`'s `mode === 'none'` reactivation card, rather than a single direct redirect. Same destination, one extra intermediate render.)
 
 ## Claim-token requirements
 
@@ -2354,9 +2354,10 @@ Stages 10 and 17.
 ## Approved plans
 
 - **Basic** — `$39/month` — single-page site, primary-city SEO, lead/contact functionality per current architecture.
-- **Growth** — `$79/month` — expanded site, multiple city-SEO pages (per current product limits), lead forms and Growth-tier functionality per current architecture.
+- **Growth** — `$79/month` — expanded site, multiple city-SEO pages (per current product limits), and Growth-tier functionality per current architecture.
 - Monthly recurring only. No trial, no setup fee, no minimum commitment enforced through Stripe, no annual billing, no usage-based billing, no coupons.
 - The customer chooses Basic or Growth before Checkout; the same consumed Stage 17 Claim may purchase either plan.
+- **MVP launch update (2026-08-13):** only Basic is offered to customers — `PlanSelectionForm.tsx` renders a single plan card and the marketing homepage's Growth upsell blurb was removed. Growth remains fully functional in the backend (`WEBPRESA_PLANS`, `resolvePriceId()`, the webhook's plan reconciliation) — this is a UI-only change, not a plan removal. Lead capture (Stage 20), originally Growth-exclusive, was moved into every plan as part of this same change.
 - One Stripe Customer per Cognito customer (via `CustomerBillingProfile`), reused across every Business that customer subscribes, and reserved for future one-time charges (domain purchase/renewal).
 
 ## Non-goals
@@ -3563,17 +3564,18 @@ beyond a display hint.
 
 ## Entitlement
 
-Lead capture is a Growth-plan feature (already advertised as such in
-`PLAN_CATALOG.growth.features`: "Lead forms to capture new customers").
-`hasPlanCapability(access, 'lead_capture')` — new, in
-`lib/auth/customer-authorization.ts`, replacing the "not yet built" stub
-comment left there in Stage 18 — returns true only when
-`access.mode === 'full' && access.plan === 'growth'`; a `past_due`
-(`billing_recovery`) Growth business does not pass. Checked twice,
+Lead capture was originally built as a Growth-plan feature (advertised as
+such in `PLAN_CATALOG.growth.features`: "Lead forms to capture new
+customers"). As of the MVP pricing change (2026-08-13, only Basic is sold —
+see Stage 18 "Approved plans"), it is included in every plan.
+`hasPlanCapability(access, 'lead_capture')` — in
+`lib/auth/customer-authorization.ts` — now returns true whenever
+`access.mode === 'full'`, regardless of plan; a `past_due`
+(`billing_recovery`) business still does not pass. Checked twice,
 independently: once to decide whether the public page even renders the
 "Request Service" CTA as a live action, and again inside the submission
-handler itself, since a hidden form must never be the only thing stopping a
-Basic-plan submission.
+handler itself, since a hidden form must never be the only thing stopping an
+unpaid business's submission.
 
 ## Submission workflow
 
@@ -3672,9 +3674,10 @@ existing `claims` table's approach.
 ## Customer lead inbox
 
 New `/app/businesses/[businessId]/leads` page, gated by
-`requireBusinessOwnership` + `hasPlanCapability`. A Basic-plan owner sees an
-upsell state on this page, not a 404 or redirect — the failure mode here is
-"upgrade," not "access denied." Authorized Growth-plan owners can:
+`requireBusinessOwnership` + `hasPlanCapability`. An owner without an active
+subscription sees an upsell state on this page, not a 404 or redirect — the
+failure mode here is "upgrade," not "access denied." Authorized owners with
+an active subscription can:
 
 - View only leads belonging to their business, newest first
 - See name, contact details, requested service, details, and submission time

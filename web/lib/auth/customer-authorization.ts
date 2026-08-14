@@ -98,33 +98,33 @@ export async function requireActiveSubscription(userId: string, businessId: stri
 }
 
 // ---------------------------------------------------------------------------
-// Plan capability gate (Stage 20 — the real Basic/Growth feature difference
-// Stage 18 deferred this boundary for: PLAN_CATALOG.growth.features already
-// advertises "Lead forms to capture new customers" as Growth-only).
+// Plan capability gate (Stage 20). Originally gated `lead_capture` to the
+// Growth plan only. MVP launch offers Basic exclusively (Growth is retained
+// in code but not sold — see `PlanSelectionForm.tsx`), and lead capture is
+// now included in every purchasable plan, so this boundary no longer
+// differentiates by plan — only by whether the business has an active
+// subscription at all. Reintroduce a per-plan `CAPABILITY_REQUIRED_PLAN` map
+// here if a real plan-differentiated capability ever exists again.
 // ---------------------------------------------------------------------------
 
 export type PlanCapability = 'lead_capture';
 
-const CAPABILITY_REQUIRED_PLAN: Record<PlanCapability, WebpresaPlan> = {
-  lead_capture: 'growth',
-};
-
 /**
- * Growth-only feature boundary. Takes an already-computed
- * `BusinessAccessResult` (from `computeBusinessAccessMode`/
- * `requireBusinessAccess`) rather than re-fetching the business, so callers
- * that already did that lookup for another reason (rendering the CTA,
- * gating the dashboard page) don't pay for a second one.
+ * Takes an already-computed `BusinessAccessResult` (from
+ * `computeBusinessAccessMode`/`requireBusinessAccess`) rather than
+ * re-fetching the business, so callers that already did that lookup for
+ * another reason (rendering the CTA, gating the dashboard page) don't pay
+ * for a second one.
  *
- * A `past_due` (`billing_recovery`) Growth business does NOT pass — actively
+ * A `past_due` (`billing_recovery`) business does NOT pass — actively
  * capturing new leads a business may not stay billed to keep is the wrong
  * default, unlike e.g. merely viewing already-captured data.
  *
  * Checked independently at every call site that matters (both where the
  * public "Request Service" CTA is resolved and inside the submission
  * handler itself) — a hidden or absent form must never be the only thing
- * standing between a Basic-plan business and lead capture.
+ * standing between an unpaid business and lead capture.
  */
-export function hasPlanCapability(access: BusinessAccessResult, capability: PlanCapability): boolean {
-  return access.mode === 'full' && access.plan === CAPABILITY_REQUIRED_PLAN[capability];
+export function hasPlanCapability(access: BusinessAccessResult, _capability: PlanCapability): boolean {
+  return access.mode === 'full';
 }

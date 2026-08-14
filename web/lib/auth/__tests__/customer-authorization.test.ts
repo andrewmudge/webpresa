@@ -139,17 +139,18 @@ describe('computeBusinessAccessMode', () => {
   });
 });
 
-describe('hasPlanCapability — lead_capture (Stage 20)', () => {
+describe('hasPlanCapability — lead_capture (Stage 20; MVP: included in every plan)', () => {
   it('grants capability for a full-access Growth business', () => {
     expect(hasPlanCapability({ mode: 'full', plan: 'growth' }, 'lead_capture')).toBe(true);
   });
 
-  it('denies capability for a full-access Basic business', () => {
-    expect(hasPlanCapability({ mode: 'full', plan: 'basic' }, 'lead_capture')).toBe(false);
+  it('grants capability for a full-access Basic business', () => {
+    expect(hasPlanCapability({ mode: 'full', plan: 'basic' }, 'lead_capture')).toBe(true);
   });
 
-  it('denies capability for a billing_recovery Growth business — past_due does not pass', () => {
+  it('denies capability for a billing_recovery business regardless of plan — past_due does not pass', () => {
     expect(hasPlanCapability({ mode: 'billing_recovery', plan: 'growth' }, 'lead_capture')).toBe(false);
+    expect(hasPlanCapability({ mode: 'billing_recovery', plan: 'basic' }, 'lead_capture')).toBe(false);
   });
 
   it('denies capability for mode "none" regardless of plan', () => {

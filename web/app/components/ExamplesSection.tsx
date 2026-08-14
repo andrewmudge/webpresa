@@ -8,7 +8,7 @@ const examples = [
     industry: "Plumbing",
     businessName: "City Plumbing Pros",
     city: "Austin, TX",
-    gradient: "from-[#11455E] to-[#1a5f80]",
+    gradient: "from-[#0D3AD9] to-[#5D7AE2]",
     accent: "#CE9059",
     services: ["Drain Repair", "Water Heaters", "Emergency"],
   },

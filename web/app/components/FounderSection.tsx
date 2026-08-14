@@ -26,7 +26,7 @@ export default function FounderSection() {
             className="flex justify-center lg:justify-start"
           >
             <div className="relative">
-              <div className="w-72 h-80 lg:w-80 lg:h-96 bg-gradient-to-br from-[#11455E] to-[#1a5f80] rounded-3xl overflow-hidden shadow-xl">
+              <div className="w-72 h-80 lg:w-80 lg:h-96 bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] rounded-3xl overflow-hidden shadow-xl">
                 {/* Portrait placeholder */}
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-8">
                   <div className="w-24 h-24 rounded-full bg-white/20 mb-3" />
@@ -78,10 +78,10 @@ export default function FounderSection() {
             </p>
 
             <Link
-              href="#contact"
+              href="/r"
               className="inline-flex items-center gap-2 text-brand font-semibold hover:text-brand-dark transition-colors duration-200 group"
             >
-              Start your website today
+              Enter your access code
               <span
                 className="transition-transform duration-200 group-hover:translate-x-1"
                 aria-hidden="true"

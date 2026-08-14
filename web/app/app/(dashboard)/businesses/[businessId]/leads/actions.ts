@@ -3,11 +3,11 @@ import { requireCustomerSession, requireBusinessOwnership, computeBusinessAccess
 import { markCustomerLeadRead, archiveCustomerLead, type UpdateLeadState } from '@/lib/customer-editing/lead-actions';
 
 /**
- * Session + ownership + Growth-plan-entitlement check, shared by both
+ * Session + ownership + lead-capture-entitlement check, shared by both
  * mutations below — mirrors `requireEditAccess` in the parent
  * `businesses/[businessId]/actions.ts`, except gated on `hasPlanCapability`
- * rather than `requireActiveSubscription`, since lead capture specifically
- * requires the Growth plan, not just any active subscription.
+ * rather than `requireActiveSubscription` directly, keeping this call site
+ * decoupled from whether lead capture is ever plan-differentiated again.
  */
 async function requireLeadEditAccess(businessId: string): Promise<void> {
   const session = await requireCustomerSession();
