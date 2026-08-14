@@ -16,10 +16,16 @@ import { reconcileDomainConnection } from '@/lib/domains/reconcile';
  * `requireCustomerSession()`/`requireBusinessOwnership()` — those redirect/
  * 404 for page rendering, which is wrong for a `fetch()`-consumed JSON
  * endpoint; failures here return a plain JSON error instead.
+ *
+ * Stage 25 — the Origin check is unconditional: a request with no `Origin`
+ * header at all is rejected, not just one with a mismatched value. Every
+ * real same-origin `fetch()` call from a browser sends `Origin` on a POST;
+ * its absence is itself a signal this didn't come from `DomainStatusPanel.tsx`
+ * as expected.
  */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
-  if (origin && origin !== request.nextUrl.origin) {
+  if (!origin || origin !== request.nextUrl.origin) {
     return NextResponse.json({ error: 'Invalid origin' }, { status: 403 });
   }
 

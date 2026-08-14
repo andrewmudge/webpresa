@@ -1,6 +1,7 @@
 import 'server-only';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { assertResourceEnvironmentConsistency } from '@/lib/env/resource-consistency';
 
 /**
  * Singleton DynamoDB DocumentClient.
@@ -56,7 +57,7 @@ export function getTableName(envVar: string): string {
   if (!name) {
     throw new Error(`${envVar} environment variable is not set`);
   }
-  return name;
+  return assertResourceEnvironmentConsistency(name);
 }
 
 export const TABLE_BUSINESSES = () => getTableName('BUSINESSES_TABLE_NAME');

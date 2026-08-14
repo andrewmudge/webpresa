@@ -12,6 +12,9 @@ export type UpdateNotificationPreferenceState = { message?: string } | undefined
  * so Settings' Notifications card can show a real error state — the
  * previous fire-and-forget call site (`DraftChangesNotice.tsx`) still
  * ignores the return value, which remains valid.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 export async function updateCustomerDraftNoticePreference(
   businessId: string,

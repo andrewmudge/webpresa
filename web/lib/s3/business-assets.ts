@@ -1,5 +1,6 @@
 import 'server-only';
 import { putAsset } from './assets';
+import { validateImageUpload } from './upload-validation';
 
 /**
  * Business logo/photo upload helpers, shared by the business detail page's
@@ -10,6 +11,13 @@ import { putAsset } from './assets';
  * being a private function duplicated in each `actions.ts` that needs it.
  */
 
+/**
+ * Client-filename-derived extension — kept only for `lib/s3/stock-images.ts`'s
+ * own admin-only upload path (a separate, non-public-proxy bucket, out of
+ * scope for the Stage 25 fix below). `uploadBusinessAsset` no longer uses
+ * this — see `upload-validation.ts` for why trusting the client's filename/
+ * `file.type` for a publicly-served asset is unsafe.
+ */
 export function fileExtension(file: File): string {
   const fromName = file.name.split('.').pop();
   if (fromName && fromName.length <= 5) return fromName.toLowerCase();
@@ -17,16 +25,23 @@ export function fileExtension(file: File): string {
 }
 
 /**
- * Uploads one file under a business's asset prefix and returns its public
- * proxy URL. Exported (not just used internally by `appendBusinessPhotos`)
- * so callers that need to upload a single file directly — a logo, or a
- * photo straight into a specific section slot — can reuse the same key
- * structure and upload path.
+ * Validates, then uploads, one image file under a business's asset prefix
+ * and returns its public proxy URL. Exported (not just used internally by
+ * `appendBusinessPhotos`) so callers that need to upload a single file
+ * directly — a logo, or a photo straight into a specific section slot —
+ * can reuse the same key structure and upload path.
+ *
+ * `keyPrefix` is the key *without* an extension — the extension is always
+ * derived from the validated, actually-decoded image format, never from
+ * the client-supplied filename or `file.type` (Stage 25 — Security
+ * Hardening; see `upload-validation.ts`). Throws `UploadValidationError`
+ * (import from `./upload-validation` to catch it specifically) if the file
+ * is too large or isn't a decodable JPEG/PNG/WebP image.
  */
-export async function uploadBusinessAsset(businessId: string, file: File, filename: string): Promise<string> {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const key = `businesses/${businessId}/assets/${filename}`;
-  await putAsset(key, buffer, file.type || 'application/octet-stream');
+export async function uploadBusinessAsset(businessId: string, file: File, keyPrefix: string): Promise<string> {
+  const { buffer, contentType, extension } = await validateImageUpload(file);
+  const key = `businesses/${businessId}/assets/${keyPrefix}.${extension}`;
+  await putAsset(key, buffer, contentType);
   return `/api/assets/${key}`;
 }
 
@@ -45,7 +60,7 @@ export async function appendBusinessPhotos(
 ): Promise<string[]> {
   if (files.length === 0) return existingPhotoUrls;
   const uploaded = await Promise.all(
-    files.map((file) => uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`)),
+    files.map((file) => uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}`)),
   );
   return [...existingPhotoUrls, ...uploaded];
 }

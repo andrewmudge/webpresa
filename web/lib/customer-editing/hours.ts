@@ -15,6 +15,9 @@ import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
  * "Contact information has exactly one edit surface" — hours was never
  * actually part of that boundary, since it lives only on `PreviewContent`),
  * so this is the whole edit surface for it.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 export type UpdateHoursState = { message?: string } | undefined;
 

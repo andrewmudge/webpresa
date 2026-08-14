@@ -164,6 +164,34 @@ The `create-access-key` response contains `AccessKeyId` and `SecretAccessKey`. A
 
 The user and its access keys are deliberately **not** managed by CDK — a long-lived secret access key should never flow through a CloudFormation template or output. CDK only attaches permission policies to this already-existing user (see below).
 
+### Creating the production user (`webpresa-vercel-prod`)
+
+**Stage 25 (Security Hardening)**: this repeatable procedure was undocumented until now — `WebpresaProdVercelAccessStack` has been deployed since Stage 22.5 (see `architecture.md`'s stack table), but the steps that actually created the `webpresa-vercel-prod` IAM user and its keys were never recorded here, only the dev flow was. Identical to the dev procedure above, against the prod account and profile:
+
+```bash
+# Create user (no console access) — in the prod AWS account (994748688217)
+aws iam create-user --user-name webpresa-vercel-prod --profile webpresa-prod
+
+# Generate access keys
+aws iam create-access-key --user-name webpresa-vercel-prod --profile webpresa-prod
+```
+
+Add the resulting `AccessKeyId`/`SecretAccessKey` to Vercel's **Production** environment only (`npx vercel env add AWS_ACCESS_KEY_ID production` / `npx vercel env add AWS_SECRET_ACCESS_KEY production` — see "Vercel CLI" below) — never to Preview, and never reuse the dev user's keys here. `WebpresaProdVercelAccessStack` attaches the same two managed policies described below to this user, scoped to prod's own tables/secrets/buckets/compute by construction (same CDK source as dev, different `config.suffix`).
+
+**Verifying Production is actually using the prod user's keys** (do this after any credential change, and periodically): compare the `AccessKeyId` prefix Vercel has stored (`npx vercel env ls` shows metadata but masks values — see "Vercel CLI" below for why the value itself can't be read back) against `aws iam list-access-keys --user-name webpresa-vercel-prod --profile webpresa-prod`. If Production's requests are ever seen touching `webpresa-dev-*` resources (or vice versa), treat that as a credential-binding mismatch, not an application bug — see the Stage 25 runtime consistency guard (`web/lib/env/resource-consistency.ts`), which fails loudly the first time a deployment resolves a table/secret/bucket name from a different environment than one it already resolved.
+
+### Rotating either user's keys
+
+No automated rotation exists — Vercel's credential model (plain environment variables, not an assumable IAM role) makes full automation impractical, so this is a documented manual procedure instead:
+
+1. Generate a new access key for the relevant user (`aws iam create-access-key --user-name webpresa-vercel-{dev,prod} --profile webpresa-{dev,prod}`) — IAM allows two active keys per user simultaneously, so the old key keeps working during this process.
+2. Update the corresponding Vercel environment (`Preview` for `webpresa-vercel-dev`, `Production` for `webpresa-vercel-prod`) with the new `AccessKeyId`/`SecretAccessKey` (`npx vercel env rm` then `npx vercel env add`, per "Vercel CLI" below — removing and re-adding is required since values can't be updated in place).
+3. Trigger a new deployment (or wait for the next one) so the running app picks up the new credential — see `lib/secrets/client.ts`'s doc comment: AWS clients cache credentials for the process lifetime, so an in-flight serverless instance keeps using whatever it started with until it cold-starts again.
+4. Confirm the new key works (a real request succeeding against DynamoDB/S3/Secrets Manager — e.g. load any admin page).
+5. Deactivate, then delete, the old access key (`aws iam update-access-key --status Inactive ...` first, confirm nothing breaks, then `aws iam delete-access-key ...`) — never delete the key still in active use.
+
+Rotate immediately, out of this normal cadence, if a key is ever suspected exposed (committed to git, printed in a log, shared outside Vercel's own storage).
+
 ### Permissions — CDK-managed (`infra/lib/stacks/vercel-access-stack.ts`)
 
 **Migrated 2026-07-24** from five hand-run `aws iam put-user-policy` inline policies to two CDK-managed policies, after a `put-user-policy` call while adding Stage 16's grants failed with `LimitExceeded: Maximum policy size of 2048 bytes exceeded for user` — a hard, non-adjustable AWS limit on the *aggregate* size of all inline policies on one user (confirmed via `aws service-quotas list-service-quotas`, unlike the Lambda concurrency limit hit in Stage 14 — there is no quota to request an increase for here). A customer-managed policy allows 6,144 characters *each*, and a user can have up to 10 attached, so this isn't a limit this project will realistically hit again.

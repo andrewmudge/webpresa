@@ -17,6 +17,17 @@ import { getAsset } from '@/lib/s3/assets';
  * Preview and postcard artifacts stay fully private; do not widen this
  * beyond the two patterns below without reconsidering what's inside those
  * other prefixes.
+ *
+ * Content-Type allowlist (Stage 25 — Security Hardening): both prefixes are
+ * only ever populated with server-validated JPEG/PNG/WebP bytes today —
+ * `lib/s3/upload-validation.ts` for `businesses/...` uploads, the matching
+ * allowlist in `lib/firecrawl/images.ts` for `scans/.../images/...`. `svg`
+ * and `gif` were deliberately dropped from this map (neither path has ever
+ * produced them): serving an uploaded SVG as `image/svg+xml` at a
+ * same-origin, publicly cacheable URL is a stored-XSS vector (SVG can embed
+ * `<script>`), and no SVG-sanitization dependency exists in this repo. An
+ * unrecognized extension falls back to `application/octet-stream`, which a
+ * browser won't execute — reinforced by the `nosniff` header below.
  */
 
 const SCAN_IMAGE_KEY_PATTERN = /^scans\/[^/]+\/[^/]+\/images\//;
@@ -26,8 +37,6 @@ const CONTENT_TYPES: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   webp: 'image/webp',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
 };
 
 function contentTypeForKey(key: string): string {
@@ -55,6 +64,7 @@ export async function GET(_request: Request, { params }: Props) {
   return new NextResponse(new Uint8Array(body), {
     headers: {
       'Content-Type': contentTypeForKey(key),
+      'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
   });

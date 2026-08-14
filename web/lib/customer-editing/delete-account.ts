@@ -3,6 +3,7 @@ import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { deleteCustomerBillingProfile } from '@/lib/db/customer-billing';
 import { deleteCustomerAccount as deleteCognitoUser } from '@/lib/auth/customer-cognito';
 import { deleteCustomerWebsite } from './delete-website';
+import { log } from '@/lib/logging/log';
 
 export type DeleteAccountState = { message?: string } | undefined;
 
@@ -56,6 +57,9 @@ export async function deleteCustomerAccount(sub: string): Promise<DeleteAccountS
     if (!cognitoResult.ok) {
       return { message: 'Your data was deleted, but we could not close your login. Please contact support.' };
     }
+
+    // Stage 25 — destructive-action audit event, after the full cascade succeeds.
+    log({ event: 'customer.account.deleted', component: 'customer-editing', operation: 'delete_account', actorId: sub });
   } catch (err) {
     console.error('Failed to delete customer account:', err instanceof Error ? err.message : err);
     return { message: 'Failed to delete account. Please try again.' };

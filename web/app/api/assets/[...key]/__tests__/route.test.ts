@@ -92,4 +92,24 @@ describe('GET /api/assets/[...key]', () => {
     );
     expect(res.headers.get('Content-Type')).toBe('image/jpeg');
   });
+
+  it('sends X-Content-Type-Options: nosniff on every served asset', async () => {
+    mockGetAsset.mockResolvedValueOnce(Buffer.from('x'));
+    const res = await GET(
+      new Request('http://localhost/api/assets/businesses/biz_1/assets/logo.png'),
+      makeParams(['businesses', 'biz_1', 'assets', 'logo.png']),
+    );
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+  });
+
+  it('Stage 25 — never serves an .svg key as image/svg+xml (falls back to octet-stream, not renderable/executable)', async () => {
+    mockGetAsset.mockResolvedValueOnce(Buffer.from('<svg onload="alert(1)"></svg>'));
+    const res = await GET(
+      new Request('http://localhost/api/assets/businesses/biz_1/assets/photos/evil.svg'),
+      makeParams(['businesses', 'biz_1', 'assets', 'photos', 'evil.svg']),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+  });
 });

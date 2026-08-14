@@ -1,5 +1,47 @@
 import type { NextConfig } from "next";
 
+/**
+ * Security headers (Stage 25 — Security Hardening). Previously absent
+ * entirely — no CSP/frame-ancestors, HSTS, nosniff, site-wide
+ * Referrer-Policy, or Permissions-Policy existed anywhere in this app.
+ *
+ * No nonce-based CSP: this app has no per-request nonce plumbing in
+ * `proxy.ts` today (Next.js's nonce approach requires proxy-generated,
+ * per-request nonces threaded into every script/style tag — a materially
+ * larger change than this pass scopes), and Tailwind/the `V` shorthand
+ * inline-style pattern used throughout the public template rely on inline
+ * `style` attributes. `frame-ancestors 'self'` (not `'none'`) — not the
+ * stricter default from Next's own CSP guide — because
+ * `WebsitePreviewCard.tsx` legitimately iframes this app's own `/b/[slug]`
+ * inside `/app/businesses/[businessId]`; `'self'` still blocks every
+ * third-party site from framing any Webpresa page (the real clickjacking
+ * defense) while keeping that same-origin embed working.
+ */
+const isDev = process.env.NODE_ENV === 'development';
+const stockImagesCdnHost = process.env.STOCK_IMAGES_CDN_DOMAIN ?? '*.cloudfront.net';
+
+const CSP = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  "style-src 'self' 'unsafe-inline'",
+  `img-src 'self' data: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost}`,
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+
+const SECURITY_HEADERS = [
+  { key: 'Content-Security-Policy', value: CSP },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()' },
+];
+
 const nextConfig: NextConfig = {
   // Static export removed in Stage 7: admin dashboard requires Server Actions,
   // Route Handlers, and proxy.ts — all incompatible with `output: 'export'`.
@@ -31,6 +73,27 @@ const nextConfig: NextConfig = {
         hostname: process.env.STOCK_IMAGES_CDN_DOMAIN ?? '*.cloudfront.net',
       },
     ],
+  },
+  async headers() {
+    return [
+      { source: '/:path*', headers: SECURITY_HEADERS },
+      // Next.js applies header rules in order, last match wins per key (see
+      // "Header Overriding Behavior" in the headers() docs) — this narrows
+      // Referrer-Policy back to `no-referrer` on the token-bearing claim/
+      // campaign-redirect entry points, matching the stricter value those
+      // routes already set directly (Stage 17/21) so a third-party resource
+      // loaded from the destination page never sees the raw token/code in
+      // a Referer header. Everything else in SECURITY_HEADERS still applies
+      // to these paths — this only overrides the one key.
+      {
+        source: '/claim/:path*',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+      {
+        source: '/r/:path*',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+    ];
   },
 };
 

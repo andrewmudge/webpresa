@@ -9,6 +9,7 @@ import { listDomainConnectionsForBusiness, deleteDomainConnectionRecord } from '
 import { removeProjectDomain } from '@/lib/vercel/domains';
 import { deleteAsset } from '@/lib/s3/assets';
 import { assetKeyFromUrl } from '@/lib/s3/business-assets';
+import { log } from '@/lib/logging/log';
 
 export type DeleteWebsiteState = { message?: string } | undefined;
 
@@ -92,6 +93,9 @@ export async function deleteCustomerWebsite(businessId: string, ownerUserId: str
     ]);
 
     await deleteBusinessById(businessId);
+
+    // Stage 25 — destructive-action audit event, after the cascade succeeds.
+    log({ event: 'customer.website.deleted', component: 'customer-editing', businessId, operation: 'delete_website', actorId: ownerUserId });
   } catch (err) {
     console.error('Failed to delete customer website:', err instanceof Error ? err.message : err);
     return { message: 'Failed to delete website. Please try again.' };

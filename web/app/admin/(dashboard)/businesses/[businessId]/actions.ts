@@ -41,8 +41,10 @@ import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
-import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl, fileExtension } from '@/lib/s3/business-assets';
+import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl } from '@/lib/s3/business-assets';
 import { deleteAsset } from '@/lib/s3/assets';
+import { UploadValidationError } from '@/lib/s3/upload-validation';
+import { log } from '@/lib/logging/log';
 import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
 import { classifySocialPlatform } from '@/lib/social-links';
 import type { BusinessFormState } from '../actions';
@@ -425,7 +427,7 @@ export async function updatePhotosAction(
         if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
           return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in the Photos card first.` };
         }
-        const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
+        const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}`);
         photoUrls = [...photoUrls, url];
         slotOverrides[slotKey] = url;
       }
@@ -489,6 +491,7 @@ export async function updatePhotosAction(
       }
     }
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update business photos:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }
@@ -535,6 +538,7 @@ export async function addBusinessPhotosAction(
 
     return { photoUrls };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to add business photos:', err instanceof Error ? err.message : err);
     return { message: 'Failed to upload photos. Please try again.' };
   }
@@ -661,11 +665,12 @@ export async function updateBusinessLogoAction(
     const existing = await getBusinessById(businessId);
     if (!existing) return { message: 'Business not found' };
 
-    const logoUrl = await uploadBusinessAsset(businessId, file, `logo.${fileExtension(file)}`);
+    const logoUrl = await uploadBusinessAsset(businessId, file, 'logo');
     await putBusiness({ ...existing, logoUrl, updatedAt: new Date().toISOString() });
 
     return { logoUrl };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update business logo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to upload logo. Please try again.' };
   }
@@ -1494,6 +1499,9 @@ export async function deleteBusinessAction(businessId: string): Promise<{ error:
   // Delete the business record last
   await deleteBusinessById(businessId);
 
+  // Stage 25 — destructive-action audit event, after the cascade succeeds.
+  log({ event: 'admin.business.deleted', component: 'admin-actions', businessId, operation: 'delete_business', actorId: session.sub });
+
   redirect('/admin/businesses');
 }
 
@@ -1563,8 +1571,21 @@ export async function releaseOwnershipAction(businessId: string): Promise<Releas
   if (!business.ownerUserId) return { error: 'This business is not currently claimed.' };
 
   const ownerProfile = await adminGetCustomerProfileBySub(business.ownerUserId);
+  const previousOwnerUserId = business.ownerUserId;
   const released = await releaseOwnership(businessId);
   if (!released) return { error: 'This business is not currently claimed.' };
+
+  // Stage 25 — this recovery workflow's own doc comment (and
+  // implementation.md, Stage 17) already documented this as "logged via
+  // structured server-side logging" — it never actually was until now.
+  log({
+    event: 'admin.business.ownership_released',
+    component: 'admin-actions',
+    businessId,
+    operation: 'release_ownership',
+    actorId: session.sub,
+    message: `previous owner sub: ${previousOwnerUserId}`,
+  });
 
   return { releasedOwnerEmail: ownerProfile?.email ?? undefined };
 }

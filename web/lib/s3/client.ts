@@ -1,5 +1,6 @@
 import 'server-only';
 import { S3Client } from '@aws-sdk/client-s3';
+import { assertResourceEnvironmentConsistency } from '@/lib/env/resource-consistency';
 
 /**
  * Singleton S3 client.
@@ -48,7 +49,7 @@ export function getAssetsBucketName(): string {
   if (!name) {
     throw new Error('ASSETS_BUCKET_NAME environment variable is not set');
   }
-  return name;
+  return assertResourceEnvironmentConsistency(name);
 }
 
 /**

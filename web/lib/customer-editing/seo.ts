@@ -8,6 +8,9 @@ import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
  * exists today; `PreviewContent.seo` has never had a dedicated editor
  * before this). Same direct-patch-onto-a-draft pattern as every other
  * section content editor in this module.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 export type CustomerSeoState = { message?: string } | undefined;
 

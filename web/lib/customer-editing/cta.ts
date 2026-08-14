@@ -12,6 +12,11 @@ import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
  * already loaded), this takes only `businessId` and resolves the target
  * preview itself via `ensureDraftPreview` — never a browser-supplied
  * `previewId`, and never a direct patch onto an already-published preview.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller (the
+ * customer-scoped Server Action in `actions.ts`) must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` before invoking
+ * this, the same convention every module in `lib/customer-editing/` follows.
  */
 const CtaTypeSchema = z.enum(CTA_ACTION_TYPES);
 

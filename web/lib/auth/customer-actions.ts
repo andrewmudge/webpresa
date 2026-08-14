@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { signInCustomer } from './customer-cognito';
 import { createCustomerSession, deleteCustomerSession } from './customer-session';
+import { log } from '@/lib/logging/log';
 
 /**
  * Customer sign-in/sign-out for the resume-checkout path (Stage 17) — a
@@ -45,9 +46,14 @@ export async function customerSignInAction(
 
   const result = await signInCustomer(parsed.data.email, parsed.data.password);
   if (!result.ok) {
+    // Stage 25 — no email/PII in the log line, matching this repo's
+    // existing convention (see lib/logging/log.ts's closed LogFields type,
+    // which has no field for one anyway).
+    log({ level: 'warn', event: 'customer.signin.failed', component: 'customer-auth' });
     return { error: 'Invalid email or password.' };
   }
 
+  log({ event: 'customer.signin.succeeded', component: 'customer-auth', actorId: result.sub });
   await createCustomerSession({ sub: result.sub, email: result.email });
   redirect(safeNextPath(formData.get('next')));
 }

@@ -82,4 +82,23 @@ export async function deleteSession(): Promise<void> {
   cookieStore.delete(COOKIE_NAME);
 }
 
+/**
+ * Stage 25 (Security Hardening) — a shared throwing equivalent of the
+ * `const session = await getSession(); if (!session) return {...}` check
+ * every admin Server Action/Route Handler already repeats independently
+ * (audited: consistently applied everywhere today, just duplicated rather
+ * than centrally enforced, unlike `requireCustomerSession()` on the
+ * customer side). New admin server code should prefer this; existing call
+ * sites are intentionally left as-is — they are already correct, and
+ * rewriting ~30 already-correct checks purely for style is out of scope
+ * for this pass.
+ */
+export async function requireAdmin(): Promise<SessionPayload> {
+  const session = await getSession();
+  if (!session) {
+    throw new Error('Unauthorized: no valid admin session');
+  }
+  return session;
+}
+
 export const ADMIN_SESSION_COOKIE = COOKIE_NAME;

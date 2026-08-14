@@ -11,6 +11,9 @@ import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
  * "Auto (unset) makes no live change, a specific pick applies immediately"
  * behavior, but the live-apply step lands on a draft (via
  * `ensureDraftPreview`) rather than an admin's direct patch-in-place.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 const UpdateThemeSchema = z.object({ theme: z.enum(THEME_NAMES).optional() });
 

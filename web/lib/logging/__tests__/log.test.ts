@@ -28,6 +28,11 @@ describe('serializeLogFields', () => {
     expect(serializeLogFields(fields)).toEqual(fields);
   });
 
+  it('Stage 25 — keeps actorId (the identity performing a security-sensitive action)', () => {
+    const fields: LogFields = { event: 'admin.business.deleted', actorId: 'admin', businessId: 'biz_1' };
+    expect(serializeLogFields(fields)).toEqual(fields);
+  });
+
   it('omits undefined optional fields entirely rather than serializing them as null/undefined', () => {
     const picked = serializeLogFields({ event: 'scan.enrichment.completed' });
     expect(picked).toEqual({ event: 'scan.enrichment.completed' });

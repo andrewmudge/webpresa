@@ -2,8 +2,12 @@
 import { timingSafeEqual, scrypt, randomBytes } from 'crypto';
 import { promisify } from 'util';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { z } from 'zod';
 import { createSession, deleteSession } from './session';
+import { checkAdminSignInRateLimit } from './signin-rate-limit';
+import { hashIp } from '@/lib/claim/validate-token';
+import { log } from '@/lib/logging/log';
 
 const scryptAsync = promisify(scrypt);
 
@@ -94,6 +98,14 @@ async function validateCredentials(username: string, password: string): Promise<
 // Server Actions
 // ---------------------------------------------------------------------------
 
+/** Stage 25 — mirrors the identical `x-forwarded-for` idiom already used by `app/claim/actions.ts`/`app/b/[slug]/actions.ts`/`app/r/[campaignCode]/route.ts`. */
+async function resolveIpHash(): Promise<string> {
+  const headerList = await headers();
+  const forwarded = headerList.get('x-forwarded-for');
+  const ip = forwarded?.split(',')[0]?.trim() || 'unknown';
+  return hashIp(ip);
+}
+
 export async function signIn(
   _prevState: SignInState,
   formData: FormData,
@@ -107,11 +119,23 @@ export async function signIn(
     return { errors: parsed.error.flatten().fieldErrors };
   }
 
-  const valid = await validateCredentials(parsed.data.username, parsed.data.password);
-  if (!valid) {
+  const ipHash = await resolveIpHash();
+  const withinLimit = await checkAdminSignInRateLimit(ipHash);
+  if (!withinLimit) {
+    // Same generic message as an invalid credential — never a distinct
+    // "rate limited" response, matching this repo's existing convention
+    // for every other rate-limited entrypoint.
+    log({ level: 'warn', event: 'admin.signin.rate_limited', component: 'admin-auth' });
     return { message: 'Invalid username or password' };
   }
 
+  const valid = await validateCredentials(parsed.data.username, parsed.data.password);
+  if (!valid) {
+    log({ level: 'warn', event: 'admin.signin.failed', component: 'admin-auth', actorId: parsed.data.username });
+    return { message: 'Invalid username or password' };
+  }
+
+  log({ event: 'admin.signin.succeeded', component: 'admin-auth', actorId: parsed.data.username });
   await createSession(parsed.data.username);
   redirect('/admin/businesses');
 }

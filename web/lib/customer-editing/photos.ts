@@ -6,8 +6,9 @@ import { PreviewThemeSchema } from '@/domain/schemas/site-preview.schema';
 import { getBusinessById, putBusiness, updateBusiness } from '@/lib/db/businesses';
 import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
-import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl, fileExtension } from '@/lib/s3/business-assets';
+import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl } from '@/lib/s3/business-assets';
 import { deleteAsset } from '@/lib/s3/assets';
+import { UploadValidationError } from '@/lib/s3/upload-validation';
 
 /**
  * Customer-scoped counterpart to the admin's `updatePhotosAction` /
@@ -17,13 +18,13 @@ import { deleteAsset } from '@/lib/s3/assets';
  * always lands on a draft (`ensureDraftPreview`), never a direct patch onto
  * an already-published preview.
  *
- * Photo uploads inherit today's actual validation state: `putAsset()` (used
- * transitively by `uploadBusinessAsset`) enforces only a key-prefix
- * allowlist, no MIME-type or per-file-size check — a pre-existing gap
- * tracked under Stage 25 (Security Hardening), not something Stage 19
- * silently fixes. What this module adds correctly is scope: every upload
- * key is written under a `businessId` the caller already proved ownership
- * of via `requireBusinessOwnership()` before calling any function here.
+ * Photo uploads are validated server-side by `uploadBusinessAsset` itself
+ * (Stage 25 — Security Hardening: real image-decode validation, a size
+ * cap, and an allowlisted content type never trusted from the browser —
+ * see `lib/s3/upload-validation.ts`). What this module adds on top is
+ * scope: every upload key is written under a `businessId` the caller
+ * already proved ownership of via `requireBusinessOwnership()` before
+ * calling any function here.
  */
 const MAX_BUSINESS_PHOTOS = 6;
 
@@ -48,6 +49,7 @@ export async function addCustomerBusinessPhotos(businessId: string, formData: Fo
     await putBusiness({ ...existing, photoUrls, updatedAt: new Date().toISOString() });
     return { photoUrls };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to add customer business photos:', err instanceof Error ? err.message : err);
     return { message: 'Failed to upload photos. Please try again.' };
   }
@@ -183,7 +185,7 @@ export async function updateCustomerPhotoSlots(businessId: string, formData: For
         if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
           return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in Photos first.` };
         }
-        const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
+        const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}`);
         photoUrls = [...photoUrls, url];
         slotOverrides[slotKey] = url;
       }
@@ -240,6 +242,7 @@ export async function updateCustomerPhotoSlots(businessId: string, formData: For
 
     return { photoUrls };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update customer photo slots:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }
@@ -299,7 +302,7 @@ async function applySlotUpdate(
       if (photoUrls.length >= MAX_BUSINESS_PHOTOS) {
         return { message: `Maximum ${MAX_BUSINESS_PHOTOS} photos allowed — remove one in Photos first.` };
       }
-      const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}.${fileExtension(file)}`);
+      const url = await uploadBusinessAsset(businessId, file, `photos/${crypto.randomUUID()}`);
       photoUrls = [...photoUrls, url];
       resolvedUrl = url;
       changed = true;
@@ -339,6 +342,7 @@ async function applySlotUpdate(
 
     return { photoUrls };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error(`Failed to update ${businessField}:`, err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }
@@ -391,7 +395,7 @@ export async function updateCustomerLogo(businessId: string, formData: FormData)
     const file = formData.get('logoPhotoFile');
     let logoUrl: string | undefined;
     if (file instanceof File && file.size > 0) {
-      logoUrl = await uploadBusinessAsset(businessId, file, `logo/${crypto.randomUUID()}.${fileExtension(file)}`);
+      logoUrl = await uploadBusinessAsset(businessId, file, `logo/${crypto.randomUUID()}`);
     } else {
       const picked = (formData.get('logoPhotoUrl') as string) || undefined;
       logoUrl = resolveLogoUrl(picked, existing.logoUrl);
@@ -402,6 +406,7 @@ export async function updateCustomerLogo(businessId: string, formData: FormData)
     await updateBusiness(businessId, { logoUrl });
     return { logoUrl };
   } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update customer logo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
   }

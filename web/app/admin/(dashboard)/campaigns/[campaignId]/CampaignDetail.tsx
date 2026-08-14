@@ -19,7 +19,7 @@ import {
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
 } from '../actions';
-import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction, retryRenderPostcardAction } from '../../postcards/actions';
+import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction, submitPostcardsToLobBulkAction, retryRenderPostcardAction } from '../../postcards/actions';
 import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actions';
 import { CampaignScanAutoRefresh } from './CampaignScanAutoRefresh';
 import { AssessmentTable } from './AssessmentTable';
@@ -262,6 +262,7 @@ function RecipientsSection({
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
   const [isBulkPending, startBulkTransition] = useTransition();
+  const [bulkSubmitError, setBulkSubmitError] = useState<string | null>(null);
 
   const statuses = new Map(recipients.map((r) => [r.campaignRecipientId, derivePostcardStatus(postcardsByRecipient[r.campaignRecipientId])]));
 
@@ -283,9 +284,15 @@ function RecipientsSection({
   }
 
   function handleSubmitAll() {
+    setBulkSubmitError(null);
     startBulkTransition(async () => {
       const targets = visibleRecipients.filter((r) => statuses.get(r.campaignRecipientId) === 'approved' && r.postcardId);
-      await Promise.all(targets.map((r) => submitPostcardToLobAction(r.postcardId!)));
+      // Stage 25 — a single capped, sequential call instead of firing one
+      // Promise.all-ed submitPostcardToLobAction per recipient: each
+      // submission is a real Lob charge, and nothing previously bounded how
+      // many one bulk click (or a direct action call) could trigger.
+      const result = await submitPostcardsToLobBulkAction(targets.map((r) => r.postcardId!));
+      if (result.error) setBulkSubmitError(result.error);
       router.refresh();
     });
   }
@@ -313,6 +320,10 @@ function RecipientsSection({
           </button>
         </div>
       </div>
+
+      {bulkSubmitError && (
+        <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{bulkSubmitError}</p>
+      )}
 
       <div className="flex flex-wrap gap-1.5 mb-4">
         {STATUS_FILTERS.map((filter) => (

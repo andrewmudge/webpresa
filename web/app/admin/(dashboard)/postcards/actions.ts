@@ -115,3 +115,44 @@ export async function submitPostcardToLobAction(postcardId: string): Promise<Sub
 
   return submitPostcardToLob(postcardId);
 }
+
+/**
+ * Stage 25 (Security Hardening) — the volume/cost guard `CampaignDetail.tsx`'s
+ * "Submit all" bulk action goes through, instead of firing one
+ * `submitPostcardToLobAction` call per recipient via `Promise.all`. Each
+ * individual submission still costs real money at Lob and is already
+ * idempotency-guarded per postcard (`submitPostcardToLob`'s atomic
+ * `pending`→`submitting` transition) — this adds the piece that guard
+ * doesn't cover: nothing previously bounded how many *distinct* postcards
+ * one bulk click (or a direct call to this action) could submit at once.
+ */
+const MAX_BULK_POSTCARD_SUBMIT = 25;
+
+export interface BulkSubmitPostcardsResult {
+  error?: string;
+  submitted?: number;
+  failed?: number;
+}
+
+export async function submitPostcardsToLobBulkAction(postcardIds: string[]): Promise<BulkSubmitPostcardsResult> {
+  const session = await getSession();
+  if (!session) return { error: 'Unauthorized' };
+
+  if (postcardIds.length === 0) return { submitted: 0, failed: 0 };
+  if (postcardIds.length > MAX_BULK_POSTCARD_SUBMIT) {
+    return { error: `Cannot submit more than ${MAX_BULK_POSTCARD_SUBMIT} postcards at once — narrow the filter and try again in batches.` };
+  }
+
+  // Sequential, not Promise.all — deliberate: each call is a real Lob spend,
+  // and there is no reason to fan these out concurrently for an admin-only,
+  // already-capped, low-volume manual action.
+  let submitted = 0;
+  let failed = 0;
+  for (const postcardId of postcardIds) {
+    const result = await submitPostcardToLob(postcardId);
+    if (result.status === 'submitted') submitted += 1;
+    else failed += 1;
+  }
+
+  return { submitted, failed };
+}

@@ -1,6 +1,13 @@
 import 'server-only';
 import { getLeadById, updateLeadStatus } from '@/lib/db/leads';
 
+/**
+ * Stage 25 — performs no auth/ownership check of `businessId` itself
+ * (`requireLeadOwnedByBusiness` below only checks the lead-to-business
+ * pairing); the caller (the customer-scoped Server Action) must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` on `businessId`
+ * first.
+ */
 export type UpdateLeadState = { message?: string } | undefined;
 
 /** Defense against a leadId for a different business slipping through — never trust the caller's businessId/leadId pairing alone. */

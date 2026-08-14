@@ -29,6 +29,14 @@ export interface LogFields {
   service?: string;
   component?: string;
   requestId?: string;
+  /**
+   * Stage 25 — the identity performing a security-sensitive action (an
+   * admin username, or a customer's Cognito `sub`) — never an email
+   * address or any other PII, and never a password/token/secret. Added for
+   * audit events (sign-in, destructive actions, ownership changes) where
+   * "who did this" is the whole point of the log line.
+   */
+  actorId?: string;
   businessId?: string;
   scanId?: string;
   scanExecutionId?: string;
@@ -54,6 +62,7 @@ const ALLOWED_KEYS: readonly (keyof LogFields)[] = [
   'service',
   'component',
   'requestId',
+  'actorId',
   'businessId',
   'scanId',
   'scanExecutionId',

@@ -347,7 +347,7 @@ describe('updateBusinessLogoAction', () => {
 
     const result = await updateBusinessLogoAction(EXISTING_BUSINESS.businessId, undefined, fd);
 
-    expect(mockUploadBusinessAsset).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, expect.any(File), 'logo.jpg');
+    expect(mockUploadBusinessAsset).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, expect.any(File), 'logo');
     expect(result?.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');

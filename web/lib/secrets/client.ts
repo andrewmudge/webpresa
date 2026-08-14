@@ -3,6 +3,7 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from '@aws-sdk/client-secrets-manager';
+import { assertResourceEnvironmentConsistency } from '@/lib/env/resource-consistency';
 
 /**
  * Singleton Secrets Manager client.
@@ -49,7 +50,7 @@ export function getSecretName(envVar: string): string {
   if (!name) {
     throw new Error(`${envVar} environment variable is not set`);
   }
-  return name;
+  return assertResourceEnvironmentConsistency(name);
 }
 
 export const SECRET_OPENAI = () => getSecretName('OPENAI_SECRET_NAME');

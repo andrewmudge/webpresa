@@ -12,6 +12,9 @@ import { parseIndexedList } from '@/lib/forms/indexed-list';
  * `ensureDraftPreview(businessId)` rather than trusting a browser-supplied
  * `previewId`, so an edit can never land directly on an already-published
  * preview.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 export type CustomerSectionContentState = { message?: string } | undefined;
 

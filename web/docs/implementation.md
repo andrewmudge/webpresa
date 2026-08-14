@@ -4937,93 +4937,897 @@ Same alarm set in both environments — there is no SNS/Slack/PagerDuty target i
 
 ---
 
-# Stage 25 — Security Hardening
+# Stage 25 — Security Hardening and Pre-Production Security Review
+
+## Status
+
+Not started. This specification replaces the original short, pre-Stage-7
+draft, which predated almost everything Stages 7–24 actually built and
+significantly understated how much real security architecture already
+exists. This version was cross-referenced against the live repository
+(authentication, authorization/IDOR, webhooks, uploads, SSRF, IAM, secrets,
+S3/DynamoDB protection, environment separation, and monitoring) before being
+finalized — see "What already exists" and "Verified gaps" below for the
+specific corrections from a from-scratch assumption.
 
 ## Objective
 
-Complete the security work required before accepting real customer data and payments.
+Establish, verify, test, and document the security controls required before
+Webpresa accepts real customer data, production payments, customer uploads,
+domain changes, postcard submissions, and other production operational
+workloads. This is **not** a greenfield security implementation: most of the
+controls below already exist and are well-built (Cognito-backed customer
+auth with centralized ownership checks, atomic single-use claim tokens,
+signature-verified and idempotent Stripe/Lob webhooks, a real SSRF guard,
+resource-scoped IAM, environment-separated AWS accounts). Stage 25
+inventories what exists, verifies it with real tests, hardens the specific
+gaps found during this planning research, consolidates duplicated security
+logic where it already exists in more than one place, and produces a
+findings register. It does not blindly replace working controls, and it does
+not invent hypothetical problems beyond what real inspection found.
 
 ## Dependencies
 
-Stages 7–24 as applicable.
+Stages 7–24, in particular Stage 17 (Cognito/claims), Stage 18 (Stripe), 20
+(leads/SES), 22 (Lob), 22.5 (dev/prod AWS account and Vercel environment
+separation), and 24 (structured logging, `/admin/operations`, CloudWatch
+monitoring) — this stage extends Stage 24's logging/alarm architecture
+rather than building a parallel one.
 
-## Major deliverables
+## What already exists (verify and test, do not rebuild)
 
-- Authorization review
-- Input-validation review
-- Secure headers
-- Rate limiting
-- CSRF protections where needed
-- Secure cookie review
-- Audit logging
-- Upload restrictions
-- SSRF protection
-- IAM least-privilege review
-- S3 security review
-- Production deletion protection
-- CloudTrail
-- Security test plan
+- **Admin authentication** (`lib/auth/session.ts`, `lib/auth/actions.ts`) —
+  scrypt-hashed single operator credential, constant-time comparison
+  (including a dummy compare on length mismatch to avoid leaking length via
+  timing), JWT session (`jose`, HS256) in an `httpOnly`/`secure`-in-prod/
+  `sameSite=lax` cookie, checked in `proxy.ts`, the admin layout, and
+  independently inside every admin Server Action.
+- **Customer authentication** (`lib/auth/customer-cognito.ts`,
+  `lib/auth/customer-session.ts`) — Amazon Cognito User Pool, a completely
+  separate session cookie/secret from admin (a captured admin token cannot
+  verify as a customer session or vice versa, by construction), Cognito
+  exceptions always mapped to generic reason codes before reaching the
+  client.
+- **Centralized customer authorization** (`lib/auth/customer-authorization.ts`)
+  — `requireCustomerSession()`, `requireBusinessOwnership()` (re-derives
+  ownership from `Business.ownerUserId` against the DB, returns `notFound()`
+  rather than a distinguishing 403/404), `requireBusinessAccess()`/
+  `requireActiveSubscription()` (layers Stripe entitlement on top). Verified
+  every real customer mutation in
+  `app/app/(dashboard)/businesses/[businessId]/actions.ts` and
+  `app/api/domains/status/route.ts` goes through these.
+- **Claim-token security** (`lib/claim/token.ts`, `lib/claim/validate-token.ts`,
+  `lib/db/claims.ts`) — 80-bit entropy, HMAC-SHA256 hash with a
+  Secrets-Manager pepper (raw token never persisted beyond issuance), atomic
+  `TransactWriteItems` single-use consumption (prevents double-claim races),
+  IP-hash rate limiting on every token-guessing entrypoint, uniformly generic
+  error responses across invalid/expired/revoked/consumed states,
+  `Referrer-Policy: no-referrer` on the token-bearing page.
+- **Campaign-code redirect security** (`app/r/[campaignCode]/route.ts`) —
+  same 80-bit/rate-limited/generic-fallback pattern; no raw IP address is
+  ever persisted, only a keyed SHA-256 hash.
+- **Stripe integration** (`app/account/checkout/actions.ts`,
+  `app/api/webhooks/stripe/route.ts`, `lib/stripe/*`) — Price IDs and Stripe
+  Customer IDs resolved server-side only, checkout/portal session creation
+  ownership-gated, atomic `CustomerBillingProfile` creation preventing a
+  duplicate Stripe Customer under concurrent first checkouts, snapshot-first
+  webhook reconciliation (always re-fetches the live Subscription rather than
+  trusting the embedded event payload, making duplicate/out-of-order
+  delivery safe by construction), raw-body signature verification, a
+  `billingPurpose` metadata boundary protecting entitlement from an
+  unrelated future charge type, and `assertLiveModeAllowed()`
+  (`lib/env/runtime-environment.ts`) refusing a live-mode key outside a
+  verified production deployment.
+- **Lob integration** (`lib/lob/verify-webhook.ts`,
+  `app/api/webhooks/lob/route.ts`, `lib/lob/submit-postcard.ts`) —
+  HMAC-SHA256 webhook signature verification with a 5-minute replay-timestamp
+  tolerance, fails closed with no configured secret, event dedup via a
+  conditional `PutItem` on Lob's own event ID, and an atomic
+  `pending`→`submitting` DynamoDB condition preventing a postcard from being
+  submitted to Lob twice.
+- **SSRF guard** (`lib/security/url-validation.ts`, deliberately duplicated
+  in `infra/lambda/screenshot-capture/src/url-validation.ts` since the
+  Lambda is an independent npm project) — requires `http`/`https`, rejects
+  embedded credentials, resolves the hostname via DNS and rejects
+  loopback/RFC1918-private/link-local/the AWS metadata address
+  (`169.254.169.254`)/other reserved ranges for every resolved address.
+  Applied to the business's website URL before calling Firecrawl,
+  Firecrawl's reported final redirect URL, and every discovered image URL —
+  with genuine per-redirect re-validation on the image-fetch path
+  (`lib/firecrawl/images.ts`).
+- **Capture-token security** (`lib/capture-token.ts` /
+  `infra/lambda/screenshot-capture/src/capture-token.ts`) — mint-only in the
+  screenshot Lambda, verify-only in the Next.js app, 5-minute TTL, delivered
+  via an `httpOnly`/`secure`/`sameSite=Strict` `__Host-webpresa_capture`
+  cookie, never a URL parameter. The Lambda re-resolves the capture target
+  from DynamoDB itself from an identifiers-only invocation payload — it
+  never trusts a caller-supplied URL.
+- **IAM** (`infra/lib/stacks/vercel-access-stack.ts`, the screenshot Lambda's
+  execution role in `infra/lib/constructs/webpresa-screenshot-lambda.ts`) —
+  essentially every grant is scoped to explicit resource ARNs (16 named
+  DynamoDB tables + their indexes, 2 named S3 buckets, 10 named secrets, 1
+  Cognito User Pool ARN with an explicit action list, 2 named Lambda
+  function ARNs, 1 state machine ARN, `GetQueueAttributes`-only on the
+  DLQ). The screenshot Lambda's own role is narrower still:
+  `dynamodb:GetItem`-only on two tables, `s3:PutObject`-only scoped to two
+  literal key-prefix patterns, `secretsmanager:GetSecretValue` on exactly
+  two secrets. The one wildcard (`ses:SendEmail` on `Resource: '*'`) is
+  deliberate and documented in code (two narrower attempts — a single
+  identity ARN, then `identity/*` — proved unreliable against real AWS
+  behavior; SES's own verified-identity restriction is the real boundary
+  regardless of the IAM resource pattern).
+- **DynamoDB / S3 production protection** (`infra/lib/constructs/webpresa-table.ts`,
+  `webpresa-bucket.ts`, `infra/lib/config/environments.ts`) — PITR, deletion
+  protection, and `RemovalPolicy.RETAIN` are wired from one shared
+  `EnvironmentConfig` to all 15 tables and the assets bucket uniformly (no
+  per-resource drift found); dev gets `DESTROY`/no-PITR/no-deletion-protection
+  for teardown convenience. Every S3 bucket is `BLOCK_ALL` + SSL-enforced
+  regardless of environment.
+- **Environment separation** — genuinely distinct AWS accounts (dev
+  `539898341083`, prod `994748688217`), a synth-time
+  `assertAccountMatchesEnvironment()` guard rejecting a mismatched
+  `--profile`/`--context env=` combination before any CloudFormation call,
+  and fully independent Vercel Production/Preview environment variables
+  since Stage 22.5 (no shared bindings remain).
+- **Secrets management** — 10 secrets in AWS Secrets Manager
+  (`getSecretJson`, cached per process lifetime), `GetSecretValue`-only IAM
+  grants (never `PutSecretValue`/`List*`), no secret value found in any CDK
+  construct prop, CloudFormation output, or committed source during this
+  review.
 
-## Implementation requirements
+## Verified gaps (this stage must actually close these)
 
-Application security must include:
+Ranked roughly by severity; see `web/docs/security-findings.md` for the full
+structured findings register with status tracking.
 
-- authentication on protected routes
-- authorization on every server operation
-- Zod validation
-- output encoding and sanitization
-- public endpoint rate limits
-- secure headers
-- HTTPS
-- controlled errors
-- secure cookies
-- audit events for important changes
-- file type and size limits
-- upload validation
-- SSRF protection
+1. **Stored XSS via unvalidated uploads (High).** `lib/s3/business-assets.ts`'s
+   `uploadBusinessAsset()` → `lib/s3/assets.ts`'s `putAsset()` performs no
+   MIME-type, size, or content validation — it stores the browser-supplied
+   `file.type` verbatim (`business-assets.ts:29`) and derives the S3 key's
+   extension from the client-supplied filename
+   (`fileExtension()`, `business-assets.ts:13-17`). `app/api/assets/[...key]/route.ts`
+   then serves the object back with a `Content-Type` re-derived purely from
+   the requested key's extension (`contentTypeForKey()`, lines 24-36) —
+   including `svg → image/svg+xml` (line 30) — with no CSP, no
+   `X-Content-Type-Options`, and a one-year immutable cache
+   (`Cache-Control`, line 58). Any authenticated customer (their own
+   business's photo/logo upload) or admin can upload an `.svg` containing a
+   `<script>` and have it served same-origin, publicly, cached for a year.
+   Already self-documented as a known, tracked gap in
+   `lib/customer-editing/photos.ts:20-27`.
+2. **No security headers anywhere (Medium).** `next.config.ts` has no
+   `headers()` configuration at all — no CSP/`frame-ancestors`
+   (clickjacking), no HSTS, no `X-Content-Type-Options`, no site-wide
+   `Referrer-Policy` (currently only set narrowly on the claim-token page),
+   no `Permissions-Policy`. Already flagged in this file's own Stage 19.A
+   notes.
+3. **No rate limiting or lockout on admin sign-in (Medium).**
+   `lib/auth/actions.ts`'s `signIn` has no throttling and no failure
+   logging — scrypt slows each guess but does not bound attempt volume.
+4. **No CloudTrail (Medium).** Confirmed absent from every CDK stack in
+   both AWS accounts.
+5. **No per-redirect SSRF re-validation for the `existing_site` Playwright
+   capture (Medium).** `validateOutboundUrl()` runs once before
+   `page.goto()` in `infra/lambda/screenshot-capture/src/handler.ts`;
+   Playwright then follows any server-side redirect on its own with no
+   request/response interception — unlike the Firecrawl image-fetch path
+   (`lib/firecrawl/images.ts`), which does re-validate every hop.
+6. **DNS-rebinding TOCTOU window (Medium).** `validateOutboundUrl()`
+   resolves DNS to check for private/reserved IPs but returns the original
+   hostname, not a pinned IP; the real connection (Playwright's own
+   resolver, or Node's `fetch()`) re-resolves DNS independently afterward.
+   Affects the screenshot Lambda's `existing_site` navigation most directly;
+   affects the Firecrawl image-fetch path to a lesser degree since it
+   connects immediately after validating.
+7. **Lob's Vercel-protection-bypass secret travels as a URL query parameter**
+   (`?x-vercel-protection-bypass=...`) on the registered webhook URL
+   (Medium) — already flagged as "still outstanding" in `deployment.md`;
+   risks exposure via logs/intermediate proxies.
+8. **The prod `webpresa-vercel-prod` IAM user's creation/rotation procedure
+   is undocumented (Medium)** — `deployment.md`'s walkthrough only covers
+   `webpresa-vercel-dev`; the prod stack and its policies are confirmed
+   deployed, but there's no recorded, repeatable process for the user/keys
+   themselves, and no documented verification that Vercel's Production
+   environment variables actually hold the prod (not dev) access keys.
+9. **No runtime guard against a Vercel deployment binding to the wrong
+   environment's AWS resources (Medium).** Unlike Stripe/Lob's
+   `assertLiveModeAllowed()`, nothing detects a Production deployment
+   accidentally configured with dev table/secret/bucket names — correctness
+   today rests entirely on the Vercel dashboard's env-var bindings being set
+   right.
+10. **`/api/domains/status`'s Origin check only runs when the `Origin`
+    header is present (Low)** — bounded by its own session+ownership
+    re-derivation either way, but it's the one hand-rolled (non-Server-Action-default)
+    CSRF posture in the app and is worth tightening rather than leaving
+    partial.
+11. **No cost/volume guard on Lob postcard submission (Low)** beyond
+    admin-session gating and the per-postcard idempotency transition —
+    `CampaignDetail.tsx`'s bulk "generate postcard" path has no cap on how
+    many real-money submissions one action can trigger.
+12. **`lib/customer-editing/*` functions take a bare `businessId` with no
+    authorization check of their own (Low)** — by design, the calling
+    Server Action is responsible for `requireBusinessAccess` first, and
+    every current call site does this correctly, but nothing prevents a
+    future call site from skipping it.
+13. **No shared `requireAdmin()` helper (Low)** — every admin Server Action
+    independently repeats the same `getSession()`/null-check, consistently
+    but without central enforcement.
+14. **No audit-denial logging outside the 7 `/api/internal/scan/*` routes
+    and webhook signature failures (Low)** — admin/customer sign-in
+    failures and the many ad hoc `Unauthorized` Server Action returns are
+    silent to the structured log pipeline; no dedicated audit trail exists
+    for ownership transfer, subscription changes, or account deletion
+    beyond the implicit history already retained in the Claims table.
+15. **Dead/misleading SSRF-adjacent code (Informational).**
+    `infra/lambda/screenshot-capture/src/same-origin.ts`'s
+    `isWithinConfiguredOrigin()` is documented as being called on every
+    redirect Playwright follows but is referenced only by its own test —
+    never wired into `handler.ts`/`browser.ts`.
+16. **No MFA option for admin or customer accounts (Informational for MVP)**
+    — Cognito is configured `Mfa.OFF`; the single admin credential has no
+    second factor.
 
-URL-fetching systems must block:
+## Required security areas
 
-- localhost
-- loopback ranges
-- private network ranges
-- link-local ranges
-- AWS metadata endpoints
-- `file://`
-- non-HTTP protocols
-- redirects into blocked networks
+### 1. Authentication
 
-AWS security must include:
+Verify the admin and customer authentication boundaries above hold under
+test (session forgery, expired/tampered JWT, cookie-swap between admin and
+customer). Add:
+- Rate limiting/lockout on `lib/auth/actions.ts`'s `signIn` — reuse the
+  existing `lib/db/rate-limit.ts` table-agnostic rate-limit-counter module
+  (already extracted from the Claims table pattern and already used by
+  leads/campaign-code entry) rather than inventing a new mechanism; key by
+  IP hash, same `RATELIMIT#`/TTL'd-item shape.
+- A decision on whether Cognito's own built-in throttling
+  (`TooManyRequestsException`/`LimitExceededException`) is sufficient for
+  customer sign-in, or whether an app-level rate limit should sit in front
+  of `InitiateAuth` too (recommend: Cognito's own throttling is sufficient
+  for MVP given the account has no advanced-security add-on cost
+  justification yet — document this decision rather than silently skipping
+  it).
+- Verify no protected Server Action or Route Handler trusts `proxy.ts`'s
+  session-presence check alone — spot-check a sample beyond what this
+  research already confirmed (all 27 actions in
+  `app/admin/(dashboard)/businesses/[businessId]/actions.ts` independently
+  call `getSession()`).
+- Do not weaken any existing cookie flag, session duration, or the
+  admin/customer/claim-intent secret-isolation design.
 
-- least-privilege IAM
-- no embedded access keys
-- secrets in Secrets Manager
-- S3 public access blocking
-- production retention and deletion protection
-- CloudTrail
-- MFA for administrative access
-- environment-separated secrets
-- consistent tags
+### 2. Authorization / IDOR / BOLA
+
+Highest-priority workstream, per the existing `requireBusinessOwnership()`/
+`requireBusinessAccess()` pattern already in place. Required:
+- A real automated IDOR test suite: Customer A (authenticated, owns Business
+  A) attempting to read/mutate Business B's data, edit Business B's preview,
+  request Business B's signed asset URLs, or modify Business B's domain
+  connection — all via `requireBusinessOwnership`'s `notFound()` behavior.
+  Reuse the existing `lib/auth/customer-authorization.ts` helpers as the
+  system under test; do not write a second, parallel ownership-check
+  implementation for the tests.
+- Confirm (with a test, not just inspection) that an authenticated customer
+  session cannot reach any `/admin/*` Server Action — the admin/customer
+  session cookies and secrets are already cryptographically isolated by
+  construction; verify this holds under test.
+- Confirm an unauthenticated request cannot invoke any customer or admin
+  mutation.
+- Formalize the `lib/customer-editing/*` "caller is responsible for auth"
+  convention: add an explicit, consistent doc-comment convention (already
+  present in some files, e.g. `photos.ts:20-27`, `business-info.ts:21-24` —
+  extend to any file missing it) stating the function performs no auth
+  check and naming the one call site expected to gate it, so a future
+  reviewer/lint pass can grep for the pattern. Do not restructure the
+  auth-at-the-call-site architecture itself unless a real new gap is found.
+- Admin has no per-resource ownership dimension by design (single-operator
+  internal tool) — document this explicitly as an accepted architecture
+  decision, not a gap requiring RBAC (RBAC remains deferred, consistent
+  with Stage 7's own deferred-work list).
+
+### 3. Input validation
+
+Inventory Zod usage across Server Actions, Route Handlers, webhook payloads,
+and AI-generated structured output (`generatePreviewContent`'s
+re-validation against `PreviewContentSchema` already exists — verify it's
+still exhaustive). Confirm bounds exist for: string lengths, array lengths
+(Firecrawl's `normalizeFirecrawlResponse()` already caps these — verify),
+file counts (`MAX_BUSINESS_PHOTOS = 6` already enforced — verify it's
+enforced server-side in every call path, not just the primary one), and
+enumeration values (plan names, campaign channel, etc. — already
+`WEBPRESA_PLANS`-validated). No new validation framework — this repo's
+existing Zod convention is sufficient; the work here is auditing coverage,
+not introducing a second approach.
+
+### 4. Output encoding / XSS / uploaded and generated content
+
+The upload/Content-Type gap (Verified gap #1) is the concrete, launch-blocking
+item here. Required changes:
+- `lib/s3/assets.ts`'s `putAsset()` (or a new validating wrapper called by
+  every upload path) must reject uploads whose actual decoded content
+  doesn't match an explicit allowlist (`image/jpeg`, `image/png`,
+  `image/webp` — mirror the stock-image path's existing `sharp(buffer).metadata()`
+  decode-and-reject-on-failure pattern, `lib/s3/stock-images.ts:56-66`,
+  rather than inventing a second validation approach) and must enforce a
+  maximum per-file size and a maximum request file count at the storage
+  layer itself, not only at the calling Server Action.
+- Stop trusting the browser's `file.type` for the stored `Content-Type` —
+  derive it from the validated decode result.
+- Stop deriving the served `Content-Type` in `app/api/assets/[...key]/route.ts`
+  from the request key's bare extension; serve the validated,
+  upload-time-determined type instead (or keep extension-derivation but only
+  from a fixed allowlist that excludes `svg`).
+- **Decide on SVG explicitly**: recommend rejecting customer/admin SVG
+  uploads outright for the MVP (remove `svg` from
+  `CONTENT_TYPES`/the upload allowlist) rather than sanitizing active SVG
+  content, given no SVG-sanitization dependency exists in this repo today.
+- Add `X-Content-Type-Options: nosniff` to `/api/assets/[...key]`'s
+  response headers (and site-wide via `next.config.ts` — see "Security
+  headers" below).
+- Stop trusting the client-supplied filename for the stored key's extension
+  — already namespaced under a random UUID + fixed prefix per business, so
+  this is a defense-in-depth tightening, not a traversal fix (the existing
+  `businessId`-scoped prefix already bounds the blast radius).
+- Review `dangerouslySetInnerHTML`/raw-HTML usage repo-wide (none was found
+  during this research in the public template or admin/customer editing
+  surfaces — confirm this holds, don't assume).
+- Document malware/virus scanning as explicitly deferred (no such capability
+  exists in this repo or its AWS footprint today).
+
+### 5. CSRF / origin protection
+
+Next.js Server Actions' built-in same-origin POST protection remains the
+primary defense and is not modified. The one Route Handler mutation outside
+that boundary, `app/api/domains/status/route.ts`, already hand-rolls an
+Origin check plus session/ownership/data re-verification — required change:
+make the Origin check unconditional (reject when the header is absent,
+rather than only checking it when present) rather than relying solely on
+the session+ownership fallback. Do not add CSRF tokens elsewhere — no other
+non-webhook, non-internal-auth mutation surface exists outside Server
+Actions (verified by a full inventory of every `route.ts` under `web/app`).
+
+### 6. Security headers / CSP
+
+Add a `headers()` function to `next.config.ts` (currently absent entirely).
+Required, evaluated against this app's real integrations:
+- `Content-Security-Policy` with `frame-ancestors 'none'` (or `'self'` if
+  the `WebsitePreviewCard` iframe embedding `/b/[slug]` needs to be
+  self-framed — verify which; it renders same-origin per Stage 19.A's
+  notes) as the primary clickjacking defense. `img-src`/`connect-src` must
+  explicitly allow: `images.unsplash.com`, `*.googleusercontent.com`
+  (Google review avatars), the stock-images CloudFront domain
+  (`STOCK_IMAGES_CDN_DOMAIN`), and Stripe's own domains for Checkout/Portal
+  redirects (top-level navigation, not embedded — confirm no `frame-src`
+  entry is actually required). Do not add origins beyond what's genuinely
+  used.
+- `Strict-Transport-Security` (Vercel may already add this at the edge —
+  verify against the deployed app rather than assuming, and add explicitly
+  if not present).
+- `X-Content-Type-Options: nosniff`.
+- `Referrer-Policy` site-wide (the claim/campaign-redirect pages already set
+  `no-referrer` narrowly — decide a sensible site-wide default, e.g.
+  `strict-origin-when-cross-origin`, without weakening the existing
+  narrower claim-page setting).
+- `Permissions-Policy` — a minimal explicit allowlist (this app doesn't use
+  camera/microphone/geolocation anywhere found in this research).
+- Verify the deployed headers against the real Vercel production app after
+  implementation, not just the source config — headers can be
+  stripped/overridden by platform-level configuration.
+
+### 7. Rate limiting and abuse protection
+
+Inventory, not a single global rule:
+- **Admin sign-in** — add (see "Authentication" above), reusing
+  `lib/db/rate-limit.ts`.
+- **Customer sign-in / sign-up / password reset** — Cognito's own
+  throttling; document as the accepted MVP posture (see "Authentication").
+- **Claim-token entry, campaign-code entry, lead submission** — already
+  rate-limited via the shared `lib/db/rate-limit.ts` pattern; verify tests
+  cover the boundary.
+- **Stripe checkout/portal creation** — already authorization-gated with
+  pending-session reuse (no duplicate Session on repeated clicks); no
+  additional IP rate limit needed — this matches the principle that an
+  authenticated, ownership-checked, idempotent expensive operation doesn't
+  need IP throttling on top.
+- **Lob postcard submission** — add a simple per-admin-action or
+  per-campaign cap on bulk submission volume (Verified gap #11); the
+  per-postcard idempotency guard already prevents double-charging the same
+  postcard, but nothing bounds a single bulk action's total volume today.
+- **Public asset proxy (`/api/assets/[...key]`)** — no rate limit exists;
+  low priority given it only serves already-intended-public content with
+  aggressive caching, but note it as reviewed rather than silently skipped.
+- **Firecrawl/OpenAI/Google Places/Playwright-triggering admin actions** —
+  already admin-session-gated (not public); the `MAX_AI_GENERATIONS`
+  soft-cap and `hasActiveScan()` concurrency guard already exist — verify,
+  don't rebuild.
+
+### 8. Webhook security
+
+- **Stripe**: verified sound end-to-end (raw-body signature verification,
+  fail-closed on invalid signature, event allowlist, `billingPurpose`
+  boundary, snapshot-first idempotent reconciliation, safe on duplicate/out-of-order
+  delivery, no secret/payload logging). Add to the automated test suite;
+  no code change anticipated.
+- **Lob**: verified sound (signature + 5-minute replay window, fail-closed
+  with no secret, event dedup, atomic submission-state guard). Required
+  change: resolve the bypass-secret-in-URL-querystring exposure (Verified
+  gap #7) — check whether Lob supports a custom header for this instead;
+  if not, document the residual risk and mitigate what's controllable (e.g.
+  confirm it's excluded from any request logging).
+
+### 9. Upload security
+
+See "Output encoding / XSS" above for the required validation changes — the
+security posture and the XSS fix are the same piece of work here, not two
+separate efforts. Additionally:
+- Confirm ownership/authorization is checked before every upload call
+  (already true — verified for every current customer path via
+  `requireBusinessOwnership`/`requireEditAccess`).
+- Enforce the max-count (`MAX_BUSINESS_PHOTOS = 6`) and the new max-size/type
+  checks at the same layer, not scattered per call site.
+- Keep private S3 storage and the existing prefix-scoped key structure
+  unchanged — only the validation and served-Content-Type logic changes.
+- Document malware scanning as explicitly deferred.
+
+### 10. SSRF / outbound request security
+
+Reuse and strengthen `lib/security/url-validation.ts` / the Lambda's
+duplicate — do not build a second implementation. Required:
+- Add per-redirect re-validation to the screenshot Lambda's `existing_site`
+  Playwright navigation, mirroring the pattern `lib/firecrawl/images.ts`
+  already uses for image fetches (manual redirect following, `dns.lookup`
+  + range check on every hop, bounded hop count).
+- Where practical, reduce the DNS-rebinding TOCTOU window (Verified gap #6)
+  — at minimum for the Node-`fetch()`-based paths (Firecrawl image
+  ingestion), resolve once and connect to the resolved IP directly rather
+  than re-resolving; for the Lambda's Playwright-based navigation, evaluate
+  whether a practical mitigation exists given Playwright's own
+  browser-level DNS resolution, and if not, explicitly risk-accept it in
+  the findings register with the mitigating factor that the Lambda's own
+  IAM role and network posture already bound the blast radius (no
+  DynamoDB/S3 write capability reachable beyond its own narrow grants).
+- Fix or remove `isWithinConfiguredOrigin()` (Verified gap #15) — either
+  wire it into the actual redirect-handling path it claims to guard, or
+  delete it and correct the doc comment.
+- Preserve the `generated_preview` capture's strict same-origin-only
+  resolution path unchanged (`same-origin.ts`'s `buildPreviewUrl`) — it is
+  correctly not routed through the general SSRF guard, since it only ever
+  targets Webpresa's own app.
+- Required SSRF test matrix: `127.0.0.1`, `0.0.0.0`, `::1`, RFC1918 ranges,
+  `169.254.169.254`, IPv6 private/link-local forms, a public-URL-that-redirects-to-private
+  case (both for the already-covered Firecrawl image path and the newly
+  hardened `existing_site` capture path), non-HTTP schemes, and
+  `file://`.
+
+### 11. Claim / access-token security
+
+Already strong (see "What already exists"). Add automated tests for: token
+guessing/enumeration resistance (rate-limit boundary), consumed-token reuse,
+concurrent double-claim attempts (exercising the real
+`TransactWriteItems` condition, not a mocked one), and confirmation that no
+raw token ever appears in a log line (already true by construction — the
+structured logger's `LogFields` type has no field for one).
+
+### 12. Stripe / billing security
+
+Already strong (see "What already exists"). Add automated tests for:
+duplicate/out-of-order webhook delivery producing no state regression
+(already unit-tested per `route.test.ts` — extend if gaps found),
+concurrent first-checkouts across two businesses resolving to one
+`CustomerBillingProfile`, and a client-submitted arbitrary plan/price value
+being rejected.
+
+### 13. Audit logging
+
+Extend Stage 24's `web/lib/logging/log.ts` and its closed `LogFields`
+allowlist — do not build a second logging system. Add `event` names and,
+where a new field is genuinely needed, extend the existing typed field list
+(never a free-form payload field) for:
+- Admin sign-in success/failure (`lib/auth/actions.ts`)
+- Customer sign-in success/failure (`app/claim/actions.ts`'s sign-in path)
+- Authorization-denied events currently silent (the ad hoc `Unauthorized`
+  returns across admin/customer Server Actions) — at minimum the
+  higher-value ones (business mutation denials), not necessarily every
+  single check site
+- Ownership changed / claim consumed (the Claims table's own history
+  already covers this implicitly — decide whether a log event adds real
+  value beyond querying that table, or whether this is already
+  sufficiently covered)
+- Subscription status changed (already logged via `stripe.webhook.processed`
+  — verify it captures enough context)
+- Postcard submitted, admin destructive actions (business/website/account
+  deletion), domain changed
+Never log: passwords, API keys, session/claim/capture tokens, Stripe/Lob/Vercel
+secrets, raw Secrets Manager values, full webhook payloads, unnecessary
+customer PII — the existing `LogFields` closed-type design already
+structurally prevents most of this; extend it, don't work around it.
+
+### 14. Controlled errors
+
+Spot-checked and found sound across webhooks and internal routes (generic
+messages, no stack traces, no AWS/DynamoDB internals in responses). Extend
+the same spot-check to a broader sample of customer/admin Server Actions as
+part of this stage's test plan, rather than assuming full coverage from the
+sample already reviewed.
+
+### 15. AWS IAM least privilege
+
+Already largely sound (see "What already exists"). Required:
+- Formalize the `ses:SendEmail` `Resource: '*'` grant as a documented,
+  risk-accepted findings-register entry (the justification already exists
+  in the CDK code comment — this just makes it a tracked decision rather
+  than an implicit one).
+- Confirm the prod `webpresa-vercel-prod` user's attached policies actually
+  match dev's scoping 1:1 (both stacks share the same construct code, so
+  this should already be true by construction — verify with
+  `aws iam list-attached-user-policies` against both users rather than
+  assuming from the shared CDK source).
+- No wildcard `Action: '*'` or `Resource: '*'` beyond the one documented SES
+  exception was found anywhere in this review.
+
+### 16. Vercel → AWS credential security
+
+Document this as a named, accepted architectural trust boundary — Webpresa
+uses long-lived static IAM access keys for the Vercel-hosted app because
+Vercel has no IAM role/OIDC concept, and the CDK stack deliberately avoids
+managing the keys themselves (never flowing a secret through a
+CloudFormation template). Required, not a redesign:
+- Document (in `deployment.md`) the same `webpresa-vercel-prod` user
+  creation/key-generation procedure `deployment.md` already documents for
+  dev, so it's a repeatable, reviewed process rather than tribal knowledge.
+- Verify (checklist item, not automatable from this repo) that Vercel's
+  Production environment's `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
+  actually hold the prod user's keys, not dev's.
+- Document a practical rotation procedure (generate new keys for the
+  relevant `webpresa-vercel-{env}` user, update the corresponding Vercel
+  environment, verify, then deactivate/delete the old key pair) — no
+  automated rotation exists or is planned given Vercel's credential model.
+- Confirm (repo-wide grep, already spot-verified in this research) that no
+  `AWS_*`/secret env var is ever read in client-side code or prefixed
+  `NEXT_PUBLIC_` — add this as an automated repo-scan test, not just a
+  one-time manual check.
+
+### 17. Secrets management
+
+Already sound (see "What already exists"). Add one new runtime guard: a
+small, narrowly-scoped fail-fast check (mirroring `assertLiveModeAllowed()`'s
+shape) that a deployment's resolved AWS resource identifiers (table/bucket/secret
+names) are internally consistent with each other — e.g. all either
+`webpresa-dev-*` or all `webpresa-prod-*`, never a mix — to catch a
+misconfigured Vercel environment-variable binding before it causes a
+cross-environment write (Verified gap #9). Keep this narrow: it detects
+inconsistency, it does not attempt to infer or override which environment
+is "correct."
+
+### 18. S3 security
+
+Already sound (see "What already exists"). Required: add
+`X-Content-Type-Options: nosniff` to `/api/assets/[...key]`'s response
+(ties into "Output encoding" above). No bucket policy, encryption, or
+public-access-blocking change needed — all already correct. Re-confirm the
+existing asset-class separation (private-only `previews/`/`postcards/`,
+proxy-served `businesses/`/accepted `scans/*/images/`, CDN-public stock
+images) stays intact after the upload-validation change.
+
+### 19. DynamoDB / production data protection
+
+Already sound (see "What already exists") — verify via `aws dynamodb
+describe-table` against both live accounts that `deletionProtectionEnabled`,
+PITR, and the table's actual `RemovalPolicy`-driven behavior match
+`environments.ts`'s intent, rather than trusting CDK source alone. Cross-reference
+(informational only, not a Stage 25 blocker): `data-stack.ts`'s own
+"PRE-PRODUCTION ARCHITECTURE NOTE" about the `status-index` GSIs being a
+hot-partition anti-pattern that "MUST BE REASSESSED BEFORE PRODUCTION" — a
+scaling/availability concern the codebase already flags, worth a pointer to
+Stage 27's launch validation rather than solving here.
+
+### 20. Production AWS account security
+
+This section is a **manual verification checklist**, not something
+inspectable from the repository — Stage 25's acceptance criteria for it
+must be completed and signed off by the user, not automated:
+- Production account root user has MFA enabled and no active root access
+  keys.
+- Human administrative access uses IAM Identity Center (or equivalent), not
+  long-lived IAM users, with MFA enforced.
+- No unnecessary human IAM users exist in the prod account beyond what
+  `deployment.md` documents.
+- `webpresa-dev`/`webpresa-prod` CLI profile isolation (already true and
+  already enforced at synth time by `assertAccountMatchesEnvironment()`).
+- Production secrets, table names, and bucket names never accidentally
+  reference dev resources (verify with the new runtime guard from §17 plus
+  a manual spot check).
+- Consistent resource tagging — verify `cdk.Tags.of(this)` (or equivalent)
+  is actually applied across stacks; `vercel-access-stack.ts` is a known,
+  documented exception (`AWS::IAM::ManagedPolicy` has no CloudFormation
+  `Tags` property) — confirm this is the only deliberate exception, not an
+  overlooked one.
+
+### 21. CloudTrail
+
+A genuine implementation requirement (Verified gap #4), not a bullet point.
+Add a CloudTrail construct (extending `infra/lib/stacks/monitoring-stack.ts`
+or a small new sibling stack, per this project's existing "small, focused
+resources" preference) providing, per environment:
+- A multi-region trail covering management events (data events on the
+  assets/stock-images buckets deferred as disproportionate to this MVP's
+  scale unless a specific investigative need arises).
+- A dedicated, private S3 log-destination bucket (`BLOCK_ALL`, SSE, a
+  restrictive bucket policy limited to the CloudTrail service principal,
+  log file validation enabled) — reuse `webpresa-bucket.ts`'s existing
+  construct rather than a bespoke bucket definition.
+- A retention/lifecycle rule appropriate to this MVP's scale (e.g.
+  transition to a cheaper storage class after a period, matching the
+  existing lifecycle-rule pattern already used on the assets bucket) —
+  proportional, not indefinite/enterprise-grade retention.
+- A small set of CloudWatch alarms for IAM policy changes, CloudTrail
+  configuration/logging changes, and other privileged administrative
+  activity, added to the existing `WebpresaMonitoringStack` dashboard
+  (Stage 24) rather than a second, parallel dashboard.
+No AWS Config, GuardDuty, or Security Hub — those remain deferred (see
+"Deferred work") unless this review surfaces a concrete, immediate need,
+which it did not.
+
+### 22. Production deletion / destructive actions
+
+Verified already sound: business/website deletion cascades are deliberate
+and ownership-checked; account deletion is blocked while any owned business
+has an active/past-due subscription; postcard submission has the atomic
+idempotency guard; domain changes are ownership-gated and re-verified
+live against the provider on every reconciliation call; infrastructure
+deletion protection is live in prod per `environments.ts`. Required
+addition: wire the audit-logging events from §13 onto these specific
+actions (business/website/account deletion, ownership release/reissue,
+domain disconnect, postcard submission) — the mechanism exists, the actions
+exist, only the log events are missing.
+
+### 23. Environment isolation
+
+Already strong at the infrastructure layer (distinct AWS accounts,
+synth-time account assertion, independent Vercel Production/Preview
+bindings, `assertLiveModeAllowed()` for Stripe/Lob). The one real gap is the
+missing runtime guard for AWS resource identifiers (§17/§9 above) — add it
+here as the concrete deliverable for this section. No other environment
+crossover risk was found: Cognito, Vercel API, Google Places, and every
+other provider configuration is already environment-scoped via distinct
+secret names or distinct Vercel environment-variable bindings.
+
+### 24. Supply-chain / dependency security
+
+- `npm audit` (or equivalent) across both `web/` and `infra/` — this
+  repo's two independent npm projects — plus the two Lambda packages
+  (`infra/lambda/screenshot-capture/`, `infra/lambda/postcard-render/`),
+  which are separately documented as fully independent npm projects with no
+  shared workspace tooling.
+- Confirm lockfiles (`package-lock.json`) are committed and used (already
+  true — `web/package-lock.json` is tracked) and no unpinned Git-URL
+  dependency exists anywhere.
+- Review the screenshot-capture and postcard-render container base images
+  for known vulnerabilities (both use a pinned base image per
+  `architecture.md`'s "Dockerfile — base image" notes — confirm the pin is
+  still current and not silently stale).
+- Enable/verify GitHub's own dependency and secret-scanning alerts on the
+  repository if not already active.
+- Risk-based rule: only critical/high vulnerabilities in reachable code
+  paths must be fixed, upgraded, or explicitly risk-accepted — not zero
+  warnings of every severity.
+
+### 25. Repository secret scanning
+
+Run a secret scanner (e.g. `gitleaks`/`trufflehog`) across the working tree
+and, where practical, git history. Expected result is clean — every real
+secret verified during this research lives in AWS Secrets Manager or a
+plain (non-secret) Vercel environment variable, never in a CDK construct
+prop, CloudFormation output, or committed source — but this must be
+actually run and its (redacted) result documented, not assumed from code
+review alone. If a real credential is ever found: treat it as compromised,
+rotate it, remove it from source, and evaluate whether git-history
+remediation is warranted — do not print the discovered value anywhere.
+
+### 26. Security test plan
+
+Add automated tests (this repo's existing co-located `__tests__` convention
+— e.g. `lib/auth/__tests__/`, `app/.../__tests__/route.test.ts`, matching
+the pattern already used for `workflow-actions.test.ts`,
+`stripe/route.test.ts`, `lob/route.test.ts`) covering:
+- **Authentication**: unauthenticated access to a protected route/Server
+  Action/Route Handler; expired/tampered session JWT; admin cookie replayed
+  against a customer route and vice versa.
+- **Authorization/IDOR**: Customer A → Customer B business read/write;
+  customer → admin operation attempt; unauthenticated → protected mutation.
+- **Validation**: malformed IDs, oversized input, invalid enum values,
+  malformed webhook payloads (already partially covered — extend).
+- **XSS/uploads**: a crafted `.svg`/mislabeled file rejected at upload; a
+  correctly-typed image accepted; oversized file rejected; wrong
+  MIME/extension mismatch rejected.
+- **SSRF**: the full matrix from §10, exercised against both the Lambda's
+  `existing_site` path (post-hardening) and the existing Firecrawl
+  image-fetch path.
+- **Rate limiting**: repeated admin sign-in attempts throttled; repeated
+  claim/campaign-code guesses throttled (already covered — verify).
+- **Webhooks**: invalid Stripe/Lob signature rejected; duplicate delivery
+  produces no state regression (Stripe already tested — extend to Lob);
+  malformed event handled without a 500.
+- **Errors**: no stack trace/AWS-internal detail in any public/customer
+  error response, across a broader sample than this review's spot check.
+- **Environment**: the new §17 runtime guard actually rejects a
+  deliberately mismatched resource-identifier configuration in a test.
+- **Headers**: verify the deployed production app's actual response headers
+  (not just source config) once §6 ships.
+
+### 27. Security findings register
+
+`web/docs/security-findings.md` (new — created alongside this stage
+rewrite, seeded with exactly the findings this planning research actually
+discovered; no hypothetical entries) tracks every finding by
+ID/severity/status, each with description, affected component, realistic
+impact, remediation, status, and verification method. Do not add
+speculative findings beyond the seeded list — new findings discovered
+*during* Stage 25's actual implementation get appended with the same
+rigor. High-severity findings (SEC-01) must be resolved before Webpresa is
+declared launch-ready; Medium findings should be resolved or have an
+explicit, dated risk-acceptance note; Low/Informational findings may be
+explicitly deferred with rationale.
+
+## Stage 24 integration
+
+Reuse Stage 24's structured logging (`lib/logging/log.ts`, extended per
+§13), correlation IDs, `/admin/operations` page, alarm/dashboard
+architecture (extended per §21 for CloudTrail-related alarms), and failure
+categories. Do not build a parallel security-observability system.
+
+## Do not over-engineer the MVP
+
+Keep the following deferred unless this stage's actual implementation
+surfaces a compelling immediate requirement (none was found during this
+planning research):
+
+- Formal third-party penetration test
+- AWS Config, GuardDuty, Security Hub
+- Enterprise SSO, compliance certifications, SOC 2
+- Full SIEM, centralized security account
+- Multi-region disaster recovery
+- WAF (no evidence of a need found — Vercel's own edge network and the
+  app's existing rate-limiting/SSRF/auth posture cover the realistic MVP
+  threat model)
+- Full SVG sanitization support (rejecting SVG outright is the recommended
+  MVP posture instead — see §4/§9)
+- Admin and customer MFA (Cognito supports adding TOTP MFA later without
+  re-architecture if real usage or a specific incident justifies it —
+  document this as the reintroduction path, don't build it now)
+- Automated secret rotation (Vercel's credential model makes this
+  impractical to fully automate; the documented manual rotation procedure
+  from §16 is the MVP answer)
+- Full DNS-pinning for the Playwright-based SSRF path (partial mitigation
+  only per §10 — a complete fix would require replacing Playwright's own
+  network stack, disproportionate for this MVP's threat model given the
+  Lambda's already-narrow IAM/network blast radius)
+
+## Required deliverables
+
+Application security: authentication review, authorization/IDOR review
+with real tests, validation-coverage audit, the upload/XSS fix, CSRF
+tightening on `/api/domains/status`, security headers/CSP, admin sign-in
+rate limiting, controlled-error spot-check extension.
+
+Integration security: Stripe/Lob webhook verification (test coverage, Lob
+bypass-secret fix), third-party trust-boundary documentation, replay/idempotency
+test coverage.
+
+Untrusted-content security: upload hardening (validation + Content-Type
+fix), SSRF hardening (redirect re-validation, DNS-rebinding mitigation
+where practical), outbound-URL inventory documentation, dead-code cleanup
+in the Lambda's SSRF-adjacent path.
+
+Cloud security: IAM findings-register entry for the one documented
+wildcard, prod Vercel-credential documentation, the new cross-environment
+runtime guard, S3 `nosniff` header, DynamoDB/S3 production-protection
+verification, CloudTrail implementation, production-account manual
+checklist.
+
+Operational security: audit events wired into `log.ts` and the relevant
+Server Actions, destructive-action logging, Stage 24 dashboard/alarm
+integration for CloudTrail signals, documented credential-rotation
+procedure.
+
+Supply-chain security: dependency review (both npm projects + both Lambda
+packages), repository secret scan.
+
+Verification: the security test plan (§26), the findings register (§27,
+seeded and tracked through resolution), and an updated launch checklist
+cross-referenced from Stage 27.
 
 ## Acceptance criteria
 
-- Security review findings are documented and resolved or explicitly accepted.
-- Admin and customer authorization tests pass.
-- SSRF tests block prohibited targets.
-- Public endpoints have rate limits.
-- Production data resources use retention and deletion protection.
-- IAM policies are scoped to required actions and resources.
-- No secret scanners find committed credentials.
-- Error responses do not expose stack traces or AWS internals.
+1. Every Server Action and Route Handler has been inventoried and
+   classified (public/customer/admin/webhook/internal) — this planning
+   research already produced the classification; Stage 25's implementation
+   confirms it stays accurate as code changes land.
+2. Every protected server operation authenticates independently of
+   `proxy.ts` (already true — verified for a broad sample; extend
+   verification to full coverage via the test plan).
+3. Every customer resource operation independently verifies
+   ownership/authorization via `requireBusinessOwnership`/
+   `requireBusinessAccess` (already true for every real call site found;
+   verified with real IDOR tests, not just inspection).
+4. Customer A cannot read or mutate Customer B's resources by changing
+   identifiers (tested, not just asserted).
+5. Customers cannot invoke admin-only operations (tested).
+6. Unauthenticated users cannot invoke protected operations (tested).
+7. Stripe and Lob webhook signatures are verified and invalid signatures
+   are rejected (already true; tested).
+8. Duplicate webhook delivery is safe/idempotent for both Stripe and Lob
+   (already true for Stripe; extend explicit test coverage to Lob).
+9. Stripe prices and customer relationships are derived from trusted
+   server-side state only (already true; tested).
+10. Admin sign-in has rate limiting; public abuse-sensitive endpoints
+    (claim/campaign-code entry, lead submission) retain their existing rate
+    limiting, verified via tests.
+11. Lob postcard submission has an authorization gate, an idempotency
+    guard, and a volume/cost cap on bulk submission.
+12. Customer/admin uploads enforce server-side MIME validation (real decode,
+    not just `Content-Type` trust), size limits, and count limits, with SVG
+    explicitly rejected for the MVP.
+13. SSRF tests block prohibited IPv4/IPv6/private/link-local/metadata
+    targets and redirects into prohibited networks, for both the Firecrawl
+    path and the newly hardened `existing_site` screenshot-capture path.
+14. Playwright's `generated_preview` capture continues to use only the
+    strict same-origin resolution path, never a caller-supplied URL.
+15. No unnecessary wildcard IAM permissions remain undocumented — the one
+    real exception (`ses:SendEmail`) is a tracked, risk-accepted findings-register
+    entry.
+16. The prod Vercel→AWS credential creation/rotation procedure is
+    documented in `deployment.md`, matching dev's existing documentation.
+17. Production S3 buckets block public access (already true; re-verified
+    live).
+18. Signed/private asset access requires authorization where applicable
+    and uses short-lived URLs (already true; re-verified).
+19. Production DynamoDB/S3 critical resources have the intended
+    retention/deletion protections (already true; re-verified live against
+    both AWS accounts, not just CDK source).
+20. Production CloudTrail is enabled, multi-region, and its log bucket is
+    private and protected.
+21. Production root MFA and privileged administrative MFA are verified via
+    the manual checklist (§20).
+22. Dev and production credentials, secrets, AWS resources, Stripe/Lob
+    modes, and URLs are demonstrably isolated (already true at the
+    infrastructure layer; the new §17/§23 runtime guard closes the one
+    remaining implicit-trust gap).
+23. Security headers are verified against the deployed production
+    application, not merely source configuration.
+24. Public/customer error responses expose no stack traces, AWS internals,
+    secrets, or sensitive provider internals (spot-checked; broadened via
+    the test plan).
+25. Secret scanning finds no active committed credentials.
+26. Critical/high dependency vulnerabilities affecting reachable code are
+    fixed, mitigated, upgraded, or explicitly risk-accepted.
+27. Security-sensitive operations (sign-in, destructive actions, ownership
+    changes) produce safe audit events per §13/§22.
+28. The security test plan (§26) passes.
+29. `architecture.md` and `deployment.md` are updated to reflect the
+    implemented security architecture and the new documented procedures
+    (credential rotation, prod IAM-user creation), per this repo's standing
+    post-stage documentation convention.
+30. The security findings register (§27) contains zero unresolved
+    High-or-above findings before Webpresa is declared production-launch-ready,
+    unless an explicit, dated risk acceptance is recorded.
 
 ## Deferred work
 
-- Formal penetration test
-- AWS Config
-- GuardDuty
-- Security Hub
-- Enterprise SSO
-- Compliance certifications
+- Formal third-party penetration test
+- AWS Config, GuardDuty, Security Hub
+- Enterprise SSO, compliance certifications, SOC 2
+- Full SIEM, centralized security account
+- Multi-region disaster recovery
+- WAF (no evidence of need found in this review)
+- Full SVG-sanitization support (SVG rejected outright instead)
+- Admin/customer MFA (Cognito supports adding it later; not required for
+  this MVP's threat model)
+- Automated secret rotation (Vercel's credential model makes full
+  automation impractical; a documented manual procedure is the MVP answer)
+- Full DNS-pinning for Playwright's SSRF path (partial mitigation only —
+  see §10)
+- Malware/virus scanning on uploads
+- Role-based admin permissions / multiple admin users (unchanged from
+  Stage 7's own deferred list)
 
 ---
 

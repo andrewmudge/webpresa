@@ -17,6 +17,9 @@ import { mergeTestimonialsPreservingOrder } from '@/lib/testimonials/merge';
  * it does not weaken the draft/publish guarantee for actual generated
  * content (hero/services copy, CTAs, theme, photos), which all do go
  * through `ensureDraftPreview`.
+ *
+ * Stage 25 — performs no auth/ownership check itself; the caller must call
+ * `requireBusinessAccess()`/`requireBusinessOwnership()` first.
  */
 export type CustomerBusinessListState = { message?: string } | undefined;
 
