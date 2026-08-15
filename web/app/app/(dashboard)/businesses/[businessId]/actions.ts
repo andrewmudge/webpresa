@@ -281,7 +281,7 @@ export async function updateBusinessListFieldActionCustomer(
 ): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerBusinessListField(businessId, field, formData);
-  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'sections'));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'content'));
 }
 
 export async function toggleReviewVisibilityActionCustomer(businessId: string, formData: FormData): Promise<void> {
@@ -290,7 +290,7 @@ export async function toggleReviewVisibilityActionCustomer(businessId: string, f
   if (typeof googleReviewId === 'string') {
     await toggleCustomerReviewVisibility(businessId, googleReviewId);
   }
-  redirect(`/app/businesses/${businessId}/website?saved=1#sections`);
+  redirect(`/app/businesses/${businessId}/website?saved=1#content`);
 }
 
 export async function reorderTestimonialsActionCustomer(businessId: string, formData: FormData): Promise<void> {
@@ -299,7 +299,7 @@ export async function reorderTestimonialsActionCustomer(businessId: string, form
   if (order.length > 0) {
     await reorderCustomerTestimonials(businessId, order);
   }
-  redirect(`/app/businesses/${businessId}/website?saved=1#sections`);
+  redirect(`/app/businesses/${businessId}/website?saved=1#content`);
 }
 
 export async function addPhotosActionCustomer(businessId: string, formData: FormData): Promise<void> {

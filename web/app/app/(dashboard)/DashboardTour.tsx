@@ -84,7 +84,7 @@ export function DashboardTour() {
       continuous
       onEvent={handleEvent}
       options={{
-        primaryColor: '#11455E',
+        primaryColor: '#0D3AD9',
         showProgress: true,
         buttons: ['back', 'primary', 'skip'],
         skipBeacon: true,

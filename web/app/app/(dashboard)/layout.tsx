@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, type CSSProperties } from 'react';
 import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
@@ -8,6 +8,18 @@ import { DashboardTour } from './DashboardTour';
 interface AppLayoutProps {
   children: React.ReactNode;
 }
+
+// Customer-dashboard brand palette override — same values and same scoped
+// `style` pattern as `app/page.tsx`'s `HOMEPAGE_BRAND_OVERRIDE`, applied
+// here instead of `globals.css` so admin and the access/claim pages keep
+// the original teal; only this subtree's `bg-brand`/`text-brand`/etc.
+// utilities resolve to the new blue.
+const CUSTOMER_DASHBOARD_BRAND_OVERRIDE = {
+  '--color-brand': '#0D3AD9',
+  '--color-brand-dark': '#092A9E',
+  '--color-brand-light': '#5D7AE2',
+  '--color-brand-muted': '#E8EBF7',
+} as CSSProperties;
 
 /**
  * Customer dashboard shell (Stage 19) — the first shared layout under the
@@ -41,7 +53,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     // else. Capping this wrapper to exactly the viewport height forces
     // <main> to be the one that actually scrolls, which is what makes
     // sticky work inside it (see the website editor's section nav).
-    <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-[#F0F4F8]">
+    <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-[#F0F4F8]" style={CUSTOMER_DASHBOARD_BRAND_OVERRIDE}>
       <AppSidebar
         businesses={businesses.map((b) => ({ businessId: b.businessId, name: b.name, slug: b.slug }))}
         signedInAs={session.email}

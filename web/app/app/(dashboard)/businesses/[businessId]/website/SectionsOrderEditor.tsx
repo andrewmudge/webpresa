@@ -11,16 +11,19 @@ import { autoSaveSectionsActionCustomer } from '../actions';
 /**
  * Where each section's title actually links to, when it has a genuine
  * editable home elsewhere on the dashboard. Sections with no dedicated
- * editor today (page chrome like `header`/`footer`/`trustStrip`, and a few
- * without a content form built yet — `reviews` beyond hide/show,
+ * editor today (page chrome like `header`/`footer`/`trustStrip`, and
  * `ctaBanner`'s heading override) are intentionally omitted rather than
- * linking to a dead end. `faq`/`process` link back to this same tab — their
- * editors live inline in `SectionsTab.tsx`, right below this checklist.
+ * linking to a dead end. `reviews` (Google review hide/show), `faq`, and
+ * `process` all link to `#content` — their editors live inline in
+ * `ContentTab.tsx`, alongside Hero/About.
  */
 function getSectionHref(type: WebsiteSectionType, businessId: string): string | undefined {
   switch (type) {
     case 'hero':
     case 'about':
+    case 'reviews':
+    case 'faq':
+    case 'process':
       return '#content';
     case 'services':
     case 'whyChooseUs':
@@ -32,9 +35,6 @@ function getSectionHref(type: WebsiteSectionType, businessId: string): string | 
       return '#contact';
     case 'socialLinks':
       return `/app/businesses/${businessId}/settings`;
-    case 'faq':
-    case 'process':
-      return '#sections';
     default:
       return undefined;
   }

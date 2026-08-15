@@ -15,9 +15,10 @@ import CTASection from "@/app/components/CTASection";
 import Footer from "@/app/components/Footer";
 
 // Homepage-only brand palette override — scoped here (not in globals.css)
-// so the rest of the app (customer dashboard, admin, access/claim pages)
-// keeps the original teal; only this subtree's `bg-brand`/`text-brand`/etc.
-// utilities resolve to the new blue.
+// so the rest of the app (admin, access/claim pages) keeps the original
+// teal; only this subtree's `bg-brand`/`text-brand`/etc. utilities resolve
+// to the new blue. The customer dashboard has its own identical override —
+// see `app/app/(dashboard)/layout.tsx`'s `CUSTOMER_DASHBOARD_BRAND_OVERRIDE`.
 const HOMEPAGE_BRAND_OVERRIDE = {
   "--color-brand": "#0D3AD9",
   "--color-brand-dark": "#092A9E",
