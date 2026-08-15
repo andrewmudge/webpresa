@@ -173,5 +173,8 @@ export async function completeTourAction(
 ): Promise<void> {
   await requireOnboardingAccess(businessId);
   await completeTourStep(businessId, outcome);
-  redirect(`/app/businesses/${businessId}`);
+  // 'completed' launches the real dashboard walkthrough (DashboardTour.tsx)
+  // via this query param; 'skipped' lands on a plain dashboard — the
+  // sidebar's "Take a tour" link is the only way to see it after that.
+  redirect(outcome === 'completed' ? `/app/businesses/${businessId}?tour=start` : `/app/businesses/${businessId}`);
 }

@@ -74,14 +74,14 @@ interface AppSidebarProps {
 }
 
 const NAV_ITEMS = [
-  { segment: '', label: 'Overview', icon: LayoutDashboard },
-  { segment: 'website', label: 'Website', icon: Globe },
+  { segment: '', label: 'Overview', icon: LayoutDashboard, tourId: 'nav-overview' },
+  { segment: 'website', label: 'Website', icon: Globe, tourId: 'nav-website' },
   // Stage 20 — shown to every business regardless of plan, consistent with
   // billing/settings below; a Basic-plan business sees an upsell state on
   // the page itself rather than the nav item being conditionally hidden.
-  { segment: 'leads', label: 'Leads', icon: Inbox },
-  { segment: 'billing', label: 'Subscription', icon: CreditCard },
-  { segment: 'settings', label: 'Settings', icon: Settings },
+  { segment: 'leads', label: 'Leads', icon: Inbox, tourId: 'nav-leads' },
+  { segment: 'billing', label: 'Subscription', icon: CreditCard, tourId: 'nav-billing' },
+  { segment: 'settings', label: 'Settings', icon: Settings, tourId: 'nav-settings' },
 ];
 
 function extractBusinessId(pathname: string): string | null {
@@ -177,6 +177,7 @@ function Nav({ currentId, onNavigate, collapsed }: { currentId: string | null; o
             onClick={onNavigate}
             title={collapsed ? item.label : undefined}
             aria-label={collapsed ? item.label : undefined}
+            data-tour-id={item.tourId}
             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               collapsed ? 'justify-center' : ''
             } ${isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
@@ -186,6 +187,15 @@ function Nav({ currentId, onNavigate, collapsed }: { currentId: string | null; o
           </Link>
         );
       })}
+      {!collapsed && (
+        <Link
+          href={`/app/businesses/${currentId}?tour=start`}
+          onClick={onNavigate}
+          className="mt-1 block px-3 py-2 text-xs font-medium text-white/50 hover:text-white/80 transition-colors"
+        >
+          Take a tour
+        </Link>
+      )}
     </nav>
   );
 }

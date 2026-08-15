@@ -1,7 +1,9 @@
+import { Suspense } from 'react';
 import { requireCustomerSession } from '@/lib/auth/customer-authorization';
 import { getBusinessesByOwnerUserId } from '@/lib/db/businesses';
 import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { AppSidebar } from './AppSidebar';
+import { DashboardTour } from './DashboardTour';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -47,6 +49,9 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         lastName={profile?.lastName}
       />
       <main className="flex-1 min-w-0 overflow-auto">{children}</main>
+      <Suspense fallback={null}>
+        <DashboardTour />
+      </Suspense>
     </div>
   );
 }

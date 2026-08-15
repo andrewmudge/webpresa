@@ -14,12 +14,14 @@ interface Props {
 }
 
 /**
- * Minimal placeholder — Part 4 replaces this with the full illustrated
- * dashboard orientation (implementation.md, Stage 19.x, Part 4). Completion
- * vs. skip is already recorded as distinct outcomes so Part 4's analytics
- * and replay entry point don't need a schema change. Wrapped in the new
- * onboarding shell for visual consistency with the other three steps only —
- * deliberately not otherwise redesigned yet.
+ * "Go to my dashboard" hands off to the real guided walkthrough
+ * (`DashboardTour.tsx`, mounted in the dashboard layout) via the
+ * `?tour=start` param appended by `completeTourAction` — this page itself
+ * stays a simple confirmation screen, not the tour surface. "Skip tour"
+ * lands on a plain dashboard; the sidebar's "Take a tour" link is the only
+ * way to see it after that. Completion vs. skip is recorded as distinct
+ * outcomes independently of whether the customer actually finishes the live
+ * walkthrough — see `completeTourStep`.
  */
 export default async function OnboardingTourPage({ params }: Props) {
   const { businessId } = await params;
