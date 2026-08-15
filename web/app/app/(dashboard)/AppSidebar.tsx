@@ -89,7 +89,7 @@ function extractBusinessId(pathname: string): string | null {
   return match ? match[1] : null;
 }
 
-function Brand({ collapsed }: { collapsed?: boolean }) {
+function Brand({ collapsed, onLight }: { collapsed?: boolean; onLight?: boolean }) {
   return (
     <Link href="/app" className="flex items-center gap-3" title="Webpresa">
       {/* Fully unconstrained-but-bounded on both axes when collapsed
@@ -109,8 +109,8 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
       />
       {!collapsed && (
         <div>
-          <span className="text-base font-bold text-white tracking-tight">Webpresa</span>
-          <p className="text-xs text-white/50 leading-none mt-0.5">My Website</p>
+          <span className={`text-base font-bold tracking-tight ${onLight ? 'text-gray-900' : 'text-white'}`}>Webpresa</span>
+          <p className={`text-xs leading-none mt-0.5 ${onLight ? 'text-gray-500' : 'text-white/50'}`}>My Website</p>
         </div>
       )}
     </Link>
@@ -273,15 +273,15 @@ export function AppSidebar({ businesses, signedInAs, firstName, lastName }: AppS
           collapsed ? 'w-16' : 'w-60'
         }`}
       >
-        <div className={`border-b border-white/10 ${collapsed ? 'px-3 py-4' : 'px-5 py-5'}`}>
+        <div className={`bg-white border-b border-gray-200 ${collapsed ? 'px-3 py-4' : 'px-5 py-5'}`}>
           <div className={`flex items-center ${collapsed ? 'flex-col gap-3' : 'justify-between gap-2'}`}>
-            <Brand collapsed={collapsed} />
+            <Brand collapsed={collapsed} onLight />
             <button
               type="button"
               onClick={toggleCollapsed}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="shrink-0 p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
             >
               {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
