@@ -112,15 +112,7 @@ export default function PreviewSection() {
             </h2>
 
             <p className="text-lg text-white/70 leading-relaxed mb-5">
-              When we come across a local business with an outdated website, we
-              create a modern version as a preview — so you can see exactly what&apos;s possible
-              before committing to anything.
-            </p>
-
-            <p className="text-lg text-white/70 leading-relaxed mb-8">
-              If you found us through a postcard or email, your preview is already waiting.
-              No obligation to move forward — we just want you to see what your business
-              could look like online.
+              We find local businesses with outdated websites and build them a better one—before they ever have to commit. If you received a postcard or email from us, your preview is already waiting.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">

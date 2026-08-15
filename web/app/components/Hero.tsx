@@ -199,10 +199,7 @@ export default function Hero() {
               variants={fadeUp}
               className="text-lg sm:text-xl text-gray-500 leading-relaxed mb-8 max-w-lg mx-auto lg:mx-0"
             >
-              We noticed your business could use a better website, so we built
-              one and sent you a postcard or an email. Click your email link,
-              or enter your postcard code below, to see your site and make it
-              yours.
+              Enter the code from your postcard to see your site and make it yours.
             </motion.p>
 
             {/* CTAs */}
