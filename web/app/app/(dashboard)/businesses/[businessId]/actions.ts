@@ -281,7 +281,7 @@ export async function updateBusinessListFieldActionCustomer(
 ): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerBusinessListField(businessId, field, formData);
-  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'services'));
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'sections'));
 }
 
 export async function toggleReviewVisibilityActionCustomer(businessId: string, formData: FormData): Promise<void> {

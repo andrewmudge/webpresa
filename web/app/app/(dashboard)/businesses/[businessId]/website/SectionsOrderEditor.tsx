@@ -13,8 +13,9 @@ import { autoSaveSectionsActionCustomer } from '../actions';
  * editable home elsewhere on the dashboard. Sections with no dedicated
  * editor today (page chrome like `header`/`footer`/`trustStrip`, and a few
  * without a content form built yet — `reviews` beyond hide/show,
- * `ctaBanner`'s heading override, `faq`, `process`) are intentionally
- * omitted rather than linking to a dead end.
+ * `ctaBanner`'s heading override) are intentionally omitted rather than
+ * linking to a dead end. `faq`/`process` link back to this same tab — their
+ * editors live inline in `SectionsTab.tsx`, right below this checklist.
  */
 function getSectionHref(type: WebsiteSectionType, businessId: string): string | undefined {
   switch (type) {
@@ -31,6 +32,9 @@ function getSectionHref(type: WebsiteSectionType, businessId: string): string | 
       return '#contact';
     case 'socialLinks':
       return `/app/businesses/${businessId}/settings`;
+    case 'faq':
+    case 'process':
+      return '#sections';
     default:
       return undefined;
   }
