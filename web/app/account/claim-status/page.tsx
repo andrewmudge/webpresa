@@ -109,6 +109,10 @@ async function ActivationCard({ business }: { business: Business }) {
       <div className="mt-10 border-t border-(--color-border) pt-10">
         <PlanSelectionForm businessId={business.businessId} />
       </div>
+
+      <div className="mt-10 border-t border-(--color-border) pt-10">
+        <TrustRow items={VALUE_TRUST_ITEMS} />
+      </div>
     </div>
   );
 }
@@ -143,10 +147,6 @@ export default async function ClaimStatusPage() {
     );
   }
 
-  const hasUnactivatedBusiness = businesses.some(
-    (b) => b.subscriptionStatus !== 'active' && b.subscriptionStatus !== 'past_due',
-  );
-
   return (
     <div className="min-h-screen page-ambient-bg">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
@@ -175,12 +175,6 @@ export default async function ClaimStatusPage() {
             ),
           )}
         </div>
-
-        {hasUnactivatedBusiness && (
-          <div className="mt-12 border-t border-(--color-border) pt-8">
-            <TrustRow items={VALUE_TRUST_ITEMS} />
-          </div>
-        )}
       </main>
     </div>
   );

@@ -1,6 +1,6 @@
 import 'server-only';
 import type Stripe from 'stripe';
-import type { BillingPurpose, WebpresaPlan } from '@/domain/constants/plans';
+import type { BillingInterval, BillingPurpose, WebpresaPlan } from '@/domain/constants/plans';
 import { resolveRuntimeEnvironment } from '@/lib/env/runtime-environment';
 
 export { resolveRuntimeEnvironment };
@@ -24,6 +24,8 @@ export interface TrustedCheckoutMetadata {
   claimId?: string;
   termsVersion?: string;
   acceptedTermsAt?: string;
+  /** Which Price ID cadence this Session was created with — audit-only; billing correctness comes from `resolvePriceId(plan, billingInterval)`, not from this metadata. */
+  billingInterval?: BillingInterval;
 }
 
 export function buildTrustedMetadata(input: TrustedCheckoutMetadata): Stripe.MetadataParam {
@@ -37,6 +39,7 @@ export function buildTrustedMetadata(input: TrustedCheckoutMetadata): Stripe.Met
   if (input.claimId) metadata.claimId = input.claimId;
   if (input.termsVersion) metadata.termsVersion = input.termsVersion;
   if (input.acceptedTermsAt) metadata.acceptedTermsAt = input.acceptedTermsAt;
+  if (input.billingInterval) metadata.billingInterval = input.billingInterval;
   return metadata;
 }
 

@@ -35,10 +35,23 @@ describe('buildTrustedMetadata', () => {
       claimId: 'claim_1',
       termsVersion: 'v1',
       acceptedTermsAt: '2026-01-01T00:00:00.000Z',
+      billingInterval: 'annual',
     }) as Record<string, string>;
     expect(metadata.claimId).toBe('claim_1');
     expect(metadata.termsVersion).toBe('v1');
     expect(metadata.acceptedTermsAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(metadata.billingInterval).toBe('annual');
+  });
+
+  it('omits billingInterval when not provided', () => {
+    const metadata = buildTrustedMetadata({
+      businessId: 'biz_1',
+      ownerUserId: 'user_1',
+      plan: 'basic',
+      billingPurpose: 'website_subscription',
+      environment: 'test',
+    }) as Record<string, string>;
+    expect(metadata.billingInterval).toBeUndefined();
   });
 });
 

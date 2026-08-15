@@ -113,8 +113,10 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
 | `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — deployed (`webpresa-dev-customer-billing-profiles`); not yet added to Vercel |
-| `STRIPE_PRICE_ID_BASIC` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjryHTxTryrfUCNCT4A9Yn`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
-| `STRIPE_PRICE_ID_GROWTH` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjsnHTxTryrfUCMeAT0q3K`); not yet added to Vercel. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_BASIC` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjryHTxTryrfUCNCT4A9Yn`); added to Vercel Production + Preview. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_GROWTH` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjsnHTxTryrfUCMeAT0q3K`); added to Vercel Production + Preview. Not a secret, but server-only (never `NEXT_PUBLIC_`) |
+| `STRIPE_PRICE_ID_BASIC_ANNUAL` | Stripe test-mode Price ID for the $375/year Basic option (claim-status billing-interval toggle) | Created (`price_1U4mSHHTxTryrfUCE3Y9PaKr`, on Product `prod_V4wKBDvjHO3E3N` — "Webpresa Basic Annual"); added to Vercel Production + Preview (2026-08-15) and `web/.env.local`. Same non-secret, server-only handling as the monthly Price IDs above |
+| `STRIPE_PRICE_ID_GROWTH_ANNUAL` | Stripe test-mode Price ID for annual Growth billing | Reserved for when Growth becomes purchasable — not created, not required today since Growth isn't offered in `PlanSelectionForm` |
 | `WEBPRESA_APP_BASE_URL` | Real deployed app URL | Stage 18 — not yet added to Vercel; server-only, used to build Checkout success/cancel URLs and the Customer Portal return URL. Same variable name as the existing infra-side (Stage 14/16) shell variable, added here as a `web/` runtime variable — see "Stage 18 — Stripe Subscriptions deployment guidance" below |
 | `CUSTOMER_ONBOARDING_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-onboarding-name` | Stage 19.x, Part 1 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
 | `DOMAIN_CONNECTIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-domain-connections-name` | Stage 19.x, Part 2 — deployed via `cdk synth`/tests only, not yet a real `cdk deploy`; not yet added to Vercel |
@@ -761,6 +763,7 @@ Newly added/changed env vars only take effect on a new deployment — the alread
 |---|---|
 | `STRIPE_SECRET_NAME` secret still holds its placeholder value | Every Stripe API call (Checkout Session creation, Portal Session creation, webhook signature verification) fails closed with a generic error — no fallback, no silent success |
 | `STRIPE_PRICE_ID_BASIC`/`STRIPE_PRICE_ID_GROWTH` missing/wrong | `resolvePriceId()` throws before any Stripe call — Checkout creation fails with a generic `plan_unavailable` reason, never a raw Stripe error |
+| `STRIPE_PRICE_ID_BASIC_ANNUAL` missing | Same failure mode, but only when the claim-status Annual toggle is selected — Monthly checkout is unaffected |
 | Stripe webhook signing secret mismatched | Every webhook delivery fails signature verification (`400`) — Stripe's dashboard shows persistent delivery failures, a clear signal to re-check the registered endpoint's secret against the stored `webhookSecret` |
 | `webpresa-vercel-dev` missing the new table/GSI grant | `AccessDeniedException` from the DynamoDB call — Checkout/webhook processing fails closed rather than silently skipping the entitlement write |
 

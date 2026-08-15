@@ -21,6 +21,10 @@ import { WEBPRESA_PLANS, type WebpresaPlan } from './plans';
 export interface PlanCatalogEntry {
   label: string;
   priceDisplay: string;
+  /** Annual-billing price display (e.g. "$375/year") — omitted for plans with no annual option offered yet (see `PlanSelectionForm`). */
+  annualPriceDisplay?: string;
+  /** Short "vs. paying monthly" savings callout shown next to the annual price (e.g. "Save 20%"). */
+  annualSavingsLabel?: string;
   description: string;
   /** Short bullet list for plan-comparison UI (e.g. the claim-status activation cards). */
   features: string[];
@@ -32,6 +36,8 @@ export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
   basic: {
     label: 'Basic',
     priceDisplay: '$39/month',
+    annualPriceDisplay: '$375/year',
+    annualSavingsLabel: 'Save 20%',
     description: 'Everything you need to get online and be found in your primary city.',
     features: [
       'Professional single-page website',

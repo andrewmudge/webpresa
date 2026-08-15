@@ -95,6 +95,7 @@ beforeEach(() => {
   process.env.WEBPRESA_APP_BASE_URL = 'https://app.example.test';
   process.env.STRIPE_PRICE_ID_BASIC = 'price_basic_test';
   process.env.STRIPE_PRICE_ID_GROWTH = 'price_growth_test';
+  process.env.STRIPE_PRICE_ID_BASIC_ANNUAL = 'price_basic_annual_test';
   mockRequireCustomerSession.mockResolvedValue(SESSION);
 });
 
@@ -192,6 +193,83 @@ describe('createCheckoutSessionAction', () => {
       'biz_1',
       expect.objectContaining({ stripeCustomerId: 'cus_new', pendingCheckoutSessionId: 'cs_new' }),
     );
+  });
+
+  it('defaults to the monthly Price ID when billingInterval is omitted', async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce(null);
+    mockCustomersCreate.mockResolvedValueOnce({ id: 'cus_new' });
+    mockCreateCustomerBillingProfile.mockResolvedValueOnce({
+      outcome: 'created',
+      profile: { userId: 'user_1', stripeCustomerId: 'cus_new' },
+    });
+    mockListClaimsForBusiness.mockResolvedValueOnce([]);
+    mockCheckoutSessionsCreate.mockResolvedValueOnce({
+      id: 'cs_new',
+      url: 'https://checkout.stripe.test/cs_new',
+      expires_at: 1893456000,
+    });
+
+    await expect(
+      createCheckoutSessionAction(undefined, formDataFor({ businessId: 'biz_1', plan: 'basic', agreeToTerms: 'on' })),
+    ).rejects.toThrow('REDIRECT:https://checkout.stripe.test/cs_new');
+
+    const [createArgs] = mockCheckoutSessionsCreate.mock.calls[0];
+    expect(createArgs.line_items).toEqual([{ price: 'price_basic_test', quantity: 1 }]);
+    expect(createArgs.metadata.billingInterval).toBe('monthly');
+  });
+
+  it('resolves the annual Price ID and tags metadata when billingInterval=annual', async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce(null);
+    mockCustomersCreate.mockResolvedValueOnce({ id: 'cus_new' });
+    mockCreateCustomerBillingProfile.mockResolvedValueOnce({
+      outcome: 'created',
+      profile: { userId: 'user_1', stripeCustomerId: 'cus_new' },
+    });
+    mockListClaimsForBusiness.mockResolvedValueOnce([]);
+    mockCheckoutSessionsCreate.mockResolvedValueOnce({
+      id: 'cs_new',
+      url: 'https://checkout.stripe.test/cs_new',
+      expires_at: 1893456000,
+    });
+
+    await expect(
+      createCheckoutSessionAction(
+        undefined,
+        formDataFor({ businessId: 'biz_1', plan: 'basic', billingInterval: 'annual', agreeToTerms: 'on' }),
+      ),
+    ).rejects.toThrow('REDIRECT:https://checkout.stripe.test/cs_new');
+
+    const [createArgs] = mockCheckoutSessionsCreate.mock.calls[0];
+    expect(createArgs.line_items).toEqual([{ price: 'price_basic_annual_test', quantity: 1 }]);
+    expect(createArgs.metadata.billingInterval).toBe('annual');
+  });
+
+  it('falls back to monthly for an arbitrary/unrecognized billingInterval value', async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce(null);
+    mockCustomersCreate.mockResolvedValueOnce({ id: 'cus_new' });
+    mockCreateCustomerBillingProfile.mockResolvedValueOnce({
+      outcome: 'created',
+      profile: { userId: 'user_1', stripeCustomerId: 'cus_new' },
+    });
+    mockListClaimsForBusiness.mockResolvedValueOnce([]);
+    mockCheckoutSessionsCreate.mockResolvedValueOnce({
+      id: 'cs_new',
+      url: 'https://checkout.stripe.test/cs_new',
+      expires_at: 1893456000,
+    });
+
+    await expect(
+      createCheckoutSessionAction(
+        undefined,
+        formDataFor({ businessId: 'biz_1', plan: 'basic', billingInterval: 'lifetime', agreeToTerms: 'on' }),
+      ),
+    ).rejects.toThrow('REDIRECT:https://checkout.stripe.test/cs_new');
+
+    const [createArgs] = mockCheckoutSessionsCreate.mock.calls[0];
+    expect(createArgs.line_items).toEqual([{ price: 'price_basic_test', quantity: 1 }]);
   });
 
   it('reuses an existing CustomerBillingProfile rather than creating a second Stripe Customer', async () => {

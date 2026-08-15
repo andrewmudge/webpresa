@@ -8,7 +8,7 @@ import { getStripeClient } from '@/lib/stripe/client';
 import { resolvePriceId } from '@/lib/stripe/plans';
 import { buildTrustedMetadata, resolveRuntimeEnvironment } from '@/lib/stripe/metadata';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
-import { WEBPRESA_PLANS, type WebpresaPlan } from '@/domain/constants/plans';
+import { WEBPRESA_PLANS, type WebpresaPlan, BILLING_INTERVALS, type BillingInterval } from '@/domain/constants/plans';
 
 /**
  * Checkout-session and Customer Portal creation (Stage 18) — see
@@ -21,6 +21,12 @@ export type CheckoutActionState = { error?: string } | undefined;
 function parseWebpresaPlan(input: FormDataEntryValue | null): WebpresaPlan | null {
   const value = typeof input === 'string' ? input : '';
   return (WEBPRESA_PLANS as readonly string[]).includes(value) ? (value as WebpresaPlan) : null;
+}
+
+/** Defaults to `'monthly'` for any missing/unrecognized value — never lets browser-supplied input pick an arbitrary Price ID (see `resolvePriceId`). */
+function parseBillingInterval(input: FormDataEntryValue | null): BillingInterval {
+  const value = typeof input === 'string' ? input : '';
+  return (BILLING_INTERVALS as readonly string[]).includes(value) ? (value as BillingInterval) : 'monthly';
 }
 
 /**
@@ -64,6 +70,7 @@ export async function createCheckoutSessionAction(
 
   const businessId = formData.get('businessId');
   const plan = parseWebpresaPlan(formData.get('plan'));
+  const billingInterval = parseBillingInterval(formData.get('billingInterval'));
   const agreedToTerms = formData.get('agreeToTerms') === 'on';
 
   if (typeof businessId !== 'string' || !businessId) return { error: 'Missing business.' };
@@ -100,7 +107,7 @@ export async function createCheckoutSessionAction(
   try {
     const appBaseUrl = resolveAppBaseUrl();
     const stripeCustomerId = await resolveStripeCustomerIdForCustomer(session.sub, session.email);
-    const priceId = resolvePriceId(plan);
+    const priceId = resolvePriceId(plan, billingInterval);
     const claimId = await findClaimIdForAudit(businessId, session.sub);
     const environment = resolveRuntimeEnvironment();
     const termsVersion = process.env.TERMS_VERSION ?? 'unversioned';
@@ -115,6 +122,7 @@ export async function createCheckoutSessionAction(
       claimId,
       termsVersion,
       acceptedTermsAt,
+      billingInterval,
     });
 
     // A fresh, single-use idempotency key per creation call — protects this

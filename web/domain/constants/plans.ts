@@ -9,6 +9,10 @@
 export const WEBPRESA_PLANS = ['basic', 'growth'] as const;
 export type WebpresaPlan = (typeof WEBPRESA_PLANS)[number];
 
+/** Billing cadence a Checkout Session is created for — see `lib/stripe/plans.ts`'s `resolvePriceId()`. */
+export const BILLING_INTERVALS = ['monthly', 'annual'] as const;
+export type BillingInterval = (typeof BILLING_INTERVALS)[number];
+
 /**
  * Application-owned subscription lifecycle — the only status most of the
  * app should ever branch on. Stripe's own raw status (~9 values, including
