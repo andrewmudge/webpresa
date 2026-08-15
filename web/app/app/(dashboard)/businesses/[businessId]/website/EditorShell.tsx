@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Pencil, Eye } from 'lucide-react';
 import { EditorTabNav, TAB_IDS, isTabId, type TabId } from './EditorTabNav';
 
@@ -56,6 +56,23 @@ export function EditorShell({ tabs, preview }: EditorShellProps) {
   // `replaceState` deliberately doesn't fire `hashchange`, so it can't
   // fight this local override on every click).
   const [manualTab, setManualTab] = useState<TabId | null>(null);
+
+  // A genuine hash change — a same-page hash link elsewhere on the page
+  // (e.g. the Sections tab's "Service Areas" link jumping to `#services`)
+  // or the browser back/forward buttons — clears the click-driven override
+  // above so `activeTab` falls back to reading the fresh hash below. This
+  // listener only ever fires from a *real* hash change: `selectTab` updates
+  // the URL via `replaceState`, which deliberately does not dispatch
+  // `hashchange` (see its own comment), so a direct tab click never
+  // triggers this reset.
+  useEffect(() => {
+    function handleHashChange() {
+      setManualTab(null);
+    }
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
   const activeTab: TabId = manualTab ?? (isTabId(hash) ? hash : 'theme');
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit');
 

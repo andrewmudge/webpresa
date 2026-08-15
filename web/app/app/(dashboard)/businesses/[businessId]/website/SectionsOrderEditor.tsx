@@ -102,6 +102,34 @@ function MoveButtons({
   );
 }
 
+/**
+ * `getSectionHref` returns either a same-page hash (jump to another tab on
+ * this same page) or a real route (`socialLinks` → the Settings page).
+ * These need different tags: `next/link` navigates same-page hash targets
+ * via `history.pushState`, which — unlike a plain anchor click or setting
+ * `location.hash` directly — does not fire a native `hashchange` event
+ * (documented browser behavior), and `EditorShell`'s tab switch is driven
+ * entirely by that event. A plain `<a>` performs real browser hash
+ * navigation, which does fire it. Non-hash hrefs still go through `Link`
+ * for normal client-side route transitions.
+ */
+function SectionTitleLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const className =
+    'text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors';
+  if (href.startsWith('#')) {
+    return (
+      <a href={href} className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  );
+}
+
 function SectionRow({
   type,
   href,
@@ -132,9 +160,7 @@ function SectionRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           {href ? (
-            <Link href={href} className="text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors">
-              {catalog.label}
-            </Link>
+            <SectionTitleLink href={href}>{catalog.label}</SectionTitleLink>
           ) : (
             <span className="text-sm font-medium text-gray-800">{catalog.label}</span>
           )}
