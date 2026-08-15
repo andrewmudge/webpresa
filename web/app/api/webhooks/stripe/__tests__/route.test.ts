@@ -2,7 +2,7 @@
  * Unit tests for the Stripe webhook Route Handler (Stage 18). All Stripe SDK
  * and DynamoDB interactions are mocked — no real network calls.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
@@ -61,6 +61,10 @@ beforeEach(() => {
   mockUpdateBusiness.mockReset();
   mockPutStripeWebhookFailure.mockReset();
   mockPutStripeWebhookFailure.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  delete process.env.STRIPE_PRICE_ID_BASIC_ANNUAL;
 });
 
 describe('POST /api/webhooks/stripe', () => {
@@ -182,6 +186,32 @@ describe('POST /api/webhooks/stripe', () => {
         cancelAtPeriodEnd: false,
         lastStripeEventId: 'evt_4',
       }),
+    );
+  });
+
+  it('resolves plan and billingInterval from the subscription price ID and writes both to the business', async () => {
+    process.env.STRIPE_PRICE_ID_BASIC_ANNUAL = 'price_basic_annual_test';
+
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_4b',
+      type: 'customer.subscription.updated',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'active',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_basic_annual_test' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(
+      'biz_1',
+      expect.objectContaining({ plan: 'basic', billingInterval: 'annual' }),
     );
   });
 

@@ -2,7 +2,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import type { ReactNode } from 'react';
 import {
-  PartyPopper,
   ShieldCheck,
   Lock,
   Cloud,
@@ -82,8 +81,13 @@ function PageShell({ dashboardHref, children }: { dashboardHref?: string; childr
     <div className="min-h-screen page-ambient-bg">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
         <div className="flex items-center gap-2">
-          <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto" />
-          <span className="text-base font-bold tracking-tight text-gray-900">Webpresa</span>
+          <Image
+            src="/webpresa_logo_horizontal_cropped_nobg.png"
+            alt="Webpresa"
+            width={1460}
+            height={238}
+            className="h-7 w-auto"
+          />
         </div>
         <div className="flex items-center gap-4">
           <a
@@ -122,24 +126,20 @@ async function ActivatedCelebration({ business }: { business: Business }) {
   const { desktopSrc, mobileSrc } = await getLatestPreviewScreenshots(business.businessId);
   const planEntry = business.plan ? PLAN_CATALOG[business.plan] : undefined;
   const dashboardHref = `/app/businesses/${business.businessId}`;
+  // `billingInterval` is unset on subscriptions that predate this field
+  // (webhook reconciliation backfills it on the next event) — 'Monthly' is
+  // the correct default for that gap, since annual billing didn't exist
+  // before it, matching every pre-existing subscription's actual cadence.
+  const isAnnual = business.billingInterval === 'annual';
+  const billingIntervalLabel = isAnnual ? 'Annual' : 'Monthly';
+  const planPriceDisplay = (isAnnual && planEntry?.annualPriceDisplay) || planEntry?.priceDisplay;
 
   return (
     <>
       <div className="rounded-3xl border border-(--color-border) bg-white p-6 shadow-sm sm:p-10">
         <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
           <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-(--color-brand-muted) text-2xl">
-                <PartyPopper size={22} className="text-(--color-brand)" />
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600">
-                <CheckCircle2 size={12} />
-                Activation complete
-              </span>
-            </div>
-            <h1 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">
-              Your website is live! 🎉
-            </h1>
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">Your website is live! 🎉</h1>
             <p className="mt-2 max-w-md text-base text-gray-600">
               Everything is set up and your site is ready to grow your business online.
             </p>
@@ -152,10 +152,10 @@ async function ActivatedCelebration({ business }: { business: Business }) {
                 <span className="block text-sm font-semibold text-gray-900">{business.name}</span>
                 {planEntry && (
                   <span className="block text-xs text-gray-500">
-                    Plan: {planEntry.label} &bull; {planEntry.priceDisplay}
+                    Plan: {planEntry.label} &bull; {planPriceDisplay}
                   </span>
                 )}
-                <span className="block text-xs text-gray-500">Billing cycle: Monthly</span>
+                <span className="block text-xs text-gray-500">Billing cycle: {billingIntervalLabel}</span>
                 <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
                   <CheckCircle2 size={12} />
                   Active
@@ -166,21 +166,17 @@ async function ActivatedCelebration({ business }: { business: Business }) {
 
           <WebsiteHeroPreview slug={business.slug} desktopSrc={desktopSrc} mobileSrc={mobileSrc} />
         </div>
-      </div>
 
-      <div className="mt-8 flex flex-col items-center text-center">
-        <Link
-          href={dashboardHref}
-          className="inline-flex items-center gap-2 rounded-xl bg-[#0D3AD9] px-8 py-3.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-        >
-          Finish Setup
-          <ArrowRight size={16} />
-        </Link>
-        <p className="mt-2 text-xs text-gray-500">Start editing, connect your domain, and publish your site.</p>
-      </div>
-
-      <div className="mt-8 rounded-2xl border border-(--color-border) bg-white p-6">
-        <TrustRow items={STATUS_TRUST_ITEMS} columns={4} />
+        <div className="mt-8 flex flex-col items-center border-t border-(--color-border) pt-8 text-center">
+          <Link
+            href={dashboardHref}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#0D3AD9] px-8 py-3.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+          >
+            Finish Setup
+            <ArrowRight size={16} />
+          </Link>
+          <p className="mt-2 text-xs text-gray-500">Start editing, connect your domain, and publish your site.</p>
+        </div>
       </div>
 
       <div className="mt-6 rounded-2xl border border-(--color-border) bg-white p-6 sm:p-8">
@@ -188,13 +184,10 @@ async function ActivatedCelebration({ business }: { business: Business }) {
         <p className="mt-1 text-sm text-gray-500">Just a few simple steps to get found online.</p>
 
         <div className="mt-6 grid grid-cols-1 divide-y divide-(--color-border) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-          {NEXT_STEPS.map((step, i) => (
+          {NEXT_STEPS.map((step) => (
             <div key={step.title} className="flex flex-col items-center px-4 py-6 text-center first:pt-0 sm:py-0">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-(--color-brand-muted) text-xs font-semibold text-(--color-brand)">
-                {i + 1}
-              </span>
-              <span className={`mt-3 flex h-12 w-12 items-center justify-center rounded-xl ${step.iconBgClass} ${step.iconColorClass}`}>
-                <step.icon size={22} />
+              <span className={`flex h-24 w-24 items-center justify-center rounded-xl ${step.iconBgClass} ${step.iconColorClass}`}>
+                <step.icon size={44} />
               </span>
               <h3 className="mt-3 text-sm font-semibold text-gray-900">{step.title}</h3>
               <p className="mt-1.5 max-w-[16rem] text-xs text-gray-500">{step.subtitle}</p>
@@ -210,22 +203,26 @@ async function ActivatedCelebration({ business }: { business: Business }) {
         </div>
       </div>
 
-      <div className="mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl border border-(--color-border) bg-white p-6 sm:flex-row">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-(--color-brand-muted) text-(--color-brand)">
-            <MessageCircle size={18} />
-          </span>
-          <span>
-            <span className="block text-sm font-semibold text-gray-900">Need help getting started?</span>
-            <span className="block text-xs text-gray-500">Our team is here for you.</span>
-          </span>
+      <div className="mt-6 rounded-2xl border border-(--color-border) bg-white p-6">
+        <TrustRow items={STATUS_TRUST_ITEMS} columns={4} />
+
+        <div className="mt-6 flex flex-col items-center justify-between gap-4 border-t border-(--color-border) pt-6 sm:flex-row">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-(--color-brand-muted) text-(--color-brand)">
+              <MessageCircle size={18} />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-gray-900">Need help getting started?</span>
+              <span className="block text-xs text-gray-500">Our team is here for you.</span>
+            </span>
+          </div>
+          <a
+            href="mailto:hello@webpresa.com"
+            className="rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+          >
+            Contact Support
+          </a>
         </div>
-        <a
-          href="mailto:hello@webpresa.com"
-          className="rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
-        >
-          Contact Support
-        </a>
       </div>
     </>
   );

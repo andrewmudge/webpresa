@@ -150,6 +150,7 @@ export async function POST(request: Request): Promise<Response> {
       ...(mapped.currentPeriodEnd !== undefined ? { currentPeriodEnd: mapped.currentPeriodEnd } : {}),
       cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
       ...(mapped.plan !== undefined ? { plan: mapped.plan } : {}),
+      ...(mapped.billingInterval !== undefined ? { billingInterval: mapped.billingInterval } : {}),
       lastStripeEventId: event.id,
       lastStripeEventAt: new Date(event.created * 1000).toISOString(),
       lastStripeSyncAt: new Date().toISOString(),

@@ -6,7 +6,7 @@ import type { WebsiteSectionsConfig } from './website-sections';
 import type { PreviewCtaConfig } from './site-preview';
 import type { LeadPriority, QualificationResult } from './website-assessment';
 import type { ScanWorkflowStatus } from './scan-execution';
-import type { WebpresaPlan, SubscriptionStatus } from '@/domain/constants/plans';
+import type { WebpresaPlan, SubscriptionStatus, BillingInterval } from '@/domain/constants/plans';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -383,6 +383,12 @@ export interface Business extends MutableTimestampedRecord {
   /** Purchased Webpresa tier. Absent = never subscribed. Never derived from
    *  a Stripe Price ID directly by any caller outside `lib/stripe/plans.ts`. */
   plan?: WebpresaPlan;
+  /** Which Price ID cadence the current subscription was resolved from —
+   *  sibling fact to `plan`, resolved from the same Stripe Price ID by the
+   *  same webhook reconciliation step (see `resolveBillingIntervalFromPriceId`
+   *  in `lib/stripe/plans.ts`). Absent for subscriptions predating this field
+   *  until their next webhook event re-syncs them. */
+  billingInterval?: BillingInterval;
   /** Application-owned lifecycle — the only status most of the app should
    *  ever branch on. Written exclusively by the verified webhook handler. */
   subscriptionStatus?: SubscriptionStatus;

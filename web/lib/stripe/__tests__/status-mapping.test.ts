@@ -16,6 +16,7 @@ const ORIGINAL_ENV = { ...process.env };
 beforeEach(() => {
   process.env.STRIPE_PRICE_ID_BASIC = 'price_basic_test';
   process.env.STRIPE_PRICE_ID_GROWTH = 'price_growth_test';
+  process.env.STRIPE_PRICE_ID_BASIC_ANNUAL = 'price_basic_annual_test';
 });
 
 afterEach(() => {
@@ -72,6 +73,7 @@ describe('mapStripeSubscriptionToAppState', () => {
       stripeRawStatus: 'active',
       cancelAtPeriodEnd: false,
       plan: 'basic',
+      billingInterval: 'monthly',
       stripeSubscriptionId: 'sub_123',
     });
     expect(result.currentPeriodEnd).toBe(new Date(1893456000 * 1000).toISOString());
@@ -84,11 +86,20 @@ describe('mapStripeSubscriptionToAppState', () => {
     expect(result.plan).toBe('growth');
   });
 
-  it('leaves plan undefined for an unrecognized price ID', () => {
+  it('resolves annual billing interval from an annual price ID, plan unchanged', () => {
+    const result = mapStripeSubscriptionToAppState(
+      makeSubscription({ items: { data: [{ price: { id: 'price_basic_annual_test' }, current_period_end: 1893456000 }] } }),
+    );
+    expect(result.plan).toBe('basic');
+    expect(result.billingInterval).toBe('annual');
+  });
+
+  it('leaves plan and billingInterval undefined for an unrecognized price ID', () => {
     const result = mapStripeSubscriptionToAppState(
       makeSubscription({ items: { data: [{ price: { id: 'price_unknown' }, current_period_end: 1893456000 }] } }),
     );
     expect(result.plan).toBeUndefined();
+    expect(result.billingInterval).toBeUndefined();
   });
 
   it('preserves cancel_at_period_end while status stays active — scheduled, not completed, cancellation', () => {

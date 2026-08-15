@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { resolvePriceId, resolvePlanFromPriceId } from '@/lib/stripe/plans';
+import { resolvePriceId, resolvePlanFromPriceId, resolveBillingIntervalFromPriceId } from '@/lib/stripe/plans';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -59,5 +59,20 @@ describe('resolvePlanFromPriceId', () => {
 
   it('returns undefined for an unrecognized Price ID', () => {
     expect(resolvePlanFromPriceId('price_unknown')).toBeUndefined();
+  });
+});
+
+describe('resolveBillingIntervalFromPriceId', () => {
+  it('resolves monthly for a monthly Price ID', () => {
+    expect(resolveBillingIntervalFromPriceId('price_basic_test')).toBe('monthly');
+    expect(resolveBillingIntervalFromPriceId('price_growth_test')).toBe('monthly');
+  });
+
+  it('resolves annual for an annual Price ID', () => {
+    expect(resolveBillingIntervalFromPriceId('price_basic_annual_test')).toBe('annual');
+  });
+
+  it('returns undefined for an unrecognized Price ID', () => {
+    expect(resolveBillingIntervalFromPriceId('price_unknown')).toBeUndefined();
   });
 });

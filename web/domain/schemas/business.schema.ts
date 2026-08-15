@@ -11,7 +11,7 @@ import {
 } from '@/domain/models/business';
 import { QUALIFICATION_RESULTS, LEAD_PRIORITIES } from '@/domain/models/website-assessment';
 import { SCAN_WORKFLOW_STATUSES } from '@/domain/models/scan-execution';
-import { WEBPRESA_PLANS, SUBSCRIPTION_STATUSES } from '@/domain/constants/plans';
+import { WEBPRESA_PLANS, SUBSCRIPTION_STATUSES, BILLING_INTERVALS } from '@/domain/constants/plans';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
 import { WebsiteSectionsConfigSchema } from './website-sections.schema';
 import { PreviewCtaConfigSchema } from './site-preview.schema';
@@ -131,6 +131,7 @@ export const BusinessSchema = z.object({
   ownerUserId: z.string().min(1).optional(),
   claimedAt: IsoTimestampSchema.optional(),
   plan: z.enum(WEBPRESA_PLANS).optional(),
+  billingInterval: z.enum(BILLING_INTERVALS).optional(),
   subscriptionStatus: z.enum(SUBSCRIPTION_STATUSES).optional(),
   stripeRawStatus: z.string().optional(),
   currentPeriodEnd: IsoTimestampSchema.optional(),

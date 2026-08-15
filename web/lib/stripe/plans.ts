@@ -1,5 +1,5 @@
 import 'server-only';
-import { WEBPRESA_PLANS, type WebpresaPlan, type BillingInterval } from '@/domain/constants/plans';
+import { WEBPRESA_PLANS, BILLING_INTERVALS, type WebpresaPlan, type BillingInterval } from '@/domain/constants/plans';
 
 /**
  * Server-side Stripe Price ID mapping (Stage 18; annual pricing added
@@ -42,5 +42,19 @@ export function resolvePriceId(plan: WebpresaPlan, interval: BillingInterval = '
 export function resolvePlanFromPriceId(priceId: string): WebpresaPlan | undefined {
   return WEBPRESA_PLANS.find((plan) =>
     Object.values(PRICE_ID_ENV_VARS[plan]).some((envVar) => process.env[envVar] === priceId),
+  );
+}
+
+/**
+ * Reverse lookup — a Stripe Subscription's current Price ID back to the
+ * `BillingInterval` it was purchased under. Sibling to `resolvePlanFromPriceId`
+ * (same webhook reconciliation call site, same Price ID), but resolves the
+ * cadence instead of the tier. Checks every plan's env var for each interval,
+ * since the Price ID alone doesn't carry which plan it belongs to — same
+ * "returns undefined rather than throwing" contract as `resolvePlanFromPriceId`.
+ */
+export function resolveBillingIntervalFromPriceId(priceId: string): BillingInterval | undefined {
+  return BILLING_INTERVALS.find((interval) =>
+    WEBPRESA_PLANS.some((plan) => process.env[PRICE_ID_ENV_VARS[plan][interval]] === priceId),
   );
 }

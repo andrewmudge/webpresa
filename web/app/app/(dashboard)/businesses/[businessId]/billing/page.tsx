@@ -51,6 +51,11 @@ export default async function BillingPage({ params, searchParams }: Props) {
   }
 
   const plan = planId ? PLAN_CATALOG[planId] : undefined;
+  // `billingInterval` is unset on subscriptions that predate this field
+  // (webhook reconciliation backfills it on the next event) — 'monthly' is
+  // the correct default for that gap, since annual billing didn't exist
+  // before it, matching every pre-existing subscription's actual cadence.
+  const planPriceDisplay = (business.billingInterval === 'annual' && plan?.annualPriceDisplay) || plan?.priceDisplay;
   const periodEndDisplay = formatDate(business.currentPeriodEnd);
   const subscriptionBadge = resolveSubscriptionBadge(business.subscriptionStatus);
   const isReadOnly = mode === 'billing_recovery';
@@ -107,7 +112,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
               </Badge>
             </div>
             <p className="mt-3 text-3xl font-bold text-gray-900">
-              {plan?.priceDisplay ?? '—'}
+              {planPriceDisplay ?? '—'}
             </p>
             <p className="mt-1 text-sm text-gray-500">
               {business.cancelAtPeriodEnd ? 'Ends on ' : 'Renews on '}
@@ -220,7 +225,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
             </div>
             <div className="flex items-center justify-between gap-2">
               <dt className="text-gray-500">Amount</dt>
-              <dd className="text-gray-900 font-medium">{plan?.priceDisplay ?? '—'}</dd>
+              <dd className="text-gray-900 font-medium">{planPriceDisplay ?? '—'}</dd>
             </div>
           </dl>
           <p className="mt-4 text-xs text-gray-500">

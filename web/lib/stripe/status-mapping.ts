@@ -1,7 +1,7 @@
 import 'server-only';
 import type Stripe from 'stripe';
-import type { SubscriptionStatus, WebpresaPlan } from '@/domain/constants/plans';
-import { resolvePlanFromPriceId } from './plans';
+import type { SubscriptionStatus, WebpresaPlan, BillingInterval } from '@/domain/constants/plans';
+import { resolvePlanFromPriceId, resolveBillingIntervalFromPriceId } from './plans';
 
 /**
  * Maps a Stripe subscription `status` to Webpresa's 3-value application
@@ -41,6 +41,7 @@ export interface MappedSubscriptionState {
   currentPeriodEnd?: string;
   cancelAtPeriodEnd: boolean;
   plan?: WebpresaPlan;
+  billingInterval?: BillingInterval;
   stripeSubscriptionId: string;
 }
 
@@ -72,6 +73,7 @@ export function mapStripeSubscriptionToAppState(subscription: Stripe.Subscriptio
     currentPeriodEnd: currentPeriodEndUnix ? new Date(currentPeriodEndUnix * 1000).toISOString() : undefined,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     plan: priceId ? resolvePlanFromPriceId(priceId) : undefined,
+    billingInterval: priceId ? resolveBillingIntervalFromPriceId(priceId) : undefined,
     stripeSubscriptionId: subscription.id,
   };
 }
