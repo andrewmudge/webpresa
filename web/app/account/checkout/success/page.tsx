@@ -1,7 +1,21 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import type { ReactNode } from 'react';
-import { PartyPopper, Sparkles, ShieldCheck, Lock, Cloud, Pencil, Store, CheckCircle2, HelpCircle } from 'lucide-react';
+import {
+  PartyPopper,
+  ShieldCheck,
+  Lock,
+  Cloud,
+  Pencil,
+  Store,
+  CheckCircle2,
+  HelpCircle,
+  ArrowRight,
+  FilePenLine,
+  Globe,
+  Rocket,
+  MessageCircle,
+} from 'lucide-react';
 import { requireCustomerSession, requireBusinessOwnership } from '@/lib/auth/customer-authorization';
 import { getLatestPreviewScreenshots } from '@/lib/screenshots/latest-preview-screenshot';
 import { PLAN_CATALOG } from '@/domain/constants/plan-catalog';
@@ -23,10 +37,38 @@ const STATUS_TRUST_ITEMS = [
   { icon: Pencil, title: 'Dashboard Unlocked', subtitle: 'You now have full access to edit and manage your site.' },
 ];
 
+/** `href` is a function of `businessId` — built once per render in `ActivatedCelebration`, not here. */
 const NEXT_STEPS = [
-  { title: 'Review & customize', subtitle: 'Edit your content, images, and details to make it your own.' },
-  { title: 'Connect your domain', subtitle: 'Use your existing domain or purchase a new one.' },
-  { title: 'Publish your website', subtitle: 'Go live with your domain and start getting new customers.' },
+  {
+    title: 'Review & customize',
+    subtitle: 'Edit your content, images, and details to make it truly yours.',
+    icon: FilePenLine,
+    iconBgClass: 'bg-blue-50',
+    iconColorClass: 'text-blue-600',
+    linkLabel: 'Go to Editor',
+    buildHref: (businessId: string) => `/app/businesses/${businessId}/website`,
+  },
+  {
+    title: 'Connect your domain',
+    subtitle: 'Use your existing domain or purchase a new one that fits your brand.',
+    icon: Globe,
+    iconBgClass: 'bg-green-50',
+    iconColorClass: 'text-green-600',
+    linkLabel: 'Manage domain',
+    buildHref: (businessId: string) => `/app/onboarding/${businessId}/domain`,
+  },
+  {
+    title: 'Publish your website',
+    subtitle: 'Go live with your domain and start getting new customers.',
+    icon: Rocket,
+    iconBgClass: 'bg-purple-50',
+    iconColorClass: 'text-purple-600',
+    linkLabel: 'Publish site',
+    // No dedicated "publish" page for an already-active business — the
+    // Publish button lives on the website editor itself (conditionally
+    // rendered when there's a draft to publish), so this points there too.
+    buildHref: (businessId: string) => `/app/businesses/${businessId}/website`,
+  },
 ];
 
 /**
@@ -86,13 +128,20 @@ async function ActivatedCelebration({ business }: { business: Business }) {
       <div className="rounded-3xl border border-(--color-border) bg-white p-6 shadow-sm sm:p-10">
         <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
           <div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-(--color-brand-muted) text-2xl">
-              <PartyPopper size={22} className="text-(--color-brand)" />
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-(--color-brand-muted) text-2xl">
+                <PartyPopper size={22} className="text-(--color-brand)" />
+              </div>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                <CheckCircle2 size={12} />
+                Activation complete
+              </span>
             </div>
-            <h1 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">Welcome to Webpresa!</h1>
-            <p className="mt-2 text-lg font-semibold text-(--color-brand)">Your website is now live and ready.</p>
-            <p className="mt-3 max-w-md text-base text-gray-600">
-              Thank you for your trust. Your website has been activated and your dashboard is ready for you.
+            <h1 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">
+              Your website is live! 🎉
+            </h1>
+            <p className="mt-2 max-w-md text-base text-gray-600">
+              Everything is set up and your site is ready to grow your business online.
             </p>
 
             <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-(--color-border) bg-white px-4 py-3 shadow-sm">
@@ -117,51 +166,67 @@ async function ActivatedCelebration({ business }: { business: Business }) {
 
           <WebsiteHeroPreview slug={business.slug} desktopSrc={desktopSrc} mobileSrc={mobileSrc} />
         </div>
+      </div>
 
-        <div className="mt-10 border-t border-(--color-border) pt-8">
-          <TrustRow items={STATUS_TRUST_ITEMS} columns={4} />
+      <div className="mt-8 flex flex-col items-center text-center">
+        <Link
+          href={dashboardHref}
+          className="inline-flex items-center gap-2 rounded-xl bg-[#0D3AD9] px-8 py-3.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+        >
+          Finish Setup
+          <ArrowRight size={16} />
+        </Link>
+        <p className="mt-2 text-xs text-gray-500">Start editing, connect your domain, and publish your site.</p>
+      </div>
+
+      <div className="mt-8 rounded-2xl border border-(--color-border) bg-white p-6">
+        <TrustRow items={STATUS_TRUST_ITEMS} columns={4} />
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-(--color-border) bg-white p-6 sm:p-8">
+        <h2 className="text-base font-semibold text-gray-900">What&apos;s next?</h2>
+        <p className="mt-1 text-sm text-gray-500">Just a few simple steps to get found online.</p>
+
+        <div className="mt-6 grid grid-cols-1 divide-y divide-(--color-border) sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {NEXT_STEPS.map((step, i) => (
+            <div key={step.title} className="flex flex-col items-center px-4 py-6 text-center first:pt-0 sm:py-0">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-(--color-brand-muted) text-xs font-semibold text-(--color-brand)">
+                {i + 1}
+              </span>
+              <span className={`mt-3 flex h-12 w-12 items-center justify-center rounded-xl ${step.iconBgClass} ${step.iconColorClass}`}>
+                <step.icon size={22} />
+              </span>
+              <h3 className="mt-3 text-sm font-semibold text-gray-900">{step.title}</h3>
+              <p className="mt-1.5 max-w-[16rem] text-xs text-gray-500">{step.subtitle}</p>
+              <Link
+                href={step.buildHref(business.businessId)}
+                className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-(--color-brand) hover:underline"
+              >
+                {step.linkLabel}
+                <ArrowRight size={14} />
+              </Link>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1.3fr_1fr]">
-        <div className="rounded-2xl border border-(--color-border) bg-white p-6">
-          <h2 className="text-sm font-semibold text-gray-900">What&apos;s next?</h2>
-          <p className="mt-1 text-xs text-gray-500">You&apos;re just a few steps away from getting found online.</p>
-          <ol className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {NEXT_STEPS.map((step, i) => (
-              <li key={step.title} className="flex items-start gap-2.5">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-(--color-brand-muted) text-xs font-semibold text-(--color-brand)">
-                  {i + 1}
-                </span>
-                <span>
-                  <span className="block text-sm font-medium text-gray-900">{step.title}</span>
-                  <span className="block text-xs text-gray-500">{step.subtitle}</span>
-                </span>
-              </li>
-            ))}
-          </ol>
+      <div className="mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl border border-(--color-border) bg-white p-6 sm:flex-row">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-(--color-brand-muted) text-(--color-brand)">
+            <MessageCircle size={18} />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold text-gray-900">Need help getting started?</span>
+            <span className="block text-xs text-gray-500">Our team is here for you.</span>
+          </span>
         </div>
-
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-(--color-border) bg-(--color-brand-muted) p-6 text-center">
-          <Sparkles size={20} className="text-(--color-brand)" />
-          <h2 className="mt-2 text-sm font-semibold text-gray-900">You&apos;re all set!</h2>
-          <p className="mt-1 text-xs text-gray-600">Your website is ready to grow your business.</p>
-          <Link
-            href={dashboardHref}
-            className="mt-4 w-full rounded-lg bg-(--color-brand) px-5 py-2.5 text-center text-sm font-medium text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"
-          >
-            Finish Setup
-          </Link>
-          <p className="mt-2 text-xs text-gray-500">Start editing, connect your domain, and publish.</p>
-        </div>
-      </div>
-
-      <p className="mt-8 text-center text-sm text-gray-500">
-        Questions? We&apos;re here to help you succeed.{' '}
-        <a href="mailto:hello@webpresa.com" className="font-medium text-(--color-brand) hover:underline">
-          Contact support
+        <a
+          href="mailto:hello@webpresa.com"
+          className="rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+        >
+          Contact Support
         </a>
-      </p>
+      </div>
     </>
   );
 }
