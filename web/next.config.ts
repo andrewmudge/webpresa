@@ -19,12 +19,19 @@ import type { NextConfig } from "next";
  */
 const isDev = process.env.NODE_ENV === 'development';
 const stockImagesCdnHost = process.env.STOCK_IMAGES_CDN_DOMAIN ?? '*.cloudfront.net';
+// Private assets bucket (screenshots, postcard creative) — served to <img>
+// tags as presigned S3 URLs (see lib/s3/assets.ts), never via the stock-
+// images CDN above. AWS SDK v3 presigns virtual-hosted-style regional URLs
+// (`{bucket}.s3.{region}.amazonaws.com`); the `*.s3.amazonaws.com` legacy
+// global-endpoint form is also allowed defensively in case a signed URL ever
+// resolves to that format instead.
+const assetsBucketRegion = process.env.AWS_REGION ?? 'us-east-1';
 
 const CSP = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost}`,
+  `img-src 'self' data: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost} https://*.s3.${assetsBucketRegion}.amazonaws.com https://*.s3.amazonaws.com`,
   "font-src 'self' data:",
   "connect-src 'self'",
   "frame-src 'self'",
