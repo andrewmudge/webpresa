@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Joyride, EVENTS, type Step, type EventData } from 'react-joyride';
 
@@ -13,6 +12,18 @@ import { Joyride, EVENTS, type Step, type EventData } from 'react-joyride';
  * (targets only ever live in the sidebar, which persists across every
  * dashboard route) — see the onboarding-tour build plan for why a deeper
  * tour into the website editor's tabs was scoped out of this pass.
+ *
+ * `run` is derived directly from `searchParams` on every render — not
+ * mirrored into local state via an effect (that was tried first and broke
+ * "Take a tour" clicks: this component lives in the persistent dashboard
+ * layout and never remounts between dashboard pages, so a `useState`
+ * lazy-initializer only ever reads the URL once, on first page load, and
+ * never reacts to a later same-page navigation that only changes the query
+ * string). Deriving `run` straight from `searchParams` re-evaluates on every
+ * navigation instead, including query-only ones, and needs no
+ * `react-hooks/set-state-in-effect`-triggering effect to turn the tour on.
+ * The param is only cleared at the end (`handleEvent`, an event-handler
+ * callback — not an effect, so `router.replace` there is unproblematic).
  *
  * Onboarding-step completion (`completedSteps`/`tourCompletedAt`) is
  * recorded server-side before the redirect that carries this param — this
@@ -56,26 +67,14 @@ export function DashboardTour() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // Derived from the URL during render (lazy initializer), not copied via a
-  // `setState`-in-effect — `run` then lives purely in React state so it
-  // survives the param being stripped from the URL below.
-  const [run, setRun] = useState(() => searchParams.get('tour') === 'start');
+  const run = searchParams.get('tour') === 'start';
 
-  useEffect(() => {
-    if (searchParams.get('tour') !== 'start') return;
-    // Strip the param immediately so it doesn't linger in the address bar
-    // (and can't re-trigger the tour on a page refresh) while the tour
-    // itself keeps running from the `run` state above, not the URL.
+  function handleEvent(data: EventData) {
+    if (data.type !== EVENTS.TOUR_END) return;
     const params = new URLSearchParams(searchParams.toString());
     params.delete('tour');
     const query = params.toString();
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }, [searchParams, pathname, router]);
-
-  function handleEvent(data: EventData) {
-    if (data.type === EVENTS.TOUR_END) {
-      setRun(false);
-    }
   }
 
   return (
