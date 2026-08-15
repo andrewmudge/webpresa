@@ -12,7 +12,7 @@ import { customerSignOutAction } from '@/lib/auth/customer-actions';
  */
 export function OnboardingShell({ businessName, children }: { businessName?: string; children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-(--color-page-gradient-start) to-(--color-page-gradient-end)">
+    <div className="min-h-screen page-ambient-bg">
       <header className="mx-auto flex max-w-[1800px] items-center justify-between px-4 py-6 sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-2">
           <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto shrink-0" />

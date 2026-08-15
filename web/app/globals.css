@@ -29,12 +29,6 @@
   --color-accent: #CE9059;
   --color-accent-dark: #3AB9FD;
 
-  /* Page-background gradient (claim-status, checkout success, onboarding) —
-     solid stops (no alpha) so it never blends with body's dark-mode
-     background into a muddy gray. */
-  --color-page-gradient-start: #cfe6ff;
-  --color-page-gradient-end: #006cf1;
-
   /* Surfaces */
   --color-surface: #FAFAFA;
   --color-border: #e5e7eb;
@@ -57,4 +51,19 @@ body {
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * Ambient page background (claim-status, checkout success, onboarding) —
+ * near-white/cool-gray base with large, heavily-blurred Webpresa-blue
+ * radial glows anchored outside the content area. Reads as white first,
+ * blue second; solid base color (no alpha) so it never blends with body's
+ * dark-mode background into a muddy gray.
+ */
+.page-ambient-bg {
+  background:
+    radial-gradient(circle at 0% 100%, rgba(0, 108, 241, 0.08), transparent 32%),
+    radial-gradient(circle at 100% 92%, rgba(0, 108, 241, 0.06), transparent 30%),
+    radial-gradient(circle at 50% 0%, rgba(0, 108, 241, 0.03), transparent 45%),
+    #f8fafc;
 }

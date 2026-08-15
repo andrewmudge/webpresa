@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import type { NeedsAttentionItem, OperationsRecommendedAction } from '@/lib/operations/needs-attention';
-import { RECOMMENDED_ACTION_LABELS } from '@/lib/operations/needs-attention';
+import type { NeedsAttentionItem, OperationsRecommendedAction } from '@/lib/operations/needs-attention-types';
+import { RECOMMENDED_ACTION_LABELS } from '@/lib/operations/needs-attention-types';
 import { formatRelativeTime } from '@/lib/operations/format-relative-time';
 import { retryEnrichmentAction } from '../businesses/[businessId]/enrichment-actions';
 import { markStaleScanFailedAction } from '../businesses/[businessId]/screenshot-actions';

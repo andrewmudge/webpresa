@@ -13,6 +13,16 @@ import { derivePostcardStatus } from '@/lib/postcards/status';
 import { getScreenshotDlqDepth } from '@/lib/sqs/dlq';
 import { getScanTypeLabel } from '@/lib/scans/scan-type';
 import type { ScanFailureCategory } from '@/domain/models/scan-event';
+import type { OperationsRecommendedAction, NeedsAttentionRecovery, NeedsAttentionItem, NeedsAttentionResult } from './needs-attention-types';
+
+// Re-exported for backward compatibility — everything that previously
+// imported these from this module (the client-safe types/const moved to
+// needs-attention-types.ts, see that file's doc comment for why) still
+// works unchanged. Only NeedsAttentionSection.tsx (a 'use client'
+// component) needs to import directly from needs-attention-types.ts
+// instead, since it cannot import this module at all.
+export type { OperationsRecommendedAction, NeedsAttentionRecovery, NeedsAttentionItem, NeedsAttentionResult };
+export { RECOMMENDED_ACTION_LABELS } from './needs-attention-types';
 
 /**
  * Stage 24 — the "Needs Attention" aggregation for `/admin/operations`.
@@ -37,54 +47,6 @@ const MAX_LEAD_NOTIFICATION_ATTEMPTS = 5;
 
 /** Scan failure categories that indicate a credential/configuration problem rather than a per-prospect issue — see implementation.md, Stage 24, "provider/authentication failures". */
 const AUTH_OR_CONFIG_FAILURE_CATEGORIES: ReadonlySet<ScanFailureCategory> = new Set(['firecrawl_auth']);
-
-export type OperationsRecommendedAction =
-  | 'safe_retry'
-  | 'requires_configuration_fix'
-  | 'requires_manual_review'
-  | 'investigate';
-
-export const RECOMMENDED_ACTION_LABELS: Record<OperationsRecommendedAction, string> = {
-  safe_retry: 'Safe to retry',
-  requires_configuration_fix: 'Requires configuration fix',
-  requires_manual_review: 'Requires manual review',
-  investigate: 'Unknown — investigate',
-};
-
-export type NeedsAttentionRecovery =
-  | { kind: 'retry_enrichment'; businessId: string; scanId: string }
-  | { kind: 'mark_stale_scan_failed'; businessId: string; scanId: string }
-  | { kind: 'mark_stale_execution_failed'; businessId: string; scanExecutionId: string }
-  | { kind: 'rerun_scan_workflow'; businessId: string; scanExecutionId: string }
-  | { kind: 'retry_render_postcard'; postcardId: string }
-  | { kind: 'retry_lead_notification'; businessId: string; leadId: string };
-
-export interface NeedsAttentionItem {
-  id: string;
-  category: 'scan' | 'scan_execution' | 'postcard' | 'lead_notification' | 'stripe_webhook' | 'dlq';
-  title: string;
-  /** Safe, admin-facing summary — never a raw provider error or stack trace (see the underlying record's own doc comments). */
-  detail?: string;
-  businessId?: string;
-  businessName?: string;
-  occurredAt: string;
-  recommendedAction: OperationsRecommendedAction;
-  recovery?: NeedsAttentionRecovery;
-  provider?: string;
-  operation?: string;
-  errorCategory?: string;
-  retryable?: boolean;
-  attempt?: number;
-  scanId?: string;
-  scanExecutionId?: string;
-  postcardId?: string;
-  leadId?: string;
-}
-
-export interface NeedsAttentionResult {
-  items: NeedsAttentionItem[];
-  screenshotDlqDepth: number | null;
-}
 
 function looksLikeAuthFailure(message: string): boolean {
   return /auth|unauthorized|forbidden|invalid.{0,10}key|credential/i.test(message);

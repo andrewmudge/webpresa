@@ -20,6 +20,15 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [businessNameInput, setBusinessNameInput] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressCity, setAddressCity] = useState('');
+  const [addressState, setAddressState] = useState('');
+  const [addressPostalCode, setAddressPostalCode] = useState('');
 
   const passwordValid = passwordMeetsPolicy(password);
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
@@ -119,11 +128,49 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
             {signUpState?.step === 'signup' && signUpState.error && <ErrorAlert>{signUpState.error}</ErrorAlert>}
             <form action={signUpFormAction} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <PlainField name="firstName" type="text" placeholder="First name" required autoComplete="given-name" accentColor={accentColor} />
-                <PlainField name="lastName" type="text" placeholder="Last name" required autoComplete="family-name" accentColor={accentColor} />
+                <PlainField
+                  name="firstName"
+                  type="text"
+                  placeholder="First name"
+                  required
+                  autoComplete="given-name"
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  accentColor={accentColor}
+                />
+                <PlainField
+                  name="lastName"
+                  type="text"
+                  placeholder="Last name"
+                  required
+                  autoComplete="family-name"
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  accentColor={accentColor}
+                />
               </div>
-              <IconField icon={Mail} name="email" type="email" placeholder="Email" required autoComplete="email" accentColor={accentColor} />
-              <IconField icon={Phone} name="phone" type="tel" placeholder="Phone number" required autoComplete="tel" accentColor={accentColor} />
+              <IconField
+                icon={Mail}
+                name="email"
+                type="email"
+                placeholder="Email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                accentColor={accentColor}
+              />
+              <IconField
+                icon={Phone}
+                name="phone"
+                type="tel"
+                placeholder="Phone number"
+                required
+                autoComplete="tel"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                accentColor={accentColor}
+              />
               <div>
                 <IconField
                   icon={KeyRound}
@@ -159,13 +206,58 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
               <div className="pt-3 border-t border-gray-100">
                 <p className="text-xs font-semibold text-gray-500 mb-2.5">Business information</p>
                 <div className="space-y-3">
-                  <PlainField name="businessName" type="text" placeholder="Business name" required autoComplete="organization" accentColor={accentColor} />
-                  <PlainField name="addressLine1" type="text" placeholder="Street address" required autoComplete="address-line1" accentColor={accentColor} />
+                  <PlainField
+                    name="businessName"
+                    type="text"
+                    placeholder="Business name"
+                    required
+                    autoComplete="organization"
+                    value={businessNameInput}
+                    onChange={(event) => setBusinessNameInput(event.target.value)}
+                    accentColor={accentColor}
+                  />
+                  <PlainField
+                    name="addressLine1"
+                    type="text"
+                    placeholder="Street address"
+                    required
+                    autoComplete="address-line1"
+                    value={addressLine1}
+                    onChange={(event) => setAddressLine1(event.target.value)}
+                    accentColor={accentColor}
+                  />
                   <div className="grid grid-cols-2 gap-3">
-                    <PlainField name="addressCity" type="text" placeholder="City" required autoComplete="address-level2" accentColor={accentColor} />
-                    <PlainField name="addressState" type="text" placeholder="State" required autoComplete="address-level1" accentColor={accentColor} />
+                    <PlainField
+                      name="addressCity"
+                      type="text"
+                      placeholder="City"
+                      required
+                      autoComplete="address-level2"
+                      value={addressCity}
+                      onChange={(event) => setAddressCity(event.target.value)}
+                      accentColor={accentColor}
+                    />
+                    <PlainField
+                      name="addressState"
+                      type="text"
+                      placeholder="State"
+                      required
+                      autoComplete="address-level1"
+                      value={addressState}
+                      onChange={(event) => setAddressState(event.target.value)}
+                      accentColor={accentColor}
+                    />
                   </div>
-                  <PlainField name="addressPostalCode" type="text" placeholder="ZIP code" required autoComplete="postal-code" accentColor={accentColor} />
+                  <PlainField
+                    name="addressPostalCode"
+                    type="text"
+                    placeholder="ZIP code"
+                    required
+                    autoComplete="postal-code"
+                    value={addressPostalCode}
+                    onChange={(event) => setAddressPostalCode(event.target.value)}
+                    accentColor={accentColor}
+                  />
                 </div>
               </div>
 
@@ -183,7 +275,17 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
         <div className="space-y-4">
           {signInState?.error && <ErrorAlert>{signInState.error}</ErrorAlert>}
           <form action={signInFormAction} className="space-y-3">
-            <IconField icon={Mail} name="email" type="email" placeholder="Email" required autoComplete="email" accentColor={accentColor} />
+            <IconField
+              icon={Mail}
+              name="email"
+              type="email"
+              placeholder="Email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              accentColor={accentColor}
+            />
             <IconField
               icon={KeyRound}
               name="password"
