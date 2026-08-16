@@ -6,21 +6,14 @@ import { DEFAULT_SECONDARY_CTA } from '@/app/b/[slug]/template/cta';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
 import { updateCtaActionCustomer, updateSectionContentActionCustomer } from '../actions';
 import { getCachedPreviews } from './data';
+import { CTA_TYPE_LABELS } from './cta-type-labels';
+import { SecondaryCtaFields } from './SecondaryCtaFields';
 
 interface Props {
   businessId: string;
   business: Business;
   isReadOnly: boolean;
 }
-
-const CTA_TYPE_LABELS: Record<(typeof CTA_ACTION_TYPES)[number], string> = {
-  phone: 'Call',
-  email: 'Email',
-  sms: 'Text message',
-  external_url: 'Link to a page',
-  request_service: 'Open request form',
-  none: 'Hidden',
-};
 
 export async function ContactTab({ businessId, business, isReadOnly }: Props) {
   const previews = await getCachedPreviews(businessId);
@@ -92,57 +85,24 @@ export async function ContactTab({ businessId, business, isReadOnly }: Props) {
             <TextField label="Destination (link, if applicable)" name="primaryValue" defaultValue={cta?.primary.value} disabled={isReadOnly} placeholder="https://…" />
           </fieldset>
 
-          <fieldset className="space-y-3 pt-2 border-t border-gray-100 group">
+          <fieldset className="space-y-3 pt-2 border-t border-gray-100">
             <legend className="text-sm font-semibold text-gray-800 pt-3">Secondary button</legend>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              {/* A generated website always shows 2 buttons by default — an
-                  unconfigured secondary falls back to a site-wide "Request
-                  Service" button (see DEFAULT_SECONDARY_CTA). Only an
-                  explicit `type: 'none'` (this box unchecked and saved)
-                  actually hides it, so the box defaults to checked in every
-                  other case, matching what's actually live. */}
-              <input
-                type="checkbox"
-                name="secondaryEnabled"
-                defaultChecked={cta?.secondary?.type !== 'none'}
-                disabled={isReadOnly}
-                className="h-4 w-4 rounded border-gray-300 text-(--color-brand)"
-              />
-              Show a secondary button
-            </label>
-            {/* Hidden via `group-has-[:checked]:block` (no client JS) —
-                only shown while the checkbox above is checked, so there's
-                no way to type secondary button details while it's
-                unchecked. The fields' values are also ignored server-side
-                whenever the box is unchecked (`updateCustomerCta`), so this
-                is a UX affordance, not the only guard. */}
-            <div className="hidden group-has-[:checked]:block space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="block">
-                  <span className="block text-sm font-medium text-gray-700 mb-1">Action</span>
-                  <select
-                    name="secondaryType"
-                    defaultValue={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.type : DEFAULT_SECONDARY_CTA.type}
-                    disabled={isReadOnly}
-                    className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
-                  >
-                    {CTA_ACTION_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {CTA_TYPE_LABELS[t]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <TextField
-                  label="Button label"
-                  name="secondaryLabel"
-                  defaultValue={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.label : DEFAULT_SECONDARY_CTA.label}
-                  disabled={isReadOnly}
-                  maxLength={40}
-                />
-              </div>
-              <TextField label="Destination (link, if applicable)" name="secondaryValue" defaultValue={cta?.secondary?.value} disabled={isReadOnly} placeholder="https://…" />
-            </div>
+            {/* A generated website always shows 2 buttons by default — an
+                unconfigured secondary falls back to a site-wide "Request
+                Service" button (see DEFAULT_SECONDARY_CTA). Only an
+                explicit `type: 'none'` (this box unchecked and saved)
+                actually hides it, so the box defaults to checked in every
+                other case, matching what's actually live. The fields'
+                values are also ignored server-side whenever the box is
+                unchecked (`updateCustomerCta`), independent of whether
+                they're visible here. */}
+            <SecondaryCtaFields
+              defaultChecked={cta?.secondary?.type !== 'none'}
+              defaultType={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.type : DEFAULT_SECONDARY_CTA.type}
+              defaultLabel={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.label : DEFAULT_SECONDARY_CTA.label}
+              defaultValue={cta?.secondary?.value}
+              disabled={isReadOnly}
+            />
           </fieldset>
 
           <SaveButton disabled={isReadOnly} />
