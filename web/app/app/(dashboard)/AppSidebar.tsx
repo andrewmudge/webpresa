@@ -89,7 +89,7 @@ function extractBusinessId(pathname: string): string | null {
   return match ? match[1] : null;
 }
 
-function Brand({ collapsed, onLight }: { collapsed?: boolean; onLight?: boolean }) {
+function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
     <Link href="/app" className="flex items-center gap-3" title="Webpresa">
       {/* Fully unconstrained-but-bounded on both axes when collapsed
@@ -99,9 +99,11 @@ function Brand({ collapsed, onLight }: { collapsed?: boolean; onLight?: boolean 
           treatment) combined with the collapsed rail's much narrower
           available width let Tailwind's `max-width:100%` preflight reset
           cap the rendered width while height stayed pinned, stretching the
-          mark out of proportion. */}
+          mark out of proportion. Transparent-background mark (`_nobg`) —
+          the sidebar itself is now the solid dark slate, so a flat-white
+          logo asset would show a visible box around it. */}
       <Image
-        src="/webpresa_w.png"
+        src="/webpresa_w_nobg.png"
         alt="Webpresa"
         width={692}
         height={394}
@@ -109,8 +111,8 @@ function Brand({ collapsed, onLight }: { collapsed?: boolean; onLight?: boolean 
       />
       {!collapsed && (
         <div>
-          <span className={`text-base font-bold tracking-tight ${onLight ? 'text-gray-900' : 'text-white'}`}>Webpresa</span>
-          <p className={`text-xs leading-none mt-0.5 ${onLight ? 'text-gray-500' : 'text-white/50'}`}>My Website</p>
+          <span className="text-base font-bold tracking-tight text-white">Webpresa</span>
+          <p className="text-xs leading-none mt-0.5 text-white/50">My Website</p>
         </div>
       )}
     </Link>
@@ -180,7 +182,7 @@ function Nav({ currentId, onNavigate, collapsed }: { currentId: string | null; o
             data-tour-id={item.tourId}
             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               collapsed ? 'justify-center' : ''
-            } ${isActive ? 'bg-white/15 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+            } ${isActive ? 'bg-(--color-brand) text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
           >
             <Icon size={18} className="shrink-0" aria-hidden="true" />
             {!collapsed && <span>{item.label}</span>}
@@ -269,19 +271,19 @@ export function AppSidebar({ businesses, signedInAs, firstName, lastName }: AppS
   return (
     <>
       <aside
-        className={`hidden md:flex flex-shrink-0 flex-col bg-brand shadow-lg transition-[width] motion-reduce:transition-none duration-150 ${
+        className={`hidden md:flex flex-shrink-0 flex-col bg-[#1E2630] shadow-lg transition-[width] motion-reduce:transition-none duration-150 ${
           collapsed ? 'w-16' : 'w-60'
         }`}
       >
-        <div className={`bg-white border-b border-gray-200 ${collapsed ? 'px-3 py-4' : 'px-5 py-5'}`}>
+        <div className={`border-b border-white/10 ${collapsed ? 'px-3 py-4' : 'px-5 py-5'}`}>
           <div className={`flex items-center ${collapsed ? 'flex-col gap-3' : 'justify-between gap-2'}`}>
-            <Brand collapsed={collapsed} onLight />
+            <Brand collapsed={collapsed} />
             <button
               type="button"
               onClick={toggleCollapsed}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              className="shrink-0 p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
             >
               {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
@@ -309,7 +311,7 @@ export function AppSidebar({ businesses, signedInAs, firstName, lastName }: AppS
         <Footer signedInAs={signedInAs} firstName={firstName} lastName={lastName} collapsed={collapsed} />
       </aside>
 
-      <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-brand px-4 py-3 shadow-lg">
+      <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-[#1E2630] px-4 py-3 shadow-lg">
         <Brand />
         <button
           type="button"
@@ -340,7 +342,7 @@ export function AppSidebar({ businesses, signedInAs, firstName, lastName }: AppS
               animate={{ x: 0 }}
               exit={{ x: shouldReduceMotion ? 0 : '-100%' }}
               transition={{ type: shouldReduceMotion ? false : 'tween', duration: shouldReduceMotion ? 0 : 0.2 }}
-              className="md:hidden fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-brand shadow-lg"
+              className="md:hidden fixed inset-y-0 left-0 z-50 w-72 flex flex-col bg-[#1E2630] shadow-lg"
             >
               <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
                 <Brand />
