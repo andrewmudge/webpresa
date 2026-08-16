@@ -194,6 +194,9 @@ describe('handler — generated_preview', () => {
         url: 'https://app.example.com/b/acme-plumbing',
         captureToken: { cookieDomain: 'app.example.com', token: 'signed.jwt.token' },
         vercelBypassSecret: 'test-bypass',
+        // Stage 25 — generated_preview always threads its own app base URL
+        // through as the strict same-origin redirect guard's boundary.
+        sameOriginBase: 'https://app.example.com',
       }),
     );
     const finalCall = mockConditionalUpdateStatus.mock.calls.at(-1)![0];

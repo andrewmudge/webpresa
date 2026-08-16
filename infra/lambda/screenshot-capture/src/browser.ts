@@ -1,5 +1,7 @@
 import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 import { CAPTURE_TOKEN_COOKIE_NAME } from './capture-token';
+import { validateOutboundUrl } from './url-validation';
+import { isWithinConfiguredOrigin } from './same-origin';
 
 /**
  * Viewport capture — see implementation.md, Stage 14, "Operational
@@ -34,10 +36,67 @@ const DISABLE_ANIMATIONS_CSS = `
 export class ScreenshotCaptureError extends Error {
   constructor(
     message: string,
-    public readonly category: 'browser_launch_failed' | 'navigation_timeout' | 'page_load_failed' | 'blocked_by_bot_protection' | 'screenshot_failed',
+    public readonly category:
+      | 'browser_launch_failed'
+      | 'navigation_timeout'
+      | 'page_load_failed'
+      | 'blocked_by_bot_protection'
+      | 'blocked_url'
+      | 'screenshot_failed',
   ) {
     super(message);
   }
+}
+
+/**
+ * Stage 25 (Security Hardening) — re-validates every *navigation* request
+ * (the initial URL, plus every server-side redirect hop Playwright follows
+ * internally within one `page.goto()` call) rather than trusting the
+ * one-time check `handler.ts` runs before `page.goto()` is ever called.
+ * Without this, a URL that passes that one-time check and then redirects —
+ * at request time — to a blocked destination would reach it unchecked,
+ * since Playwright follows redirects on its own with no re-validation by
+ * default. Each hop in a redirect chain is dispatched as its own request
+ * through this same route handler, so this covers the whole chain, not
+ * just the first hop.
+ *
+ * Two modes, matching the two capture targets' genuinely different trust
+ * models (see `same-origin.ts`'s doc comment):
+ * - `sameOriginBase` set (`generated_preview`) → `isWithinConfiguredOrigin`:
+ *   strict same-origin only, since this destination is never actually
+ *   untrusted — it's always Webpresa's own app, so *any* redirect off that
+ *   exact origin is refused, private-IP or not. This is the check
+ *   `same-origin.ts`'s own doc comment always claimed happened here; it
+ *   didn't, until now.
+ * - `sameOriginBase` unset (`existing_site`) → `validateOutboundUrl()`: the
+ *   general SSRF blocklist, mirroring the per-redirect re-validation
+ *   `web/lib/firecrawl/images.ts` already does for image fetches on the
+ *   Next.js side.
+ *
+ * Deliberately scoped to navigation requests only (`request.isNavigationRequest()`)
+ * — subresource requests a loaded page makes (images, scripts, XHR) are not
+ * re-validated here, keeping this targeted at the actual SSRF surface
+ * (where the page/frame itself ends up) rather than adding a DNS lookup to
+ * every request a real-world page happens to make.
+ */
+export async function guardNavigationRequests(context: BrowserContext, sameOriginBase?: string): Promise<void> {
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    if (!request.isNavigationRequest()) {
+      await route.continue();
+      return;
+    }
+
+    const allowed = sameOriginBase
+      ? isWithinConfiguredOrigin(sameOriginBase, request.url())
+      : (await validateOutboundUrl(request.url())).ok;
+
+    if (!allowed) {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
+  });
 }
 
 export async function launchBrowser(): Promise<Browser> {
@@ -70,6 +129,7 @@ async function newContext(
   viewport: ViewportName,
   captureToken?: { cookieDomain: string; token: string },
   vercelBypassSecret?: string,
+  sameOriginBase?: string,
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport: VIEWPORTS[viewport],
@@ -98,6 +158,7 @@ async function newContext(
       },
     ]);
   }
+  await guardNavigationRequests(context, sameOriginBase);
   return context;
 }
 
@@ -107,6 +168,11 @@ async function newContext(
  * `ScreenshotCaptureError` into that viewport's own `captureResults` entry,
  * so one viewport's failure never aborts the other (see "Operational
  * parameters", "Partial success handling").
+ *
+ * `sameOriginBase` (Stage 25): set only for the `generated_preview` target
+ * (its own app base URL) — see `guardNavigationRequests`. Left unset for
+ * `existing_site`, which is validated against the general SSRF blocklist
+ * instead.
  */
 export async function captureViewport(params: {
   browser: Browser;
@@ -114,8 +180,9 @@ export async function captureViewport(params: {
   viewport: ViewportName;
   captureToken?: { cookieDomain: string; token: string };
   vercelBypassSecret?: string;
+  sameOriginBase?: string;
 }): Promise<Buffer> {
-  const context = await newContext(params.browser, params.viewport, params.captureToken, params.vercelBypassSecret);
+  const context = await newContext(params.browser, params.viewport, params.captureToken, params.vercelBypassSecret, params.sameOriginBase);
   try {
     const page = await context.newPage();
 
@@ -124,7 +191,15 @@ export async function captureViewport(params: {
       response = await page.goto(params.url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const category = /timeout/i.test(message) ? 'navigation_timeout' : 'page_load_failed';
+      // ERR_BLOCKED_BY_CLIENT is guardNavigationRequests' own abort reason
+      // (Stage 25) — the initial URL or a redirect hop failed the SSRF
+      // blocklist. Distinct from a generic load failure so it's visible as
+      // such in captureResults, not misreported as an ordinary page error.
+      const category = /err_blocked_by_client/i.test(message)
+        ? 'blocked_url'
+        : /timeout/i.test(message)
+          ? 'navigation_timeout'
+          : 'page_load_failed';
       throw new ScreenshotCaptureError(`Navigation failed: ${message}`, category);
     }
 

@@ -9,6 +9,7 @@ import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
 import { WebpresaMonitoringStack } from '../lib/stacks/monitoring-stack';
+import { WebpresaCloudTrailStack } from '../lib/stacks/cloudtrail-stack';
 import { assertAccountMatchesEnvironment, getEnvironmentConfig } from '../lib/config/environments';
 
 const app = new cdk.App();
@@ -224,4 +225,13 @@ new WebpresaMonitoringStack(app, `Webpresa${label}MonitoringStack`, {
   scanExecutionsTable: dataStack.scanExecutionsTable,
   postcardsTable: dataStack.postcardsTable,
   businessesTable: dataStack.businessesTable,
+});
+
+// Stage 25 — CloudTrail. Self-contained (no dependency on any resource
+// above), so it carries no risk to already-deployed stacks. See
+// cloudtrail-stack.ts for scope rationale.
+new WebpresaCloudTrailStack(app, `Webpresa${label}CloudTrailStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} account-activity audit trail — CloudTrail, a private log bucket, and IAM/CloudTrail-change alarms (Stage 25)`,
 });

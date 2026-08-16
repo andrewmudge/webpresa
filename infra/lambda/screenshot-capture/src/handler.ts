@@ -90,6 +90,8 @@ export async function handler(event: CapturePayload): Promise<void> {
   let targetUrl: string;
   let captureToken: { cookieDomain: string; token: string } | undefined;
   let vercelBypassSecret: string | undefined;
+  /** Stage 25 — set only for `generated_preview`; see browser.ts's `guardNavigationRequests`. */
+  let sameOriginBase: string | undefined;
 
   if (event.targetType === 'existing_site') {
     const business = await getItem<BusinessRecord>(env('BUSINESSES_TABLE_NAME'), { businessId: event.businessId });
@@ -122,6 +124,7 @@ export async function handler(event: CapturePayload): Promise<void> {
       return;
     }
     targetUrl = built.url;
+    sameOriginBase = appBaseUrl;
 
     const { signingKey } = await getSecretJson(env('CAPTURE_TOKEN_SECRET_NAME'));
     const token = await mintCaptureToken({ previewId: event.previewId, scanId: event.scanId, signingKey });
@@ -154,7 +157,7 @@ export async function handler(event: CapturePayload): Promise<void> {
     let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined;
     try {
       browser = await launchBrowser();
-      const screenshot = await captureViewport({ browser, url: targetUrl, viewport, captureToken, vercelBypassSecret });
+      const screenshot = await captureViewport({ browser, url: targetUrl, viewport, captureToken, vercelBypassSecret, sameOriginBase });
       const storageKey = `scans/${event.businessId}/${event.scanId}/${targetFolder(event.targetType)}/${viewport}.png`;
       try {
         await putScreenshot(env('ASSETS_BUCKET_NAME'), storageKey, screenshot);
