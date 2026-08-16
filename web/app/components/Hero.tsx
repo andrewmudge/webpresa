@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { CheckCircle2, Wifi, Search, Shield } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 const fadeUp = {
@@ -27,91 +28,33 @@ const statusCards = [
 
 function WebsiteMockup() {
   return (
-    <div className="relative w-full max-w-sm mx-auto lg:mx-0">
-      {/* Main mockup card */}
+    <div className="relative w-full max-w-[690px] mx-auto lg:mx-0">
+      {/* Hero photo */}
       <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.7, delay: 0.3, ease: "easeOut" }}
-        className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
-        aria-hidden="true"
+        initial={{ opacity: 0, x: 48 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
+        className="relative rounded-2xl overflow-hidden shadow-2xl"
       >
-        {/* Browser chrome */}
-        <div className="flex items-center gap-1.5 px-4 py-3 bg-gray-50 border-b border-gray-100">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-          <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-          <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-          <div className="ml-3 flex-1 bg-gray-200 rounded-md h-5 flex items-center px-2">
-            <span className="text-[9px] text-gray-400 font-mono">
-              www.cityplumbingpros.com
-            </span>
-          </div>
-        </div>
-
-        {/* Fake website content */}
-        <div className="bg-white">
-          {/* Fake nav */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50">
-            <div className="h-3 w-20 bg-brand rounded-sm opacity-80" />
-            <div className="flex gap-2">
-              <div className="h-2.5 w-8 bg-gray-200 rounded-sm" />
-              <div className="h-2.5 w-10 bg-gray-200 rounded-sm" />
-              <div className="h-2.5 w-8 bg-gray-200 rounded-sm" />
-            </div>
-            <div className="h-5 w-16 bg-accent rounded-md opacity-90" />
-          </div>
-
-          {/* Fake hero */}
-          <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-6">
-            <div className="h-3 w-40 bg-white/30 rounded-sm mb-2" />
-            <div className="h-5 w-52 bg-white/60 rounded-sm mb-1.5" />
-            <div className="h-3 w-44 bg-white/25 rounded-sm mb-4" />
-            <div className="h-7 w-28 bg-accent rounded-lg opacity-95" />
-          </div>
-
-          {/* Service cards */}
-          <div className="px-4 py-4">
-            <div className="h-2.5 w-24 bg-gray-200 rounded-sm mb-3 mx-auto" />
-            <div className="grid grid-cols-3 gap-2">
-              {["Drain Repair", "Water Heaters", "Emergency"].map((s) => (
-                <div
-                  key={s}
-                  className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100"
-                >
-                  <div className="w-5 h-5 bg-brand/20 rounded-md mx-auto mb-1.5" />
-                  <div className="h-2 bg-gray-300 rounded-sm w-full" />
-                  <div className="h-1.5 bg-gray-200 rounded-sm w-3/4 mx-auto mt-1" />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Testimonial strip */}
-          <div className="px-4 pb-4">
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-              <div className="flex items-center gap-1 mb-1.5">
-                {[...Array(5)].map((_, i) => (
-                  <span key={i} className="text-yellow-400 text-[10px]">★</span>
-                ))}
-                <span className="text-[9px] text-gray-400 ml-1">5.0</span>
-              </div>
-              <div className="h-2 bg-gray-200 rounded-sm w-full mb-1" />
-              <div className="h-2 bg-gray-200 rounded-sm w-4/5 mb-2" />
-              <div className="h-2 w-16 bg-gray-300 rounded-sm" />
-            </div>
-          </div>
-        </div>
+        <Image
+          src="/hero_illustrations/main_app_hero.png"
+          alt="A laptop and phone displaying a website Webpresa built for a plumbing business"
+          width={1547}
+          height={1016}
+          priority
+          className="w-full h-auto"
+        />
       </motion.div>
 
       {/* Floating status cards */}
       {statusCards.map((card, i) => {
         const Icon = card.icon;
         const positions = [
-          "-left-10 top-12",
-          "-right-8 top-1/3",
-          "-left-6 bottom-16",
+          "-left-6 top-8",
+          "-right-6 top-1/3",
+          "-right-10 bottom-10",
         ];
-        const delays = [0.6, 0.8, 1.0];
+        const delays = [0.8, 1.0, 1.2];
         const yRange = [i % 2 === 0 ? -6 : -4, i % 2 === 0 ? 6 : 4];
 
         return (
@@ -166,22 +109,10 @@ export default function Hero() {
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Left column */}
           <div className="text-center lg:text-left">
-            {/* Badge */}
-            <motion.div
-              custom={0}
-              initial="hidden"
-              animate="visible"
-              variants={fadeUp}
-              className="inline-flex items-center gap-2 bg-brand-muted text-brand text-xs font-semibold px-4 py-1.5 rounded-full mb-6"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-brand" />
-              For businesses we&apos;ve already built a site for
-            </motion.div>
-
             {/* Headline */}
             <motion.h1
               id="hero-heading"
-              custom={1}
+              custom={0}
               initial="hidden"
               animate="visible"
               variants={fadeUp}
@@ -193,7 +124,7 @@ export default function Hero() {
 
             {/* Subheadline */}
             <motion.p
-              custom={2}
+              custom={1}
               initial="hidden"
               animate="visible"
               variants={fadeUp}
@@ -204,7 +135,7 @@ export default function Hero() {
 
             {/* CTAs */}
             <motion.div
-              custom={3}
+              custom={2}
               initial="hidden"
               animate="visible"
               variants={fadeUp}
@@ -230,7 +161,7 @@ export default function Hero() {
 
             {/* Trust items */}
             <motion.ul
-              custom={4}
+              custom={3}
               initial="hidden"
               animate="visible"
               variants={fadeUp}

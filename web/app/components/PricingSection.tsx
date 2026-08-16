@@ -1,16 +1,71 @@
 "use client";
 
 import { motion, useInView } from "framer-motion";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { PLAN_CATALOG } from "@/domain/constants/plan-catalog";
+import type { BillingInterval } from "@/domain/constants/plans";
+import { cn } from "@/lib/utils";
 
 const includes = PLAN_CATALOG.basic.features;
+
+function BillingIntervalToggle({
+  billingInterval,
+  onChange,
+  savingsLabel,
+}: {
+  billingInterval: BillingInterval;
+  onChange: (interval: BillingInterval) => void;
+  savingsLabel?: string;
+}) {
+  return (
+    <div className="mx-auto flex w-fit items-center gap-1 rounded-full border border-gray-200 bg-white p-1">
+      <button
+        type="button"
+        onClick={() => onChange("monthly")}
+        aria-pressed={billingInterval === "monthly"}
+        className={cn(
+          "rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+          billingInterval === "monthly" ? "bg-brand text-white" : "text-gray-500 hover:text-gray-700",
+        )}
+      >
+        Monthly
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("annual")}
+        aria-pressed={billingInterval === "annual"}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+          billingInterval === "annual" ? "bg-brand text-white" : "text-gray-500 hover:text-gray-700",
+        )}
+      >
+        Annual
+        {savingsLabel && (
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+              billingInterval === "annual" ? "bg-white/20 text-white" : "bg-emerald-50 text-emerald-600",
+            )}
+          >
+            {savingsLabel}
+          </span>
+        )}
+      </button>
+    </div>
+  );
+}
 
 export default function PricingSection() {
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
+  const isAnnual = billingInterval === "annual" && Boolean(PLAN_CATALOG.basic.annualPriceDisplay);
+  const [amount, period] = (isAnnual
+    ? PLAN_CATALOG.basic.annualPriceDisplay!
+    : PLAN_CATALOG.basic.priceDisplay
+  ).split("/");
 
   return (
     <section
@@ -36,11 +91,16 @@ export default function PricingSection() {
           >
             Simple, transparent pricing.
           </h2>
-          <p className="text-lg text-gray-500 max-w-xl mx-auto">
+          <p className="text-lg text-gray-500 max-w-xl mx-auto mb-8">
             No setup fees. No surprise bills. Start with everything you need
             to look professional online — upgrade anytime as your business
             grows.
           </p>
+          <BillingIntervalToggle
+            billingInterval={billingInterval}
+            onChange={setBillingInterval}
+            savingsLabel={PLAN_CATALOG.basic.annualSavingsLabel}
+          />
         </motion.div>
 
         {/* Pricing card */}
@@ -64,11 +124,16 @@ export default function PricingSection() {
               <span className="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">
                 Starting at
               </span>
-              <div className="flex items-end gap-1 mb-2">
+              <div className="flex items-end gap-2 mb-2">
                 <span className="text-6xl font-black text-gray-900 leading-none tracking-tight">
-                  {PLAN_CATALOG.basic.priceDisplay.replace("/month", "")}
+                  {amount}
                 </span>
-                <span className="text-xl text-gray-400 font-medium pb-1">/month</span>
+                <span className="text-xl text-gray-400 font-medium pb-1">/{period}</span>
+                {isAnnual && PLAN_CATALOG.basic.annualSavingsLabel && (
+                  <span className="mb-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-600">
+                    {PLAN_CATALOG.basic.annualSavingsLabel}
+                  </span>
+                )}
               </div>
               <p className="text-sm text-gray-400 mb-8">
                 Cancel anytime — no long-term contract.

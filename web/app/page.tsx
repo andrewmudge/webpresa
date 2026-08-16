@@ -5,7 +5,7 @@ import ProblemSection from "@/app/components/ProblemSection";
 import WhyStartFromScratch from "@/app/components/WhyStartFromScratch";
 import HowItWorks from "@/app/components/HowItWorks";
 import PreviewSection from "@/app/components/PreviewSection";
-import ExamplesSection from "@/app/components/ExamplesSection";
+// import ExamplesSection from "@/app/components/ExamplesSection"; // Website examples section — temporarily hidden
 import FeaturesSection from "@/app/components/FeaturesSection";
 import PricingSection from "@/app/components/PricingSection";
 import FounderSection from "@/app/components/FounderSection";
@@ -36,7 +36,7 @@ export default function Home() {
         <ProblemSection />
         <WhyStartFromScratch />
         <HowItWorks />
-        <ExamplesSection />
+        {/* <ExamplesSection /> — Website examples section, temporarily hidden */}
         <FeaturesSection />
         <PricingSection />
         <FounderSection />

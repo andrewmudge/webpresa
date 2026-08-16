@@ -3,6 +3,7 @@
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { Mail } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 function PreviewMockup() {
@@ -11,55 +12,15 @@ function PreviewMockup() {
       initial={{ opacity: 0, y: 20, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.7, delay: 0.4, ease: "easeOut" }}
-      className="bg-white rounded-2xl shadow-2xl border border-white/10 overflow-hidden w-full max-w-sm mx-auto"
-      aria-hidden="true"
+      className="relative rounded-2xl shadow-2xl border border-white/10 overflow-hidden w-full max-w-sm mx-auto"
     >
-      {/* Browser chrome */}
-      <div className="flex items-center gap-1.5 px-4 py-3 bg-gray-50 border-b border-gray-100">
-        <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-        <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-        <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-        <div className="ml-3 flex-1 bg-gray-200 rounded-md h-5 flex items-center px-2">
-          <span className="text-[9px] text-gray-400 font-mono">preview.webpresa.com/your-business</span>
-        </div>
-      </div>
-
-      {/* Preview content */}
-      <div className="bg-white">
-        {/* Nav */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50">
-          <div className="h-3 w-24 bg-[#0D3AD9] rounded-sm opacity-80" />
-          <div className="h-5 w-16 bg-[#3AB9FD] rounded-md opacity-90" />
-        </div>
-
-        {/* Hero */}
-        <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-6">
-          <div className="h-2 w-20 bg-white/30 rounded-sm mb-2" />
-          <div className="h-5 w-48 bg-white/65 rounded-sm mb-1.5" />
-          <div className="h-2.5 w-40 bg-white/30 rounded-sm mb-4" />
-          <div className="h-7 w-24 bg-[#3AB9FD] rounded-lg" />
-        </div>
-
-        {/* Services */}
-        <div className="px-4 py-4">
-          <div className="grid grid-cols-3 gap-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
-                <div className="w-5 h-5 bg-[#0D3AD9]/15 rounded-md mx-auto mb-1.5" />
-                <div className="h-2 bg-gray-300 rounded-sm w-full" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Preview badge */}
-        <div className="px-4 pb-4">
-          <div className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-            <span className="text-[10px] text-amber-700 font-medium">Preview — not yet published</span>
-          </div>
-        </div>
-      </div>
+      <Image
+        src="/marketing/preview-landscaping-full.png"
+        alt="A preview of a website Webpresa built for a landscaping business"
+        width={1450}
+        height={1085}
+        className="w-full h-auto"
+      />
     </motion.div>
   );
 }

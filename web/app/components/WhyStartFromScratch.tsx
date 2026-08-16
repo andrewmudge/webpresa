@@ -3,122 +3,29 @@
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { ArrowRight } from "lucide-react";
+import Image from "next/image";
 
 function OldWebsiteMockup() {
   return (
-    <div className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden w-full">
-      {/* Browser chrome */}
-      <div className="flex items-center gap-1.5 px-4 py-3 bg-gray-100 border-b border-gray-200">
-        <span className="w-2.5 h-2.5 rounded-full bg-red-300" />
-        <span className="w-2.5 h-2.5 rounded-full bg-yellow-300" />
-        <span className="w-2.5 h-2.5 rounded-full bg-green-300" />
-        <div className="ml-3 flex-1 bg-gray-300 rounded-sm h-5 flex items-center px-2">
-          <span className="text-[9px] text-gray-500 font-mono">acmeplumbing.net</span>
-        </div>
-      </div>
-
-      {/* Outdated website content */}
-      <div className="bg-gray-50">
-        {/* Old-style header */}
-        <div className="bg-gray-700 px-4 py-3 flex items-center justify-between">
-          <div className="h-4 w-28 bg-gray-500 rounded-sm" />
-          <div className="flex gap-3">
-            <div className="h-2.5 w-8 bg-gray-500 rounded-sm" />
-            <div className="h-2.5 w-10 bg-gray-500 rounded-sm" />
-            <div className="h-2.5 w-8 bg-gray-500 rounded-sm" />
-          </div>
-        </div>
-
-        {/* Old hero with table-style layout */}
-        <div className="bg-gray-200 px-4 py-5 border-b-4 border-gray-400">
-          <div className="h-4 w-48 bg-gray-400 rounded-sm mb-2" />
-          <div className="h-3 w-36 bg-gray-300 rounded-sm mb-4" />
-          <div className="h-7 w-24 bg-gray-500 rounded-sm border border-gray-600" />
-        </div>
-
-        {/* Old-style content boxes */}
-        <div className="p-4">
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            {["Services", "Contact Us"].map((s) => (
-              <div key={s} className="bg-white border border-gray-300 p-3 rounded-sm">
-                <div className="h-2.5 w-14 bg-gray-400 rounded-sm mb-2" />
-                <div className="h-2 w-full bg-gray-200 rounded-sm mb-1" />
-                <div className="h-2 w-3/4 bg-gray-200 rounded-sm" />
-              </div>
-            ))}
-          </div>
-          <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-sm text-center">
-            <div className="h-2.5 w-32 bg-yellow-300 rounded-sm mx-auto mb-1" />
-            <div className="h-2 w-24 bg-yellow-200 rounded-sm mx-auto" />
-          </div>
-        </div>
-      </div>
-    </div>
+    <Image
+      src="/marketing/before.png"
+      alt="An outdated website for a local plumbing business"
+      width={1052}
+      height={802}
+      className="w-full h-auto rounded-2xl shadow-md border border-gray-200"
+    />
   );
 }
 
 function NewWebsiteMockup() {
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden w-full">
-      {/* Browser chrome */}
-      <div className="flex items-center gap-1.5 px-4 py-3 bg-gray-50 border-b border-gray-100">
-        <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-        <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-        <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-        <div className="ml-3 flex-1 bg-gray-200 rounded-md h-5 flex items-center px-2">
-          <span className="text-[9px] text-gray-400 font-mono">acmeplumbing.com</span>
-        </div>
-      </div>
-
-      {/* Modern website content */}
-      <div className="bg-white">
-        {/* Modern nav */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50">
-          <div className="h-3 w-20 bg-[#0D3AD9] rounded-sm opacity-80" />
-          <div className="flex gap-2">
-            <div className="h-2.5 w-8 bg-gray-200 rounded-sm" />
-            <div className="h-2.5 w-10 bg-gray-200 rounded-sm" />
-            <div className="h-2.5 w-8 bg-gray-200 rounded-sm" />
-          </div>
-          <div className="h-5 w-16 bg-[#CE9059] rounded-md opacity-90" />
-        </div>
-
-        {/* Modern hero */}
-        <div className="bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] px-5 py-5">
-          <div className="h-2.5 w-32 bg-white/30 rounded-sm mb-1.5" />
-          <div className="h-4 w-44 bg-white/70 rounded-sm mb-1" />
-          <div className="h-2.5 w-36 bg-white/30 rounded-sm mb-3.5" />
-          <div className="h-6 w-24 bg-[#CE9059] rounded-lg opacity-95" />
-        </div>
-
-        {/* Service cards */}
-        <div className="px-4 py-4">
-          <div className="grid grid-cols-3 gap-2">
-            {["Drain Repair", "Water Heaters", "Emergency"].map((s) => (
-              <div key={s} className="bg-gray-50 rounded-lg p-2.5 text-center border border-gray-100">
-                <div className="w-5 h-5 bg-[#0D3AD9]/15 rounded-md mx-auto mb-1.5" />
-                <div className="h-2 bg-gray-300 rounded-sm w-full" />
-                <div className="h-1.5 bg-gray-200 rounded-sm w-3/4 mx-auto mt-1" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Stars row */}
-        <div className="px-4 pb-4">
-          <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-            <div className="flex items-center gap-1 mb-1.5">
-              {[...Array(5)].map((_, i) => (
-                <span key={i} className="text-yellow-400 text-[10px]">★</span>
-              ))}
-              <span className="text-[9px] text-gray-400 ml-1">5.0</span>
-            </div>
-            <div className="h-2 bg-gray-200 rounded-sm w-full mb-1" />
-            <div className="h-2 bg-gray-200 rounded-sm w-3/5" />
-          </div>
-        </div>
-      </div>
-    </div>
+    <Image
+      src="/marketing/after.png"
+      alt="A modern website Webpresa built for the same plumbing business"
+      width={1048}
+      height={772}
+      className="w-full h-auto rounded-2xl shadow-xl border border-gray-100"
+    />
   );
 }
 

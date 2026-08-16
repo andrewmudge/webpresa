@@ -3,6 +3,7 @@
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { Shield } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function FounderSection() {
@@ -26,17 +27,13 @@ export default function FounderSection() {
             className="flex justify-center lg:justify-start"
           >
             <div className="relative">
-              <div className="w-72 h-80 lg:w-80 lg:h-96 bg-gradient-to-br from-[#0D3AD9] to-[#5D7AE2] rounded-3xl overflow-hidden shadow-xl">
-                {/* Portrait placeholder */}
-                <div className="absolute inset-0 flex flex-col items-center justify-end pb-8">
-                  <div className="w-24 h-24 rounded-full bg-white/20 mb-3" />
-                  <div className="h-3 w-28 bg-white/30 rounded-sm mb-1.5" />
-                  <div className="h-2 w-20 bg-white/20 rounded-sm" />
-                </div>
-                {/* Abstract geometric overlay */}
-                <div className="absolute top-6 right-6 w-16 h-16 border-2 border-white/10 rounded-2xl" />
-                <div className="absolute top-12 right-12 w-8 h-8 bg-accent/30 rounded-lg" />
-              </div>
+              <Image
+                src="/marketing/owner.png"
+                alt="The founder of Webpresa"
+                width={1086}
+                height={1448}
+                className="w-72 h-80 lg:w-80 lg:h-96 object-cover rounded-3xl shadow-xl"
+              />
               {/* Floating accent */}
               <div
                 className="absolute -bottom-4 -right-4 w-24 h-24 bg-accent/10 rounded-2xl -z-10"
