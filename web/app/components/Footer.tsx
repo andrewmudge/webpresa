@@ -15,8 +15,8 @@ const footerLinks = [
   {
     heading: "Resources",
     links: [
-      { label: "Privacy Policy", href: "#contact" },
-      { label: "Terms of Service", href: "#contact" },
+      { label: "Privacy Policy", href: "/privacy" },
+      { label: "Terms of Service", href: "/terms" },
       { label: "Contact", href: "mailto:hello@webpresa.com" },
     ],
   },

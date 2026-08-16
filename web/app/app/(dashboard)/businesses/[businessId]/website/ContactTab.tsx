@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
-import { Card, TextField, SaveButton } from '../FormBits';
-import { updateCtaActionCustomer } from '../actions';
+import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
+import { updateCtaActionCustomer, updateSectionContentActionCustomer } from '../actions';
 import { getCachedPreviews } from './data';
 
 interface Props {
@@ -47,6 +47,14 @@ export async function ContactTab({ businessId, business, isReadOnly }: Props) {
         <Link href={`/app/businesses/${businessId}/settings`} className="mt-3 inline-block text-sm font-medium text-(--color-brand) hover:underline">
           Edit business information →
         </Link>
+      </Card>
+
+      <Card title="CTA banner heading" description="The headline and sub-headline shown above your call-to-action buttons near the bottom of your website.">
+        <form action={updateSectionContentActionCustomer.bind(null, businessId, 'ctaBanner')} className="space-y-4">
+          <TextField label="Headline" name="sectionHeadline" defaultValue={content?.ctaBannerSection?.headline} disabled={isReadOnly} maxLength={120} />
+          <TextAreaField label="Sub-headline" name="sectionSubheadline" defaultValue={content?.ctaBannerSection?.subheadline} disabled={isReadOnly} maxLength={300} rows={2} />
+          <SaveButton disabled={isReadOnly} />
+        </form>
       </Card>
 
       <Card title="Call-to-action buttons" description="What happens when a visitor taps your website's main buttons.">

@@ -894,9 +894,7 @@ export async function publishPreviewAction(
   businessId: string,
   previewId: string,
   // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: PublishPreviewState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _formData: FormData,
 ): Promise<PublishPreviewState> {
   const session = await getSession();
@@ -935,9 +933,7 @@ async function runWebsiteGeneration(businessId: string): Promise<GenerateWebsite
 export async function generateWebsiteAction(
   businessId: string,
   // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: GenerateWebsiteState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _formData: FormData,
 ): Promise<GenerateWebsiteState> {
   const session = await getSession();
@@ -1328,9 +1324,7 @@ export type TestimonialsState = { message?: string; testimonials?: BusinessTesti
 export async function importGoogleReviewsAction(
   businessId: string,
   // Required by useActionState's (state, payload) signature but unused — no form fields, just a trigger button.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _prevState: TestimonialsState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _formData: FormData,
 ): Promise<TestimonialsState> {
   const session = await getSession();

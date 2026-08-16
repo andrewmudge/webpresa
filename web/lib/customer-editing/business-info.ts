@@ -111,15 +111,40 @@ export async function updateCustomerBusinessInfo(
     // Dual-write, through the draft-safety lens: same "apply immediately to
     // the current preview" convenience the admin action gives, but landing
     // on a draft rather than silently patching an already-published
-    // preview (see `ensureDraftPreview`'s doc comment).
-    if (socialLinks.length > 0) {
+    // preview (see `ensureDraftPreview`'s doc comment). Phone/email/address
+    // mirror onto the preview's own `content.contact` — what the public
+    // site actually renders (`ContactSection`/`GeneratedSiteFooter` read
+    // only `content.contact`, never `Business.phone`/`email`/`address`
+    // directly) — the same way `hours` already does via its own dedicated
+    // call in `actions.ts`. Only touches a field when this submission
+    // actually supplied a new value, same as the `socialLinks` case below,
+    // so leaving a field blank here never wipes out an existing preview
+    // value.
+    const newAddressLine =
+      data.addressLine1 && data.addressCity && data.addressState && data.addressPostalCode
+        ? `${data.addressLine1}${data.addressLine2 ? ` ${data.addressLine2}` : ''}, ${data.addressCity}, ${data.addressState} ${data.addressPostalCode}`
+        : undefined;
+
+    if (data.phone || data.email || newAddressLine || socialLinks.length > 0) {
       const draft = await ensureDraftPreview(businessId);
       if (draft) {
-        const newSocialLinks: PreviewSocialLink[] = socialLinks.map((url) => ({
-          platform: classifySocialPlatform(url),
-          url,
-        }));
-        const content: PreviewContent = { ...draft.content, socialLinks: newSocialLinks };
+        const content: PreviewContent = {
+          ...draft.content,
+          contact: {
+            ...draft.content.contact,
+            ...(data.phone ? { phone: data.phone } : {}),
+            ...(data.email ? { email: data.email } : {}),
+            ...(newAddressLine ? { address: newAddressLine } : {}),
+          },
+          ...(socialLinks.length > 0
+            ? {
+                socialLinks: socialLinks.map((url) => ({
+                  platform: classifySocialPlatform(url),
+                  url,
+                })) as PreviewSocialLink[],
+              }
+            : {}),
+        };
         PreviewContentSchema.parse(content);
         await putSitePreview({ ...draft, content, updatedAt: new Date().toISOString() });
       }

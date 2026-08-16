@@ -61,8 +61,21 @@ describe('updateCustomerBusinessInfo', () => {
     expect(mockPutBusiness).not.toHaveBeenCalled();
   });
 
-  it('saves name/phone/email and does not touch social links or the preview when none were submitted', async () => {
+  it('saves name/phone/email and dual-writes phone/email onto the draft preview\'s contact info', async () => {
     mockGetBusinessById.mockResolvedValueOnce(makeBusiness());
+    mockEnsureDraftPreview.mockResolvedValueOnce({
+      previewId: 'preview_draft',
+      businessId: 'biz_1',
+      status: 'draft',
+      content: {
+        hero: { headline: 'h', subheadline: 's', ctaText: 'Call' },
+        services: [{ name: 'Service', description: 'Description' }],
+        tagline: 't',
+        aboutText: 'a',
+        contact: {},
+      },
+      theme: { fontFamily: 'sans-serif' },
+    });
 
     const result = await updateCustomerBusinessInfo(
       'biz_1',
@@ -75,6 +88,52 @@ describe('updateCustomerBusinessInfo', () => {
     expect(saved.name).toBe('Acme Plumbing');
     expect(saved.phone).toBe('555-1234');
     expect(saved.email).toBe('hi@acme.test');
+
+    // The public site renders contact info from the preview's own
+    // `content.contact`, never `Business.phone`/`email` directly — this
+    // dual-write is what makes a Settings edit actually show up on the
+    // live site once published.
+    expect(mockEnsureDraftPreview).toHaveBeenCalledWith('biz_1');
+    expect(mockPutSitePreview).toHaveBeenCalledTimes(1);
+    const savedPreview = mockPutSitePreview.mock.calls[0][0];
+    expect(savedPreview.content.contact).toEqual({ phone: '555-1234', email: 'hi@acme.test' });
+  });
+
+  it('dual-writes a newly submitted complete address onto the draft preview as a formatted string', async () => {
+    mockGetBusinessById.mockResolvedValueOnce(makeBusiness());
+    mockEnsureDraftPreview.mockResolvedValueOnce({
+      previewId: 'preview_draft',
+      businessId: 'biz_1',
+      status: 'draft',
+      content: {
+        hero: { headline: 'h', subheadline: 's', ctaText: 'Call' },
+        services: [{ name: 'Service', description: 'Description' }],
+        tagline: 't',
+        aboutText: 'a',
+        contact: {},
+      },
+      theme: { fontFamily: 'sans-serif' },
+    });
+
+    await updateCustomerBusinessInfo(
+      'biz_1',
+      formData({
+        name: 'Acme',
+        addressLine1: '601 West Main Street',
+        addressCity: 'Frisco',
+        addressState: 'CO',
+        addressPostalCode: '80443',
+      }),
+    );
+
+    const savedPreview = mockPutSitePreview.mock.calls[0][0];
+    expect(savedPreview.content.contact.address).toBe('601 West Main Street, Frisco, CO 80443');
+  });
+
+  it('does not touch the preview when no phone/email/address/social links were submitted', async () => {
+    mockGetBusinessById.mockResolvedValueOnce(makeBusiness());
+    const result = await updateCustomerBusinessInfo('biz_1', formData({ name: 'Acme' }));
+    expect(result).toBeUndefined();
     expect(mockEnsureDraftPreview).not.toHaveBeenCalled();
   });
 

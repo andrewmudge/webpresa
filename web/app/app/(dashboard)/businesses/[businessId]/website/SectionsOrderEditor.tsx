@@ -11,11 +11,12 @@ import { autoSaveSectionsActionCustomer } from '../actions';
 /**
  * Where each section's title actually links to, when it has a genuine
  * editable home elsewhere on the dashboard. Sections with no dedicated
- * editor today (page chrome like `header`/`footer`/`trustStrip`, and
- * `ctaBanner`'s heading override) are intentionally omitted rather than
- * linking to a dead end. `reviews` (Google review hide/show), `faq`, and
- * `process` all link to `#content` — their editors live inline in
- * `ContentTab.tsx`, alongside Hero/About.
+ * editor today (page chrome like `header`/`footer`/`trustStrip`) are
+ * intentionally omitted rather than linking to a dead end. `reviews`
+ * (Google review hide/show), `faq`, and `process` all link to `#content` —
+ * their editors live inline in `ContentTab.tsx`, alongside Hero/About.
+ * `ctaBanner` links to `#contact`, where its heading/sub-headline editor
+ * lives alongside the CTA button editor in `ContactTab.tsx`.
  */
 function getSectionHref(type: WebsiteSectionType, businessId: string): string | undefined {
   switch (type) {
@@ -32,6 +33,7 @@ function getSectionHref(type: WebsiteSectionType, businessId: string): string | 
     case 'gallery':
       return '#photos';
     case 'contact':
+    case 'ctaBanner':
       return '#contact';
     case 'socialLinks':
       return `/app/businesses/${businessId}/settings`;
@@ -115,7 +117,7 @@ function MoveButtons({
  */
 function SectionTitleLink({ href, children }: { href: string; children: React.ReactNode }) {
   const className =
-    'text-sm font-medium text-(--color-brand) underline decoration-(--color-brand)/40 underline-offset-2 hover:decoration-(--color-brand) transition-colors';
+    'text-sm font-medium text-gray-900 underline decoration-gray-400 underline-offset-2 hover:decoration-gray-900 transition-colors';
   if (href.startsWith('#')) {
     return (
       <a href={href} className={className}>
