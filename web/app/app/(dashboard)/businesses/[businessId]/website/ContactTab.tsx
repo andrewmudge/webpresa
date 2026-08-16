@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
 import { CTA_ACTION_TYPES } from '@/domain/models/site-preview';
+import { DEFAULT_CTA_BANNER_HEADLINE, DEFAULT_CTA_BANNER_SUBHEADLINE } from '@/app/b/[slug]/template/FinalCTA';
+import { DEFAULT_SECONDARY_CTA } from '@/app/b/[slug]/template/cta';
 import { Card, TextField, TextAreaField, SaveButton } from '../FormBits';
 import { updateCtaActionCustomer, updateSectionContentActionCustomer } from '../actions';
 import { getCachedPreviews } from './data';
@@ -51,8 +53,21 @@ export async function ContactTab({ businessId, business, isReadOnly }: Props) {
 
       <Card title="CTA banner heading" description="The headline and sub-headline shown above your call-to-action buttons near the bottom of your website.">
         <form action={updateSectionContentActionCustomer.bind(null, businessId, 'ctaBanner')} className="space-y-4">
-          <TextField label="Headline" name="sectionHeadline" defaultValue={content?.ctaBannerSection?.headline} disabled={isReadOnly} maxLength={120} />
-          <TextAreaField label="Sub-headline" name="sectionSubheadline" defaultValue={content?.ctaBannerSection?.subheadline} disabled={isReadOnly} maxLength={300} rows={2} />
+          <TextField
+            label="Headline"
+            name="sectionHeadline"
+            defaultValue={content?.ctaBannerSection?.headline ?? DEFAULT_CTA_BANNER_HEADLINE}
+            disabled={isReadOnly}
+            maxLength={120}
+          />
+          <TextAreaField
+            label="Sub-headline"
+            name="sectionSubheadline"
+            defaultValue={content?.ctaBannerSection?.subheadline ?? DEFAULT_CTA_BANNER_SUBHEADLINE}
+            disabled={isReadOnly}
+            maxLength={300}
+            rows={2}
+          />
           <SaveButton disabled={isReadOnly} />
         </form>
       </Card>
@@ -77,26 +92,57 @@ export async function ContactTab({ businessId, business, isReadOnly }: Props) {
             <TextField label="Destination (link, if applicable)" name="primaryValue" defaultValue={cta?.primary.value} disabled={isReadOnly} placeholder="https://…" />
           </fieldset>
 
-          <fieldset className="space-y-3 pt-2 border-t border-gray-100">
+          <fieldset className="space-y-3 pt-2 border-t border-gray-100 group">
             <legend className="text-sm font-semibold text-gray-800 pt-3">Secondary button</legend>
             <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" name="secondaryEnabled" defaultChecked={!!cta?.secondary} disabled={isReadOnly} className="h-4 w-4 rounded border-gray-300 text-(--color-brand)" />
+              {/* A generated website always shows 2 buttons by default — an
+                  unconfigured secondary falls back to a site-wide "Request
+                  Service" button (see DEFAULT_SECONDARY_CTA). Only an
+                  explicit `type: 'none'` (this box unchecked and saved)
+                  actually hides it, so the box defaults to checked in every
+                  other case, matching what's actually live. */}
+              <input
+                type="checkbox"
+                name="secondaryEnabled"
+                defaultChecked={cta?.secondary?.type !== 'none'}
+                disabled={isReadOnly}
+                className="h-4 w-4 rounded border-gray-300 text-(--color-brand)"
+              />
               Show a secondary button
             </label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="block">
-                <span className="block text-sm font-medium text-gray-700 mb-1">Action</span>
-                <select name="secondaryType" defaultValue={cta?.secondary?.type ?? 'request_service'} disabled={isReadOnly} className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50">
-                  {CTA_ACTION_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {CTA_TYPE_LABELS[t]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <TextField label="Button label" name="secondaryLabel" defaultValue={cta?.secondary?.label} disabled={isReadOnly} maxLength={40} />
+            {/* Hidden via `group-has-[:checked]:block` (no client JS) —
+                only shown while the checkbox above is checked, so there's
+                no way to type secondary button details while it's
+                unchecked. The fields' values are also ignored server-side
+                whenever the box is unchecked (`updateCustomerCta`), so this
+                is a UX affordance, not the only guard. */}
+            <div className="hidden group-has-[:checked]:block space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block">
+                  <span className="block text-sm font-medium text-gray-700 mb-1">Action</span>
+                  <select
+                    name="secondaryType"
+                    defaultValue={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.type : DEFAULT_SECONDARY_CTA.type}
+                    disabled={isReadOnly}
+                    className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                  >
+                    {CTA_ACTION_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {CTA_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <TextField
+                  label="Button label"
+                  name="secondaryLabel"
+                  defaultValue={cta?.secondary?.type && cta.secondary.type !== 'none' ? cta.secondary.label : DEFAULT_SECONDARY_CTA.label}
+                  disabled={isReadOnly}
+                  maxLength={40}
+                />
+              </div>
+              <TextField label="Destination (link, if applicable)" name="secondaryValue" defaultValue={cta?.secondary?.value} disabled={isReadOnly} placeholder="https://…" />
             </div>
-            <TextField label="Destination (link, if applicable)" name="secondaryValue" defaultValue={cta?.secondary?.value} disabled={isReadOnly} placeholder="https://…" />
           </fieldset>
 
           <SaveButton disabled={isReadOnly} />

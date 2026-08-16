@@ -100,7 +100,7 @@ function normalizeLegacyCtaConfig(content: PreviewContent): PreviewCtaConfig {
  * regeneration or admin action, even for previews that today only have a
  * primary CTA on file.
  */
-const DEFAULT_SECONDARY_CTA: PreviewCta = { type: 'request_service', label: 'Request Service' };
+export const DEFAULT_SECONDARY_CTA: PreviewCta = { type: 'request_service', label: 'Request Service' };
 
 /**
  * Resolve the full primary/secondary CTA configuration for a preview.

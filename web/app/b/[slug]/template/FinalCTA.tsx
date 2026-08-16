@@ -2,6 +2,16 @@ import { V } from './tokens';
 import { CtaIcon, type ResolvedCta } from './cta';
 import { CtaButton } from './CtaButton';
 
+/**
+ * Built-in fallback copy, shown whenever `content.ctaBannerSection` is
+ * absent. Exported so the customer/admin editors can pre-fill their
+ * headline/sub-headline fields with what's actually live on the page
+ * instead of leaving them blank — see `ContactTab.tsx`'s "CTA banner
+ * heading" card.
+ */
+export const DEFAULT_CTA_BANNER_HEADLINE = "Ready for a fix? Let's talk.";
+export const DEFAULT_CTA_BANNER_SUBHEADLINE = 'Schedule service today — fast response, professional results.';
+
 interface Props {
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
@@ -22,10 +32,10 @@ export function FinalCTA({ primary, secondary, sectionHeadline, sectionSubheadli
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 text-center">
         <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-4 leading-tight">
-          {sectionHeadline || "Ready for a fix? Let's talk."}
+          {sectionHeadline || DEFAULT_CTA_BANNER_HEADLINE}
         </h2>
         <p className="text-white/75 mb-10 max-w-md mx-auto">
-          {sectionSubheadline || 'Schedule service today — fast response, professional results.'}
+          {sectionSubheadline || DEFAULT_CTA_BANNER_SUBHEADLINE}
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           {primary && (

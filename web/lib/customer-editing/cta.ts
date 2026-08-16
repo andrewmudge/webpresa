@@ -77,15 +77,22 @@ export async function updateCustomerCta(businessId: string, formData: FormData):
     label: data.primaryType === 'none' ? '' : data.primaryLabel.trim(),
     ...(data.primaryValue?.trim() ? { value: data.primaryValue.trim() } : {}),
   };
-  const secondary: PreviewCta | undefined =
+  // Always an explicit value, never omitted — `resolvePreviewCtaConfig`
+  // (app/b/[slug]/template/cta.tsx) falls back to a site-wide default
+  // secondary CTA ("Request Service") whenever `secondary` is `undefined`,
+  // so unchecking "Show a secondary button" and saving `undefined` here
+  // would silently leave that default button showing instead of actually
+  // hiding it. `type: 'none'` is what `resolvePreviewCta` treats as
+  // "don't render this button."
+  const secondary: PreviewCta =
     data.secondaryEnabled === 'on' && data.secondaryType
       ? {
           type: data.secondaryType,
           label: data.secondaryType === 'none' ? '' : (data.secondaryLabel ?? '').trim(),
           ...(data.secondaryValue?.trim() ? { value: data.secondaryValue.trim() } : {}),
         }
-      : undefined;
-  const cta: PreviewCtaConfig = { primary, ...(secondary ? { secondary } : {}) };
+      : { type: 'none', label: '' };
+  const cta: PreviewCtaConfig = { primary, secondary };
 
   try {
     const draft = await ensureDraftPreview(businessId);
