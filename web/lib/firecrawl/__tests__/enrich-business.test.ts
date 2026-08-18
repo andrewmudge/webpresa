@@ -233,14 +233,19 @@ describe('enrichBusinessWebsite — Business is canonical', () => {
 });
 
 describe('enrichBusinessWebsite — missing website', () => {
-  it('sets manual_approval_required with the exact required note and never calls Firecrawl', async () => {
+  it('never calls Firecrawl and records a completed (not failed/manual-approval) disposition', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness({ websiteUrl: undefined }));
 
     const outcome = await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
 
+    // The outcome's own status key is unchanged (still selects the
+    // "no website" redirect-banner copy) — see EnrichmentSection.tsx's
+    // RESULT_BANNER_COPY. What changed is what gets persisted: no longer a
+    // failure/manual-approval disposition, since a no-website business is
+    // expected and fully handled by the no_website postcard template.
     expect(outcome.status).toBe('manual_approval_required');
     expect(outcome.message).toBe(
-      'No website was available for Firecrawl enrichment. No images were downloaded. Manual image sourcing and approval are required.',
+      'No website on file — Firecrawl enrichment does not apply. This business will automatically use the no-website postcard template.',
     );
     expect(mockScrapeWebsite).not.toHaveBeenCalled();
     expect(mockIngestScanImages).not.toHaveBeenCalled();
@@ -248,22 +253,23 @@ describe('enrichBusinessWebsite — missing website', () => {
     expect(mockUpdateBusiness).toHaveBeenCalledWith(
       'biz_00000000-0000-0000-0000-000000000001',
       expect.objectContaining({
-        enrichmentStatus: 'manual_approval_required',
+        enrichmentStatus: 'enrichment_completed',
         manualApprovalReason: 'missing_website',
         manualApprovalNote:
-          'No website was available for Firecrawl enrichment. No images were downloaded. Manual image sourcing and approval are required.',
+          'No website on file — Firecrawl enrichment does not apply. This business will automatically use the no-website postcard template.',
       }),
     );
   });
 
-  it('does not create a generic failed ScanEvent for the no-website case', async () => {
+  it('records a completed ScanEvent with no failure fields for the no-website case', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness({ websiteUrl: '' }));
 
     await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
 
     const finalScanWrite = mockPutScanEvent.mock.calls.at(-1)?.[0] as ScanEvent;
-    expect(finalScanWrite.status).toBe('manual_approval_required');
-    expect(finalScanWrite.failureCategory).toBe('missing_website');
+    expect(finalScanWrite.status).toBe('completed');
+    expect(finalScanWrite.failureCategory).toBeUndefined();
+    expect(finalScanWrite.failureMessage).toBeUndefined();
   });
 });
 

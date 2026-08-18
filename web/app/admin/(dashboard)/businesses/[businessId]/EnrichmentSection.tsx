@@ -204,8 +204,8 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
 const RESULT_BANNER_COPY: Record<string, { tone: 'success' | 'warning' | 'error'; text: string }> = {
   completed: { tone: 'success', text: 'Website enrichment completed — a new preview version was generated.' },
   manual_approval_required: {
-    tone: 'warning',
-    text: 'No website was available for Firecrawl enrichment. No images were downloaded. Manual image sourcing and approval are required.',
+    tone: 'success',
+    text: 'No website on file — Firecrawl enrichment does not apply. This business will automatically use the no-website postcard template.',
   },
   conflict: { tone: 'warning', text: 'A scan for this business is already queued or running.' },
   failed: { tone: 'error', text: 'The enrichment attempt failed. See the failure details below — retry if eligible.' },

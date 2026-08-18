@@ -25,7 +25,7 @@ import { log } from '@/lib/logging/log';
  */
 
 const NO_WEBSITE_NOTE =
-  'No website was available for Firecrawl enrichment. No images were downloaded. Manual image sourcing and approval are required.';
+  'No website on file — Firecrawl enrichment does not apply. This business will automatically use the no-website postcard template.';
 const NO_USABLE_IMAGES_NOTE = 'No usable website images were found or downloaded. Manual image sourcing may be required.';
 
 export const ENRICHMENT_CONFLICT_MESSAGE = 'A scan for this business is already queued or running.';
@@ -101,20 +101,28 @@ async function scrapeWithBoundedRetry(url: string): Promise<FirecrawlScrapeData>
   throw lastError;
 }
 
-/** No-website path — never calls Firecrawl, never downloads any image. */
+/**
+ * No-website path — never calls Firecrawl, never downloads any image, and
+ * is not a failure needing manual approval: a business with no `websiteUrl`
+ * is an expected, common disposition (see `handleNoWebsite` in
+ * `lib/scoring/score-business.ts`, which treats it the same way), not
+ * something Firecrawl attempted and couldn't finish. The `ScanEvent` and
+ * `Business.enrichmentStatus` are both recorded as `completed` so this
+ * disposition never surfaces as a "Manual approval required"/failure state
+ * in the admin UI (the per-business "Needs Attention" strip, the scan
+ * detail page's Failure card) or blocks the rest of the scan workflow — the
+ * `no_website` postcard template (`lib/postcards/template.ts`) needs no
+ * Firecrawl-scraped content or images at all. `manualApprovalReason`/
+ * `manualApprovalNote` are still recorded, purely informational, so the
+ * Website Enrichment card can explain why nothing ran.
+ */
 async function handleMissingWebsite(business: Business): Promise<EnrichmentOutcome> {
   const scan = createScanEvent({ businessId: business.businessId, provider: 'firecrawl', operation: 'scrape' });
-  const terminal: ScanEvent = {
-    ...scan,
-    status: 'manual_approval_required',
-    failureCategory: 'missing_website',
-    failureMessage: NO_WEBSITE_NOTE,
-    completedAt: nowIso(),
-  };
+  const terminal: ScanEvent = { ...scan, status: 'completed', completedAt: nowIso() };
   await saveScan(terminal);
 
   await updateBusiness(business.businessId, {
-    enrichmentStatus: 'manual_approval_required',
+    enrichmentStatus: 'enrichment_completed',
     manualApprovalReason: 'missing_website',
     manualApprovalNote: NO_WEBSITE_NOTE,
   });
