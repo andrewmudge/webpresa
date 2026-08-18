@@ -21,6 +21,12 @@ function formatAddress(address: Address): string[] {
  * The standardized Webpresa postcard back (Stage 22). Postal safe-zone/
  * bleed margins confirmed against Lob's live docs (`postcard-size.ts`).
  *
+ * The sender-address block (top-left) is intentionally not rendered for
+ * now — the back is otherwise left blank. `senderName`/`senderAddress`
+ * stay on the props interface, still populated by both callers from
+ * `getLobSenderAddress()`, so this is a quick, contained flip to bring the
+ * block back later rather than a change to the render pipeline.
+ *
  * The recipient-address block in the bottom-right (sized/positioned to
  * Lob's documented ink-free zone, `POSTCARD_INK_FREE_ZONE_PERCENT`) is
  * **admin-preview context only** — confirmed against Lob's docs that Lob
@@ -31,25 +37,10 @@ function formatAddress(address: Address): string[] {
  * (`showGuides={true}`) still shows it, dashed-outlined, so a reviewer can
  * visually confirm which business a given postcard is addressed to.
  */
-export default function PostcardBack({ recipientName, recipientAddress, senderName, senderAddress, showGuides = true }: PostcardBackProps) {
+export default function PostcardBack({ recipientName, recipientAddress, showGuides = true }: PostcardBackProps) {
   return (
     <PostcardFrame showGuides={showGuides}>
       <div className="relative h-full bg-white p-6 text-sm text-gray-900">
-        <div className="max-w-[45%]">
-          {senderAddress ? (
-            <div className="text-xs text-gray-500">
-              <p className="font-medium text-gray-700">{senderName}</p>
-              {formatAddress(senderAddress).map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-amber-600">
-              Sender/return address not configured — set the `WEBPRESA_LOB_SENDER_*` environment variables (see deployment.md).
-            </p>
-          )}
-        </div>
-
         {showGuides && (
           <div
             className="absolute flex flex-col justify-end border border-dashed border-gray-300 p-2"

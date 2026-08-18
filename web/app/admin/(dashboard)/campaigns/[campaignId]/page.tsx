@@ -8,6 +8,7 @@ import { listScanExecutionsForBusiness } from '@/lib/db/scan-executions';
 import { getPostcardById } from '@/lib/db/postcards';
 import { getLatestExistingSiteScreenshots } from '@/lib/screenshots/latest-existing-site-screenshot';
 import { getLatestPreviewScreenshots } from '@/lib/screenshots/latest-preview-screenshot';
+import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 import { generateCampaignQrPng } from '@/lib/campaign/qr';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { getSignedAssetUrl } from '@/lib/s3/assets';
@@ -77,6 +78,7 @@ export default async function CampaignDetailPage({ params }: Props) {
 
           const assets: RecipientPostcardAssets = {
             businessName: business?.name ?? r.businessId,
+            templateVariant: resolvePostcardTemplateVariant(business ?? {}),
             beforeScreenshotSrc: beforeShots.desktopSrc,
             afterDesktopScreenshotSrc: afterShots.desktopSrc,
             afterMobileScreenshotSrc: afterShots.mobileSrc,

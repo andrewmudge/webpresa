@@ -7,11 +7,21 @@ import LaptopMockup from '@/components/mockups/LaptopMockup';
 import PhoneMockup from '@/components/mockups/PhoneMockup';
 import { POSTCARD_SAFE_ZONE_INSET_PERCENT, POSTCARD_BLEED_SIZE_INCHES } from './postcard-size';
 import { POSTCARD_NAVY, POSTCARD_BLUE, POSTCARD_BLUE_LIGHT } from './postcard-colors';
+import type { PostcardTemplateVariant } from '@/domain/models/postcard';
 
 const caveat = Caveat({ subsets: ['latin'], weight: '600' });
 
 export interface PostcardFrontProps {
   businessName: string;
+  /**
+   * Which front template to render — `has_website` (before/after comparison,
+   * the original design) or `no_website` (Stage 26). Resolved per business
+   * by `resolvePostcardTemplateVariant` (`lib/postcards/template.ts`) and
+   * always passed explicitly by every call site, never defaulted here, so a
+   * caller can't silently ship the wrong template on a print artifact.
+   */
+  templateVariant: PostcardTemplateVariant;
+  /** Only used when `templateVariant === 'has_website'`. */
   beforeScreenshotSrc?: string;
   afterDesktopScreenshotSrc?: string;
   afterMobileScreenshotSrc?: string;
@@ -123,6 +133,20 @@ function ScanMeArrow({ className }: { className?: string }) {
 }
 
 /**
+ * Hand-drawn wavy underline beneath the `no_website` headline's last line
+ * (Stage 26) — same informal, marketing-sketch feel as `CurvedArrow`/
+ * `ScanMeArrow` above, reused here rather than inventing a new visual
+ * language for the second template.
+ */
+function HeadlineSquiggle({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 200 24" fill="none" className={className} aria-hidden="true">
+      <path d="M4 14 Q 34 2 66 12 T 130 10 T 196 6" stroke={POSTCARD_BLUE} strokeWidth="7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
  * The standardized Webpresa postcard front (Stage 22) — one fixed layout,
  * dynamically populated from business data. This is a composition, not
  * just a component tree: the website mockup (via the reusable
@@ -141,6 +165,7 @@ function ScanMeArrow({ className }: { className?: string }) {
  */
 export default function PostcardFront({
   businessName,
+  templateVariant,
   beforeScreenshotSrc,
   afterDesktopScreenshotSrc,
   afterMobileScreenshotSrc,
@@ -205,103 +230,138 @@ export default function PostcardFront({
               its own card, overlaps the headline box regardless of how
               well the headline text itself fits its share. */}
           <div className="flex min-h-0 w-[35%] flex-col gap-[2.2cqh]">
-            {/* Headline's share reduced (52%→44%) and the card's grown
-                (30%→38%) — the old-site preview was getting starved of
-                height and rendering cut off (2026-08-06 feedback: "old
-                preview should always be displayed"). The headline is the
-                one that should flex to fit what's left, not the preview. */}
-            {/* items-center (unchanged) + text-left (2026-08-07 feedback:
-                "left justified... left edge should be where the second we
-                currently sits"): `items-center` on this column still
-                shrink-wraps the `h1`'s own box to its widest line ("We
-                already", per a direct measurement — 110px wide vs. the
-                other three lines' 84–106px) and centers *that* box in the
-                column — unchanged from the centered version. Switching
-                only the `h1`'s own `text-align` to `left` then left-aligns
-                every line within that already-positioned box, so they all
-                start exactly where "We already" (the widest line) already
-                sat under full centering — achieving the requested result
-                with no manual offset math needed. */}
-            <div className="flex min-h-0 flex-[0_0_44%] flex-col items-center justify-center">
-              <h1 className="text-left text-[3.9cqw] font-black tracking-tight" style={{ lineHeight: 1.05 }}>
-                <span className="block" style={{ color: POSTCARD_NAVY }}>
-                  Websites
-                </span>
-                <span className="block" style={{ color: POSTCARD_NAVY }}>
-                  are hard.
-                </span>
-                <span className="mt-[0.6cqh] block" style={{ color: POSTCARD_BLUE }}>
-                  We already
-                </span>
-                <span className="block" style={{ color: POSTCARD_BLUE }}>
-                  built yours.
-                </span>
-              </h1>
-            </div>
-
-            {/* Grown 38%→52% (2026-08-08 feedback: "looks almost like an
-                iPhone sideways rather than 3:2 or 4:3... extend the bottom
-                down"). At 38%, this card's real physical box worked out to
-                ~3.03in × 1.62in — a ~1.88:1 ratio, wider than a sideways
-                phone screen. 44% (headline) + 2.2cqh (gap) + 38% (card) left
-                ~10cqh of this column's 68cqh totally unused below the card
-                (flex-col's default `justify-start`, flex-grow:0 on both
-                children) — invisible dead space, not a rendering bug. 52% is
-                the column's *entire* remaining budget after the headline and
-                gap (68 − 29.92 − 2.2 ≈ 35.9cqh, i.e. ~52.8%, rounded down a
-                hair for a safety margin) — using all of it, not an arbitrary
-                bump, and it lands the card at ~3.03in × 2.21in ≈ 1.37:1,
-                squarely between 4:3 (1.33) and 3:2 (1.5) as asked. Top edge
-                (right below the headline+gap) is unchanged — only the
-                bottom edge moves down, per the request. */}
-            <div className="relative min-h-0 flex-[0_0_52%]" style={{ transform: `translateY(-${SIXTEENTH_INCH_CQH}cqh)` }}>
-              <span className="absolute -top-[1.6cqh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-[1.4cqw] py-[0.5cqh] text-[1.1cqw] font-bold text-white shadow-sm">
-                YOUR CURRENT SITE
-              </span>
-              {/* Solid theme-blue "mat" frame around the preview
-                  (2026-08-09 feedback: "a very opaque theme blue
-                  background around the current site preview") — a fully
-                  opaque fill, not a light tint, with the existing
-                  white/gray card inset inside it via padding.
-                  `POSTCARD_NAVY`, not `POSTCARD_BLUE`: the lighter blue
-                  was "too light" the same day. */}
-              <div
-                className="h-full w-full overflow-hidden p-[0.6cqw] shadow-[0_3px_10px_rgba(11,30,61,0.08)]"
-                style={{ backgroundColor: POSTCARD_NAVY, borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
-              >
-                {/* No `pt-` here (there used to be one, to clear room for
-                    the "YOUR CURRENT SITE" badge poking above): once the
-                    navy mat frame was added, that padding left a visible
-                    white gap between the mat's inner edge and the preview
-                    itself (2026-08-09 feedback). The badge has its own
-                    opaque background and `z-10`, so it stays legible
-                    sitting directly on top of the preview without it. */}
-                <div
-                  className="h-full w-full overflow-hidden border border-gray-100 bg-gray-50"
-                  style={{ borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
-                >
-                  {beforeScreenshotSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
-                  ) : (
-                    <p className="p-[1cqw] text-center text-[1.3cqw] text-gray-400">No existing-site screenshot yet</p>
-                  )}
+            {templateVariant === 'no_website' ? (
+              /* Stage 26 — no-website variant: no before/after comparison is
+                 possible (there is no existing site to show), so this
+                 column is just the headline, a hand-drawn underline accent,
+                 and the supporting subtext, vertically centered in the same
+                 column height budget the headline+card share otherwise
+                 splits 44%/52% — there's no card here to protect that split
+                 for. */
+              <div className="flex min-h-0 flex-1 flex-col justify-center gap-[2cqh]">
+                <h1 className="text-left text-[3.9cqw] font-black tracking-tight" style={{ lineHeight: 1.05 }}>
+                  <span className="block" style={{ color: POSTCARD_NAVY }}>
+                    We noticed you
+                  </span>
+                  <span className="block" style={{ color: POSTCARD_NAVY }}>
+                    didn&apos;t have a
+                  </span>
+                  <span className="block" style={{ color: POSTCARD_NAVY }}>
+                    website...
+                  </span>
+                  <span className="mt-[0.6cqh] block" style={{ color: POSTCARD_BLUE }}>
+                    so we built
+                  </span>
+                  <span className="block" style={{ color: POSTCARD_BLUE }}>
+                    one for you.
+                  </span>
+                </h1>
+                <HeadlineSquiggle className="h-[1.6cqw] w-[18cqw]" />
+                <p className="text-left text-[1.5cqw] leading-snug text-gray-600">
+                  It&apos;s professional, mobile-friendly, and ready to help you get found by more customers.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Headline's share reduced (52%→44%) and the card's grown
+                    (30%→38%) — the old-site preview was getting starved of
+                    height and rendering cut off (2026-08-06 feedback: "old
+                    preview should always be displayed"). The headline is the
+                    one that should flex to fit what's left, not the preview. */}
+                {/* items-center (unchanged) + text-left (2026-08-07 feedback:
+                    "left justified... left edge should be where the second we
+                    currently sits"): `items-center` on this column still
+                    shrink-wraps the `h1`'s own box to its widest line ("We
+                    already", per a direct measurement — 110px wide vs. the
+                    other three lines' 84–106px) and centers *that* box in the
+                    column — unchanged from the centered version. Switching
+                    only the `h1`'s own `text-align` to `left` then left-aligns
+                    every line within that already-positioned box, so they all
+                    start exactly where "We already" (the widest line) already
+                    sat under full centering — achieving the requested result
+                    with no manual offset math needed. */}
+                <div className="flex min-h-0 flex-[0_0_44%] flex-col items-center justify-center">
+                  <h1 className="text-left text-[3.9cqw] font-black tracking-tight" style={{ lineHeight: 1.05 }}>
+                    <span className="block" style={{ color: POSTCARD_NAVY }}>
+                      Websites
+                    </span>
+                    <span className="block" style={{ color: POSTCARD_NAVY }}>
+                      are hard.
+                    </span>
+                    <span className="mt-[0.6cqh] block" style={{ color: POSTCARD_BLUE }}>
+                      We already
+                    </span>
+                    <span className="block" style={{ color: POSTCARD_BLUE }}>
+                      built yours.
+                    </span>
+                  </h1>
                 </div>
-              </div>
-              {/* Nested inside the card itself (not a separate flex column
-                  spanning the whole row, as before) and positioned `top:
-                  20%` of *this card's own* height, per 2026-08-07 feedback
-                  ("20% of the way down from the top of the current preview
-                  display to the bottom") — the old column-based placement
-                  tracked the row's full height, not the card's. */}
-              {/* 20% smaller (h/w 5/7cqw → 4/5.6cqw) and pushed further
-                  right so its tip sits closer to the desktop display
-                  (2026-08-08 feedback: "arrow... is too large... move more
-                  to the right"). */}
-              <div className="absolute z-10" style={{ top: '20%', right: '-4cqw' }}>
-                <CurvedArrow className="h-[4cqw] w-[5.6cqw]" />
-              </div>
-            </div>
+
+                {/* Grown 38%→52% (2026-08-08 feedback: "looks almost like an
+                    iPhone sideways rather than 3:2 or 4:3... extend the bottom
+                    down"). At 38%, this card's real physical box worked out to
+                    ~3.03in × 1.62in — a ~1.88:1 ratio, wider than a sideways
+                    phone screen. 44% (headline) + 2.2cqh (gap) + 38% (card) left
+                    ~10cqh of this column's 68cqh totally unused below the card
+                    (flex-col's default `justify-start`, flex-grow:0 on both
+                    children) — invisible dead space, not a rendering bug. 52% is
+                    the column's *entire* remaining budget after the headline and
+                    gap (68 − 29.92 − 2.2 ≈ 35.9cqh, i.e. ~52.8%, rounded down a
+                    hair for a safety margin) — using all of it, not an arbitrary
+                    bump, and it lands the card at ~3.03in × 2.21in ≈ 1.37:1,
+                    squarely between 4:3 (1.33) and 3:2 (1.5) as asked. Top edge
+                    (right below the headline+gap) is unchanged — only the
+                    bottom edge moves down, per the request. */}
+                <div className="relative min-h-0 flex-[0_0_52%]" style={{ transform: `translateY(-${SIXTEENTH_INCH_CQH}cqh)` }}>
+                  <span className="absolute -top-[1.6cqh] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gray-900 px-[1.4cqw] py-[0.5cqh] text-[1.1cqw] font-bold text-white shadow-sm">
+                    YOUR CURRENT SITE
+                  </span>
+                  {/* Solid theme-blue "mat" frame around the preview
+                      (2026-08-09 feedback: "a very opaque theme blue
+                      background around the current site preview") — a fully
+                      opaque fill, not a light tint, with the existing
+                      white/gray card inset inside it via padding.
+                      `POSTCARD_NAVY`, not `POSTCARD_BLUE`: the lighter blue
+                      was "too light" the same day. */}
+                  <div
+                    className="h-full w-full overflow-hidden p-[0.6cqw] shadow-[0_3px_10px_rgba(11,30,61,0.08)]"
+                    style={{ backgroundColor: POSTCARD_NAVY, borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
+                  >
+                    {/* No `pt-` here (there used to be one, to clear room for
+                        the "YOUR CURRENT SITE" badge poking above): once the
+                        navy mat frame was added, that padding left a visible
+                        white gap between the mat's inner edge and the preview
+                        itself (2026-08-09 feedback). The badge has its own
+                        opaque background and `z-10`, so it stays legible
+                        sitting directly on top of the preview without it. */}
+                    <div
+                      className="h-full w-full overflow-hidden border border-gray-100 bg-gray-50"
+                      style={{ borderRadius: `${CURRENT_SITE_CARD_RADIUS_CQW}cqw` }}
+                    >
+                      {beforeScreenshotSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={beforeScreenshotSrc} alt={`${businessName}'s previous website`} className="h-full w-full object-cover object-top" />
+                      ) : (
+                        <p className="p-[1cqw] text-center text-[1.3cqw] text-gray-400">No existing-site screenshot yet</p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Nested inside the card itself (not a separate flex column
+                      spanning the whole row, as before) and positioned `top:
+                      20%` of *this card's own* height, per 2026-08-07 feedback
+                      ("20% of the way down from the top of the current preview
+                      display to the bottom") — the old column-based placement
+                      tracked the row's full height, not the card's. */}
+                  {/* 20% smaller (h/w 5/7cqw → 4/5.6cqw) and pushed further
+                      right so its tip sits closer to the desktop display
+                      (2026-08-08 feedback: "arrow... is too large... move more
+                      to the right"). */}
+                  <div className="absolute z-10" style={{ top: '20%', right: '-4cqw' }}>
+                    <CurvedArrow className="h-[4cqw] w-[5.6cqw]" />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex min-h-0 w-[65%] flex-col items-center">

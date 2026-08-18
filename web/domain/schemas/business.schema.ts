@@ -10,6 +10,7 @@ import {
   TESTIMONIAL_SOURCES,
 } from '@/domain/models/business';
 import { QUALIFICATION_RESULTS, LEAD_PRIORITIES } from '@/domain/models/website-assessment';
+import { POSTCARD_TEMPLATE_VARIANTS } from '@/domain/models/postcard';
 import { SCAN_WORKFLOW_STATUSES } from '@/domain/models/scan-execution';
 import { WEBPRESA_PLANS, SUBSCRIPTION_STATUSES, BILLING_INTERVALS } from '@/domain/constants/plans';
 import { AddressSchema, IsoTimestampSchema, ScoreSchema, UrlOrPathSchema } from './common.schema';
@@ -125,6 +126,7 @@ export const BusinessSchema = z.object({
   websiteQualityScore: ScoreSchema.optional(),
   adminReviewedQualification: z.enum(QUALIFICATION_RESULTS).optional(),
   adminReviewedScore: ScoreSchema.optional(),
+  adminPostcardTemplateOverride: z.enum(POSTCARD_TEMPLATE_VARIANTS).optional(),
   latestScanExecutionId: z.string().optional(),
   scanExecutionStatus: z.enum(SCAN_WORKFLOW_STATUSES).optional(),
   scanExecutionUpdatedAt: IsoTimestampSchema.optional(),

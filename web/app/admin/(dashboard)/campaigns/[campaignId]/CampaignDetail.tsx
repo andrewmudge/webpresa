@@ -24,6 +24,7 @@ import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actio
 import { CampaignScanAutoRefresh } from './CampaignScanAutoRefresh';
 import { AssessmentTable } from './AssessmentTable';
 import PostcardFrontThumbnail from '../../postcards/components/PostcardFrontThumbnail';
+import type { PostcardTemplateVariant } from '@/domain/models/postcard';
 
 export interface BusinessOption {
   businessId: string;
@@ -37,6 +38,7 @@ export interface BusinessOption {
 
 export interface RecipientPostcardAssets {
   businessName: string;
+  templateVariant: PostcardTemplateVariant;
   beforeScreenshotSrc?: string;
   afterDesktopScreenshotSrc?: string;
   afterMobileScreenshotSrc?: string;
@@ -657,6 +659,7 @@ function PostcardControl({
     <div className="flex flex-wrap items-start gap-3">
       <PostcardFrontThumbnail
         businessName={assets?.businessName ?? ''}
+        templateVariant={assets?.templateVariant ?? 'has_website'}
         beforeScreenshotSrc={assets?.beforeScreenshotSrc}
         afterDesktopScreenshotSrc={assets?.afterDesktopScreenshotSrc}
         afterMobileScreenshotSrc={assets?.afterMobileScreenshotSrc}

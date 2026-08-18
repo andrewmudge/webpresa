@@ -10,6 +10,15 @@ export type PostcardStatus = (typeof POSTCARD_STATUSES)[number];
 export const POSTCARD_PROVIDERS = ['lob', 'stannp', 'postgrid'] as const;
 export type PostcardProvider = (typeof POSTCARD_PROVIDERS)[number];
 
+/**
+ * Which front template a postcard uses — resolved per business (see
+ * `resolvePostcardTemplateVariant` in `lib/postcards/template.ts`), never
+ * per campaign, since a single campaign mixes businesses with and without
+ * an existing website.
+ */
+export const POSTCARD_TEMPLATE_VARIANTS = ['has_website', 'no_website'] as const;
+export type PostcardTemplateVariant = (typeof POSTCARD_TEMPLATE_VARIANTS)[number];
+
 // ---------------------------------------------------------------------------
 // Postcard record
 // ---------------------------------------------------------------------------

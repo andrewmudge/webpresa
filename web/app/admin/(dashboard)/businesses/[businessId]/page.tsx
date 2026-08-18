@@ -38,6 +38,7 @@ import { WorkflowSection } from './WorkflowSection';
 import { EnrichmentSection } from './EnrichmentSection';
 import { ScreenshotsSection } from './ScreenshotsSection';
 import { ScoringSection } from './ScoringSection';
+import { PostcardTemplateSection } from './PostcardTemplateSection';
 import { ScanImageReview } from './ScanImageReview';
 import { LeadsSection } from './LeadsSection';
 import { FoundContactInfo } from './FoundContactInfo';
@@ -66,6 +67,7 @@ interface Props {
     screenshotResult?: string;
     scoringResult?: string;
     scoreOverride?: string;
+    postcardTemplateOverride?: string;
     photoApproval?: string;
     contactApproval?: string;
   }>;
@@ -80,6 +82,7 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
     screenshotResult,
     scoringResult,
     scoreOverride,
+    postcardTemplateOverride,
     photoApproval,
     contactApproval,
   } = await searchParams;
@@ -301,6 +304,11 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
       {/* AI website assessment (Stage 15) — scores the existing_site scan; requires a completed Firecrawl enrichment above. */}
       <div className="mb-6">
         <ScoringSection business={business} scans={scans} resultQuery={scoringResult} overrideQuery={scoreOverride} />
+      </div>
+
+      {/* Postcard template override (Stage 26) — foundation for future per-business A/B testing of template conversion. */}
+      <div className="mb-6">
+        <PostcardTemplateSection business={business} overrideQuery={postcardTemplateOverride} />
       </div>
 
       {/* Lead capture and delivery (Stage 20) — notification troubleshooting, independent of the scan/enrichment pipeline above. */}

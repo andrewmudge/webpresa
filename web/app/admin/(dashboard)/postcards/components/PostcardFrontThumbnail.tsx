@@ -1,4 +1,5 @@
 import PostcardFront from './PostcardFront';
+import type { PostcardTemplateVariant } from '@/domain/models/postcard';
 
 /**
  * Small, clickable preview of a postcard's front — reuses `PostcardFront`
@@ -11,6 +12,7 @@ import PostcardFront from './PostcardFront';
  */
 export interface PostcardFrontThumbnailProps {
   businessName: string;
+  templateVariant: PostcardTemplateVariant;
   beforeScreenshotSrc?: string;
   afterDesktopScreenshotSrc?: string;
   afterMobileScreenshotSrc?: string;
@@ -23,6 +25,7 @@ export interface PostcardFrontThumbnailProps {
 
 export default function PostcardFrontThumbnail({
   businessName,
+  templateVariant,
   beforeScreenshotSrc,
   afterDesktopScreenshotSrc,
   afterMobileScreenshotSrc,
@@ -35,6 +38,7 @@ export default function PostcardFrontThumbnail({
     <div style={{ width, pointerEvents: 'none' }}>
       <PostcardFront
         businessName={businessName}
+        templateVariant={templateVariant}
         beforeScreenshotSrc={beforeScreenshotSrc}
         afterDesktopScreenshotSrc={afterDesktopScreenshotSrc}
         afterMobileScreenshotSrc={afterMobileScreenshotSrc}

@@ -287,6 +287,18 @@ describe('Business — website generation fields', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts a valid adminPostcardTemplateOverride', () => {
+    const biz = createBusiness({ name: 'Override Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, adminPostcardTemplateOverride: 'no_website' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an invalid adminPostcardTemplateOverride', () => {
+    const biz = createBusiness({ name: 'Bad Override Co', industry: 'hvac' });
+    const result = BusinessSchema.safeParse({ ...biz, adminPostcardTemplateOverride: 'has_a_website' });
+    expect(result.success).toBe(false);
+  });
+
   it('accepts a photo-slot override pinned to an uploaded photo URL', () => {
     const biz = createBusiness({ name: 'Slot Co', industry: 'hvac' });
     const result = BusinessSchema.safeParse({ ...biz, heroPhotoUrl: '/api/assets/businesses/biz_1/assets/photos/0.jpg' });

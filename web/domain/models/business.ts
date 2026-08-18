@@ -7,6 +7,7 @@ import type { PreviewCtaConfig } from './site-preview';
 import type { LeadPriority, QualificationResult } from './website-assessment';
 import type { ScanWorkflowStatus } from './scan-execution';
 import type { WebpresaPlan, SubscriptionStatus, BillingInterval } from '@/domain/constants/plans';
+import type { PostcardTemplateVariant } from './postcard';
 
 // ---------------------------------------------------------------------------
 // Section-eligibility content sub-types (Stage 11.x)
@@ -338,6 +339,21 @@ export interface Business extends MutableTimestampedRecord {
    */
   adminReviewedQualification?: QualificationResult;
   adminReviewedScore?: number;
+
+  // -------------------------------------------------------------------------
+  // Postcard template override (Stage 26)
+  //
+  // The postcard front template is normally chosen automatically per
+  // business — `has_website` vs. `no_website`, based on `websiteUrl` (see
+  // `resolvePostcardTemplateVariant` in `lib/postcards/template.ts`). This
+  // field, stored separately from that computed default, lets an admin pin
+  // a specific business to a specific template regardless of the automatic
+  // rule — the same "computed default + recoverable override" shape as
+  // `adminReviewedQualification`/`adminReviewedScore` above. Foundation for
+  // future per-business A/B testing of template conversion.
+  // -------------------------------------------------------------------------
+
+  adminPostcardTemplateOverride?: PostcardTemplateVariant;
 
   // -------------------------------------------------------------------------
   // Scan workflow rollup (Stage 16)

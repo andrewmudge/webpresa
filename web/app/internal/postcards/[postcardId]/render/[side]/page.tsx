@@ -5,6 +5,7 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { getCampaignRecipientById } from '@/lib/db/campaign-recipients';
 import { getLatestExistingSiteScreenshots } from '@/lib/screenshots/latest-existing-site-screenshot';
 import { getLatestPreviewScreenshots } from '@/lib/screenshots/latest-preview-screenshot';
+import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 import { generateCampaignQrPng } from '@/lib/campaign/qr';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
@@ -91,6 +92,7 @@ export default async function PostcardRenderPage({ params }: Props) {
   return (
     <PostcardFront
       businessName={business.name}
+      templateVariant={resolvePostcardTemplateVariant(business)}
       beforeScreenshotSrc={beforeShots.desktopSrc}
       afterDesktopScreenshotSrc={afterShots.desktopSrc}
       afterMobileScreenshotSrc={afterShots.mobileSrc}
