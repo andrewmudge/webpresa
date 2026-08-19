@@ -133,15 +133,15 @@ function ScanMeArrow({ className }: { className?: string }) {
 }
 
 /**
- * Hand-drawn wavy underline beneath the `no_website` headline's last line
- * (Stage 26) — same informal, marketing-sketch feel as `CurvedArrow`/
- * `ScanMeArrow` above, reused here rather than inventing a new visual
- * language for the second template.
+ * Hand-drawn underline beneath the `no_website` headline's last line
+ * (Stage 26) — a single gentle arc, not a multi-hump squiggle (2026-08-19
+ * feedback: "it shouldn't squiggle, just have a slight arc"), via one
+ * quadratic curve rather than the repeated `T` segments a wavy line needs.
  */
 function HeadlineSquiggle({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 200 24" fill="none" className={className} aria-hidden="true">
-      <path d="M4 14 Q 34 2 66 12 T 130 10 T 196 6" stroke={POSTCARD_BLUE} strokeWidth="7" strokeLinecap="round" />
+      <path d="M4 8 Q 100 22 196 4" stroke={POSTCARD_BLUE} strokeWidth="7" strokeLinecap="round" />
     </svg>
   );
 }
@@ -238,7 +238,7 @@ export default function PostcardFront({
                  column height budget the headline+card share otherwise
                  splits 44%/52% — there's no card here to protect that split
                  for. */
-              <div className="flex min-h-0 flex-1 flex-col justify-center gap-[2cqh]">
+              <div className="relative flex min-h-0 flex-1 flex-col justify-center gap-[2cqh]">
                 <h1 className="text-left text-[3.9cqw] font-black tracking-tight" style={{ lineHeight: 1.05 }}>
                   <span className="block" style={{ color: POSTCARD_NAVY }}>
                     We noticed you
@@ -260,6 +260,13 @@ export default function PostcardFront({
                 <p className="text-left text-[1.5cqw] leading-snug text-gray-600">
                   It&apos;s professional, mobile-friendly, and ready to help you get found by more customers.
                 </p>
+                {/* Same hand-drawn arrow the has_website variant points at
+                    its "current site" card with, reused here pointing at
+                    the showcase column instead — missing from the first
+                    pass (2026-08-19 feedback). */}
+                <div className="absolute -bottom-[1cqh] -right-[3cqw] z-10">
+                  <CurvedArrow className="h-[4cqw] w-[5.6cqw]" />
+                </div>
               </div>
             ) : (
               <>
