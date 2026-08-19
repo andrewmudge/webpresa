@@ -8763,3 +8763,33 @@ Vercel: OPERATIONS_DISMISSALS_TABLE_NAME present on both Preview and Production
 git: origin/dev and origin/main both at the pushed commit; Vercel git-integration auto-deploys
      for both branches completed (Ready) independent of this session's own action
 ```
+
+---
+
+**Date:** 2026-08-19
+
+**Bug fix: businesses with a great existing website were auto-qualified for postcard campaigns.** A user reviewing a campaign's AI Website Assessment table found a business scored 89/100 on its existing site, yet `qualification: 'qualified'` — auto-selected for import into a campaign whose entire premise is "you need a better website." Root cause, confirmed by reading the actual scoring code: `overallScore`, `confidence`, `leadPriority`, and `qualification` are four independent sibling fields the AI returns in one structured-output call (`lib/ai/score-website.ts`) with no prompt rubric tying them together, and the one deterministic safety net over the AI's raw opinion (`applyQualificationOverrides`, `lib/scoring/qualification-rules.ts`) never read `overallScore`/`leadPriority` at all — it only handled "no website" and "website unavailable." Not a rule silently failing to fire; no such rule existed.
+
+Added a third deterministic override, confirmed with the user (score threshold and requiring both AI signals to agree, rather than score alone, to stay conservative): an existing site scoring ≥ 80 *and* the AI's own `leadPriority: 'low'` verdict now forces `qualification: 'manual_review'` instead of passing the AI's raw recommendation through. Both signals have to agree — a high score paired with medium/high priority is left alone, since the model may have a reason not captured by `overallScore` alone. Fixed at the `qualification-rules.ts` layer (not just the campaign table's auto-select checkbox) so `Business.qualification` is consistent everywhere it's read: the business page's badge, the campaign assessment table, and Stage 16 workflow routing. Discovered along the way: `applyQualificationOverrides` has a second call site (`handleWebsiteUnavailable`, which never runs the AI at all since Firecrawl already failed) — made the new fields optional rather than required so that call site isn't forced to pass meaningless placeholder values; the new rule simply doesn't apply without both.
+
+## Files changed
+
+```
+web/lib/scoring/qualification-rules.ts                MODIFIED — new high-quality-existing-site override rule
+web/lib/scoring/score-business.ts                       MODIFIED — passes overallScore/leadPriority through at the AI-scoring call site
+web/lib/scoring/__tests__/qualification-rules.test.ts   MODIFIED — 5 new tests for the rule (reported case, threshold boundary, below threshold, priority mismatch, fields absent)
+web/docs/implementation.md                               MODIFIED — added the rule to the Stage 15 "Qualification rules" list
+web/docs/build_log.md                                    MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/:
+  npm run lint         — clean
+  npx tsc --noEmit     — clean
+  npm test              — all test files passing, including the 5 new qualification-rules cases
+  npm run build          — production build succeeds
+```
+
+No infra/deploy changes — pure application-logic fix, no new fields on `Business`/schemas, no new tables.

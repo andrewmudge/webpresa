@@ -1697,6 +1697,7 @@ The AI provides a recommendation; application rules may override it. Initial det
 - Government organization → Reject
 - Website unavailable → Manual Review
 - Invalid address → Manual Review
+- Existing site scores ≥ 80 *and* the AI's own `leadPriority` is Low → Manual Review (added 2026-08-19: an 89-scoring existing site was getting auto-qualified for a postcard campaign whose whole premise is "you need a better website" — the AI's raw `qualification` recommendation on its own wasn't a reliable enough signal, so this is a deterministic override on its `overallScore`/`leadPriority` outputs, same as the other rules in this list. See `lib/scoring/qualification-rules.ts`.)
 
 Do not trigger postcard mailing, or any other outreach action, solely from an AI score.
 

@@ -195,7 +195,12 @@ async function runScoringAttempt(
     completedAt: nowIso(),
   });
 
-  const qualification = applyQualificationOverrides({ business, aiQualification: scored.assessment.qualification });
+  const qualification = applyQualificationOverrides({
+    business,
+    aiQualification: scored.assessment.qualification,
+    overallScore: scored.assessment.overallScore,
+    leadPriority: scored.assessment.leadPriority,
+  });
 
   await updateBusiness(business.businessId, {
     qualification,
