@@ -74,7 +74,10 @@ export default async function CampaignDetailPage({ params }: Props) {
             generateCampaignQrPng(r.campaignCode, appBaseUrl),
           ]);
           const postcard = postcardsByRecipient[r.campaignRecipientId];
-          const frontUrl = postcard?.frontArtifactKey ? await getSignedAssetUrl(postcard.frontArtifactKey) : undefined;
+          const [frontUrl, backUrl] = await Promise.all([
+            postcard?.frontArtifactKey ? getSignedAssetUrl(postcard.frontArtifactKey) : Promise.resolve(undefined),
+            postcard?.backArtifactKey ? getSignedAssetUrl(postcard.backArtifactKey) : Promise.resolve(undefined),
+          ]);
 
           const assets: RecipientPostcardAssets = {
             businessName: business?.name ?? r.businessId,
@@ -85,6 +88,8 @@ export default async function CampaignDetailPage({ params }: Props) {
             qrDataUri: `data:image/png;base64,${qrPng.toString('base64')}`,
             accessCodeDisplay: formatCampaignCodeForDisplay(r.campaignCode),
             frontUrl,
+            recipientAddress: business?.address,
+            backUrl,
           };
           return [r.campaignRecipientId, assets] as const;
         }),

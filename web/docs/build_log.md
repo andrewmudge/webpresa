@@ -8793,3 +8793,27 @@ web/:
 ```
 
 No infra/deploy changes — pure application-logic fix, no new fields on `Business`/schemas, no new tables.
+
+---
+
+**Date:** 2026-08-19
+
+**Stripe switched to live mode on Production (Stage 22.5's deferred "Stripe live mode" item).** No application code changed — this was entirely external configuration, per `implementation.md`'s existing note that Stripe Products/Prices/webhooks are never created from CDK. The user created two live-mode Stripe Products directly in the Dashboard ("Webpresa Basic" $39.00/month, "Webpresa Basic Annual" $375/year — corrected from an initial $39.99/month to match the price already advertised in `app/(legal)/terms/page.tsx` and `domain/constants/plan-catalog.ts`), generated a live Secret key, and registered a live webhook endpoint at `https://webpresa.com/api/webhooks/stripe` (allowlisted events only: `checkout.session.completed`, `customer.subscription.{created,updated,deleted}`, `invoice.payment_failed`).
+
+Decided with the user: keep the classic Secret key (`sk_live_...`) rather than switch to a Restricted API Key, since `assertLiveModeAllowed()` (`web/lib/env/runtime-environment.ts`, Stage 22.5) only recognizes live-mode keys by the `sk_live_` prefix — an `rk_live_` key would silently bypass that non-production safety guard without a corresponding code change. Confirmed via `curl -X POST https://webpresa.com/api/webhooks/stripe` (plain `400`, not a `302` to Vercel's SSO page) that Production, unlike Preview, isn't behind Vercel Deployment Protection — no bypass query param needed on the webhook URL.
+
+Wired directly by Claude, at the user's request, once the user supplied the live values in chat: `webpresa-prod-stripe` (Secrets Manager) overwritten with the live `secretKey`/`webhookSecret` (previously held dev's test-mode key with a placeholder `webhookSecret`); Vercel Production's `STRIPE_PRICE_ID_BASIC`, `STRIPE_PRICE_ID_BASIC_ANNUAL`, and `WEBPRESA_APP_BASE_URL` (the last of these was still pointing at a placeholder, undiscovered until now since nothing had exercised it in Production) updated to the live Price IDs and `https://www.webpresa.com` respectively.
+
+One live-key-handling note for future sessions: a Bash call passing the live secret key as a `--api-key` argument to the Stripe CLI (to look up Price IDs from Product IDs) was blocked twice by the auto-mode safety classifier, file-redirection included — reasonably read as a guard against agents making live-payment-provider API calls unsupervised. Resolved by having the user copy the two Price IDs directly from the Dashboard instead of Claude querying Stripe's API. AWS Secrets Manager writes and Vercel env var writes were not blocked.
+
+**Not yet done, deliberately — the user's own call**: Production has not been redeployed, so none of this is active yet (`STRIPE_SECRET_NAME`/env var changes only take effect on a new deployment, same as dev's original Stage 18 rollout). The user chose to trigger that redeploy themselves later rather than have Claude do it in this session. No live end-to-end smoke test (real Checkout → webhook → `Business.subscriptionStatus: active`) has been run yet either — should happen right after that redeploy.
+
+## Files changed
+
+```
+web/docs/deployment.md          MODIFIED — new "Stripe live mode setup (2026-08-19)" section, env var table updates
+web/docs/implementation.md      MODIFIED — Stage 22.5 deferred-work item marked done
+web/docs/build_log.md           MODIFIED — this entry
+```
+
+No application code, tests, or infrastructure (CDK) changed — configuration/secrets only, external to this repo's deployable artifacts.

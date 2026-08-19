@@ -4768,7 +4768,7 @@ Both items below are now resolved:
 
 Manual/external items, all the user's, none blocking anything:
 
-- **Stripe live mode** — generate live API keys, live Price IDs (Basic/Growth), register the live webhook at `https://webpresa.com/api/webhooks/stripe`. Test-mode keys already work for infra smoke-testing.
+- ~~**Stripe live mode**~~ — done 2026-08-19: live secret key + live webhook (`https://webpresa.com/api/webhooks/stripe`) written into `webpresa-prod-stripe`; live Basic monthly/annual Price IDs added to Vercel Production. See `deployment.md`, "Stripe live mode setup," for the full record. Growth's live Price IDs were not created (not customer-purchasable). Pending: the user's own Production redeploy to activate these values, and a live end-to-end smoke test.
 - **Lob live mode** — production credentials (requires a payment method on file with Lob), register the production webhook in Lob's dashboard (no API for this — dashboard only) pointing at `https://webpresa.com/api/webhooks/lob`, including the Vercel protection-bypass query param.
 - **Vercel API token rotation** — the token behind the `vercel-api` secrets (both environments) expires 2026-10-29.
 - OpenSRS domain-purchase integration (not implemented yet — separate stage).

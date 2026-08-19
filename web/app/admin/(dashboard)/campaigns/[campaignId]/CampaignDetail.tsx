@@ -8,6 +8,7 @@ import { CAMPAIGN_STATUSES } from '@/domain/models/campaign';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
 import type { ScanHit } from '@/domain/models/scan-hit';
 import type { Postcard } from '@/domain/models/postcard';
+import type { Address } from '@/domain/models/common';
 import type { QualificationResult, LeadPriority } from '@/domain/models/website-assessment';
 import type { ScanWorkflowStatus } from '@/domain/models/scan-execution';
 import { isActiveWorkflowStatus } from '@/lib/workflow/labels';
@@ -24,6 +25,7 @@ import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actio
 import { CampaignScanAutoRefresh } from './CampaignScanAutoRefresh';
 import { AssessmentTable } from './AssessmentTable';
 import PostcardFrontThumbnail from '../../postcards/components/PostcardFrontThumbnail';
+import PostcardBackThumbnail from '../../postcards/components/PostcardBackThumbnail';
 import type { PostcardTemplateVariant } from '@/domain/models/postcard';
 
 export interface BusinessOption {
@@ -46,6 +48,10 @@ export interface RecipientPostcardAssets {
   accessCodeDisplay?: string;
   /** Signed S3 URL for the rendered front PDF — absent until rendering completes. */
   frontUrl?: string;
+  /** Business mailing address — for the back thumbnail's recipient-address preview. */
+  recipientAddress?: Address;
+  /** Signed S3 URL for the rendered back PDF — absent until rendering completes. */
+  backUrl?: string;
 }
 
 interface Props {
@@ -666,6 +672,12 @@ function PostcardControl({
         qrDataUri={assets?.qrDataUri}
         accessCodeDisplay={assets?.accessCodeDisplay}
         href={assets?.frontUrl}
+        width={128}
+      />
+      <PostcardBackThumbnail
+        recipientName={assets?.businessName ?? ''}
+        recipientAddress={assets?.recipientAddress}
+        href={assets?.backUrl}
         width={128}
       />
       <div className="min-w-[140px] space-y-1.5">
