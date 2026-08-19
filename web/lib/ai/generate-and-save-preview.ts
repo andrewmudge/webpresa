@@ -3,6 +3,7 @@ import { getBusinessById, updateBusiness } from '@/lib/db/businesses';
 import { listPreviewsForBusiness, putSitePreview } from '@/lib/db/site-previews';
 import { createSitePreview } from '@/domain/factories/site-preview.factory';
 import { generatePreviewContent } from './generate-preview';
+import { INDUSTRY_SERVICE_DEFAULTS } from './industry-service-defaults';
 
 /**
  * The Stage 11 "Generate Website" pipeline (metrics → OpenAI → persist),
@@ -26,11 +27,22 @@ export interface GenerateAndSaveWebsiteOutcome {
 }
 
 export async function generateAndSaveWebsite(businessId: string): Promise<GenerateAndSaveWebsiteOutcome> {
-  const business = await getBusinessById(businessId);
+  let business = await getBusinessById(businessId);
   if (!business) return { status: 'failed', message: 'Business not found.' };
 
+  // A no-website business (imported via Google Places, or added manually
+  // with no scrape to draw from) has no servicesOffered on file — Google
+  // Places exposes no service/menu data. Rather than hard-blocking
+  // generation (and, transitively, the no-website postcard's preview
+  // screenshot — see `generate-preview` route), fall back to a generic
+  // per-industry default and persist it, same durability rule as the
+  // theme/CTA persistence below: save once so every future regeneration —
+  // and the Business Details form — stays consistent, and an admin can
+  // correct it to the business's real services at any time.
   if (!business.servicesOffered?.trim()) {
-    return { status: 'not_eligible', message: 'Add at least one service under "Services offered" before generating a website.' };
+    const servicesOffered = INDUSTRY_SERVICE_DEFAULTS[business.industry];
+    await updateBusiness(business.businessId, { servicesOffered });
+    business = { ...business, servicesOffered };
   }
 
   const existing = await listPreviewsForBusiness(businessId);

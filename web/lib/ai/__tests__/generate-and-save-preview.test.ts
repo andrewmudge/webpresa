@@ -146,15 +146,20 @@ describe('generateAndSaveWebsite — success flow', () => {
 });
 
 describe('generateAndSaveWebsite — eligibility', () => {
-  it('is not eligible when the business has no services listed', async () => {
-    mockGetBusinessById.mockResolvedValueOnce({ ...EXISTING_BUSINESS, servicesOffered: undefined });
+  it('falls back to a per-industry default and persists it when the business has no services listed', async () => {
+    mockGetBusinessById.mockResolvedValueOnce({ ...EXISTING_BUSINESS, industry: 'plumbing', servicesOffered: undefined });
 
     const result = await generateAndSaveWebsite(EXISTING_BUSINESS.businessId);
 
-    expect(result.status).toBe('not_eligible');
-    expect(result.message).toMatch(/at least one service/i);
-    expect(mockGeneratePreviewContent).not.toHaveBeenCalled();
-    expect(mockPutSitePreview).not.toHaveBeenCalled();
+    expect(result.status).toBe('completed');
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(
+      EXISTING_BUSINESS.businessId,
+      { servicesOffered: expect.stringContaining('Drain cleaning') },
+    );
+    expect(mockGeneratePreviewContent).toHaveBeenCalledWith(
+      expect.objectContaining({ servicesOffered: expect.stringContaining('Drain cleaning') }),
+    );
+    expect(mockPutSitePreview).toHaveBeenCalledOnce();
   });
 
   it('enforces the AI generation cap', async () => {
