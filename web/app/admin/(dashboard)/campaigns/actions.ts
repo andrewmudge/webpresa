@@ -145,6 +145,11 @@ export async function addCampaignRecipientAction(campaignId: string, input: AddC
   const business = await getBusinessById(businessId);
   if (!business) return { error: 'Business not found.' };
 
+  const existingRecipients = await listCampaignRecipientsForCampaign(campaignId);
+  if (existingRecipients.some((r) => r.businessId === businessId)) {
+    return { error: 'This business is already a recipient of this campaign.' };
+  }
+
   const destinationUrl = input.destinationUrl?.trim();
   const destinationLabel = input.destinationLabel?.trim();
 

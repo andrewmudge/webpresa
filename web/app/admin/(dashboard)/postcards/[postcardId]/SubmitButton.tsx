@@ -11,6 +11,8 @@ export interface SubmitButtonProps {
   reviewedAt?: string;
   providerPostcardId?: string;
   failureReason?: string;
+  /** Whether the currently-configured Lob key is live (`isLobLiveMode()`, `lib/lob/client.ts`) — determines which copy renders below the button. */
+  isLiveMode: boolean;
 }
 
 /**
@@ -19,7 +21,7 @@ export interface SubmitButtonProps {
  * `[postcardId]/page.tsx`) — approval and submission are deliberately
  * separate, explicit admin steps (implementation.md, Stage 22).
  */
-export default function SubmitButton({ postcardId, status, reviewedAt, providerPostcardId, failureReason }: SubmitButtonProps) {
+export default function SubmitButton({ postcardId, status, reviewedAt, providerPostcardId, failureReason, isLiveMode }: SubmitButtonProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -72,10 +74,16 @@ export default function SubmitButton({ postcardId, status, reviewedAt, providerP
         {isPending ? 'Submitting…' : 'Submit to Lob'}
       </button>
       {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
-      <p className="mt-2 text-xs text-gray-400">
-        Uses the Lob test-mode API key currently on file — no real mail is sent. A production send requires an explicit, separate decision to
-        swap in a live key.
-      </p>
+      {isLiveMode ? (
+        <p className="mt-2 text-xs font-medium text-red-600">
+          Uses the Lob live API key — this mails a real postcard and charges a real cost. There is no undo.
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-gray-400">
+          Uses the Lob test-mode API key currently on file — no real mail is sent. A production send requires an explicit, separate decision to
+          swap in a live key.
+        </p>
+      )}
     </div>
   );
 }

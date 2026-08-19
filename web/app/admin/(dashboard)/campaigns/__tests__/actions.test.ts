@@ -205,6 +205,18 @@ describe('addCampaignRecipientAction', () => {
     expect(mockPutCampaignRecipient).not.toHaveBeenCalled();
   });
 
+  it('rejects a business already a recipient of this campaign', async () => {
+    mockGetBusinessById.mockResolvedValueOnce(BUSINESS);
+    mockListCampaignRecipientsForCampaign.mockResolvedValueOnce([
+      { campaignRecipientId: 'rec_existing', campaignId: 'campaign_1', businessId: 'biz_1' },
+    ]);
+
+    const result = await addCampaignRecipientAction('campaign_1', { businessId: 'biz_1' });
+
+    expect(result.error).toMatch(/already a recipient/i);
+    expect(mockPutCampaignRecipient).not.toHaveBeenCalled();
+  });
+
   it('reuses an existing usable claim instead of generating a new one', async () => {
     mockGetBusinessById.mockResolvedValueOnce(BUSINESS);
     mockListClaimsForBusiness.mockResolvedValueOnce([{ claimId: 'claim_existing', status: 'issued', expiresAt: FUTURE }]);

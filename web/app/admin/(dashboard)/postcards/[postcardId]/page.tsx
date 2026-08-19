@@ -10,6 +10,7 @@ import { generateCampaignQrPng } from '@/lib/campaign/qr';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
 import { getLobSenderAddress, type LobSenderAddress } from '@/lib/env/lob-sender-address';
+import { isLobLiveMode } from '@/lib/lob/client';
 import PostcardFront from '../components/PostcardFront';
 import PostcardBack from '../components/PostcardBack';
 import PostcardZoom from '../components/PostcardZoom';
@@ -60,6 +61,8 @@ export default async function PostcardDetailPage({ params }: Props) {
   } catch {
     senderAddress = undefined;
   }
+
+  const isLiveMode = await isLobLiveMode();
 
   return (
     <div className="p-8">
@@ -155,6 +158,7 @@ export default async function PostcardDetailPage({ params }: Props) {
               reviewedAt={postcard.reviewedAt}
               providerPostcardId={postcard.providerPostcardId}
               failureReason={postcard.failureReason}
+              isLiveMode={isLiveMode}
             />
           </div>
         </div>

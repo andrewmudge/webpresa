@@ -19,6 +19,7 @@ import {
   deleteCampaignAction,
   updateCampaignRecipientDestinationAction,
   updateCampaignRecipientStatusAction,
+  addCampaignRecipientAction,
 } from '../actions';
 import { createPostcardAction, approvePostcardAction, submitPostcardToLobAction, submitPostcardsToLobBulkAction, retryRenderPostcardAction } from '../../postcards/actions';
 import { runCampaignScanAction, type RunCampaignScanSummary } from './scan-actions';
@@ -372,7 +373,84 @@ function RecipientsSection({
           ))}
         </ul>
       )}
+
+      <AddExistingBusinessForm campaignId={campaignId} businessById={businessById} recipients={recipients} />
     </div>
+  );
+}
+
+/**
+ * Attaches an already-existing `Business` (e.g. one created manually via
+ * "New business", which has no `googlePlaceId` and won't surface in the
+ * Google Places discover flow) to this campaign as a recipient — restores
+ * the manual business picker `CampaignDetail.tsx` had before the Stage 21
+ * redesign moved recipient creation exclusively to discover/import.
+ * `addCampaignRecipientAction` itself is unchanged from that era and is
+ * fully source-agnostic; this is purely the UI to call it directly with an
+ * admin-picked `businessId` instead of one freshly imported from Places.
+ */
+function AddExistingBusinessForm({
+  campaignId,
+  businessById,
+  recipients,
+}: {
+  campaignId: string;
+  businessById: Map<string, BusinessOption>;
+  recipients: CampaignRecipient[];
+}) {
+  const router = useRouter();
+  const [businessId, setBusinessId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const alreadyRecipientIds = new Set(recipients.map((r) => r.businessId));
+  const availableBusinesses = Array.from(businessById.values())
+    .filter((b) => !alreadyRecipientIds.has(b.businessId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const result = await addCampaignRecipientAction(campaignId, { businessId });
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setBusinessId('');
+      router.refresh();
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
+      <label className="text-xs text-gray-500">
+        Add existing business
+        <select
+          value={businessId}
+          onChange={(e) => setBusinessId(e.target.value)}
+          required
+          className="mt-1 block w-64 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+        >
+          <option value="" disabled>
+            {availableBusinesses.length === 0 ? 'No businesses available' : 'Select a business…'}
+          </option>
+          {availableBusinesses.map((b) => (
+            <option key={b.businessId} value={b.businessId}>
+              {b.name} ({b.slug})
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="submit"
+        disabled={isPending || !businessId}
+        className="rounded-lg bg-brand text-white px-4 py-2 text-sm font-medium hover:bg-brand-dark transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {isPending ? 'Adding…' : 'Add recipient'}
+      </button>
+      {error && <p className="w-full text-xs text-red-700">{error}</p>}
+    </form>
   );
 }
 

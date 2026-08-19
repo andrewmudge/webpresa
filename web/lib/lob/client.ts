@@ -40,6 +40,17 @@ export class LobApiError extends Error {
   }
 }
 
+/**
+ * Whether the currently-configured Lob key is live (`live_...`) rather than
+ * test (`test_...`) — the same prefix check `lobRequest` uses, exposed
+ * standalone for UI copy that needs to know the mode without making a
+ * request (see `SubmitButton.tsx`).
+ */
+export async function isLobLiveMode(): Promise<boolean> {
+  const { apiKey } = await getLobSecret();
+  return apiKey.startsWith('live_');
+}
+
 export async function lobRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { apiKey } = await getLobSecret();
   assertLiveModeAllowed('Lob', apiKey.startsWith('live_'));

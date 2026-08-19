@@ -12,7 +12,7 @@ vi.mock('@/lib/secrets', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { lobRequest } from '../client';
+import { lobRequest, isLobLiveMode } from '../client';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,5 +54,17 @@ describe('lobRequest', () => {
 
     await expect(lobRequest('/postcards')).rejects.toThrow(/Lob: refusing to use a live-mode API key/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('isLobLiveMode', () => {
+  it('returns false for a test-mode key', async () => {
+    mockGetLobSecret.mockResolvedValue({ apiKey: 'test_abc', webhookSecret: 'whsec' });
+    await expect(isLobLiveMode()).resolves.toBe(false);
+  });
+
+  it('returns true for a live-mode key', async () => {
+    mockGetLobSecret.mockResolvedValue({ apiKey: 'live_abc', webhookSecret: 'whsec' });
+    await expect(isLobLiveMode()).resolves.toBe(true);
   });
 });
