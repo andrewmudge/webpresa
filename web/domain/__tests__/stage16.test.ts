@@ -62,6 +62,21 @@ describe('ScanExecution factory', () => {
     expect(() => ScanExecutionSchema.parse(terminal)).not.toThrow();
   });
 
+  it('normalizes a literal null qualification/leadPriority (Step Functions cannot omit an unresolved JSONPath) to undefined', () => {
+    const biz = createBusiness({ name: 'Acme', industry: 'plumbing' });
+    const execution = createScanExecution({ businessId: biz.businessId, triggerSource: 'admin_manual', requestedBy: 'admin' });
+    const noWebsiteTerminal = {
+      ...execution,
+      status: 'qualified' as const,
+      qualification: null,
+      leadPriority: null,
+    };
+
+    const parsed = ScanExecutionSchema.parse(noWebsiteTerminal);
+    expect(parsed.qualification).toBeUndefined();
+    expect(parsed.leadPriority).toBeUndefined();
+  });
+
   it('accepts a failed execution with a structured ScanWorkflowFailure', () => {
     const biz = createBusiness({ name: 'Acme', industry: 'plumbing' });
     const execution = createScanExecution({ businessId: biz.businessId, triggerSource: 'admin_manual', requestedBy: 'admin' });

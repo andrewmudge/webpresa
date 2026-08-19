@@ -139,4 +139,20 @@ describe('claimScanExecutionStatus', () => {
       }),
     ).rejects.toThrow('network blip');
   });
+
+  it('omits null-valued fields from the update instead of persisting a literal null (Step Functions sends null for an unresolved JSONPath, e.g. leadPriority for a no-website business)', async () => {
+    mockSend.mockResolvedValueOnce({});
+
+    await claimScanExecutionStatus({
+      scanExecutionId: 'scanexec_00000000-0000-0000-0000-000000000001',
+      expectedCurrentStatus: 'running',
+      updates: { status: 'qualified', qualification: 'qualified', leadPriority: null as never },
+    });
+
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.UpdateExpression).not.toMatch(/#leadPriority/);
+    expect(command.input.ExpressionAttributeNames).not.toHaveProperty('#leadPriority');
+    expect(command.input.ExpressionAttributeValues).not.toHaveProperty(':leadPriority');
+    expect(command.input.ExpressionAttributeValues[':qualification']).toBe('qualified');
+  });
 });

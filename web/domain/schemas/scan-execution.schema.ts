@@ -40,8 +40,27 @@ export const ScanExecutionSchema = z.object({
     .string()
     .regex(/^preview_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     .optional(),
-  qualification: z.enum(QUALIFICATION_RESULTS).optional(),
-  leadPriority: z.enum(LEAD_PRIORITIES).optional(),
+  // `.nullish()` + transform, not plain `.optional()`: the Step Functions
+  // scan workflow (`infra/lib/stacks/scan-workflow-stack.ts`) reads these
+  // from the `/api/internal/scan/score` route's JSON response, which
+  // reports a business's not-yet-set qualification/leadPriority as literal
+  // `null` (so every `$.scoreResult.ResponseBody.*` JSONPath reference
+  // always resolves to something) — that `null` flows straight through
+  // into `ScanExecution.updates` and gets persisted as-is (DynamoDB has no
+  // concept of "undefined"). A business with no website never gets a
+  // `leadPriority` at all (see `handleNoWebsite` in
+  // `lib/scoring/score-business.ts`), so this is the normal, expected shape
+  // for that execution, not corrupt data — `undefined` is what every other
+  // reader of this field already expects, so normalize `null` to that
+  // rather than widening every consumer to also handle `null`.
+  qualification: z
+    .enum(QUALIFICATION_RESULTS)
+    .nullish()
+    .transform((v) => v ?? undefined),
+  leadPriority: z
+    .enum(LEAD_PRIORITIES)
+    .nullish()
+    .transform((v) => v ?? undefined),
   manualReviewReason: z.string().max(500).optional(),
   attemptNumber: z.number().int().min(1),
   parentScanExecutionId: z

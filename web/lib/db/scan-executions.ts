@@ -114,6 +114,14 @@ export async function claimScanExecutionStatus(params: {
   const values: Record<string, unknown> = { ':expectedStatus': expectedCurrentStatus };
 
   for (const [key, value] of Object.entries(fields)) {
+    // The Step Functions state machine can't omit a JSONPath reference that
+    // resolves to nothing (e.g. `qualification`/`leadPriority` for a
+    // no-website business — see the schema's own doc comment) — it sends a
+    // literal JSON `null` instead. Every field on `ScanExecution` is either
+    // a real value or simply absent, never `null`, so skip it here rather
+    // than persisting a `NULL` DynamoDB attribute a schema `.parse()` can't
+    // read back as "unset".
+    if (value === null) continue;
     const nameAlias = `#${key}`;
     const valueAlias = `:${key}`;
     setClauses.push(`${nameAlias} = ${valueAlias}`);
