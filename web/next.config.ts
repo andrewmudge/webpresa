@@ -50,6 +50,23 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // `sharp` (lib/image/hero-dimensions.ts, lib/theme/logo-color.ts,
+  // lib/firecrawl/images.ts, lib/s3/stock-images.ts, lib/s3/upload-
+  // validation.ts) is a native addon — Next.js's build-time file tracer
+  // decides which node_modules files get copied into each deployed
+  // serverless function, and it doesn't always find every native binary a
+  // package needs, especially with two separate sharp installs present
+  // (this app's own `sharp` dependency plus Next.js's own internal nested
+  // copy, at different versions with different libvips builds). That gap
+  // surfaced as a real Vercel `preview` outage: `ERR_DLOPEN_FAILED:
+  // libvips-cpp.so.8.18.3: cannot open shared object file` — the tracer
+  // silently omitted that exact file from the function bundle. Explicitly
+  // including sharp's own linux-x64 binaries (Vercel's function runtime)
+  // here is the documented fix for "some files were not detected" per
+  // `outputFileTracingIncludes`'s own doc comment in next's config types.
+  outputFileTracingIncludes: {
+    '/**/*': ['./node_modules/sharp/**/*', './node_modules/@img/sharp-linux-x64/**/*', './node_modules/@img/sharp-libvips-linux-x64/**/*'],
+  },
   // Static export removed in Stage 7: admin dashboard requires Server Actions,
   // Route Handlers, and proxy.ts — all incompatible with `output: 'export'`.
   // Homepage pages are still statically optimised by Next.js at build time.
