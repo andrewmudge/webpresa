@@ -298,7 +298,9 @@ describe('createBillingPortalSessionAction', () => {
     mockGetCustomerBillingProfile.mockResolvedValueOnce({ userId: 'user_1', stripeCustomerId: 'cus_1' });
     mockPortalSessionsCreate.mockResolvedValueOnce({ url: 'https://billing.stripe.test/portal_2' });
 
-    await expect(createBillingPortalSessionAction('biz_1')).rejects.toThrow('REDIRECT:https://billing.stripe.test/portal_2');
+    await expect(createBillingPortalSessionAction('biz_1', 'claim-status')).rejects.toThrow(
+      'REDIRECT:https://billing.stripe.test/portal_2',
+    );
 
     expect(mockPortalSessionsCreate).toHaveBeenCalledWith({
       customer: 'cus_1',
@@ -310,7 +312,47 @@ describe('createBillingPortalSessionAction', () => {
     mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
     mockGetCustomerBillingProfile.mockResolvedValueOnce(null);
 
-    await expect(createBillingPortalSessionAction('biz_1')).rejects.toThrow('REDIRECT:/account/claim-status');
+    await expect(createBillingPortalSessionAction('biz_1', 'claim-status')).rejects.toThrow('REDIRECT:/account/claim-status');
     expect(mockPortalSessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("resolves the Portal's return_url to the dashboard when opened from there, not claim-status", async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce({ userId: 'user_1', stripeCustomerId: 'cus_1' });
+    mockPortalSessionsCreate.mockResolvedValueOnce({ url: 'https://billing.stripe.test/portal_3' });
+
+    await expect(createBillingPortalSessionAction('biz_1', 'dashboard')).rejects.toThrow(
+      'REDIRECT:https://billing.stripe.test/portal_3',
+    );
+
+    expect(mockPortalSessionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      return_url: 'https://app.example.test/app/businesses/biz_1',
+    });
+  });
+
+  it("resolves the Portal's return_url to the billing page when opened from there", async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce({ userId: 'user_1', stripeCustomerId: 'cus_1' });
+    mockPortalSessionsCreate.mockResolvedValueOnce({ url: 'https://billing.stripe.test/portal_4' });
+
+    await expect(createBillingPortalSessionAction('biz_1', 'billing')).rejects.toThrow(
+      'REDIRECT:https://billing.stripe.test/portal_4',
+    );
+
+    expect(mockPortalSessionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      return_url: 'https://app.example.test/app/businesses/biz_1/billing',
+    });
+  });
+
+  it('redirects a Portal-session-creation failure back to the resolved return path with an error flag', async () => {
+    mockRequireBusinessOwnership.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockGetCustomerBillingProfile.mockResolvedValueOnce({ userId: 'user_1', stripeCustomerId: 'cus_1' });
+    mockPortalSessionsCreate.mockRejectedValueOnce(new Error('stripe down'));
+
+    await expect(createBillingPortalSessionAction('biz_1', 'billing')).rejects.toThrow(
+      'REDIRECT:/app/businesses/biz_1/billing?error=portal_unavailable',
+    );
   });
 });

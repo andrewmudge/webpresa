@@ -8817,3 +8817,83 @@ web/docs/build_log.md           MODIFIED — this entry
 ```
 
 No application code, tests, or infrastructure (CDK) changed — configuration/secrets only, external to this repo's deployable artifacts.
+
+---
+
+**Date:** 2026-08-19
+
+**Lob switched to live mode on Production (Stage 22.5's other deferred item — postcards can now actually be mailed).** Mirrors the same-day Stripe cutover above, but needed one real code change since Lob's mode isn't purely external configuration.
+
+**Code change**: `SubmitButton.tsx` (`app/admin/(dashboard)/postcards/[postcardId]/`) hardcoded "Uses the Lob test-mode API key currently on file — no real mail is sent," which would silently become false once a live key was wired in — an admin could read that and assume a click was a no-op when it would actually mail a real postcard and charge real money. Added `isLobLiveMode()` (`web/lib/lob/client.ts`) — the same `apiKey.startsWith('live_')` prefix check `lobRequest` already performs for its safety guard, exposed standalone as a read-only check. `page.tsx` now awaits it server-side and passes an `isLiveMode` prop into `SubmitButton`, which renders one of two copy variants accordingly — correct automatically on any environment, not just at cutover time. Added 2 tests to `lib/lob/__tests__/client.test.ts` (`isLobLiveMode` true/false).
+
+**External config, wired by Claude at the user's request once supplied in chat**: `webpresa-prod-lob` (Secrets Manager) overwritten with the live `apiKey`/`webhookSecret` (previously held dev's test-mode key with a placeholder `webhookSecret`, same as Stripe's pre-cutover state). `LOB_SECRET_NAME` and `WEBPRESA_LOB_SENDER_*` were already correctly present on Vercel Production (confirmed, not assumed) — no Vercel env var changes needed, unlike Stripe's cutover.
+
+**Discovered along the way**: the user registered the Live-environment Lob webhook and reported `postcard.mailed` wasn't a selectable event type — only `postcard.delivered` was, alongside the previously-available `created`/`deleted`/`failed`/`rejected`/`rendered_pdf`/`rendered_thumbnails`. This contradicts `status-mapping.ts`'s existing doc comment, which had assumed `mailed` would become selectable once live (based on 2026-08-08 reasoning that test-mode postcards never physically ship, so mailing-lifecycle events wouldn't apply there but would once live). Practical effect, confirmed and accepted by the user rather than acted on: since neither `mailed` nor `billed` (test mode's proxy) will fire on this webhook, `Postcard.status` has no path to `'mailed'` in live mode — it stays `'submitted'` until/unless `postcard.delivered` fires, then jumps straight to `'delivered'`, skipping the intermediate state. No code change made for this, since `SubmitButton.tsx`'s existing success-state check already treats `submitted`/`mailed`/`delivered` as one outcome — flagged in `deployment.md` as worth revisiting (re-check Lob's event picker after a real live postcard has been produced, in case `mailed` becomes selectable then).
+
+**Redeploy**: same mechanism as the Stripe cutover — `main` was behind `dev` by one unrelated commit (`fc569ed`, a campaign feature), fast-forwarded (`git checkout main && git merge --ff-only origin/dev`) and pushed, at the user's explicit request, to trigger Production's redeploy.
+
+**Not yet done, deliberately — the user's own call**: the live end-to-end smoke test (one real postcard, real charge, real mail) was explicitly deferred; should happen before trusting live mode for actual customers.
+
+## Files changed
+
+```
+web/lib/lob/client.ts                              MODIFIED — isLobLiveMode()
+web/lib/lob/__tests__/client.test.ts                MODIFIED — 2 new tests
+web/app/admin/(dashboard)/postcards/[postcardId]/page.tsx          MODIFIED — passes isLiveMode into SubmitButton
+web/app/admin/(dashboard)/postcards/[postcardId]/SubmitButton.tsx  MODIFIED — live-vs-test-accurate copy
+web/docs/deployment.md                              MODIFIED — new "Lob live mode setup (2026-08-19)" section
+web/docs/implementation.md                          MODIFIED — Stage 22.5 deferred-work item marked done
+web/docs/build_log.md                               MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/:
+  npm run lint       — clean
+  npx tsc --noEmit   — clean
+  npm test            — 133 test files, 1392 tests, all passing
+  npm run build        — production build succeeds
+```
+
+No infrastructure (CDK) changes — Secrets Manager value update only, same as Stripe's cutover.
+
+---
+
+**Date:** 2026-08-20
+
+**Two real bugs found and fixed via a live end-to-end production test of the Stripe live-mode cutover** — the user signed up for real with their own card, then tested cancellation through the Customer Portal.
+
+**Bug 1 — scheduled cancellations were never detected.** `mapStripeSubscriptionToAppState` (`lib/stripe/status-mapping.ts`) derived `cancelAtPeriodEnd` solely from `subscription.cancel_at_period_end`. A real cancellation through Stripe's Customer Portal was captured live: the webhook delivered and was processed successfully (confirmed `200 OK` in Stripe's dashboard, twice, one second apart), but the fetched subscription object had `cancel_at_period_end: false` — Stripe's Portal instead sets `cancel_at` to the current period's end timestamp, with `canceled_at` and `cancellation_details.reason: "cancellation_requested"` also populated. The mapping never looked at `cancel_at` at all, so the app kept showing "Basic plan is active. Renews on [date]" post-cancellation instead of "Your plan ends on [date]." This was a real webhook-delivery **and** processing success followed by a silent-wrong-answer bug, not a delivery failure — diagnosed by walking the raw Stripe event payload the user pulled directly from their subscription's timeline. Fixed: `cancelAtPeriodEnd: subscription.cancel_at_period_end || subscription.cancel_at != null` — this app has no concept of an arbitrary cancellation date, so any non-null `cancel_at` is treated the same as the boolean. 2 new tests in `lib/stripe/__tests__/status-mapping.test.ts` using the real payload's field values.
+
+**Bug 2 — "Return to Webpresa" from the Customer Portal always landed on `/account/claim-status`**, regardless of which page actually opened the Portal (dashboard overview, the dedicated Billing page, or claim-status itself) — `createPortalSessionUrl` (`app/account/checkout/actions.ts`) hardcoded a single `return_url`. Fixed by adding a `BillingPortalReturnTo` allowlist (`'claim-status' | 'dashboard' | 'billing'`) resolved server-side to one of three fixed paths — preserves the "no client-supplied return URL" security property from Stage 18's original design (`implementation.md`, "Security requirements") while actually returning to the right page. All 7 call sites (`claim-status/page.tsx` ×2, dashboard `page.tsx`, `ActionRequiredCard.tsx`, billing `page.tsx` ×3) now bind their own page's `returnTo`. 4 tests added/updated in `app/account/checkout/__tests__/actions.test.ts`.
+
+**Also discovered along the way, not yet fixed**: `pendingCheckoutSessionId` is never cleared by the webhook handler (`app/api/webhooks/stripe/route.ts`'s `updateBusiness` call omits it) — contradicts `implementation.md`'s documented webhook workflow step 7 ("clear pendingCheckoutSessionId"). Harmless so far (nothing re-reads a stale `pendingCheckoutSessionId` once `subscriptionStatus` is set), but flagged here for whoever picks it up — out of scope for this fix.
+
+This session's earlier apex-vs-www webhook redirect bug (Stripe and Lob webhooks both registered at `https://webpresa.com/...`, which 308-redirects to `https://www.webpresa.com/...` — Stripe/Lob never follow redirects) was fixed by the user directly in each provider's dashboard (editing the endpoint URL), not a code change; that bug is what caused the very first checkout's entitlement to get stuck, resolved by resending the failed events after the URL fix.
+
+## Files changed
+
+```
+web/lib/stripe/status-mapping.ts                                  MODIFIED — cancel_at fallback for cancelAtPeriodEnd
+web/lib/stripe/__tests__/status-mapping.test.ts                   MODIFIED — 2 new tests using the real captured payload
+web/app/account/checkout/actions.ts                                MODIFIED — BillingPortalReturnTo, per-caller return_url
+web/app/account/checkout/__tests__/actions.test.ts                 MODIFIED — 2 new tests, 2 existing updated
+web/app/account/claim-status/page.tsx                              MODIFIED — binds 'claim-status'
+web/app/app/(dashboard)/businesses/[businessId]/page.tsx           MODIFIED — binds 'dashboard'
+web/app/app/(dashboard)/businesses/[businessId]/ActionRequiredCard.tsx  MODIFIED — binds 'dashboard'
+web/app/app/(dashboard)/businesses/[businessId]/billing/page.tsx   MODIFIED — binds 'billing' ×3
+web/docs/build_log.md                                              MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/:
+  npm run lint       — clean
+  npx tsc --noEmit   — clean
+  npm test            — 133 test files, 1398 tests, all passing
+  npm run build        — production build succeeds
+```
+
+Not yet done: after this deploys, resend one of the two captured `customer.subscription.updated` events from Stripe's dashboard to re-run reconciliation against the fixed code and correct the test business's stored `cancelAtPeriodEnd` — its DynamoDB record still reflects the pre-fix (wrong) value until then.

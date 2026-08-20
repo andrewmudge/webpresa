@@ -30,7 +30,7 @@ export function ActionRequiredCard({ businessId, items }: { businessId: string; 
                 </form>
               )}
               {item.action.kind === 'billing_portal' && (
-                <form action={createBillingPortalSessionAction.bind(null, businessId)}>
+                <form action={createBillingPortalSessionAction.bind(null, businessId, 'dashboard')}>
                   <SaveButton label={item.actionLabel} pendingLabel="Opening Stripe…" fullWidthOnMobile />
                 </form>
               )}

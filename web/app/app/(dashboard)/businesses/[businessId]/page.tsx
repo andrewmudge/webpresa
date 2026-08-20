@@ -144,7 +144,7 @@ export default async function BusinessHomePage({ params, searchParams }: Props) 
             <span className="flex items-center gap-2">
               <AlertTriangle size={16} /> There&apos;s a problem with your last payment. Editing is paused until it&apos;s resolved.
             </span>
-            <form action={createBillingPortalSessionAction.bind(null, businessId)}>
+            <form action={createBillingPortalSessionAction.bind(null, businessId, 'dashboard')}>
               <button type="submit" className="shrink-0 font-medium underline">
                 Fix billing
               </button>

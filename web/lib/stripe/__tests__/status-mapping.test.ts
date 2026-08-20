@@ -108,6 +108,19 @@ describe('mapStripeSubscriptionToAppState', () => {
     expect(result.cancelAtPeriodEnd).toBe(true);
   });
 
+  it('treats a non-null cancel_at as a scheduled cancellation even when cancel_at_period_end is false — the real Customer Portal cancellation shape (2026-08-20 production bug)', () => {
+    const result = mapStripeSubscriptionToAppState(
+      makeSubscription({ cancel_at_period_end: false, cancel_at: 1789870155, canceled_at: 1787192858 }),
+    );
+    expect(result.subscriptionStatus).toBe('active');
+    expect(result.cancelAtPeriodEnd).toBe(true);
+  });
+
+  it('does not treat a null cancel_at as a scheduled cancellation', () => {
+    const result = mapStripeSubscriptionToAppState(makeSubscription({ cancel_at_period_end: false, cancel_at: null }));
+    expect(result.cancelAtPeriodEnd).toBe(false);
+  });
+
   it('maps a fully canceled subscription', () => {
     const result = mapStripeSubscriptionToAppState(makeSubscription({ status: 'canceled' }));
     expect(result.subscriptionStatus).toBe('canceled');

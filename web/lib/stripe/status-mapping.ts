@@ -54,6 +54,17 @@ export interface MappedSubscriptionState {
  * status mapping — read from the subscription's first item, since
  * `current_period_end` lives per-item as of newer Stripe API versions
  * rather than on the subscription object itself.
+ *
+ * `cancelAtPeriodEnd` is derived from `cancel_at_period_end` OR a non-null
+ * `cancel_at` — confirmed against a real live Customer Portal cancellation
+ * (2026-08-20): the Portal's "cancel subscription" flow sets `cancel_at` to
+ * the current period's end timestamp and leaves `cancel_at_period_end`
+ * `false`, which this mapping previously missed entirely (a real production
+ * bug — the app never showed the pending-cancellation notice after a real
+ * customer canceled). `cancel_at` is Stripe's more general "schedule a
+ * cancellation at any specific time" field; this app has no concept of a
+ * cancellation date other than the current period's end, so any non-null
+ * `cancel_at` is treated the same as `cancel_at_period_end: true`.
  */
 export function mapStripeSubscriptionToAppState(subscription: Stripe.Subscription): MappedSubscriptionState {
   const firstItem = subscription.items.data[0];
@@ -71,7 +82,7 @@ export function mapStripeSubscriptionToAppState(subscription: Stripe.Subscriptio
     subscriptionStatus: mapStripeStatusToAppStatus(subscription.status),
     stripeRawStatus: subscription.status,
     currentPeriodEnd: currentPeriodEndUnix ? new Date(currentPeriodEndUnix * 1000).toISOString() : undefined,
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end || subscription.cancel_at != null,
     plan: priceId ? resolvePlanFromPriceId(priceId) : undefined,
     billingInterval: priceId ? resolveBillingIntervalFromPriceId(priceId) : undefined,
     stripeSubscriptionId: subscription.id,

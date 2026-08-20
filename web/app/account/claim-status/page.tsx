@@ -49,7 +49,7 @@ function SubscribedBusinessCard({ business }: { business: Business }) {
           >
             Go to dashboard
           </Link>
-          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-2">
+          <form action={createBillingPortalSessionAction.bind(null, business.businessId, 'claim-status')} className="mt-2">
             <button
               type="submit"
               className="w-full rounded-lg border border-(--color-border) text-gray-700 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
@@ -71,7 +71,7 @@ function SubscribedBusinessCard({ business }: { business: Business }) {
           >
             Go to dashboard
           </Link>
-          <form action={createBillingPortalSessionAction.bind(null, business.businessId)} className="mt-2">
+          <form action={createBillingPortalSessionAction.bind(null, business.businessId, 'claim-status')} className="mt-2">
             <button
               type="submit"
               className="w-full rounded-lg border border-(--color-border) text-gray-700 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"

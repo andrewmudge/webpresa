@@ -53,11 +53,32 @@ async function findClaimIdForAudit(businessId: string, userId: string): Promise<
   return claims.find((claim) => claim.status === 'consumed' && claim.consumedByUserId === userId)?.claimId;
 }
 
-async function createPortalSessionUrl(stripeCustomerId: string): Promise<string> {
+/**
+ * Where the Customer Portal should send the customer back to on "Return to
+ * Webpresa" — a small, fixed allowlist rather than a client-supplied URL, so
+ * `createBillingPortalSessionAction` stays a no-open-redirect server-
+ * controlled return URL (see implementation.md, Stage 18, "Security
+ * requirements") while actually returning to whichever page opened the
+ * Portal, instead of always `/account/claim-status` regardless of caller.
+ */
+export type BillingPortalReturnTo = 'claim-status' | 'dashboard' | 'billing';
+
+function resolveBillingPortalReturnPath(businessId: string, returnTo: BillingPortalReturnTo): string {
+  switch (returnTo) {
+    case 'dashboard':
+      return `/app/businesses/${businessId}`;
+    case 'billing':
+      return `/app/businesses/${businessId}/billing`;
+    case 'claim-status':
+      return '/account/claim-status';
+  }
+}
+
+async function createPortalSessionUrl(stripeCustomerId: string, returnPath: string): Promise<string> {
   const stripe = await getStripeClient();
   const portalSession = await stripe.billingPortal.sessions.create({
     customer: stripeCustomerId,
-    return_url: `${resolveAppBaseUrl()}/account/claim-status`,
+    return_url: `${resolveAppBaseUrl()}${returnPath}`,
   });
   return portalSession.url;
 }
@@ -83,7 +104,7 @@ export async function createCheckoutSessionAction(
   if (business.subscriptionStatus === 'active' || business.subscriptionStatus === 'past_due') {
     const profile = await getCustomerBillingProfile(session.sub);
     if (!profile) redirect('/account/claim-status');
-    redirect(await createPortalSessionUrl(profile.stripeCustomerId));
+    redirect(await createPortalSessionUrl(profile.stripeCustomerId, resolveBillingPortalReturnPath(businessId, 'claim-status')));
   }
 
   const stripe = await getStripeClient();
@@ -166,25 +187,30 @@ export async function createCheckoutSessionAction(
 }
 
 /**
- * Bound to a `businessId` and used directly as a form action (no
- * `useActionState`). A Stripe portal-session failure redirects back to the
- * calling business's billing page with `?error=portal_unavailable` instead
- * of throwing to a generic error boundary, so the page can show a plain-
- * language retry message.
+ * Bound to a `businessId` and a `returnTo` (see `BillingPortalReturnTo`) and
+ * used directly as a form action (no `useActionState`) — every call site
+ * binds the page it's rendered on, so "Return to Webpresa" in the Portal
+ * sends the customer back to wherever they actually opened it from, not
+ * unconditionally to `/account/claim-status`. A Stripe portal-session
+ * failure redirects back to that same resolved path with
+ * `?error=portal_unavailable` instead of throwing to a generic error
+ * boundary, so the page can show a plain-language retry message.
  */
-export async function createBillingPortalSessionAction(businessId: string): Promise<void> {
+export async function createBillingPortalSessionAction(businessId: string, returnTo: BillingPortalReturnTo): Promise<void> {
   const session = await requireCustomerSession();
   await requireBusinessOwnership(session.sub, businessId);
 
+  const returnPath = resolveBillingPortalReturnPath(businessId, returnTo);
+
   const profile = await getCustomerBillingProfile(session.sub);
-  if (!profile) redirect('/account/claim-status');
+  if (!profile) redirect(returnPath);
 
   let portalUrl: string;
   try {
-    portalUrl = await createPortalSessionUrl(profile.stripeCustomerId);
+    portalUrl = await createPortalSessionUrl(profile.stripeCustomerId, returnPath);
   } catch (err) {
     console.error('[stripe] portal_session_creation_failed', { businessId, err });
-    redirect(`/app/businesses/${businessId}/billing?error=portal_unavailable`);
+    redirect(`${returnPath}?error=portal_unavailable`);
   }
 
   redirect(portalUrl);

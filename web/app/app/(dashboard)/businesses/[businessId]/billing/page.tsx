@@ -119,7 +119,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
               {periodEndDisplay ?? '—'}
             </p>
 
-            <form action={createBillingPortalSessionAction.bind(null, businessId)} className="mt-5">
+            <form action={createBillingPortalSessionAction.bind(null, businessId, 'billing')} className="mt-5">
               <SaveButton
                 label="Manage Payment & Subscription"
                 pendingLabel="Opening Stripe…"
@@ -231,7 +231,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
           <p className="mt-4 text-xs text-gray-500">
             Payment methods, receipts, and billing details are managed securely in Stripe.
           </p>
-          <form action={createBillingPortalSessionAction.bind(null, businessId)} className="mt-4">
+          <form action={createBillingPortalSessionAction.bind(null, businessId, 'billing')} className="mt-4">
             <SaveButton label="Manage Payment Methods" pendingLabel="Opening Stripe…" variant="secondary" fullWidthOnMobile />
           </form>
         </Card>
@@ -239,7 +239,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
 
       <Card title="Billing history">
         <p className="text-sm text-gray-600">Your invoices and receipts are available in the Stripe billing portal.</p>
-        <form action={createBillingPortalSessionAction.bind(null, businessId)} className="mt-4">
+        <form action={createBillingPortalSessionAction.bind(null, businessId, 'billing')} className="mt-4">
           <SaveButton
             label="View invoices in Stripe"
             pendingLabel="Opening Stripe…"
