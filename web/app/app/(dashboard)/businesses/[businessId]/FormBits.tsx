@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 /** Small shared form primitives reused across every customer editor tab. */
 
@@ -39,6 +41,81 @@ export function TextField({
         autoComplete={autoComplete}
         className="w-full rounded-lg border border-(--color-border) px-3 py-2 text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400"
       />
+    </label>
+  );
+}
+
+/**
+ * A single-line `TextField` that can be expanded into a multi-line
+ * `textarea` for fields whose text often overflows a single line (e.g.
+ * service descriptions) — the box stays compact by default, but every
+ * field gets the same expand affordance rather than only the ones that
+ * happen to overflow, so behavior is predictable. Only one of the two
+ * underlying elements is ever mounted at a time (both share one `name` and
+ * one controlled value), so toggling never loses what's been typed and
+ * never double-submits the field.
+ */
+export function ExpandableTextField({
+  label,
+  name,
+  defaultValue,
+  placeholder,
+  required,
+  disabled,
+  maxLength,
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string;
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+  maxLength?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [value, setValue] = useState(defaultValue ?? '');
+  const fieldClassName =
+    'w-full rounded-lg border border-(--color-border) px-3 py-2 text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-(--color-brand) disabled:bg-gray-50 disabled:text-gray-400';
+
+  return (
+    <label className="block">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          disabled={disabled}
+          className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-gray-400 hover:text-(--color-brand) disabled:opacity-50"
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
+      </div>
+      {expanded ? (
+        <textarea
+          name={name}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={placeholder}
+          required={required}
+          disabled={disabled}
+          maxLength={maxLength}
+          rows={4}
+          className={fieldClassName}
+        />
+      ) : (
+        <input
+          type="text"
+          name={name}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={placeholder}
+          required={required}
+          disabled={disabled}
+          maxLength={maxLength}
+          className={fieldClassName}
+        />
+      )}
     </label>
   );
 }

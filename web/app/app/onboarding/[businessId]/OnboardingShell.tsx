@@ -15,8 +15,13 @@ export function OnboardingShell({ businessName, children }: { businessName?: str
     <div className="min-h-screen page-ambient-bg">
       <header className="mx-auto flex max-w-[1800px] items-center justify-between px-4 py-6 sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-2">
-          <Image src="/webpresa_w.png" alt="Webpresa" width={692} height={394} className="h-7 w-auto shrink-0" />
-          <span className="shrink-0 text-base font-bold tracking-tight text-gray-900">Webpresa</span>
+          <Image
+            src="/webpresa_logo_horizontal_cropped_nobg.png"
+            alt="Webpresa"
+            width={1460}
+            height={238}
+            className="h-7 w-auto shrink-0"
+          />
           {businessName && (
             <>
               <span className="shrink-0 text-gray-300" aria-hidden="true">/</span>

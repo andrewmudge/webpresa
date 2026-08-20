@@ -1,5 +1,5 @@
 import type { Business } from '@/domain/models/business';
-import { Card, TextField, SaveButton } from '../FormBits';
+import { Card, TextField, ExpandableTextField, SaveButton } from '../FormBits';
 import { PhotoSlotPicker } from '../PhotoSlotPicker';
 import { updateServicesCardActionCustomer, updateWhyChooseUsCardActionCustomer, updateSectionContentActionCustomer } from '../actions';
 import { getCachedPreviews } from './data';
@@ -46,7 +46,7 @@ export async function ServicesTab({ businessId, business, isReadOnly }: Props) {
             {serviceRows.slice(0, 10).map((row, i) => (
               <div key={i} className="grid gap-2 sm:grid-cols-2 border border-gray-100 rounded-lg p-3">
                 <TextField label={`Service ${i + 1} name`} name={`services.${i}.name`} defaultValue={row.name} disabled={isReadOnly} maxLength={100} />
-                <TextField label="Description" name={`services.${i}.description`} defaultValue={row.description} disabled={isReadOnly} maxLength={500} />
+                <ExpandableTextField label="Description" name={`services.${i}.description`} defaultValue={row.description} disabled={isReadOnly} maxLength={500} />
               </div>
             ))}
           </div>

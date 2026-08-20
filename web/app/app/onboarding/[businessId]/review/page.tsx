@@ -4,7 +4,7 @@ import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { ensureCustomerOnboarding } from '@/lib/onboarding/ensure';
 import { canAccessOnboardingStep } from '@/lib/onboarding/steps';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
-import { TextField, TextAreaField, SaveButton } from '@/app/app/(dashboard)/businesses/[businessId]/FormBits';
+import { TextField, TextAreaField, ExpandableTextField, SaveButton } from '@/app/app/(dashboard)/businesses/[businessId]/FormBits';
 import { OnboardingShell } from '../OnboardingShell';
 import { OnboardingProgress } from '../OnboardingProgress';
 import { OnboardingStepLayout } from '../OnboardingStepLayout';
@@ -130,7 +130,7 @@ export default async function OnboardingReviewPage({ params, searchParams }: Pro
                 {serviceRows.map((row, i) => (
                   <div key={i} className="grid gap-2 rounded-lg border border-gray-100 p-3 sm:grid-cols-2">
                     <TextField label={`Service ${i + 1} name`} name={`services.${i}.name`} defaultValue={row.name} maxLength={100} />
-                    <TextField label="Description" name={`services.${i}.description`} defaultValue={row.description} maxLength={500} />
+                    <ExpandableTextField label="Description" name={`services.${i}.description`} defaultValue={row.description} maxLength={500} />
                   </div>
                 ))}
                 <div className="flex items-center gap-3">
@@ -161,7 +161,7 @@ export default async function OnboardingReviewPage({ params, searchParams }: Pro
           <OnboardingPrimaryButton
             action={completeReviewAction.bind(null, businessId)}
             externalFormId={REVIEW_FORM_ID}
-            label="Continue to domain"
+            label={business.email ? 'Continue to domain' : 'Continue to notifications'}
             pendingLabel="Saving…"
           />
         }
