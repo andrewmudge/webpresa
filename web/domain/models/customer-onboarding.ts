@@ -27,8 +27,15 @@ export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
  * post-payment `/account/checkout/success` page now performs the
  * celebrate/orient job a dedicated Welcome step used to, making it
  * redundant. Review is the first real step a customer lands on now.
+ *
+ * `'leads'` runs right after Review, before Domain, because it depends on
+ * Review's `email` outcome: if Review left `Business.email` set, this step
+ * is completed automatically (copying it into `leadNotificationEmail`) and
+ * never shown; if not, it's the first step the customer actually sees, so
+ * lead-capture notifications have somewhere to go before the site can even
+ * go live.
  */
-export const ONBOARDING_COMPLETABLE_STEPS = ['review', 'domain', 'publish', 'tour'] as const;
+export const ONBOARDING_COMPLETABLE_STEPS = ['review', 'leads', 'domain', 'publish', 'tour'] as const;
 export type OnboardingCompletableStep = (typeof ONBOARDING_COMPLETABLE_STEPS)[number];
 
 export const ONBOARDING_STEPS = [...ONBOARDING_COMPLETABLE_STEPS, 'complete'] as const;

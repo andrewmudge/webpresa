@@ -463,4 +463,12 @@ export interface Business extends MutableTimestampedRecord {
    *  (`localStorage`, keyed by draft `previewId`) and resets automatically on
    *  publish — this field is the durable, cross-device opt-out. */
   draftChangesNoticeEnabled?: boolean;
+  /** Private inbox for new-lead notifications (`lib/leads/notify.ts`'s send
+   *  target) — deliberately separate from the public `email` field above,
+   *  which is displayed on the business's own site as its contact email. An
+   *  owner's lead-routing address should never leak into that public
+   *  display just because it happens to be set. Collected during onboarding
+   *  (auto-copied from `email` when one already exists, otherwise asked for
+   *  explicitly) and editable anytime after via Settings → Notifications. */
+  leadNotificationEmail?: string;
 }

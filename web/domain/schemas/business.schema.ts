@@ -146,6 +146,7 @@ export const BusinessSchema = z.object({
   termsVersion: z.string().max(50).optional(),
   acceptedTermsAt: IsoTimestampSchema.optional(),
   draftChangesNoticeEnabled: z.boolean().optional(),
+  leadNotificationEmail: z.string().email().optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

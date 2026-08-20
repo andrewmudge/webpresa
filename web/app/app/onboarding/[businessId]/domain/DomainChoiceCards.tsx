@@ -84,7 +84,6 @@ export function DomainChoiceCards({ businessId, displayUrl }: { businessId: stri
         onSelect={() => setSelected('webpresa')}
         icon={<Globe size={18} />}
         title="Use my Webpresa address for now"
-        badge="Recommended"
         subtitle="Your website will be published at your Webpresa address. Connect a custom domain anytime later."
       >
         <div className="space-y-3">

@@ -110,8 +110,8 @@ export default async function OnboardingDomainPage({ params, searchParams }: Pro
 
       <OnboardingActionBar
         back={
-          <Link href={`/app/onboarding/${businessId}/review`} className="text-sm font-medium text-gray-500 hover:text-gray-700">
-            Back to review
+          <Link href={`/app/onboarding/${businessId}/leads`} className="text-sm font-medium text-gray-500 hover:text-gray-700">
+            Back
           </Link>
         }
         status={

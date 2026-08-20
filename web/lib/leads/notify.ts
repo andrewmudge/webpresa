@@ -14,16 +14,21 @@ import { log } from '@/lib/logging/log';
  * manual per-lead retry action — so there is never a second, drifting copy
  * of "what counts as success" or "how attempts are recorded".
  *
- * Never throws — every failure mode (no `Business.email` configured, SES
+ * Never throws — every failure mode (no notification email configured, SES
  * error, timeout) is recorded as a `'failed'` outcome and swallowed. A
  * notification failure must never affect the caller's own control flow;
  * the Lead is already durable by the time this ever runs.
  */
 export async function sendLeadNotificationAndRecordOutcome(
   lead: Lead,
-  business: Pick<Business, 'email' | 'name' | 'slug'>,
+  business: Pick<Business, 'email' | 'leadNotificationEmail' | 'name' | 'slug'>,
 ): Promise<void> {
-  if (!business.email) {
+  // `leadNotificationEmail` is the dedicated, private lead-routing address
+  // (set during onboarding or Settings → Notifications); `email` is kept as
+  // a fallback for any business that predates that field and never went
+  // through the flow that populates it.
+  const notificationEmail = business.leadNotificationEmail || business.email;
+  if (!notificationEmail) {
     await updateLeadNotificationOutcome(lead.leadId, {
       status: 'failed',
       error: 'business_has_no_notification_email',
@@ -43,7 +48,7 @@ export async function sendLeadNotificationAndRecordOutcome(
   }
 
   const result = await sendLeadNotificationEmail({
-    to: business.email,
+    to: notificationEmail,
     businessName: business.name,
     sourcePage: `/b/${business.slug}`,
     lead,

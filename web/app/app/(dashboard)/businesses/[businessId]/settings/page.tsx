@@ -66,6 +66,7 @@ export default async function SettingsPage({ params, searchParams }: Props) {
         <NotificationsCard
           businessId={businessId}
           defaultEnabled={business.draftChangesNoticeEnabled !== false}
+          defaultLeadNotificationEmail={business.leadNotificationEmail}
           isReadOnly={isReadOnly}
         />
         <DangerZoneCard

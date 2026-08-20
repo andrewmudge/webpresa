@@ -26,6 +26,7 @@ import {
 } from '@/lib/customer-editing/photos';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import { updateCustomerDraftNoticePreference } from '@/lib/customer-editing/notification-preference';
+import { updateCustomerLeadNotificationEmail } from '@/lib/customer-editing/lead-notification-email';
 import { updateCustomerBusinessHours } from '@/lib/customer-editing/hours';
 import { updateCustomerAccountProfile } from '@/lib/customer-editing/account';
 import { deleteCustomerWebsite } from '@/lib/customer-editing/delete-website';
@@ -331,6 +332,14 @@ export async function updateDraftNoticePreferenceActionCustomer(
 ): Promise<{ message?: string } | undefined> {
   await requireEditAccess(businessId);
   return updateCustomerDraftNoticePreference(businessId, enabled);
+}
+
+export async function updateLeadNotificationEmailActionCustomer(
+  businessId: string,
+  email: string,
+): Promise<{ message?: string } | undefined> {
+  await requireEditAccess(businessId);
+  return updateCustomerLeadNotificationEmail(businessId, email);
 }
 
 // ---------------------------------------------------------------------------

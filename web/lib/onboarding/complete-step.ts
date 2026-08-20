@@ -42,6 +42,21 @@ export async function completeReviewStep(businessId: string): Promise<CustomerOn
   return updated;
 }
 
+/**
+ * The `Business.leadNotificationEmail` write itself happens separately, via
+ * `updateCustomerLeadNotificationEmail` (`lib/customer-editing/`) — this
+ * only ever marks the step complete, matching this file's own split
+ * between editing logic and progress bookkeeping. Called either when the
+ * caller auto-skips this step (Review already left `Business.email` set)
+ * or after the customer submits the step's own form.
+ */
+export async function completeLeadsStep(businessId: string): Promise<CustomerOnboarding> {
+  const existing = await requireExistingOnboarding(businessId);
+  const updated = addCompletedStep(existing, 'leads');
+  await putCustomerOnboarding(updated);
+  return updated;
+}
+
 /** Part 1: the only way to complete the domain step is an explicit defer. Parts 2/3 add their own completion paths on this same step. */
 export async function deferDomainStep(businessId: string): Promise<CustomerOnboarding> {
   const existing = await requireExistingOnboarding(businessId);

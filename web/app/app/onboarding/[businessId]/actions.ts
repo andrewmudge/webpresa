@@ -6,8 +6,10 @@ import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info';
 import { updateCustomerSectionContent } from '@/lib/customer-editing/section-content';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
+import { updateCustomerLeadNotificationEmail } from '@/lib/customer-editing/lead-notification-email';
 import {
   completeReviewStep,
+  completeLeadsStep,
   deferDomainStep,
   completeExistingDomainStep,
   completePublishStep,
@@ -54,6 +56,39 @@ export async function completeReviewAction(businessId: string, formData: FormDat
   }
 
   await completeReviewStep(businessId);
+
+  // The `leads` step asks where to send new-lead notifications. If Review
+  // just left `Business.email` set, reuse it (matching how the two fields
+  // are meant to start in sync) and skip straight past — the step is never
+  // shown to a customer who already has a notification address. Otherwise
+  // send them to the step so they can provide one.
+  if (business.email) {
+    await updateCustomerLeadNotificationEmail(businessId, business.email);
+    await completeLeadsStep(businessId);
+    redirect(`/app/onboarding/${businessId}/domain`);
+  }
+  redirect(`/app/onboarding/${businessId}/leads`);
+}
+
+/**
+ * Completes the `leads` step — only reachable when Review left
+ * `Business.email` unset (see `completeReviewAction`), so an explicit
+ * notification email is required here; there's no "skip" option.
+ */
+export async function completeLeadsAction(businessId: string, formData: FormData): Promise<void> {
+  await requireOnboardingAccess(businessId);
+
+  const email = formData.get('leadNotificationEmail');
+  if (typeof email !== 'string' || !email.trim()) {
+    redirect(`/app/onboarding/${businessId}/leads?error=${encodeURIComponent('Enter an email address for new-lead notifications.')}`);
+  }
+
+  const result = await updateCustomerLeadNotificationEmail(businessId, email.trim());
+  if (result?.message) {
+    redirect(`/app/onboarding/${businessId}/leads?error=${encodeURIComponent(result.message)}`);
+  }
+
+  await completeLeadsStep(businessId);
   redirect(`/app/onboarding/${businessId}/domain`);
 }
 

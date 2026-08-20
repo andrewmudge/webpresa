@@ -8,6 +8,7 @@ import {
 
 const STEP_LABELS: Record<OnboardingCompletableStep, string> = {
   review: 'Review',
+  leads: 'Notifications',
   domain: 'Domain',
   publish: 'Publish',
   tour: 'Tour',
@@ -15,6 +16,7 @@ const STEP_LABELS: Record<OnboardingCompletableStep, string> = {
 
 const STEP_SUBLABELS: Record<OnboardingCompletableStep, string> = {
   review: 'Business information',
+  leads: 'Where leads go',
   domain: 'Choose your address',
   publish: 'Go live',
   tour: 'Learn the basics',

@@ -19,7 +19,7 @@ vi.mock('@/lib/db/customer-onboarding', () => ({
   putCustomerOnboarding: mockPut,
 }));
 
-import { completeReviewStep, deferDomainStep, completePublishStep, completeTourStep } from '@/lib/onboarding/complete-step';
+import { completeReviewStep, completeLeadsStep, deferDomainStep, completePublishStep, completeTourStep } from '@/lib/onboarding/complete-step';
 import type { CustomerOnboarding } from '@/domain/models/customer-onboarding';
 
 function makeRecord(overrides: Partial<CustomerOnboarding> = {}): CustomerOnboarding {
@@ -47,7 +47,7 @@ describe('step-completion functions', () => {
     const result = await completeReviewStep('biz_1');
 
     expect(result.completedSteps).toEqual(['review']);
-    expect(result.currentStep).toBe('domain');
+    expect(result.currentStep).toBe('leads');
     expect(result.status).toBe('in_progress');
     expect(mockPut).toHaveBeenCalledWith(expect.objectContaining({ completedSteps: ['review'] }));
   });
@@ -58,36 +58,59 @@ describe('step-completion functions', () => {
     const result = await completeReviewStep('biz_1');
 
     expect(result.completedSteps).toEqual(['review']);
+    expect(result.currentStep).toBe('leads');
+  });
+
+  it('completeLeadsStep appends leads and moves to domain', async () => {
+    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review'], status: 'in_progress' }));
+
+    const result = await completeLeadsStep('biz_1');
+
+    expect(result.completedSteps).toEqual(['review', 'leads']);
+    expect(result.currentStep).toBe('domain');
+    expect(result.status).toBe('in_progress');
+  });
+
+  it('completeLeadsStep is idempotent — re-calling it does not duplicate the step', async () => {
+    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review', 'leads'], status: 'in_progress' }));
+
+    const result = await completeLeadsStep('biz_1');
+
+    expect(result.completedSteps).toEqual(['review', 'leads']);
     expect(result.currentStep).toBe('domain');
   });
 
   it('deferDomainStep sets domainDecision and domainDeferredAt', async () => {
-    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review'], status: 'in_progress' }));
+    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review', 'leads'], status: 'in_progress' }));
 
     const result = await deferDomainStep('biz_1');
 
     expect(result.domainDecision).toBe('defer');
     expect(result.domainDeferredAt).toBeTruthy();
-    expect(result.completedSteps).toEqual(['review', 'domain']);
+    expect(result.completedSteps).toEqual(['review', 'leads', 'domain']);
   });
 
   it('does not become completed until publish and tour are also present', async () => {
-    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review', 'domain'], status: 'in_progress' }));
+    mockGetByBusinessId.mockResolvedValueOnce(
+      makeRecord({ completedSteps: ['review', 'leads', 'domain'], status: 'in_progress' }),
+    );
 
     const result = await completePublishStep('biz_1');
 
-    expect(result.completedSteps).toEqual(['review', 'domain', 'publish']);
+    expect(result.completedSteps).toEqual(['review', 'leads', 'domain', 'publish']);
     expect(result.currentStep).toBe('tour');
     expect(result.status).toBe('in_progress'); // NOT completed — tour still missing
     expect(result.completedAt).toBeUndefined();
   });
 
   it('completePublishStep is idempotent — re-calling it does not duplicate the step', async () => {
-    mockGetByBusinessId.mockResolvedValueOnce(makeRecord({ completedSteps: ['review', 'domain', 'publish'], status: 'in_progress' }));
+    mockGetByBusinessId.mockResolvedValueOnce(
+      makeRecord({ completedSteps: ['review', 'leads', 'domain', 'publish'], status: 'in_progress' }),
+    );
 
     const result = await completePublishStep('biz_1');
 
-    expect(result.completedSteps).toEqual(['review', 'domain', 'publish']);
+    expect(result.completedSteps).toEqual(['review', 'leads', 'domain', 'publish']);
     expect(result.currentStep).toBe('tour');
     expect(result.status).toBe('in_progress');
   });
@@ -96,19 +119,19 @@ describe('step-completion functions', () => {
     // Simulates a customer who only ever calls "Enter my dashboard for now"
     // (continueWithDraftAction) — completePublishStep is simply never
     // invoked, so there is no code path that could mark the record complete.
-    const record = makeRecord({ completedSteps: ['review', 'domain'], status: 'in_progress' });
+    const record = makeRecord({ completedSteps: ['review', 'leads', 'domain'], status: 'in_progress' });
     expect(record.status).toBe('in_progress');
     expect(mockPut).not.toHaveBeenCalled();
   });
 
   it('reaches completed only once publish and tour are both present', async () => {
     mockGetByBusinessId.mockResolvedValueOnce(
-      makeRecord({ completedSteps: ['review', 'domain', 'publish'], status: 'in_progress' }),
+      makeRecord({ completedSteps: ['review', 'leads', 'domain', 'publish'], status: 'in_progress' }),
     );
 
     const result = await completeTourStep('biz_1', 'completed');
 
-    expect(result.completedSteps).toEqual(['review', 'domain', 'publish', 'tour']);
+    expect(result.completedSteps).toEqual(['review', 'leads', 'domain', 'publish', 'tour']);
     expect(result.currentStep).toBe('complete');
     expect(result.status).toBe('completed');
     expect(result.completedAt).toBeTruthy();
@@ -118,7 +141,7 @@ describe('step-completion functions', () => {
 
   it('records a skipped tour distinctly from a completed one', async () => {
     mockGetByBusinessId.mockResolvedValueOnce(
-      makeRecord({ completedSteps: ['review', 'domain', 'publish'], status: 'in_progress' }),
+      makeRecord({ completedSteps: ['review', 'leads', 'domain', 'publish'], status: 'in_progress' }),
     );
 
     const result = await completeTourStep('biz_1', 'skipped');
