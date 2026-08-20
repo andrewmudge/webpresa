@@ -182,6 +182,7 @@ describe('POST /api/webhooks/stripe', () => {
       'biz_1',
       expect.objectContaining({
         subscriptionStatus: 'active',
+        status: 'customer',
         stripeSubscriptionId: 'sub_1',
         cancelAtPeriodEnd: false,
         lastStripeEventId: 'evt_4',
@@ -240,6 +241,33 @@ describe('POST /api/webhooks/stripe', () => {
     expect(response.status).toBe(200);
     expect(mockGetBusinessByStripeSubscriptionId).toHaveBeenCalledWith('sub_2');
     expect(mockUpdateBusiness).toHaveBeenCalledWith('biz_2', expect.objectContaining({ subscriptionStatus: 'past_due' }));
+    // past_due must never move a business to cancelled — it stays whatever it already was.
+    const payload = mockUpdateBusiness.mock.calls.find(([id]) => id === 'biz_2')?.[1];
+    expect(payload).not.toHaveProperty('status');
+  });
+
+  it('maps a canceled subscription to status: cancelled', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_cancel',
+      type: 'customer.subscription.deleted',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1' });
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'canceled',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_x' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateBusiness).toHaveBeenCalledWith(
+      'biz_1',
+      expect.objectContaining({ subscriptionStatus: 'canceled', status: 'cancelled' }),
+    );
   });
 
   it('returns 500 on an unexpected internal failure so Stripe retries — never a silent drop', async () => {

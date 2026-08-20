@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { Business } from '@/domain/models/business';
 import { QUALIFICATION_LABELS, QUALIFICATION_TONE } from '@/lib/scoring/labels';
 import { DeleteBusinessRowButton } from './DeleteBusinessRowButton';
+import { StatusBadge } from './StatusBadge';
 
 /**
  * Client-side name search over the currently-loaded page of businesses
@@ -122,17 +123,5 @@ function QualificationCell({ business: b }: { business: Business }) {
     >
       {QUALIFICATION_LABELS[qualification]}
     </span>
-  );
-}
-
-function StatusBadge({ status }: { status: Business['status'] }) {
-  const styles: Record<Business['status'], string> = {
-    active: 'bg-green-50 text-green-700',
-    pending: 'bg-yellow-50 text-yellow-700',
-    inactive: 'bg-gray-50 text-gray-600',
-    archived: 'bg-red-50 text-red-600',
-  };
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}>{status}</span>
   );
 }

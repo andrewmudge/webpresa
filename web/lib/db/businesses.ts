@@ -9,7 +9,8 @@ import {
   QueryCommand,
   type ScanCommandInput,
 } from '@aws-sdk/lib-dynamodb';
-import type { Business } from '@/domain/models/business';
+import type { Business, BusinessStatus } from '@/domain/models/business';
+import { BUSINESS_STATUSES } from '@/domain/models/business';
 import { BusinessSchema } from '@/domain/schemas/business.schema';
 import { WEBSITE_SECTION_TYPES } from '@/domain/constants/website-sections';
 import { getDynamoDBClient, TABLE_BUSINESSES } from './client';
@@ -19,6 +20,7 @@ import { getDynamoDBClient, TABLE_BUSINESSES } from './client';
 // ---------------------------------------------------------------------------
 
 const KNOWN_SECTION_TYPES = new Set<string>(WEBSITE_SECTION_TYPES);
+const KNOWN_STATUSES = new Set<string>(BUSINESS_STATUSES);
 
 interface RawWebsiteSections {
   sections?: unknown[];
@@ -27,37 +29,53 @@ interface RawWebsiteSections {
 
 interface RawBusinessItem {
   websiteSections?: RawWebsiteSections;
+  status?: unknown;
   [key: string]: unknown;
 }
 
 /**
- * Parses a raw DynamoDB item into a validated `Business`, tolerating a
- * `websiteSections.sections` entry whose `component` no longer exists in
- * the current catalog — e.g. the former `testimonials` section, merged into
- * `reviews` (see build_log.md). `BusinessSchema`'s `websiteSections` field
- * is intentionally strict (`z.enum(WEBSITE_SECTION_TYPES)`) so a *new* save
- * can never persist an unsupported component — but applied unmodified to a
- * *read*, that same strictness would reject the entire business record over
- * one stale entry. This mirrors `resolveStoredOrDefaultSections`'s
- * render-time leniency (`lib/website-sections/resolve.ts`) one layer
- * earlier, so a legacy record never even fails to load. Write paths
- * (`putBusiness`/`updateBusiness`) intentionally keep calling
- * `BusinessSchema.parse()` directly — full strictness for anything actually
- * being persisted going forward.
+ * Parses a raw DynamoDB item into a validated `Business`, tolerating two
+ * kinds of stale data rather than rejecting the whole record:
+ *
+ * 1. A `websiteSections.sections` entry whose `component` no longer exists
+ *    in the current catalog — e.g. the former `testimonials` section,
+ *    merged into `reviews` (see build_log.md).
+ * 2. A `status` value from the pre-funnel-redesign enum (`active`/
+ *    `inactive`/`archived` — `pending` is shared by both enums and never
+ *    hits this path). Substituted with `'pending'` so a business that
+ *    hasn't been through the one-off backfill script yet still loads
+ *    everywhere (`getBusinessById`, the admin list, `/b/[slug]`) instead of
+ *    throwing on every read until the backfill runs.
+ *
+ * `BusinessSchema`'s corresponding fields are intentionally strict
+ * (`z.enum(...)`) so a *new* save can never persist an unsupported value —
+ * but applied unmodified to a *read*, that same strictness would reject the
+ * entire business record over one stale field. This mirrors
+ * `resolveStoredOrDefaultSections`'s render-time leniency
+ * (`lib/website-sections/resolve.ts`) one layer earlier, so a legacy record
+ * never even fails to load. Write paths (`putBusiness`/`updateBusiness`)
+ * intentionally keep calling `BusinessSchema.parse()` directly — full
+ * strictness for anything actually being persisted going forward.
  */
 function parseBusinessItem(raw: unknown): Business {
   const item = raw as RawBusinessItem;
-  const sections = item?.websiteSections?.sections;
-  if (!Array.isArray(sections)) return BusinessSchema.parse(raw);
 
-  const cleanedSections = sections.filter(
-    (s) => typeof s === 'object' && s !== null && KNOWN_SECTION_TYPES.has((s as { component?: unknown }).component as string),
-  );
-  if (cleanedSections.length === sections.length) return BusinessSchema.parse(raw);
+  const sections = item?.websiteSections?.sections;
+  const cleanedSections =
+    Array.isArray(sections) &&
+    sections.filter(
+      (s) => typeof s === 'object' && s !== null && KNOWN_SECTION_TYPES.has((s as { component?: unknown }).component as string),
+    );
+  const needsSectionsFix = cleanedSections !== false && cleanedSections.length !== sections?.length;
+
+  const needsStatusFix = typeof item?.status === 'string' && !KNOWN_STATUSES.has(item.status);
+
+  if (!needsSectionsFix && !needsStatusFix) return BusinessSchema.parse(raw);
 
   return BusinessSchema.parse({
     ...item,
-    websiteSections: { ...item.websiteSections, sections: cleanedSections },
+    ...(needsSectionsFix ? { websiteSections: { ...item.websiteSections, sections: cleanedSections } } : {}),
+    ...(needsStatusFix ? { status: 'pending' satisfies BusinessStatus } : {}),
   });
 }
 
@@ -471,6 +489,65 @@ export async function releaseOwnership(businessId: string): Promise<boolean> {
         UpdateExpression: 'REMOVE ownerUserId, claimedAt SET updatedAt = :now',
         ConditionExpression: 'attribute_exists(ownerUserId)',
         ExpressionAttributeValues: { ':now': now },
+      }),
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return false;
+    throw err;
+  }
+}
+
+type AdvanceableBusinessStatus = 'outreach' | 'engaged' | 'claimed';
+
+/**
+ * Every status value the target may legally advance from — encodes the
+ * funnel's forward-only rank order (see `BUSINESS_STATUSES`'s doc comment).
+ * `customer`/`cancelled` deliberately never appear in any list here: a
+ * business already at either one makes every one of these conditions fail,
+ * which is what makes this helper self-guarding against ever regressing a
+ * paying (or formerly paying) customer back to an earlier funnel stage.
+ */
+const ADVANCE_ALLOWED_PRIOR: Record<AdvanceableBusinessStatus, BusinessStatus[]> = {
+  outreach: ['pending'],
+  engaged: ['pending', 'outreach'],
+  claimed: ['pending', 'outreach', 'engaged'],
+};
+
+/**
+ * Advances a business's funnel `status` forward by one step, only if its
+ * current status is still behind `target` — a race-safe, conditional write
+ * so the three independent trigger call sites (postcard submission, a
+ * campaign-code scan, claim consumption) can never regress a business that
+ * another trigger has already moved further along, and repeat events
+ * (re-mailing, re-scanning) are harmless no-ops.
+ *
+ * Returns `false` (never throws) when the condition doesn't hold — already
+ * at or past `target` — matching `releaseOwnership`'s conditional-update
+ * convention. Bypasses `updateBusiness()` deliberately: that function has no
+ * `ConditionExpression` and does a read-then-write, which isn't race-safe
+ * here.
+ */
+export async function advanceBusinessStatus(businessId: string, target: AdvanceableBusinessStatus): Promise<boolean> {
+  const allowedPrior = ADVANCE_ALLOWED_PRIOR[target];
+  const client = getDynamoDBClient();
+  const now = new Date().toISOString();
+
+  const priorValueAliases = allowedPrior.map((_, i) => `:prior${i}`);
+  const expressionAttributeValues: Record<string, unknown> = { ':target': target, ':now': now };
+  allowedPrior.forEach((status, i) => {
+    expressionAttributeValues[`:prior${i}`] = status;
+  });
+
+  try {
+    await client.send(
+      new UpdateCommand({
+        TableName: TABLE_BUSINESSES(),
+        Key: { businessId },
+        UpdateExpression: 'SET #status = :target, updatedAt = :now',
+        ConditionExpression: `#status IN (${priorValueAliases.join(', ')})`,
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: expressionAttributeValues,
       }),
     );
     return true;

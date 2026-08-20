@@ -36,6 +36,7 @@ import {
   updateBusiness,
   getBusinessesByOwnerUserId,
   releaseOwnership,
+  advanceBusinessStatus,
 } from '@/lib/db/businesses';
 import { createBusiness } from '@/domain/factories/business.factory';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
@@ -107,6 +108,19 @@ describe('getBusinessById', () => {
     // record — back down to exactly the known catalog's section count.
     expect(result?.websiteSections?.sections).toHaveLength(legacySections.sections.length);
   });
+
+  it.each(['active', 'inactive', 'archived'])(
+    "tolerates a stored status of '%s' from before the funnel-status redesign, substituting 'pending'",
+    async (legacyStatus) => {
+      const b = { ...makeBusiness(), status: legacyStatus };
+      mockSend.mockResolvedValueOnce({ Item: b });
+
+      const result = await getBusinessById(b.businessId);
+
+      expect(result).not.toBeNull();
+      expect(result?.status).toBe('pending');
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -310,15 +324,15 @@ describe('listBusinesses', () => {
     it('pages through multiple scans to accumulate enough matches', async () => {
       // `status` isn't part of CreateBusinessInput (the factory always
       // defaults to 'pending') — set it directly on the built record.
-      const matchA = { ...makeBusiness({ name: 'A' }), status: 'active' as const };
+      const matchA = { ...makeBusiness({ name: 'A' }), status: 'outreach' as const };
       const nonMatch = { ...makeBusiness({ name: 'B' }), status: 'pending' as const };
-      const matchC = { ...makeBusiness({ name: 'C' }), status: 'active' as const };
+      const matchC = { ...makeBusiness({ name: 'C' }), status: 'outreach' as const };
 
       mockSend
         .mockResolvedValueOnce({ Items: [matchA, nonMatch], LastEvaluatedKey: { businessId: 'cursor1' } })
         .mockResolvedValueOnce({ Items: [matchC], LastEvaluatedKey: undefined });
 
-      const result = await listBusinesses({ limit: 50, status: 'active' });
+      const result = await listBusinesses({ limit: 50, status: 'outreach' });
 
       expect(result.items.map((b) => b.businessId)).toEqual([matchA.businessId, matchC.businessId]);
       expect(result.nextCursor).toBeUndefined();
@@ -326,10 +340,10 @@ describe('listBusinesses', () => {
     });
 
     it('returns a cursor to resume from when the table is not yet exhausted', async () => {
-      const match = { ...makeBusiness(), status: 'active' as const };
+      const match = { ...makeBusiness(), status: 'outreach' as const };
       mockSend.mockResolvedValueOnce({ Items: [match], LastEvaluatedKey: { businessId: 'cursor1' } });
 
-      const result = await listBusinesses({ limit: 1, status: 'active' });
+      const result = await listBusinesses({ limit: 1, status: 'outreach' });
 
       expect(result.items).toHaveLength(1);
       expect(result.nextCursor).toBeDefined();
@@ -338,7 +352,7 @@ describe('listBusinesses', () => {
     it('stops at the safety cap without throwing when a filter matches nothing', async () => {
       mockSend.mockResolvedValue({ Items: [makeBusiness()], LastEvaluatedKey: { businessId: 'keeps-going' } });
 
-      const result = await listBusinesses({ limit: 50, status: 'active' });
+      const result = await listBusinesses({ limit: 50, status: 'outreach' });
 
       expect(result.items).toHaveLength(0);
       // Safety cap (40 pages) reached rather than looping forever.
@@ -357,7 +371,7 @@ describe('matchesBusinessFilters', () => {
   // silently ignore them).
   const business = {
     ...makeBusiness({ name: 'Acme Plumbing', industry: 'plumbing', source: 'manual' }),
-    status: 'active' as const,
+    status: 'outreach' as const,
     address: { line1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701', country: 'US' },
   };
 
@@ -366,11 +380,11 @@ describe('matchesBusinessFilters', () => {
   });
 
   it('matches exact status/industry/source', () => {
-    expect(matchesBusinessFilters(business, { status: 'active', industry: 'plumbing', source: 'manual' })).toBe(true);
+    expect(matchesBusinessFilters(business, { status: 'outreach', industry: 'plumbing', source: 'manual' })).toBe(true);
   });
 
   it('rejects a non-matching status', () => {
-    expect(matchesBusinessFilters(business, { status: 'archived' })).toBe(false);
+    expect(matchesBusinessFilters(business, { status: 'cancelled' })).toBe(false);
   });
 
   it('matches city/state case-insensitively as a substring', () => {
@@ -487,5 +501,41 @@ describe('releaseOwnership', () => {
       new ConditionalCheckFailedException({ message: 'conditional check failed', $metadata: {} }),
     );
     expect(await releaseOwnership('biz_x')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// advanceBusinessStatus (forward-only funnel status)
+// ---------------------------------------------------------------------------
+
+describe('advanceBusinessStatus', () => {
+  it.each([
+    ['outreach', ['pending']],
+    ['engaged', ['pending', 'outreach']],
+    ['claimed', ['pending', 'outreach', 'engaged']],
+  ] as const)('advances to %s, conditioned on the allowed prior statuses', async (target, allowedPrior) => {
+    mockSend.mockResolvedValueOnce({});
+    expect(await advanceBusinessStatus('biz_x', target)).toBe(true);
+
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.UpdateExpression).toBe('SET #status = :target, updatedAt = :now');
+    expect(command.input.ExpressionAttributeNames).toEqual({ '#status': 'status' });
+    expect(command.input.ExpressionAttributeValues[':target']).toBe(target);
+    const priorValues = Object.entries(command.input.ExpressionAttributeValues)
+      .filter(([key]) => key.startsWith(':prior'))
+      .map(([, value]) => value);
+    expect(priorValues).toEqual(allowedPrior);
+  });
+
+  it('returns false (never throws) when the business is already at or past the target — the race/no-op case', async () => {
+    mockSend.mockRejectedValueOnce(
+      new ConditionalCheckFailedException({ message: 'conditional check failed', $metadata: {} }),
+    );
+    expect(await advanceBusinessStatus('biz_x', 'engaged')).toBe(false);
+  });
+
+  it('rethrows an unexpected DynamoDB error', async () => {
+    mockSend.mockRejectedValueOnce(new Error('boom'));
+    await expect(advanceBusinessStatus('biz_x', 'outreach')).rejects.toThrow('boom');
   });
 });

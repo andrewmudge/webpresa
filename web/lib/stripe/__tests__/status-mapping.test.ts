@@ -6,7 +6,7 @@ import type Stripe from 'stripe';
 
 vi.mock('server-only', () => ({}));
 
-import { mapStripeStatusToAppStatus, mapStripeSubscriptionToAppState } from '@/lib/stripe/status-mapping';
+import { mapStripeStatusToAppStatus, mapStripeSubscriptionToAppState, deriveBusinessStatusFromSubscriptionStatus } from '@/lib/stripe/status-mapping';
 
 /** Loosely-typed test fixture — only the fields status-mapping.ts actually reads. */
 type PartialSubscription = Record<string, unknown>;
@@ -21,6 +21,24 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
+});
+
+describe('deriveBusinessStatusFromSubscriptionStatus', () => {
+  it('maps active to customer', () => {
+    expect(deriveBusinessStatusFromSubscriptionStatus('active')).toBe('customer');
+  });
+
+  it('maps canceled to cancelled', () => {
+    expect(deriveBusinessStatusFromSubscriptionStatus('canceled')).toBe('cancelled');
+  });
+
+  it('does NOT map past_due to cancelled — a past-due business stays customer', () => {
+    expect(deriveBusinessStatusFromSubscriptionStatus('past_due')).toBeUndefined();
+  });
+
+  it('returns undefined for undefined (no subscriptionStatus change this event)', () => {
+    expect(deriveBusinessStatusFromSubscriptionStatus(undefined)).toBeUndefined();
+  });
 });
 
 describe('mapStripeStatusToAppStatus', () => {

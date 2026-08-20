@@ -6,12 +6,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 
 const mockSend = vi.fn();
+const mockAdvanceBusinessStatus = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db/client', () => ({
   getDynamoDBClient: () => ({ send: mockSend }),
   TABLE_CLAIMS: () => 'webpresa-test-claims',
   TABLE_BUSINESSES: () => 'webpresa-test-businesses',
 }));
+
+vi.mock('@/lib/db/businesses', () => ({ advanceBusinessStatus: mockAdvanceBusinessStatus }));
 
 vi.mock('server-only', () => ({}));
 
@@ -39,6 +42,7 @@ function makeClaim(overrides: Partial<ReturnType<typeof createClaim>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAdvanceBusinessStatus.mockResolvedValue(true);
 });
 
 describe('getClaimById', () => {
@@ -154,8 +158,16 @@ describe('consumeClaim', () => {
     userId: 'cognito-sub-1',
   };
 
-  it('returns "consumed" when the transaction commits', async () => {
+  it('returns "consumed" when the transaction commits, and advances business status to claimed', async () => {
     mockSend.mockResolvedValueOnce({});
+    const result = await consumeClaim(params);
+    expect(result).toEqual({ outcome: 'consumed' });
+    expect(mockAdvanceBusinessStatus).toHaveBeenCalledWith(params.businessId, 'claimed');
+  });
+
+  it('still returns "consumed" when advancing business status fails — best-effort, decoupled from the ownership grant', async () => {
+    mockSend.mockResolvedValueOnce({});
+    mockAdvanceBusinessStatus.mockRejectedValueOnce(new Error('conditional write failed'));
     const result = await consumeClaim(params);
     expect(result).toEqual({ outcome: 'consumed' });
   });
@@ -170,6 +182,7 @@ describe('consumeClaim', () => {
 
     const result = await consumeClaim(params);
     expect(result).toEqual({ outcome: 'already_consumed_by_user' });
+    expect(mockAdvanceBusinessStatus).not.toHaveBeenCalled();
   });
 
   it('returns "conflict" when someone else already consumed the claim', async () => {
@@ -182,6 +195,7 @@ describe('consumeClaim', () => {
 
     const result = await consumeClaim(params);
     expect(result).toEqual({ outcome: 'conflict' });
+    expect(mockAdvanceBusinessStatus).not.toHaveBeenCalled();
   });
 
   it('returns "conflict" when the business condition failed (already owned) and the claim is still "issued"', async () => {
@@ -192,6 +206,7 @@ describe('consumeClaim', () => {
 
     const result = await consumeClaim(params);
     expect(result).toEqual({ outcome: 'conflict' });
+    expect(mockAdvanceBusinessStatus).not.toHaveBeenCalled();
   });
 
   it('re-throws unrelated errors', async () => {

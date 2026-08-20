@@ -1,6 +1,7 @@
 import 'server-only';
 import type Stripe from 'stripe';
 import type { SubscriptionStatus, WebpresaPlan, BillingInterval } from '@/domain/constants/plans';
+import type { BusinessStatus } from '@/domain/models/business';
 import { resolvePlanFromPriceId, resolveBillingIntervalFromPriceId } from './plans';
 
 /**
@@ -33,6 +34,24 @@ export function mapStripeStatusToAppStatus(stripeStatus: Stripe.Subscription.Sta
     default:
       return undefined;
   }
+}
+
+/**
+ * Derives `Business.status`'s `customer`/`cancelled` pair directly from the
+ * live `subscriptionStatus` — the one pair in the funnel allowed to flip
+ * both ways (resubscribing after a cancellation moves back to `customer`),
+ * so this deliberately bypasses `advanceBusinessStatus`'s forward-only rank
+ * guard and is called unconditionally from the webhook handler, same as
+ * `subscriptionStatus` itself.
+ *
+ * `past_due` and `undefined` (trialing/incomplete, or no change this event)
+ * both return `undefined` — a `past_due` business stays `customer`; it never
+ * becomes `cancelled` just for falling behind on payment.
+ */
+export function deriveBusinessStatusFromSubscriptionStatus(subscriptionStatus: SubscriptionStatus | undefined): BusinessStatus | undefined {
+  if (subscriptionStatus === 'active') return 'customer';
+  if (subscriptionStatus === 'canceled') return 'cancelled';
+  return undefined;
 }
 
 export interface MappedSubscriptionState {

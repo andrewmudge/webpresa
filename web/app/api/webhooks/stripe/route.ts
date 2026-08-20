@@ -1,7 +1,7 @@
 import type Stripe from 'stripe';
 import { getStripeClient } from '@/lib/stripe/client';
 import { getStripeSecret } from '@/lib/secrets';
-import { mapStripeSubscriptionToAppState } from '@/lib/stripe/status-mapping';
+import { mapStripeSubscriptionToAppState, deriveBusinessStatusFromSubscriptionStatus } from '@/lib/stripe/status-mapping';
 import { extractBusinessId, extractBillingPurpose } from '@/lib/stripe/metadata';
 import { getBusinessById, getBusinessByStripeSubscriptionId, updateBusiness } from '@/lib/db/businesses';
 import { log } from '@/lib/logging/log';
@@ -142,9 +142,11 @@ export async function POST(request: Request): Promise<Response> {
     // object is the authority, not the embedded event payload.
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     const mapped = mapStripeSubscriptionToAppState(subscription);
+    const derivedStatus = deriveBusinessStatusFromSubscriptionStatus(mapped.subscriptionStatus);
 
     await updateBusiness(businessId, {
       ...(mapped.subscriptionStatus !== undefined ? { subscriptionStatus: mapped.subscriptionStatus } : {}),
+      ...(derivedStatus !== undefined ? { status: derivedStatus } : {}),
       stripeRawStatus: mapped.stripeRawStatus,
       stripeSubscriptionId: mapped.stripeSubscriptionId,
       ...(mapped.currentPeriodEnd !== undefined ? { currentPeriodEnd: mapped.currentPeriodEnd } : {}),

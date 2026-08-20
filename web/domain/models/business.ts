@@ -73,7 +73,16 @@ export interface BusinessProcessStep {
 // Status & source enums
 // ---------------------------------------------------------------------------
 
-export const BUSINESS_STATUSES = ['active', 'inactive', 'pending', 'archived'] as const;
+/**
+ * Forward-only funnel status, written only by the system in response to
+ * real events — never admin-settable. The listed order doubles as the
+ * canonical rank order (`pending` < `outreach` < `engaged` < `claimed`,
+ * with `customer`/`cancelled` as the one pair allowed to flip both ways).
+ * Sole writers: `advanceBusinessStatus` (`lib/db/businesses.ts`) for
+ * `pending`→`outreach`→`engaged`→`claimed`, and the Stripe webhook (via
+ * `deriveBusinessStatusFromSubscriptionStatus`) for `customer`/`cancelled`.
+ */
+export const BUSINESS_STATUSES = ['pending', 'outreach', 'engaged', 'claimed', 'customer', 'cancelled'] as const;
 export type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 export const BUSINESS_SOURCES = ['scan', 'manual', 'import', 'google_places'] as const;

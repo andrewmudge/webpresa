@@ -40,7 +40,7 @@ import { mergeTestimonialsPreservingOrder } from '@/lib/testimonials/merge';
 import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
-import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
+import { BUSINESS_SOURCES } from '@/domain/models/business';
 import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl } from '@/lib/s3/business-assets';
 import { deleteAsset } from '@/lib/s3/assets';
 import { UploadValidationError } from '@/lib/s3/upload-validation';
@@ -281,10 +281,16 @@ export async function updateThemeAction(
 
 const UpdateAdminFieldsSchema = z.object({
   source: z.enum(BUSINESS_SOURCES),
-  status: z.enum(BUSINESS_STATUSES),
 });
 
-/** Updates only `Business.source`/`status`. Never touches any other field. */
+/**
+ * Updates only `Business.source`. Never touches any other field —
+ * `status` is no longer admin-settable at all (it's a derived funnel
+ * indicator written only by `advanceBusinessStatus`/the Stripe webhook; see
+ * `domain/models/business.ts`'s `BUSINESS_STATUSES` doc comment), so any
+ * `status` present in submitted form data is simply ignored, not validated
+ * or written.
+ */
 export async function updateAdminFieldsAction(
   businessId: string,
   redirectTo: string,
@@ -296,7 +302,6 @@ export async function updateAdminFieldsAction(
 
   const parsed = UpdateAdminFieldsSchema.safeParse({
     source: formData.get('source') as string,
-    status: formData.get('status') as string,
   });
   if (!parsed.success) {
     return { errors: parsed.error.flatten().fieldErrors };
@@ -309,7 +314,6 @@ export async function updateAdminFieldsAction(
     await putBusiness({
       ...existing,
       source: parsed.data.source,
-      status: parsed.data.status,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {

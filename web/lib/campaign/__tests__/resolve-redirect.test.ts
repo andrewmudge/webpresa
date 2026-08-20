@@ -13,6 +13,7 @@ const mockGetCampaignById = vi.hoisted(() => vi.fn());
 const mockPutScanHit = vi.hoisted(() => vi.fn());
 const mockReserveVisitorFingerprint = vi.hoisted(() => vi.fn());
 const mockGetBusinessById = vi.hoisted(() => vi.fn());
+const mockAdvanceBusinessStatus = vi.hoisted(() => vi.fn());
 const mockGetClaimById = vi.hoisted(() => vi.fn());
 const mockSignClaimIntent = vi.hoisted(() => vi.fn());
 
@@ -34,6 +35,7 @@ vi.mock('@/lib/db/scan-hits', () => ({
 
 vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
+  advanceBusinessStatus: mockAdvanceBusinessStatus,
 }));
 
 vi.mock('@/lib/db/claims', () => ({
@@ -107,6 +109,7 @@ beforeEach(() => {
   mockGetBusinessById.mockResolvedValue({ ...BUSINESS });
   mockGetClaimById.mockResolvedValue({ ...CLAIM });
   mockSignClaimIntent.mockResolvedValue('signed.jwt.token');
+  mockAdvanceBusinessStatus.mockResolvedValue(true);
 });
 
 function baseParams(overrides: Partial<Parameters<typeof resolveCampaignRedirect>[0]> = {}) {
@@ -166,6 +169,13 @@ describe('resolveCampaignRedirect', () => {
     expect(hit.businessId).toBe(RECIPIENT.businessId);
     expect(hit.destinationUrl).toBe(RECIPIENT.destinationUrl);
     expect(hit.deviceClass).toBe('desktop');
+    expect(mockAdvanceBusinessStatus).toHaveBeenCalledWith(RECIPIENT.businessId, 'engaged');
+  });
+
+  it('still redirects when advancing business status fails — non-fatal', async () => {
+    mockAdvanceBusinessStatus.mockRejectedValueOnce(new Error('conditional write failed'));
+    const result = await resolveCampaignRedirect(baseParams());
+    expect(result.outcome).toBe('redirect');
   });
 
   it('increments the unique count only when the fingerprint reservation is new', async () => {

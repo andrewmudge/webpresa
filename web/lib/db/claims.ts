@@ -6,6 +6,8 @@ import type { Claim } from '@/domain/models/claim';
 import { ClaimSchema } from '@/domain/schemas/claim.schema';
 import { getDynamoDBClient, TABLE_CLAIMS, TABLE_BUSINESSES } from './client';
 import * as rateLimit from './rate-limit';
+import { advanceBusinessStatus } from './businesses';
+import { log } from '@/lib/logging/log';
 
 // ---------------------------------------------------------------------------
 // Pure predicates
@@ -271,6 +273,28 @@ export async function consumeClaim(params: ConsumeClaimParams): Promise<ConsumeC
         ],
       }),
     );
+
+    // Deliberately a separate, best-effort call rather than a third item in
+    // the transaction above: folding it in would mean a legitimate reclaim
+    // of an already-`customer`/`cancelled` business (ownership released
+    // then re-granted) fails the *entire* claim transaction just because a
+    // display field couldn't advance — status must never gate the real
+    // ownership grant. `advanceBusinessStatus`'s forward-only guard already
+    // makes this a harmless no-op on such a business, so ownership-granting
+    // and status-advancing stay fully decoupled.
+    try {
+      await advanceBusinessStatus(businessId, 'claimed');
+    } catch (err) {
+      log({
+        level: 'error',
+        event: 'business.status.advance_failed',
+        component: 'claim-consumption',
+        businessId,
+        claimId,
+        message: err instanceof Error ? err.message : 'Failed to advance business status to claimed.',
+      });
+    }
+
     return { outcome: 'consumed' };
   } catch (err) {
     if (err instanceof TransactionCanceledException) {

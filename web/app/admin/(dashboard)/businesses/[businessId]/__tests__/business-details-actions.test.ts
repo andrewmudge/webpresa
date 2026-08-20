@@ -192,7 +192,7 @@ describe('updateBusinessDetailsAction', () => {
   });
 
   it('never touches theme/source/status fields', async () => {
-    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, theme: 'classicBlue', source: 'import', status: 'active' });
+    mockGetBusinessById.mockResolvedValue({ ...EXISTING_BUSINESS, theme: 'classicBlue', source: 'import', status: 'engaged' });
 
     await expect(
       updateBusinessDetailsAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, makeFormData(DETAILS_FIELDS)),
@@ -201,7 +201,7 @@ describe('updateBusinessDetailsAction', () => {
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.theme).toBe('classicBlue');
     expect(saved.source).toBe('import');
-    expect(saved.status).toBe('active');
+    expect(saved.status).toBe('engaged');
   });
 
   it('never touches photo fields (logoUrl, photoUrls, photo-slot overrides)', async () => {

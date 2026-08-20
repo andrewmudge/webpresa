@@ -1,8 +1,9 @@
 'use client';
 import { useActionState } from 'react';
-import { BUSINESS_SOURCES, BUSINESS_STATUSES } from '@/domain/models/business';
+import { BUSINESS_SOURCES } from '@/domain/models/business';
 import type { Business } from '@/domain/models/business';
 import { SelectField, SubmitButton } from './FormFields';
+import { StatusBadge } from './StatusBadge';
 import type { BusinessFormState } from './actions';
 
 interface AdminFieldsFormProps {
@@ -11,7 +12,7 @@ interface AdminFieldsFormProps {
   submitLabel?: string;
 }
 
-/** Its own narrow card/action so saving source/status can never touch any other business field. */
+/** Its own narrow card/action so saving source can never touch any other business field. */
 export function AdminFieldsForm({ action, defaults, submitLabel = 'Save' }: AdminFieldsFormProps) {
   const [state, formAction] = useActionState<BusinessFormState, FormData>(action, undefined);
   const errors = state?.errors ?? {};
@@ -31,13 +32,14 @@ export function AdminFieldsForm({ action, defaults, submitLabel = 'Save' }: Admi
           defaultValue={defaults?.source ?? 'manual'}
           errors={errors.source}
         />
-        <SelectField
-          label="Status"
-          name="status"
-          options={BUSINESS_STATUSES}
-          defaultValue={defaults?.status}
-          errors={errors.status}
-        />
+        {defaults?.status && (
+          <div>
+            <span className="block text-sm font-medium text-gray-700 mb-1.5">Status</span>
+            <div className="flex items-center h-[42px]">
+              <StatusBadge status={defaults.status} />
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 pt-2">
         <SubmitButton label={submitLabel} />

@@ -27,6 +27,7 @@ const {
   mockGetBusinessById,
   mockDeleteBusinessById,
   mockUpdateBusiness,
+  mockPutBusiness,
   mockGetSession,
   mockGenerateAndSaveWebsite,
 } = vi.hoisted(() => ({
@@ -42,6 +43,7 @@ const {
   mockGetBusinessById: vi.fn(),
   mockDeleteBusinessById: vi.fn(),
   mockUpdateBusiness: vi.fn(),
+  mockPutBusiness: vi.fn(),
   mockGetSession: vi.fn(),
   mockGenerateAndSaveWebsite: vi.fn(),
 }));
@@ -100,7 +102,7 @@ vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
   deleteBusinessById: mockDeleteBusinessById,
   updateBusiness: mockUpdateBusiness,
-  putBusiness: vi.fn(),
+  putBusiness: mockPutBusiness,
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -137,7 +139,7 @@ vi.mock('next/navigation', () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { updatePreviewCtaAction, generateWebsiteAction, publishPreviewAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
+import { updatePreviewCtaAction, generateWebsiteAction, publishPreviewAction, updateAdminFieldsAction } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
 import type { SitePreview } from '@/domain/models/site-preview';
 import type { Business } from '@/domain/models/business';
 
@@ -194,6 +196,7 @@ beforeEach(() => {
   mockListPreviewsForBusiness.mockResolvedValue([]);
   mockGenerateAndSaveWebsite.mockResolvedValue({ status: 'completed', previewId: EXISTING_PREVIEW.previewId });
   mockUpdateBusiness.mockResolvedValue(EXISTING_BUSINESS);
+  mockPutBusiness.mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -443,5 +446,41 @@ describe('updatePreviewCtaAction — not found', () => {
     const result = await updatePreviewCtaAction('preview_notfound', undefined, fd);
     expect(result?.message).toBe('Preview not found');
     expect(mockPutSitePreview).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateAdminFieldsAction — `status` is no longer admin-settable; only
+// `source` is written. A `status` field present in submitted form data
+// (e.g. a stale client) is simply ignored, never validated or persisted.
+// ---------------------------------------------------------------------------
+
+describe('updateAdminFieldsAction', () => {
+  it('updates only source, leaving status untouched', async () => {
+    const fd = makeFormData({ source: 'google_places' });
+    await expect(updateAdminFieldsAction(EXISTING_BUSINESS.businessId, '/admin/businesses/biz_1', undefined, fd)).rejects.toThrow(
+      'REDIRECT:/admin/businesses/biz_1',
+    );
+
+    expect(mockPutBusiness).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'google_places', status: EXISTING_BUSINESS.status }),
+    );
+  });
+
+  it('ignores a status field present in submitted form data — not validated, not written', async () => {
+    const fd = makeFormData({ source: 'manual', status: 'customer' });
+    await expect(updateAdminFieldsAction(EXISTING_BUSINESS.businessId, '/admin/businesses/biz_1', undefined, fd)).rejects.toThrow(
+      'REDIRECT:/admin/businesses/biz_1',
+    );
+
+    expect(mockPutBusiness).toHaveBeenCalledWith(expect.objectContaining({ status: EXISTING_BUSINESS.status }));
+  });
+
+  it('returns Unauthorized when session is missing', async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    const fd = makeFormData({ source: 'manual' });
+    const result = await updateAdminFieldsAction(EXISTING_BUSINESS.businessId, '/admin/businesses/biz_1', undefined, fd);
+    expect(result?.message).toBe('Unauthorized');
+    expect(mockPutBusiness).not.toHaveBeenCalled();
   });
 });

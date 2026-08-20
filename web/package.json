@@ -9,7 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "screenshot": "node scripts/screenshot.mjs"
+    "screenshot": "node scripts/screenshot.mjs",
+    "backfill:business-status:dev": "tsx --conditions=react-server --env-file=.env.local scripts/backfill-business-status.ts",
+    "backfill:business-status:prod": "tsx --conditions=react-server --env-file=.env.prod.local scripts/backfill-business-status.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1085.0",
@@ -51,6 +53,7 @@
     "eslint-config-next": "16.2.10",
     "playwright": "^1.62.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5",
     "vitest": "^3.0.0"
   }

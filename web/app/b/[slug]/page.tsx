@@ -10,6 +10,7 @@ import { computeBusinessAccessMode, hasPlanCapability } from '@/lib/auth/custome
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-token';
 import { getClaimBannerState } from '@/lib/claim/banner-state';
 import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
+import { resolveIsIndexable } from './indexability';
 import { GeneratedWebsite } from './template';
 
 export const dynamic = 'force-dynamic';
@@ -146,11 +147,11 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
 
   const { preview } = found;
   const business = await getBusinessById(preview.businessId);
-  // Deliberately unrelated to claim ownership (Stage 17) — this stays on
-  // the general `Business.status` lifecycle field until Stage 18/19 decide
-  // whether paid activation should also flip it. See
-  // implementation.md, Stage 17, "Public claim-banner behavior".
-  const isIndexable = business?.status === 'active';
+  // `'customer'` = an active paying subscription — the only funnel stage
+  // that should be publicly indexed (see `Business.status`'s doc comment
+  // in domain/models/business.ts). Deliberately unrelated to claim
+  // ownership (Stage 17) or admin-set state — this is purely event-driven.
+  const isIndexable = resolveIsIndexable(business);
 
   return {
     title: preview.content.seo?.title ?? preview.content.hero.headline,

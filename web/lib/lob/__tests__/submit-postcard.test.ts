@@ -15,6 +15,7 @@ const {
   mockMarkPostcardSubmitted,
   mockMarkPostcardSubmissionFailed,
   mockGetBusinessById,
+  mockAdvanceBusinessStatus,
   mockGetLobSenderAddress,
   mockGetSignedAssetUrl,
 } = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const {
   mockMarkPostcardSubmitted: vi.fn(),
   mockMarkPostcardSubmissionFailed: vi.fn(),
   mockGetBusinessById: vi.fn(),
+  mockAdvanceBusinessStatus: vi.fn(),
   mockGetLobSenderAddress: vi.fn(),
   mockGetSignedAssetUrl: vi.fn(),
 }));
@@ -48,7 +50,7 @@ vi.mock('@/lib/db/postcards', () => ({
   markPostcardSubmitted: mockMarkPostcardSubmitted,
   markPostcardSubmissionFailed: mockMarkPostcardSubmissionFailed,
 }));
-vi.mock('@/lib/db/businesses', () => ({ getBusinessById: mockGetBusinessById }));
+vi.mock('@/lib/db/businesses', () => ({ getBusinessById: mockGetBusinessById, advanceBusinessStatus: mockAdvanceBusinessStatus }));
 vi.mock('@/lib/env/lob-sender-address', () => ({ getLobSenderAddress: mockGetLobSenderAddress }));
 vi.mock('@/lib/s3/assets', () => ({ getSignedAssetUrl: mockGetSignedAssetUrl }));
 
@@ -100,6 +102,7 @@ beforeEach(() => {
   mockGetSignedAssetUrl.mockImplementation(async (key: string) => `https://signed.example.com/${key}`);
   mockTransitionPostcardToSubmitting.mockResolvedValue(true);
   mockLobRequest.mockResolvedValue({ id: 'psc_abc123', price: 1.23 });
+  mockAdvanceBusinessStatus.mockResolvedValue(true);
 });
 
 describe('submitPostcardToLob — eligibility checks', () => {
@@ -179,12 +182,22 @@ describe('submitPostcardToLob — happy path', () => {
 
     expect(mockMarkPostcardSubmitted).toHaveBeenCalledWith(POSTCARD_ID, { providerPostcardId: 'psc_abc123', costCents: 123 });
     expect(result).toEqual({ status: 'submitted', providerPostcardId: 'psc_abc123' });
+    expect(mockAdvanceBusinessStatus).toHaveBeenCalledWith(BUSINESS_ID, 'outreach');
   });
 
   it('leaves costCents unset when Lob does not return a numeric price', async () => {
     mockLobRequest.mockResolvedValue({ id: 'psc_abc123' });
     await submitPostcardToLob(POSTCARD_ID);
     expect(mockMarkPostcardSubmitted).toHaveBeenCalledWith(POSTCARD_ID, { providerPostcardId: 'psc_abc123', costCents: undefined });
+  });
+
+  it('still reports a successful submission when advancing business status fails — non-fatal', async () => {
+    mockAdvanceBusinessStatus.mockRejectedValue(new Error('conditional write failed'));
+
+    const result = await submitPostcardToLob(POSTCARD_ID);
+
+    expect(result).toEqual({ status: 'submitted', providerPostcardId: 'psc_abc123' });
+    expect(mockMarkPostcardSubmitted).toHaveBeenCalled();
   });
 });
 

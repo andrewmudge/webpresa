@@ -2,7 +2,7 @@ import 'server-only';
 import type { Address } from '@/domain/models/common';
 import { lobRequest, LobApiError } from './client';
 import { getPostcardById, transitionPostcardToSubmitting, markPostcardSubmitted, markPostcardSubmissionFailed } from '@/lib/db/postcards';
-import { getBusinessById } from '@/lib/db/businesses';
+import { getBusinessById, advanceBusinessStatus } from '@/lib/db/businesses';
 import { getLobSenderAddress } from '@/lib/env/lob-sender-address';
 import { getSignedAssetUrl } from '@/lib/s3/assets';
 import { log } from '@/lib/logging/log';
@@ -147,6 +147,21 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
 
     const costCents = typeof response.price === 'number' ? Math.round(response.price * 100) : undefined;
     await markPostcardSubmitted(postcardId, { providerPostcardId: response.id, costCents });
+
+    // Best-effort — the postcard is already committed to Lob at this point,
+    // so a status-advance failure must never surface as a submission failure.
+    try {
+      await advanceBusinessStatus(postcard.businessId, 'outreach');
+    } catch (err) {
+      log({
+        level: 'error',
+        event: 'business.status.advance_failed',
+        component: 'lob-submission',
+        businessId: postcard.businessId,
+        postcardId,
+        message: err instanceof Error ? err.message : 'Failed to advance business status to outreach.',
+      });
+    }
 
     log({
       event: 'postcard.submission.completed',

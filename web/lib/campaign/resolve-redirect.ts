@@ -7,12 +7,13 @@ import {
   recordScanHitRollup,
 } from '@/lib/db/campaign-recipients';
 import { getCampaignById } from '@/lib/db/campaigns';
-import { getBusinessById } from '@/lib/db/businesses';
+import { getBusinessById, advanceBusinessStatus } from '@/lib/db/businesses';
 import { getClaimById, isClaimUsable } from '@/lib/db/claims';
 import { putScanHit, reserveVisitorFingerprint } from '@/lib/db/scan-hits';
 import { createScanHit } from '@/domain/factories/scan-hit.factory';
 import { signClaimIntent, CLAIM_INTENT_MAX_AGE_SECONDS } from '@/lib/auth/claim-intent';
 import { parseUserAgent } from './user-agent';
+import { log } from '@/lib/logging/log';
 
 /**
  * `/r/[campaignCode]`'s validate → record → resolve-destination logic
@@ -157,6 +158,20 @@ export async function resolveCampaignRedirect(params: ResolveCampaignRedirectPar
   // lead submission).
   await putScanHit(hit);
   await recordScanHitRollup({ campaignRecipientId: recipient.campaignRecipientId, isNewUniqueVisitor });
+
+  // Best-effort — a status-advance failure must never break the redirect.
+  try {
+    await advanceBusinessStatus(recipient.businessId, 'engaged');
+  } catch (err) {
+    log({
+      level: 'error',
+      event: 'business.status.advance_failed',
+      component: 'campaign-redirect',
+      businessId: recipient.businessId,
+      campaignRecipientId: recipient.campaignRecipientId,
+      message: err instanceof Error ? err.message : 'Failed to advance business status to engaged.',
+    });
+  }
 
   for (const [key, value] of incomingSearchParams.entries()) {
     // Never trust a client-supplied `campaign` param — the resolved code
