@@ -188,6 +188,57 @@ describe('submitPostcardToLob — happy path', () => {
   });
 });
 
+describe('submitPostcardToLob — long business name degradation', () => {
+  it('truncates a business name over 40 chars at a word boundary with no dangling punctuation, and logs it', async () => {
+    mockGetBusinessById.mockResolvedValue(baseBusiness({ name: 'Radiant Plumbing, Air Conditioning, & Electrical' }));
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await submitPostcardToLob(POSTCARD_ID);
+
+    const requestBody = JSON.parse(mockLobRequest.mock.calls[0][1].body);
+    expect(requestBody.to.name.length).toBeLessThanOrEqual(40);
+    expect(requestBody.to.name).toBe('Radiant Plumbing, Air Conditioning');
+    expect(requestBody.to.name).not.toMatch(/[\s,;:&-]$/);
+
+    const truncationLog = consoleSpy.mock.calls.map((call) => call[0]).find((line) => typeof line === 'string' && line.includes('postcard.submission.name_truncated'));
+    expect(truncationLog).toBeDefined();
+    consoleSpy.mockRestore();
+  });
+
+  it('leaves a name exactly at 40 chars unchanged', async () => {
+    const name = 'A'.repeat(40);
+    mockGetBusinessById.mockResolvedValue(baseBusiness({ name }));
+
+    await submitPostcardToLob(POSTCARD_ID);
+
+    const requestBody = JSON.parse(mockLobRequest.mock.calls[0][1].body);
+    expect(requestBody.to.name).toBe(name);
+  });
+
+  it('hard-truncates a single word with no spaces that exceeds 40 chars', async () => {
+    const name = 'B'.repeat(55);
+    mockGetBusinessById.mockResolvedValue(baseBusiness({ name }));
+
+    await submitPostcardToLob(POSTCARD_ID);
+
+    const requestBody = JSON.parse(mockLobRequest.mock.calls[0][1].body);
+    expect(requestBody.to.name).toBe('B'.repeat(40));
+  });
+
+  it('does not log a truncation event when the name already fits', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await submitPostcardToLob(POSTCARD_ID);
+    // baseBusiness() name is 'Acme Plumbing' (13 chars) — well under the limit.
+    const requestBody = JSON.parse(mockLobRequest.mock.calls[0][1].body);
+    expect(requestBody.to.name).toBe('Acme Plumbing');
+
+    const truncationLog = consoleSpy.mock.calls.map((call) => call[0]).find((line) => typeof line === 'string' && line.includes('postcard.submission.name_truncated'));
+    expect(truncationLog).toBeUndefined();
+    consoleSpy.mockRestore();
+  });
+});
+
 describe('submitPostcardToLob — failure after claiming', () => {
   it('records a failed submission (via markPostcardSubmissionFailed) when the Lob API call throws', async () => {
     mockLobRequest.mockRejectedValue(new MockLobApiError('Lob API request to /postcards failed: bad address', 422, {}));

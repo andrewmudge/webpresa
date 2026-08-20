@@ -25,6 +25,8 @@ const LOB_MAIL_TYPE = 'usps_first_class';
 const LOB_USE_TYPE = 'marketing';
 /** How long the signed S3 URLs handed to Lob stay valid — comfortably longer than Lob's own fetch should ever take. */
 const ARTIFACT_URL_TTL_SECONDS = 3600;
+/** Lob's `to.name`/`from.name` fields reject anything longer than this (422 `invalid`). */
+const LOB_NAME_MAX_LENGTH = 40;
 
 export type SubmitPostcardOutcome =
   | { status: 'submitted'; providerPostcardId: string }
@@ -42,9 +44,26 @@ interface LobAddress {
   address_country: string;
 }
 
+/**
+ * Lob rejects `to.name`/`from.name` over 40 chars (422 `invalid`), but
+ * `Business.name` is validated up to 200 chars — long trading names (e.g.
+ * "Radiant Plumbing, Air Conditioning, & Electrical") must be shortened
+ * before submission. Cuts at the last word boundary within the limit so a
+ * word isn't sliced in half, then trims trailing punctuation left dangling
+ * by the cut. Falls back to a hard cut only when a single word exceeds the
+ * limit on its own.
+ */
+function truncateLobName(name: string, maxLength = LOB_NAME_MAX_LENGTH): string {
+  if (name.length <= maxLength) return name;
+  let cut = name.slice(0, maxLength);
+  const lastSpace = cut.lastIndexOf(' ');
+  if (lastSpace > 0) cut = cut.slice(0, lastSpace);
+  return cut.replace(/[\s,;:&-]+$/, '');
+}
+
 function toLobAddress(name: string, address: Address): LobAddress {
   return {
-    name,
+    name: truncateLobName(name),
     address_line1: address.line1,
     ...(address.line2 ? { address_line2: address.line2 } : {}),
     address_city: address.city,
@@ -99,6 +118,18 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
       getSignedAssetUrl(postcard.frontArtifactKey, ARTIFACT_URL_TTL_SECONDS),
       getSignedAssetUrl(postcard.backArtifactKey, ARTIFACT_URL_TTL_SECONDS),
     ]);
+
+    const recipientName = truncateLobName(business.name);
+    if (recipientName !== business.name) {
+      log({
+        event: 'postcard.submission.name_truncated',
+        component: 'lob-submission',
+        businessId: postcard.businessId,
+        postcardId,
+        provider: 'lob',
+        message: `Recipient name truncated from ${business.name.length} to ${recipientName.length} chars for Lob's ${LOB_NAME_MAX_LENGTH}-char to.name limit.`,
+      });
+    }
 
     const response = await lobRequest<LobPostcardResponse>('/postcards', {
       method: 'POST',
