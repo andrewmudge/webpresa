@@ -98,6 +98,26 @@ describe('getAnalyticsDashboardData', () => {
     expect(result.filterOptions.campaigns).toEqual([{ campaignId: 'campaign_1', name: 'Summer batch' }]);
   });
 
+  it('counts a currently-active customer toward Active Customers/MRR even with no recorded firstPaidAt (pre-Stage-29 customer)', async () => {
+    // Regression: businesses that became paying customers before firstPaidAt
+    // started being written must still show up as active right now.
+    const preInstrumentedCustomer = makeBusiness({
+      businessId: 'biz_legacy',
+      subscriptionStatus: 'active',
+      firstPaidAt: undefined,
+      plan: 'basic',
+      billingInterval: 'monthly',
+    });
+    mockListAllBusinesses.mockResolvedValue([preInstrumentedCustomer]);
+    mockListAllPostcards.mockResolvedValue([]);
+
+    const result = await getAnalyticsDashboardData({ datePreset: '30d' });
+
+    expect(result.kpis.activeCustomers.current).toBe(1);
+    expect(result.kpis.mrrCents.current).toBe(3900);
+    expect(result.customerHealth.activeCustomers).toBe(1);
+  });
+
   it('narrows businesses (and transitively the postcard cohort) by industry', async () => {
     const inIndustry = makeBusiness({ businessId: 'biz_in', industry: 'plumbing' });
     const outOfIndustry = makeBusiness({ businessId: 'biz_out', industry: 'electrical', firstPaidAt: '2026-07-11T00:00:00.000Z' });

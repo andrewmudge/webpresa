@@ -66,8 +66,9 @@ async function computeDashboard(filters: AnalyticsFilters): Promise<AnalyticsDas
   const subscriberMix = computeSubscriberMix(businesses);
   const customerHealth = computeCustomerHealth(businesses, window, now);
 
-  const activeCustomersPrevious = window.previousEnd !== undefined ? countActiveAsOf(businesses, window.previousEnd) : null;
-  const mrrPrevious = window.previousEnd !== undefined ? mrrCentsAsOf(businesses, window.previousEnd) : null;
+  const nowIso = now.toISOString();
+  const activeCustomersPrevious = window.previousEnd !== undefined ? countActiveAsOf(businesses, window.previousEnd, nowIso) : null;
+  const mrrPrevious = window.previousEnd !== undefined ? mrrCentsAsOf(businesses, window.previousEnd, nowIso) : null;
 
   let newPaidPrevious: number | null = null;
   let churnPrevious: number | null = null;
@@ -76,7 +77,7 @@ async function computeDashboard(filters: AnalyticsFilters): Promise<AnalyticsDas
     const canceledPrevious = businesses.filter(
       (b) => b.subscriptionStatus === 'canceled' && b.canceledAt && b.canceledAt >= window.previousStart! && b.canceledAt < window.previousEnd!,
     ).length;
-    churnPrevious = computeChurnRate(canceledPrevious, countActiveAsOf(businesses, window.previousStart!));
+    churnPrevious = computeChurnRate(canceledPrevious, countActiveAsOf(businesses, window.previousStart!, nowIso));
   }
 
   return {

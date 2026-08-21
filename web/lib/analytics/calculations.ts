@@ -56,19 +56,46 @@ export function normalizeToMonthlyCents(plan: WebpresaPlan | undefined, billingI
  * a narrow edge case for a brand-new SaaS with very few customers today,
  * accepted rather than building a full event-history table for this MVP.
  */
-export function wasActiveAsOf(business: Pick<Business, 'firstPaidAt' | 'canceledAt' | 'subscriptionStatus'>, asOfIso: string): boolean {
-  if (!business.firstPaidAt || business.firstPaidAt > asOfIso) return false;
-  if (business.subscriptionStatus === 'active') return true; // stale canceledAt from a prior cycle is ignored once active again
-  if (business.subscriptionStatus === 'canceled' && business.canceledAt && business.canceledAt > asOfIso) return true;
+/**
+ * `nowIso` distinguishes "am I asking about right now" from "am I asking
+ * about a past instant" — the two need different fallback behavior when
+ * `firstPaidAt` is missing:
+ *
+ * - **Right now** (`asOfIso >= nowIso`): `subscriptionStatus` is always the
+ *   live, current truth (it's rewritten on every Stripe webhook,
+ *   unconditionally) — a currently-active business is active right now
+ *   whether or not `firstPaidAt` happens to be recorded. A business that
+ *   became a customer before Stage 29's `firstPaidAt` field shipped (the
+ *   webhook only sets it going forward, never retroactively) must never be
+ *   invisible to "Active Customers"/"Current MRR" just because of when this
+ *   feature happened to ship.
+ * - **A past instant** (`asOfIso < nowIso`): only `firstPaidAt` can place a
+ *   business there — without it, we genuinely don't know whether they were
+ *   already a customer at that point, so they're excluded rather than
+ *   assumed either way. This is the deliberate, honest gap: current state
+ *   is always correct; un-instrumented history is admittedly incomplete,
+ *   never fabricated.
+ */
+export function wasActiveAsOf(business: Pick<Business, 'firstPaidAt' | 'canceledAt' | 'subscriptionStatus'>, asOfIso: string, nowIso: string): boolean {
+  const isCurrentInstant = asOfIso >= nowIso;
+
+  if (business.subscriptionStatus === 'active') {
+    if (isCurrentInstant) return true;
+    return !!business.firstPaidAt && business.firstPaidAt <= asOfIso;
+  }
+  if (business.subscriptionStatus === 'canceled') {
+    if (!business.firstPaidAt || business.firstPaidAt > asOfIso) return false;
+    return !!business.canceledAt && business.canceledAt > asOfIso; // stale canceledAt from a prior cycle is ignored once active again
+  }
   return false;
 }
 
-export function countActiveAsOf(businesses: Business[], asOfIso: string): number {
-  return businesses.filter((b) => wasActiveAsOf(b, asOfIso)).length;
+export function countActiveAsOf(businesses: Business[], asOfIso: string, nowIso: string): number {
+  return businesses.filter((b) => wasActiveAsOf(b, asOfIso, nowIso)).length;
 }
 
-export function mrrCentsAsOf(businesses: Business[], asOfIso: string): number {
-  return businesses.filter((b) => wasActiveAsOf(b, asOfIso)).reduce((sum, b) => sum + normalizeToMonthlyCents(b.plan, b.billingInterval), 0);
+export function mrrCentsAsOf(businesses: Business[], asOfIso: string, nowIso: string): number {
+  return businesses.filter((b) => wasActiveAsOf(b, asOfIso, nowIso)).reduce((sum, b) => sum + normalizeToMonthlyCents(b.plan, b.billingInterval), 0);
 }
 
 /** Defensive cap on `computeMrrTrend`'s month-by-month loop — 50 years, never actually reached at this app's scale. */
@@ -85,9 +112,15 @@ const MAX_TREND_MONTHS = 600;
  *
  * The iteration start is clamped to the earliest `firstPaidAt` on record
  * (never earlier than the window itself) so the `'all time'` preset, whose
- * window starts at the Unix epoch, doesn't walk decades of empty months.
+ * window starts at the Unix epoch, doesn't walk decades of empty months. If
+ * NO business has a recorded `firstPaidAt` at all (e.g. every currently-active
+ * business predates that field), there's no historical anchor to reconstruct
+ * past months from — the trend clamps to the current month only, showing the
+ * one real, live data point we have rather than hundreds of misleadingly
+ * empty bars back to the epoch.
  */
 export function computeMrrTrend(businesses: Business[], window: ResolvedDateWindow, now: Date = new Date()): MrrTrendPoint[] {
+  const nowIso = now.toISOString();
   const windowStart = new Date(window.start);
   const cappedEnd = new Date(Math.min(new Date(window.end).getTime(), now.getTime()));
   if (Number.isNaN(windowStart.getTime()) || cappedEnd.getTime() <= windowStart.getTime()) return [];
@@ -97,7 +130,12 @@ export function computeMrrTrend(businesses: Business[], window: ResolvedDateWind
     const t = new Date(b.firstPaidAt).getTime();
     return earliest === null || t < earliest ? t : earliest;
   }, null);
-  const effectiveStart = earliestPaidAtMs !== null && earliestPaidAtMs > windowStart.getTime() ? new Date(earliestPaidAtMs) : windowStart;
+  const effectiveStart =
+    earliestPaidAtMs !== null
+      ? earliestPaidAtMs > windowStart.getTime()
+        ? new Date(earliestPaidAtMs)
+        : windowStart
+      : new Date(Date.UTC(cappedEnd.getUTCFullYear(), cappedEnd.getUTCMonth(), 1));
   if (effectiveStart.getTime() > cappedEnd.getTime()) return [];
 
   const points: MrrTrendPoint[] = [];
@@ -109,7 +147,7 @@ export function computeMrrTrend(businesses: Business[], window: ResolvedDateWind
     points.push({
       monthLabel: monthEnd.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
       monthEnd: monthEnd.toISOString(),
-      mrrCents: mrrCentsAsOf(businesses, monthEnd.toISOString()),
+      mrrCents: mrrCentsAsOf(businesses, monthEnd.toISOString(), nowIso),
     });
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
   }
@@ -125,7 +163,7 @@ export function computeMrrTrend(businesses: Business[], window: ResolvedDateWind
  * self-service plan changes ship.
  */
 export function computeMrrBreakdown(businesses: Business[], window: ResolvedDateWindow, now: Date = new Date()): RevenueSummary {
-  const currentMrrCents = mrrCentsAsOf(businesses, now.toISOString());
+  const currentMrrCents = mrrCentsAsOf(businesses, now.toISOString(), now.toISOString());
 
   const newMrrCents = businesses
     .filter((b) => b.firstPaidAt && b.firstPaidAt >= window.start && b.firstPaidAt < window.end)
@@ -167,12 +205,13 @@ export function computeSubscriberMix(businesses: Business[]): SubscriberMixResul
 }
 
 export function computeCustomerHealth(businesses: Business[], window: ResolvedDateWindow, now: Date = new Date()): CustomerHealthResult {
-  const activeCustomers = countActiveAsOf(businesses, now.toISOString());
+  const nowIso = now.toISOString();
+  const activeCustomers = countActiveAsOf(businesses, nowIso, nowIso);
   const newCustomers = businesses.filter((b) => b.firstPaidAt && b.firstPaidAt >= window.start && b.firstPaidAt < window.end).length;
   const canceledCustomers = businesses.filter(
     (b) => b.subscriptionStatus === 'canceled' && b.canceledAt && b.canceledAt >= window.start && b.canceledAt < window.end,
   ).length;
-  const activeAtPeriodStart = countActiveAsOf(businesses, window.start);
+  const activeAtPeriodStart = countActiveAsOf(businesses, window.start, nowIso);
 
   return {
     activeCustomers,
