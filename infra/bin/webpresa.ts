@@ -226,6 +226,7 @@ new WebpresaSesStack(app, `Webpresa${label}SesStack`, {
   env,
   description: `Webpresa ${label} SES event pipeline — Configuration Set, SNS topic, HTTPS webhook subscription (Marketing stage)`,
   appBaseUrl,
+  vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
 });
 
 // Stage 24 — CloudWatch dashboards/alarms. No WEBPRESA_APP_BASE_URL

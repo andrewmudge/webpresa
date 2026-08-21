@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ses from 'aws-cdk-lib/aws-ses';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
 
@@ -9,6 +10,21 @@ export interface WebpresaSesStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
   /** The Next.js app's public base URL — the SNS topic's HTTPS subscription target is `{appBaseUrl}/api/webhooks/ses`. */
   readonly appBaseUrl: string;
+  /**
+   * Cross-stack reference from WebpresaDataStack — this `dev` deployment has
+   * Vercel Deployment Protection enabled, which redirects every
+   * unauthenticated request (including SNS's own delivery POSTs) to
+   * Vercel's SSO login page at the edge, before Next.js ever runs
+   * (confirmed directly: a plain `curl -X POST` to `/api/webhooks/ses`
+   * 302s to `vercel.com/sso-api`). SNS — like Stripe, Lob, or any
+   * third-party webhook sender — can't attach a custom
+   * `x-vercel-protection-bypass` header, so the same fix `deployment.md`
+   * already documents for the Stripe webhook applies here: append the
+   * bypass secret as a query parameter on the subscribed URL instead,
+   * checked per-request with no cookie needed. Has zero effect on this
+   * app's own SNS signature verification, which never inspects the URL.
+   */
+  readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
 }
 
 /**
@@ -43,7 +59,7 @@ export class WebpresaSesStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: WebpresaSesStackProps) {
     super(scope, id, props);
 
-    const { config, appBaseUrl } = props;
+    const { config, appBaseUrl, vercelProtectionBypassSecret } = props;
     const envLabel = config.suffix.charAt(0).toUpperCase() + config.suffix.slice(1);
     cdk.Tags.of(this).add('Project', 'Webpresa');
     cdk.Tags.of(this).add('Environment', envLabel);
@@ -59,7 +75,13 @@ export class WebpresaSesStack extends cdk.Stack {
       displayName: `Webpresa ${envLabel} SES events`,
     });
 
-    this.eventTopic.addSubscription(new subscriptions.UrlSubscription(`${appBaseUrl}/api/webhooks/ses`));
+    const bypassSecretValue = cdk.SecretValue.secretsManager(vercelProtectionBypassSecret.secretArn, { jsonField: 'bypassSecret' });
+    const subscriptionEndpoint = cdk.Fn.join('', [appBaseUrl, '/api/webhooks/ses?x-vercel-protection-bypass=', bypassSecretValue.unsafeUnwrap()]);
+    // `protocol` must be explicit here — UrlSubscription normally infers it
+    // from the URL's `https://` prefix, but that inference needs a
+    // resolved string at synth time, and this URL is a CloudFormation
+    // token (the Fn::Join above) until deploy time.
+    this.eventTopic.addSubscription(new subscriptions.UrlSubscription(subscriptionEndpoint, { protocol: sns.SubscriptionProtocol.HTTPS }));
 
     // ── Configuration Set + SNS event destination ──────────────────────────
     this.configurationSet = new ses.CfnConfigurationSet(this, 'MarketingConfigurationSet', {
