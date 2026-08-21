@@ -9,7 +9,6 @@ import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 import { generateCampaignQrPng } from '@/lib/campaign/qr';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
-import { getLobSenderAddress, type LobSenderAddress } from '@/lib/env/lob-sender-address';
 import { CAPTURE_TOKEN_COOKIE_NAME, verifyPostcardRenderToken } from '@/lib/capture-token';
 import PostcardFront from '@/app/admin/(dashboard)/postcards/components/PostcardFront';
 import PostcardBack from '@/app/admin/(dashboard)/postcards/components/PostcardBack';
@@ -57,22 +56,7 @@ export default async function PostcardRenderPage({ params }: Props) {
   if (!business) notFound();
 
   if (side === 'back') {
-    let senderAddress: LobSenderAddress | undefined;
-    try {
-      senderAddress = getLobSenderAddress();
-    } catch {
-      senderAddress = undefined;
-    }
-
-    return (
-      <PostcardBack
-        recipientName={business.name}
-        recipientAddress={business.address}
-        senderName={senderAddress?.name}
-        senderAddress={senderAddress}
-        showGuides={false}
-      />
-    );
+    return <PostcardBack recipientName={business.name} recipientAddress={business.address} showGuides={false} />;
   }
 
   const [recipient, beforeShots, afterShots] = await Promise.all([

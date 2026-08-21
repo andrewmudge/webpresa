@@ -7,8 +7,6 @@ import { POSTCARD_NAVY, POSTCARD_BLUE, POSTCARD_BLUE_LIGHT } from './postcard-co
 export interface PostcardBackProps {
   recipientName: string;
   recipientAddress?: Address;
-  senderName?: string;
-  senderAddress?: Address;
   /** Forwarded to `PostcardFrame` — see its own doc comment. `false` for the Stage 22 Phase 2 print-rendering pages. */
   showGuides?: boolean;
 }
@@ -27,12 +25,7 @@ const FEATURES = [
 
 const CONTENT_LEFT = `calc(${POSTCARD_SAFE_ZONE_INSET_PERCENT.x}cqw + 1cqw)`;
 const CONTENT_TOP = `calc(${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}cqh + 1cqh)`;
-const CONTENT_BOTTOM = `${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}cqh`;
-
-/** Left edge of Lob's ink-free zone, as a % of the full bleed canvas — the sender address aligns to this, sitting just above the box. */
-const INK_FREE_ZONE_LEFT_CQW = 100 - POSTCARD_INK_FREE_ZONE_PERCENT.right - POSTCARD_INK_FREE_ZONE_PERCENT.width;
-/** Distance from the card's bottom edge to the *top* of the ink-free zone — the sender address's own bottom offset builds on this plus a small gap. */
-const INK_FREE_ZONE_TOP_FROM_BOTTOM_CQH = POSTCARD_INK_FREE_ZONE_PERCENT.bottom + POSTCARD_INK_FREE_ZONE_PERCENT.height;
+const CONTENT_BOTTOM = `calc(${POSTCARD_SAFE_ZONE_INSET_PERCENT.y}cqh + 0.8cqh)`;
 
 /**
  * The standardized Webpresa postcard back (Stage 22, redesigned per a
@@ -42,10 +35,10 @@ const INK_FREE_ZONE_TOP_FROM_BOTTOM_CQH = POSTCARD_INK_FREE_ZONE_PERCENT.bottom 
  * A left marketing panel (logo, headline, feature list, contact footer —
  * the general brand pitch, distinct from the front's personalized
  * before/after showcase) sized to roughly the width the Lob-reserved
- * ink-free zone leaves free, plus the sender/return address positioned
- * directly above that ink-free zone on the right, left-aligned to its left
- * edge (matching a standard postcard's return-address placement just above
- * the recipient block) rather than at the top of the card.
+ * ink-free zone leaves free. No return/sender address is rendered — per
+ * the user, checking Lob's/USPS's own docs confirmed one isn't required on
+ * this mail class, so the block that used to sit above the ink-free zone
+ * was removed rather than left in reduced form.
  *
  * The recipient-address block (sized/positioned to Lob's documented
  * ink-free zone, `POSTCARD_INK_FREE_ZONE_PERCENT`) is **admin-preview
@@ -55,22 +48,22 @@ const INK_FREE_ZONE_TOP_FROM_BOTTOM_CQH = POSTCARD_INK_FREE_ZONE_PERCENT.bottom 
  * artifact (`showGuides={false}`) renders that block empty rather than
  * drawing text Lob will never show; the admin preview (`showGuides={true}`)
  * still shows it, dashed-outlined, so a reviewer can visually confirm which
- * business a given postcard is addressed to. The sender address, the
- * ink-free-zone box, and the missing-address warning are all direct
- * children of the outer full-card `relative` wrapper (not nested inside the
- * marketing panel) so their `left`/`right`/`bottom` offsets resolve against
- * the *whole* card, matching how `POSTCARD_INK_FREE_ZONE_PERCENT` itself is
- * defined.
+ * business a given postcard is addressed to. It and the missing-address
+ * warning stay direct children of the outer full-card `relative` wrapper
+ * (not nested inside the marketing panel) so their `right`/`bottom` offsets
+ * resolve against the *whole* card, matching how
+ * `POSTCARD_INK_FREE_ZONE_PERCENT` itself is defined.
  */
-export default function PostcardBack({ recipientName, recipientAddress, senderName, senderAddress, showGuides = true }: PostcardBackProps) {
+export default function PostcardBack({ recipientName, recipientAddress, showGuides = true }: PostcardBackProps) {
   return (
     <PostcardFrame showGuides={showGuides}>
       <div className="relative h-full bg-white">
         {/* Left marketing panel — logo, headline, feature list, contact footer.
-            The top content block is `flex-1 justify-center`, not top-aligned,
-            so it's vertically centered in the space above the footer instead
-            of sitting flush at the top with one large leftover gap before the
-            footer (2026-08-21 feedback: "everything is scrunched at the top"). */}
+            Feature list and footer sized up (2026-08-21 feedback: "still white
+            space below built for trust... make the questions and learn more
+            sections bigger... make the 3 claims larger") so the panel's own
+            content fills the column instead of leaving slack in the middle
+            and at the bottom; the footer stays pinned via `mt-auto`. */}
         <div
           className="flex h-full flex-col"
           style={{ width: '56%', paddingLeft: CONTENT_LEFT, paddingTop: CONTENT_TOP, paddingBottom: CONTENT_BOTTOM, paddingRight: '2cqw' }}
@@ -80,10 +73,13 @@ export default function PostcardBack({ recipientName, recipientAddress, senderNa
             <img src="/webpresa_logo_horizontal_cropped_nobg.png" alt="Webpresa" className="h-[3.6cqh] w-auto" />
             <div className="mt-[1.2cqh] h-[0.35cqh] w-[7cqw]" style={{ backgroundColor: POSTCARD_BLUE }} />
 
+            {/* Three lines, each on its own line (2026-08-21 feedback), not
+                two lines with the third wrapping onto the second. */}
             <h2 className="mt-[2cqh] text-[2.8cqw] font-black leading-[1.15] tracking-tight" style={{ color: POSTCARD_NAVY }}>
               <span className="block">We build websites</span>
-              <span className="block">
-                so you can build <span style={{ color: POSTCARD_BLUE }}>your business.</span>
+              <span className="block">so you can build</span>
+              <span className="block" style={{ color: POSTCARD_BLUE }}>
+                your business.
               </span>
             </h2>
 
@@ -91,22 +87,22 @@ export default function PostcardBack({ recipientName, recipientAddress, senderNa
               A modern, mobile-friendly website that helps you look professional and attract more customers.
             </p>
 
-            <div className="mt-[2.2cqh] flex flex-col">
+            <div className="mt-[2.4cqh] flex flex-col">
               {FEATURES.map((feature, i) => (
                 <div key={feature.label}>
                   {i > 0 && <div className="my-[1.3cqh] h-px w-full bg-gray-200" />}
-                  <div className="flex items-center gap-[1cqw]">
+                  <div className="flex items-center gap-[1.2cqw]">
                     <span
-                      className="flex h-[3.2cqw] w-[3.2cqw] shrink-0 items-center justify-center rounded-full"
+                      className="flex h-[4.2cqw] w-[4.2cqw] shrink-0 items-center justify-center rounded-full"
                       style={{ backgroundColor: `${POSTCARD_BLUE}1A` }}
                     >
-                      <feature.Icon className="h-[1.7cqw] w-[1.7cqw]" style={{ color: POSTCARD_BLUE }} strokeWidth={2} />
+                      <feature.Icon className="h-[2.2cqw] w-[2.2cqw]" style={{ color: POSTCARD_BLUE }} strokeWidth={2} />
                     </span>
                     <div>
-                      <p className="text-[1.45cqw] font-bold" style={{ color: POSTCARD_BLUE }}>
+                      <p className="text-[1.85cqw] font-bold" style={{ color: POSTCARD_BLUE }}>
                         {feature.label}
                       </p>
-                      <p className="text-[1.15cqw] text-gray-600">{feature.sub}</p>
+                      <p className="text-[1.4cqw] text-gray-600">{feature.sub}</p>
                     </div>
                   </div>
                 </div>
@@ -114,50 +110,35 @@ export default function PostcardBack({ recipientName, recipientAddress, senderNa
             </div>
           </div>
 
-          <div className="mt-auto pt-[1.5cqh]">
+          <div className="mt-auto pt-[1.2cqh]">
             <div className="flex items-stretch overflow-hidden rounded-lg" style={{ backgroundColor: POSTCARD_NAVY }}>
-              <div className="flex flex-1 items-center gap-[0.8cqw] px-[1.1cqw] py-[0.7cqh]">
-                <span className="flex h-[2.3cqw] w-[2.3cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
-                  <Mail className="h-[1.2cqw] w-[1.2cqw] text-white" />
+              <div className="flex flex-1 items-center gap-[1.1cqw] px-[1.4cqw] py-[1.2cqh]">
+                <span className="flex h-[3.4cqw] w-[3.4cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
+                  <Mail className="h-[1.8cqw] w-[1.8cqw] text-white" />
                 </span>
                 <div>
-                  <p className="text-[0.95cqw] font-bold text-white">Questions?</p>
-                  <p className="text-[0.85cqw] text-white/75">We&apos;re happy to help.</p>
-                  <p className="text-[0.95cqw] font-bold text-white">support@webpresa.com</p>
+                  <p className="text-[1.35cqw] font-bold text-white">Questions?</p>
+                  <p className="text-[1.15cqw] text-white/75">We&apos;re happy to help.</p>
+                  <p className="text-[1.35cqw] font-bold text-white">support@webpresa.com</p>
                 </div>
               </div>
               <div className="w-px self-stretch bg-white/20" />
-              <div className="flex flex-1 items-center gap-[0.8cqw] px-[1.1cqw] py-[0.7cqh]">
-                <span className="flex h-[2.3cqw] w-[2.3cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
-                  <Globe className="h-[1.2cqw] w-[1.2cqw] text-white" />
+              <div className="flex flex-1 items-center gap-[1.1cqw] px-[1.4cqw] py-[1.2cqh]">
+                <span className="flex h-[3.4cqw] w-[3.4cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
+                  <Globe className="h-[1.8cqw] w-[1.8cqw] text-white" />
                 </span>
                 <div>
-                  <p className="text-[0.95cqw] font-bold text-white">Learn more</p>
-                  <p className="text-[0.95cqw] font-bold text-white">webpresa.com</p>
+                  <p className="text-[1.35cqw] font-bold text-white">Learn more</p>
+                  <p className="text-[1.35cqw] font-bold text-white">webpresa.com</p>
                 </div>
               </div>
             </div>
 
-            <p className="mt-[0.6cqh] text-center text-[0.85cqw] font-extrabold uppercase tracking-wide" style={{ color: POSTCARD_BLUE }}>
+            <p className="mt-[0.6cqh] text-center text-[0.95cqw] font-extrabold uppercase tracking-wide" style={{ color: POSTCARD_BLUE }}>
               Proudly building better websites for local businesses.
             </p>
           </div>
         </div>
-
-        {/* Sender/return address — positioned above Lob's ink-free zone, left-aligned to its left edge. */}
-        {senderAddress && (
-          <div
-            className="absolute uppercase"
-            style={{ left: `${INK_FREE_ZONE_LEFT_CQW}cqw`, bottom: `calc(${INK_FREE_ZONE_TOP_FROM_BOTTOM_CQH}cqh + 1.2cqh)` }}
-          >
-            <div className="text-[1.05cqw] leading-relaxed text-gray-700">
-              {senderName && <p className="font-bold">{senderName}</p>}
-              {formatAddress(senderAddress).map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-          </div>
-        )}
 
         {showGuides && (
           <div
