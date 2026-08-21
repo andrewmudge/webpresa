@@ -21,11 +21,11 @@ function formatAddress(address: Address): string[] {
  * The standardized Webpresa postcard back (Stage 22). Postal safe-zone/
  * bleed margins confirmed against Lob's live docs (`postcard-size.ts`).
  *
- * The sender-address block (top-left) is intentionally not rendered for
- * now — the back is otherwise left blank. `senderName`/`senderAddress`
- * stay on the props interface, still populated by both callers from
- * `getLobSenderAddress()`, so this is a quick, contained flip to bring the
- * block back later rather than a change to the render pipeline.
+ * The sender-address block (top-left) renders whenever `senderAddress` is
+ * present — plain uppercase text, matching a standard postcard return
+ * address. Left unrendered when `senderAddress` is omitted (e.g.
+ * `PostcardBackThumbnail`, which never passes it) rather than showing a
+ * warning, since that's expected in those contexts, not a misconfiguration.
  *
  * The recipient-address block in the bottom-right (sized/positioned to
  * Lob's documented ink-free zone, `POSTCARD_INK_FREE_ZONE_PERCENT`) is
@@ -37,10 +37,21 @@ function formatAddress(address: Address): string[] {
  * (`showGuides={true}`) still shows it, dashed-outlined, so a reviewer can
  * visually confirm which business a given postcard is addressed to.
  */
-export default function PostcardBack({ recipientName, recipientAddress, showGuides = true }: PostcardBackProps) {
+export default function PostcardBack({ recipientName, recipientAddress, senderName, senderAddress, showGuides = true }: PostcardBackProps) {
   return (
     <PostcardFrame showGuides={showGuides}>
       <div className="relative h-full bg-white p-6 text-sm text-gray-900">
+        {senderAddress && (
+          <div className="max-w-[45%] uppercase">
+            <div className="text-xs leading-relaxed text-gray-700">
+              {senderName && <p className="font-medium">{senderName}</p>}
+              {formatAddress(senderAddress).map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {showGuides && (
           <div
             className="absolute flex flex-col justify-end border border-dashed border-gray-300 p-2"
