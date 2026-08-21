@@ -120,7 +120,13 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       statements: [
         new iam.PolicyStatement({
           sid: 'DynamoDbTables',
-          actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan'],
+          // `BatchGetItem` added Stage 29 (Analytics) — `lib/db/campaign-recipients.ts`'s
+          // `listCampaignRecipientsByIds()` is the first caller anywhere in
+          // this app to need it (resolving many CampaignRecipients by known
+          // key without a second full-table Scan). Granted across every
+          // table via this same shared statement, matching the existing
+          // pattern here rather than carving out a narrower per-table grant.
+          actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:BatchGetItem'],
           resources: tablesWithIndexes.flatMap((table) => [table.tableArn, `${table.tableArn}/index/*`]),
         }),
         new iam.PolicyStatement({

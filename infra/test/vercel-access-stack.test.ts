@@ -134,7 +134,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the six DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), and stripe-webhook-failures/operations-dismissals (Stage 24)', () => {
+  it('grants the seven DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), stripe-webhook-failures/operations-dismissals (Stage 24), and BatchGetItem (Stage 29, for listCampaignRecipientsByIds)', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -142,8 +142,17 @@ describe('data-access policy statements', () => {
     const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'DynamoDbTables')!;
 
     expect(statement.Action).toEqual(
-      expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan']),
+      expect.arrayContaining([
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+        'dynamodb:DeleteItem',
+        'dynamodb:Query',
+        'dynamodb:Scan',
+        'dynamodb:BatchGetItem',
+      ]),
     );
+    expect(statement.Action).toHaveLength(7);
     // 17 tables × (table + index/*) = 34 resource entries.
     expect(statement.Resource).toHaveLength(34);
   });
