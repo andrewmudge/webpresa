@@ -1414,7 +1414,7 @@ Repeat with `--profile webpresa-prod --context env=prod` (and `npm run diff:ses:
 | `MARKETING_CLICK_TOKEN_SECRET_NAME` | `webpresa-dev-marketing-click-token` |
 | `MARKETING_SES_FROM_EMAIL` | A branded address under the verified `webpresa.com` domain, e.g. `andrew@webpresa.com` — deliberately distinct from `SES_FROM_EMAIL` |
 | `SES_CONFIGURATION_SET_NAME` | CloudFormation export `webpresa-dev-ses-configuration-set-name` (`webpresa-dev-marketing`) |
-| `MARKETING_TEST_RECIPIENT_ALLOWLIST` | Comma-separated real inboxes you control, e.g. `mudge.andrew+test@gmail.com`. **Required** in every non-production environment before any real or test send can succeed at all. |
+| `MARKETING_TEST_RECIPIENT_ALLOWLIST` | Comma-separated real inboxes/`@domain` suffixes, or the literal `*` to disable this gate entirely. **Dev is currently set to `*`** — a deliberate choice given SES production access is already granted in this account; the app-level allowlist is a *separate*, additional guard on top of that, not a substitute for it. **Required** (non-`*`) in any non-production environment before any real or test send can succeed at all otherwise. |
 
 ### Vercel Cron
 
