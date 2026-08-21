@@ -153,6 +153,12 @@ export async function POST(request: Request): Promise<Response> {
       cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
       ...(mapped.plan !== undefined ? { plan: mapped.plan } : {}),
       ...(mapped.billingInterval !== undefined ? { billingInterval: mapped.billingInterval } : {}),
+      // Stage 29 (Analytics) — set once (never overwritten on a later
+      // resubscribe) / on each cancellation. See Business.firstPaidAt/
+      // canceledAt doc comments for the exact semantics these two fields
+      // carry and why they're diagnostic-adjacent but not gated writes.
+      ...(mapped.subscriptionStatus === 'active' && !business.firstPaidAt ? { firstPaidAt: new Date().toISOString() } : {}),
+      ...(derivedStatus === 'cancelled' ? { canceledAt: new Date().toISOString() } : {}),
       lastStripeEventId: event.id,
       lastStripeEventAt: new Date(event.created * 1000).toISOString(),
       lastStripeSyncAt: new Date().toISOString(),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { POSTCARD_STATUSES, POSTCARD_PROVIDERS } from '@/domain/models/postcard';
+import { POSTCARD_STATUSES, POSTCARD_PROVIDERS, POSTCARD_TEMPLATE_VARIANTS } from '@/domain/models/postcard';
 import { IsoTimestampSchema } from './common.schema';
 
 export const PostcardSchema = z.object({
@@ -9,6 +9,7 @@ export const PostcardSchema = z.object({
   businessId: z.string().regex(/^biz_/),
   previewId: z.string().regex(/^preview_/),
   campaignRecipientId: z.string().regex(/^recipient_/).optional(),
+  templateVariant: z.enum(POSTCARD_TEMPLATE_VARIANTS).optional(),
   provider: z.enum(POSTCARD_PROVIDERS),
   providerPostcardId: z.string().optional(),
   status: z.enum(POSTCARD_STATUSES),

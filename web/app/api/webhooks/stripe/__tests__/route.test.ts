@@ -190,6 +190,50 @@ describe('POST /api/webhooks/stripe', () => {
     );
   });
 
+  it('sets firstPaidAt the first time a business becomes active (Stage 29)', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_4c',
+      type: 'customer.subscription.updated',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1' }); // no firstPaidAt yet
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'active',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_x' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    const payload = mockUpdateBusiness.mock.calls[0][1];
+    expect(payload.firstPaidAt).toEqual(expect.any(String));
+    expect(payload).not.toHaveProperty('canceledAt');
+  });
+
+  it('never overwrites an already-set firstPaidAt on a later reconciliation (e.g. a plan/price update)', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_4d',
+      type: 'customer.subscription.updated',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1', firstPaidAt: '2026-01-01T00:00:00.000Z' });
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'active',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_x' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateBusiness.mock.calls[0][1]).not.toHaveProperty('firstPaidAt');
+  });
+
   it('resolves plan and billingInterval from the subscription price ID and writes both to the business', async () => {
     process.env.STRIPE_PRICE_ID_BASIC_ANNUAL = 'price_basic_annual_test';
 
@@ -268,6 +312,50 @@ describe('POST /api/webhooks/stripe', () => {
       'biz_1',
       expect.objectContaining({ subscriptionStatus: 'canceled', status: 'cancelled' }),
     );
+  });
+
+  it('sets canceledAt when a subscription transitions to cancelled (Stage 29)', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_cancel2',
+      type: 'customer.subscription.deleted',
+      created: 1700000000,
+      data: { object: { id: 'sub_1', metadata: { businessId: 'biz_1', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_1', firstPaidAt: '2026-01-01T00:00:00.000Z' });
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'canceled',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_x' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    const payload = mockUpdateBusiness.mock.calls[0][1];
+    expect(payload.canceledAt).toEqual(expect.any(String));
+    expect(payload).not.toHaveProperty('firstPaidAt'); // already set, not re-set
+  });
+
+  it('does not set canceledAt for a past_due status (only a genuine cancellation)', async () => {
+    mockConstructEvent.mockReturnValue({
+      id: 'evt_pastdue',
+      type: 'customer.subscription.updated',
+      created: 1700000000,
+      data: { object: { id: 'sub_2', metadata: { businessId: 'biz_2', billingPurpose: 'website_subscription' } } },
+    });
+    mockGetBusinessById.mockResolvedValueOnce({ businessId: 'biz_2', firstPaidAt: '2026-01-01T00:00:00.000Z' });
+    mockSubscriptionsRetrieve.mockResolvedValueOnce({
+      id: 'sub_2',
+      status: 'past_due',
+      cancel_at_period_end: false,
+      items: { data: [{ price: { id: 'price_x' }, current_period_end: 1893456000 }] },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateBusiness.mock.calls[0][1]).not.toHaveProperty('canceledAt');
   });
 
   it('returns 500 on an unexpected internal failure so Stripe retries — never a silent drop', async () => {

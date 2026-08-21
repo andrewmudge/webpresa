@@ -7,6 +7,7 @@ import { getPostcardByCampaignRecipientId, putPostcard, approvePostcard } from '
 import { createPostcard } from '@/domain/factories/postcard.factory';
 import { renderPostcardArtifacts } from '@/lib/postcards/render';
 import { submitPostcardToLob, type SubmitPostcardOutcome } from '@/lib/lob/submit-postcard';
+import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 
 /**
  * Admin postcard management (Stage 22). Manual-only, one postcard at a
@@ -59,6 +60,7 @@ export async function createPostcardAction(campaignRecipientId: string): Promise
     previewId: business.currentPreviewId,
     provider: 'lob',
     campaignRecipientId,
+    templateVariant: resolvePostcardTemplateVariant(business),
   });
   await putPostcard(postcard);
   await linkPostcardToCampaignRecipient(campaignRecipientId, postcard.postcardId);

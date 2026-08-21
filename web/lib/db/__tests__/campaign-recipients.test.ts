@@ -18,6 +18,7 @@ import {
   getCampaignRecipientByCode,
   listCampaignRecipientsForCampaign,
   listCampaignRecipientsForBusiness,
+  listCampaignRecipientsByIds,
   putCampaignRecipient,
   updateCampaignRecipientDestination,
   updateCampaignRecipientStatus,
@@ -92,6 +93,74 @@ describe('listCampaignRecipientsForBusiness', () => {
     await listCampaignRecipientsForBusiness('biz_00000000-0000-0000-0000-000000000001');
     const command = mockSend.mock.calls[0][0];
     expect(command.input.IndexName).toBe('business-id-index');
+  });
+});
+
+describe('listCampaignRecipientsByIds', () => {
+  it('returns an empty array without calling DynamoDB for an empty input', async () => {
+    const result = await listCampaignRecipientsByIds([]);
+    expect(result).toEqual([]);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('batch-gets and parses every requested recipient in a single chunk', async () => {
+    const r1 = makeRecipient();
+    const r2 = makeRecipient({ campaignRecipientId: 'recipient_00000000-0000-0000-0000-000000000002' });
+    mockSend.mockResolvedValueOnce({
+      Responses: { 'webpresa-test-campaign-recipients': [r1, r2] },
+    });
+
+    const result = await listCampaignRecipientsByIds([r1.campaignRecipientId, r2.campaignRecipientId]);
+
+    expect(result).toHaveLength(2);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.RequestItems['webpresa-test-campaign-recipients'].Keys).toEqual([
+      { campaignRecipientId: r1.campaignRecipientId },
+      { campaignRecipientId: r2.campaignRecipientId },
+    ]);
+  });
+
+  it('dedupes duplicate ids before batch-getting', async () => {
+    const r1 = makeRecipient();
+    mockSend.mockResolvedValueOnce({
+      Responses: { 'webpresa-test-campaign-recipients': [r1] },
+    });
+
+    await listCampaignRecipientsByIds([r1.campaignRecipientId, r1.campaignRecipientId]);
+
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.RequestItems['webpresa-test-campaign-recipients'].Keys).toHaveLength(1);
+  });
+
+  it('chunks requests at the 100-item BatchGetItem limit', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `recipient_${String(i).padStart(8, '0')}-0000-0000-0000-000000000000`);
+    mockSend.mockResolvedValue({ Responses: { 'webpresa-test-campaign-recipients': [] } });
+
+    await listCampaignRecipientsByIds(ids);
+
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(mockSend.mock.calls[0][0].input.RequestItems['webpresa-test-campaign-recipients'].Keys).toHaveLength(100);
+    expect(mockSend.mock.calls[1][0].input.RequestItems['webpresa-test-campaign-recipients'].Keys).toHaveLength(50);
+  });
+
+  it('retries once on UnprocessedKeys, then gives up on any still left', async () => {
+    const r1 = makeRecipient();
+    mockSend
+      .mockResolvedValueOnce({
+        Responses: { 'webpresa-test-campaign-recipients': [] },
+        UnprocessedKeys: {
+          'webpresa-test-campaign-recipients': { Keys: [{ campaignRecipientId: r1.campaignRecipientId }] },
+        },
+      })
+      .mockResolvedValueOnce({
+        Responses: { 'webpresa-test-campaign-recipients': [r1] },
+      });
+
+    const result = await listCampaignRecipientsByIds([r1.campaignRecipientId]);
+
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
   });
 });
 

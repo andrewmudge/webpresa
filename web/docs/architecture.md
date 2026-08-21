@@ -1251,6 +1251,36 @@ No admin-facing environment switcher was added, and none was needed — dev/prod
 
 ---
 
+## Admin Analytics Dashboard (Stage 29)
+
+**Implemented 2026-08-20.** `/admin/analytics` — business/acquisition/revenue metrics, deliberately separate from `/admin/operations`'s technical/system health. Now the default `/admin` landing page (`AdminSidebar.tsx`'s `NAV_ITEMS` lists it first, ahead of Operations); Operations itself is untouched.
+
+### Domain model additions (no infra change — plain optional attributes on existing items)
+
+- `Business.firstPaidAt?` / `Business.canceledAt?` — set only by `app/api/webhooks/stripe/route.ts`'s existing reconciliation write (same call site as `subscriptionStatus`/`plan`/`billingInterval`), inside the already-fetched `business` object it has in scope. `firstPaidAt` is set once and never overwritten; `canceledAt` reflects only the most recent cancellation, the same snapshot-only semantics `currentPeriodEnd`/`cancelAtPeriodEnd` already have — no subscription-event-history table was added for this MVP.
+- `Postcard.templateVariant?` — stamped once at creation (`createPostcardAction`) via the existing `resolvePostcardTemplateVariant(business)`, so a postcard's template-performance row stays stable even if the business's `websiteUrl` changes later. Legacy postcards without it fall back to computing the variant live.
+- `PLAN_CATALOG` (`domain/constants/plan-catalog.ts`) gained `monthlyPriceCents`/`annualPriceCents` — the numeric counterpart to its existing display strings, and the sole source MRR math reads from.
+
+### `web/lib/analytics/`
+
+Mirrors `lib/operations/`'s split exactly: `dashboard-types.ts` (client-safe), `date-range.ts`/`calculations.ts`/`attribution.ts` (pure, no `server-only`, no I/O — the full unit-test surface), `dashboard.ts` (`server-only`, `getAnalyticsDashboardData()`, the page's sole entry point, mirroring `aggregateNeedsAttention()`'s role). Reuses the existing bounded-`Scan` pattern (`listAllBusinesses()`, `listAllPostcards()`, `listAllCampaigns()`) rather than the flagged `status-index` GSIs, plus one new `listCampaignRecipientsByIds()` batch-get in `lib/db/campaign-recipients.ts` for resolving the postcard cohort's recipients without a second full scan.
+
+**Funnel** (Postcards Sent → Engaged → Claimed → Signed Up → Paid) is computed from real, already-shipped events: `Postcard.submittedAt` (sent), `CampaignRecipient.estimatedUniqueScans` (engaged — the deduped fingerprint estimate, so repeated scans of one QR don't inflate the count), `Business.status` rank vs. `'claimed'` (claimed — the same event-driven funnel field the just-shipped `advanceBusinessStatus` writes), and `Business.firstPaidAt` (paid, deduped by business). "Signed Up" is documented as literally the same count as "Claimed" — in this architecture, claim consumption and Cognito sign-up happen atomically in `consumeClaim()`.
+
+**MRR trend** reconstructs true active MRR per calendar month-end (not an acquisition-velocity "new MRR by cohort" chart), so it directly answers whether recurring revenue is trending up or down. Known, accepted limitation: a cancel-then-resubscribe cycle appears continuously active through the gap, since only the latest `canceledAt` is retained.
+
+**Template attribution's shared-claim tie-break**: when one reused claim is referenced by two `CampaignRecipient`s for the same not-yet-claimed business (a real path in `campaigns/actions.ts`), only the earliest-created recipient gets "claimed"/"paid" credit in the per-template table, preventing one business's outcome from inflating two templates' conversion rates. The business-level funnel itself stays postcard-indexed and is unaffected.
+
+**Cancellation reasons**: not captured anywhere in this codebase (confirmed — no Stripe `cancellation_details` handling, no survey, no `Business` field). `getCancellationReasons()` always returns a `{ collected: false, breakdown: [] }` placeholder; no field or subsystem was built for unused capture.
+
+**Caching**: `getAnalyticsDashboardData` is wrapped in `unstable_cache` (3-minute revalidation) — deliberately different from Operations' fully-uncached `force-dynamic`, since Operations is incident response (staleness is actively harmful) while Analytics is a reporting page where a few minutes of staleness is normal and the underlying computation (two bounded scans + a batch-get) is worth not repeating on every filter tweak.
+
+### `/admin/analytics` UI
+
+`web/app/admin/(dashboard)/analytics/page.tsx` plus presentational sub-components matching the existing admin design system exactly (bordered white cards, `--color-brand` tokens, the campaigns-table styling) — no chart library exists anywhere in this repo, so the MRR trend and funnel bars are hand-built `<div>`/inline-style bar charts, not a new dependency. `PostcardPerformanceTable.tsx` is the only `'use client'` component (local column-sort only, mirroring `NeedsAttentionSection.tsx`'s "thin client wrapper around server-computed data" precedent).
+
+---
+
 ## API boundaries
 
 Admin mutations use **Next.js Server Actions** (`'use server'` modules):

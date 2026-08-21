@@ -6048,6 +6048,49 @@ Anything not supported by validated customer demand or a clear strategic decisio
 
 ---
 
+# Stage 29 — Admin Analytics Dashboard
+
+## Status
+
+Complete. `npm run lint`, `npx tsc --noEmit`, `npm test` (1530 tests, 143 files), and `npm run build` all pass. No infrastructure changes — every new field is a plain, additive, optional attribute on an existing DynamoDB item (no new table, no new GSI, no `cdk diff`).
+
+## Objective
+
+Give an admin a fast, decision-useful view of whether the Webpresa business model is working — acquisition funnel, postcard performance, revenue, and subscription health — separate from `/admin/operations` (technical/system health). `/admin/analytics` is the new default `/admin` landing page, listed above Operations in the sidebar.
+
+## Domain model changes (additive only)
+
+- `Business.firstPaidAt?: string` — set exactly once, the first time `subscriptionStatus` becomes `'active'`, by `app/api/webhooks/stripe/route.ts`'s existing reconciliation write. Never overwritten on a later resubscribe.
+- `Business.canceledAt?: string` — set on every transition to `'cancelled'`, same write site. Retains only the MOST RECENT cancellation (a snapshot field, not an event log — consistent with `currentPeriodEnd`/`cancelAtPeriodEnd`'s existing semantics).
+- `Postcard.templateVariant?: PostcardTemplateVariant` — denormalized at creation time (`createPostcardAction`, `app/admin/(dashboard)/postcards/actions.ts`) via `resolvePostcardTemplateVariant(business)`, so a postcard's template-performance attribution is immune to the business's `websiteUrl`/`adminPostcardTemplateOverride` changing after it was sent. Legacy postcards without this field fall back to computing it live from current `Business` state.
+- `PLAN_CATALOG` (`domain/constants/plan-catalog.ts`) gained real numeric `monthlyPriceCents`/`annualPriceCents` fields — the single source of truth for MRR math (never a second, driftable constant alongside the existing display strings).
+
+## Analytics layer (`web/lib/analytics/`)
+
+Mirrors `lib/operations/`'s existing split: `dashboard-types.ts` (client-safe types/constants, no `server-only`), `date-range.ts` and `calculations.ts` and `attribution.ts` (pure functions, no I/O — the unit-test core), `dashboard.ts` (`server-only` orchestration, `getAnalyticsDashboardData()`, mirroring `aggregateNeedsAttention()`'s role, wrapped in `unstable_cache` at a 3-minute revalidation window).
+
+Key documented approximations (all deliberate, all commented in code):
+
+- **"Signed Up" = "Claimed"**: in this architecture, claim consumption and Cognito account creation/sign-in happen atomically (`consumeClaim()`), so there's no distinct earlier signup event to count separately.
+- **MRR trend chart** reconstructs true active MRR per calendar month-end (`mrrCentsAsOf` per month), not a "new MRR by cohort month" chart — this is what actually shows whether recurring revenue is trending up or down. Known, accepted limitation: a business that cancels and later resubscribes appears continuously active through the gap, since `canceledAt` only retains the most recent cancellation (no full subscription-event-history table for this MVP).
+- **New/Churned/Net New MRR** use each business's current `plan`/`billingInterval`, not price-at-signup (no price history retained — harmless today since only one plan/cadence is purchasable).
+- **Shared-claim tie-break**: when one reused claim is referenced by two `CampaignRecipient`s for the same business (a real code path in `campaigns/actions.ts`), only the recipient with the earliest `createdAt` gets "claimed"/"paid" attribution credit in the per-template table — deterministic, never probabilistic. The business-level funnel is deliberately postcard-indexed and unaffected by this.
+- **Cancellation reasons**: not captured anywhere in this codebase today (no Stripe `cancellation_details`, no survey). `getCancellationReasons()` always returns `{ collected: false, breakdown: [] }`; the UI shows a plain "not currently tracked" state — no fabricated data, no subsystem built for unused capture.
+
+## UI (`web/app/admin/(dashboard)/analytics/`)
+
+`page.tsx` (Server Component, `force-dynamic`, reads `searchParams`) plus presentational sub-components (`FilterBar`, `KpiGrid`, `FunnelCard`, `RevenueSection`/`MrrTrendChart`, `SubscriberMixCard`, `BestTemplateCallout`, `PostcardPerformanceTable` — the one `'use client'` component, for local sort only — `CustomerHealthCard`, `CancellationReasonsCard`). Matches the existing admin design system exactly (bordered white cards, `--color-brand` tokens, the campaigns-table styling) — no chart library added (none exists in this repo), no gauge/pie charts.
+
+## Nav / default route
+
+`AdminSidebar.tsx`'s `NAV_ITEMS` gained `Analytics` as the first entry (above Operations). `app/admin/(dashboard)/page.tsx` now redirects to `/admin/analytics` instead of `/admin/businesses`. Nothing under `/admin/operations` was touched.
+
+## Deferred work
+
+Forecasting, LTV modeling, cohort retention heatmaps, geographic heat maps, advanced multi-touch attribution, A/B significance testing, CSV export, scheduled reports, external BI integrations — the calculation layer's pure-function shape (arrays in, typed view-models out) is structured so these can be added later without a rewrite. Real cancellation-reason capture (Stripe Customer Portal `cancellation_details` or a pre-cancellation survey) is a real, separate follow-up.
+
+---
+
 # Recommended execution milestones
 
 The numbered stages above remain the canonical implementation references. The milestones below group them into business outcomes.

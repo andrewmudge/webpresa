@@ -69,6 +69,16 @@ describe('unique IDs', () => {
     const pc2 = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob' });
     expect(pc1.postcardId).not.toBe(pc2.postcardId);
   });
+
+  it('Postcard.templateVariant is absent unless explicitly stamped', () => {
+    const biz = createBusiness({ name: 'Acme Plumbing', industry: 'plumbing' });
+    const preview = createSitePreview({ businessId: biz.businessId, templateId: 't1', content: validContent, theme: validTheme });
+    const withoutVariant = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob' });
+    expect(withoutVariant.templateVariant).toBeUndefined();
+
+    const withVariant = createPostcard({ businessId: biz.businessId, previewId: preview.previewId, provider: 'lob', templateVariant: 'has_website' });
+    expect(withVariant.templateVariant).toBe('has_website');
+  });
 });
 
 // ---------------------------------------------------------------------------

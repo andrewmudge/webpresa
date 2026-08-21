@@ -25,6 +25,16 @@ export interface PlanCatalogEntry {
   annualPriceDisplay?: string;
   /** Short "vs. paying monthly" savings callout shown next to the annual price (e.g. "Save 20%"). */
   annualSavingsLabel?: string;
+  /** Real numeric price Stripe charges monthly, in cents — the single source
+   *  of truth Stage 29 (Analytics) reads for MRR math. Never a second,
+   *  driftable constant alongside `priceDisplay`. */
+  monthlyPriceCents: number;
+  /** Real numeric annual price Stripe charges, in cents — omitted for a plan
+   *  with no annual Price configured in Stripe (`growth`, today). Annual MRR
+   *  normalization divides this by 12 (see `lib/analytics/calculations.ts`'s
+   *  `normalizeToMonthlyCents` — e.g. 37500 / 12 = 3125 cents = $31.25/mo,
+   *  never the raw $375). */
+  annualPriceCents?: number;
   description: string;
   /** Short bullet list for plan-comparison UI (e.g. the claim-status activation cards). */
   features: string[];
@@ -38,6 +48,8 @@ export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
     priceDisplay: '$39/month',
     annualPriceDisplay: '$375/year',
     annualSavingsLabel: 'Save 20%',
+    monthlyPriceCents: 3900,
+    annualPriceCents: 37500,
     description: 'Everything you need to get online and be found in your primary city.',
     features: [
       'Professional single-page website',
@@ -52,6 +64,7 @@ export const PLAN_CATALOG: Record<WebpresaPlan, PlanCatalogEntry> = {
   growth: {
     label: 'Growth',
     priceDisplay: '$79/month',
+    monthlyPriceCents: 7900,
     description: 'Expand your visibility with multiple pages and lead generation tools.',
     featuresIntro: 'Everything in Basic, plus:',
     features: [

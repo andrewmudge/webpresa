@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react';
 import { signOut } from '@/lib/auth/actions';
 
 const NAV_ITEMS = [
+  { href: '/admin/analytics', label: 'Analytics' },
   { href: '/admin/operations', label: 'Operations' },
   { href: '/admin/campaigns', label: 'Campaigns' },
   { href: '/admin/businesses', label: 'Businesses' },

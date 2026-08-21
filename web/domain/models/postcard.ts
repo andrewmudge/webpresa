@@ -46,6 +46,14 @@ export interface Postcard extends MutableTimestampedRecord {
   previewId: string;
   /** The CampaignRecipient this postcard was generated for, if any. */
   campaignRecipientId?: string;
+  /** Denormalized at creation time via `resolvePostcardTemplateVariant(business)`
+   *  (`lib/postcards/template.ts`) — immune to the business's `websiteUrl`/
+   *  `adminPostcardTemplateOverride` changing after this postcard was sent, so
+   *  Stage 29 (Analytics) template-performance breakdowns stay stable against
+   *  historical sends. Absent on postcards created before this field existed;
+   *  callers needing a value for those fall back to calling
+   *  `resolvePostcardTemplateVariant()` against current `Business` state. */
+  templateVariant?: PostcardTemplateVariant;
   provider: PostcardProvider;
   /** The ID returned by the mailing provider after submission. */
   providerPostcardId?: string;

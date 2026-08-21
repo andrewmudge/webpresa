@@ -1,9 +1,12 @@
 import 'server-only';
-import { GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
 import type { CampaignRecipient, CampaignRecipientStatus } from '@/domain/models/campaign-recipient';
 import { CampaignRecipientSchema } from '@/domain/schemas/campaign-recipient.schema';
 import { getDynamoDBClient, TABLE_CAMPAIGN_RECIPIENTS } from './client';
 import * as rateLimit from './rate-limit';
+
+/** DynamoDB's own per-table BatchGetItem key limit. */
+const BATCH_GET_CHUNK_SIZE = 100;
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -66,6 +69,44 @@ export async function listCampaignRecipientsForBusiness(businessId: string): Pro
     }),
   );
   return (result.Items ?? []).map((item) => CampaignRecipientSchema.parse(item));
+}
+
+/**
+ * Batch-gets CampaignRecipients by primary key — used by
+ * `lib/analytics/dashboard.ts` (Stage 29) to resolve the recipients for a
+ * set of postcards it already scanned, without a second full-table Scan.
+ * Chunks at DynamoDB's 100-item BatchGetItem limit; duplicate/unprocessed
+ * keys within a chunk are retried once (BatchGetItem can return
+ * `UnprocessedKeys` under throttling) before giving up on any that remain,
+ * matching the rest of this codebase's "best-effort, never throw on a
+ * partial read" posture for analytics-adjacent reads. Order of the returned
+ * array is not guaranteed to match `campaignRecipientIds`.
+ */
+export async function listCampaignRecipientsByIds(campaignRecipientIds: string[]): Promise<CampaignRecipient[]> {
+  if (campaignRecipientIds.length === 0) return [];
+
+  const client = getDynamoDBClient();
+  const uniqueIds = Array.from(new Set(campaignRecipientIds));
+  const results: CampaignRecipient[] = [];
+
+  for (let i = 0; i < uniqueIds.length; i += BATCH_GET_CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(i, i + BATCH_GET_CHUNK_SIZE);
+    let keys = chunk.map((campaignRecipientId) => ({ campaignRecipientId }));
+
+    for (let attempt = 0; attempt < 2 && keys.length > 0; attempt++) {
+      const result = await client.send(
+        new BatchGetCommand({
+          RequestItems: { [TABLE_CAMPAIGN_RECIPIENTS()]: { Keys: keys } },
+        }),
+      );
+      for (const item of result.Responses?.[TABLE_CAMPAIGN_RECIPIENTS()] ?? []) {
+        results.push(CampaignRecipientSchema.parse(item));
+      }
+      keys = (result.UnprocessedKeys?.[TABLE_CAMPAIGN_RECIPIENTS()]?.Keys as { campaignRecipientId: string }[] | undefined) ?? [];
+    }
+  }
+
+  return results;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { Postcard, PostcardProvider } from '@/domain/models/postcard';
+import type { Postcard, PostcardProvider, PostcardTemplateVariant } from '@/domain/models/postcard';
 import { PostcardSchema } from '@/domain/schemas/postcard.schema';
 import { generateId, nowIso } from './utils';
 
@@ -8,6 +8,11 @@ export interface CreatePostcardInput {
   provider: PostcardProvider;
   /** The CampaignRecipient this postcard is being generated for. Absent for a single-postcard test send. */
   campaignRecipientId?: string;
+  /** The template resolved for this business at creation time — see
+   *  `Postcard.templateVariant`'s doc comment. Callers should pass
+   *  `resolvePostcardTemplateVariant(business)` (`lib/postcards/template.ts`),
+   *  not compute it here, since this factory has no access to `Business`. */
+  templateVariant?: PostcardTemplateVariant;
 }
 
 /**
@@ -27,6 +32,7 @@ export function createPostcard(input: CreatePostcardInput): Postcard {
     businessId: input.businessId,
     previewId: input.previewId,
     ...(input.campaignRecipientId !== undefined && { campaignRecipientId: input.campaignRecipientId }),
+    ...(input.templateVariant !== undefined && { templateVariant: input.templateVariant }),
     provider: input.provider,
     status: 'pending',
     createdAt: now,

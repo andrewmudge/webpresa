@@ -450,6 +450,21 @@ export interface Business extends MutableTimestampedRecord {
    *  versioning are Stage 26's responsibility. */
   termsVersion?: string;
   acceptedTermsAt?: string;
+  /** ISO 8601 timestamp — set exactly once, the first time subscriptionStatus
+   *  becomes 'active'. Never overwritten on a later resubscribe: this is the
+   *  sole source of "when did this business first become a paying customer,"
+   *  used by Stage 29 (Analytics) for new-customer cohorts, MRR-trend
+   *  bucketing, and postcard->paid conversion timing. Written only by
+   *  app/api/webhooks/stripe/route.ts. */
+  firstPaidAt?: string;
+  /** ISO 8601 timestamp — the MOST RECENT cancellation only, overwritten on
+   *  each new cancellation event, consistent with currentPeriodEnd/
+   *  cancelAtPeriodEnd's existing snapshot-only (not historical) semantics.
+   *  Meaningful only while subscriptionStatus === 'canceled' — see
+   *  lib/analytics/calculations.ts's wasActiveAsOf() for why a stale value
+   *  from a prior cancel/resubscribe cycle must be ignored once active again.
+   *  Written only by app/api/webhooks/stripe/route.ts. */
+  canceledAt?: string;
 
   // -------------------------------------------------------------------------
   // Customer dashboard preferences (Stage 19)
