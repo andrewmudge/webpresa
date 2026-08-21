@@ -8,6 +8,7 @@ import { WebpresaPostcardRenderStack } from '../lib/stacks/postcard-render-stack
 import { WebpresaScanWorkflowStack } from '../lib/stacks/scan-workflow-stack';
 import { WebpresaStockImagesStack } from '../lib/stacks/stock-images-stack';
 import { WebpresaVercelAccessStack } from '../lib/stacks/vercel-access-stack';
+import { WebpresaSesStack } from '../lib/stacks/ses-stack';
 import { WebpresaMonitoringStack } from '../lib/stacks/monitoring-stack';
 import { WebpresaCloudTrailStack } from '../lib/stacks/cloudtrail-stack';
 import { assertAccountMatchesEnvironment, getEnvironmentConfig } from '../lib/config/environments';
@@ -188,6 +189,13 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   scanHitsTable: dataStack.scanHitsTable,
   stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
   operationsDismissalsTable: dataStack.operationsDismissalsTable,
+  marketingCampaignsTable: dataStack.marketingCampaignsTable,
+  marketingEmailTemplatesTable: dataStack.marketingEmailTemplatesTable,
+  marketingOutreachTable: dataStack.marketingOutreachTable,
+  marketingSuppressionsTable: dataStack.marketingSuppressionsTable,
+  marketingMessagesTable: dataStack.marketingMessagesTable,
+  marketingClicksTable: dataStack.marketingClicksTable,
+  marketingSesEventsTable: dataStack.marketingSesEventsTable,
   assetsBucket: dataStack.assetsBucket,
   stockImagesBucket: stockImagesStack.bucket,
   stockImagesTable: stockImagesStack.table,
@@ -201,11 +209,23 @@ new WebpresaVercelAccessStack(app, `Webpresa${label}VercelAccessStack`, {
   captureTokenSecret: dataStack.captureTokenSecret,
   vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
   internalApiSecret: dataStack.internalApiSecret,
+  marketingClickTokenSecret: dataStack.marketingClickTokenSecret,
   screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
   postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
   scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
   customerUserPool: dataStack.customerUserPool,
   screenshotDlqQueue: screenshotStack.screenshotLambda.deadLetterQueue,
+});
+
+// Marketing stage — SES Configuration Set → SNS → HTTPS webhook pipeline.
+// Depends on WEBPRESA_APP_BASE_URL like the screenshot/scan-workflow/
+// postcard-render stacks above — always deploy via `npm run diff:ses`/
+// `deploy:ses`, never a raw `cdk deploy` (see AGENTS.md).
+new WebpresaSesStack(app, `Webpresa${label}SesStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} SES event pipeline — Configuration Set, SNS topic, HTTPS webhook subscription (Marketing stage)`,
+  appBaseUrl,
 });
 
 // Stage 24 — CloudWatch dashboards/alarms. No WEBPRESA_APP_BASE_URL

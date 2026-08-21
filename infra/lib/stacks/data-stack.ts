@@ -72,6 +72,13 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly scanHitsTable: dynamodb.Table;
   public readonly stripeWebhookFailuresTable: dynamodb.Table;
   public readonly operationsDismissalsTable: dynamodb.Table;
+  public readonly marketingCampaignsTable: dynamodb.Table;
+  public readonly marketingEmailTemplatesTable: dynamodb.Table;
+  public readonly marketingOutreachTable: dynamodb.Table;
+  public readonly marketingSuppressionsTable: dynamodb.Table;
+  public readonly marketingMessagesTable: dynamodb.Table;
+  public readonly marketingClicksTable: dynamodb.Table;
+  public readonly marketingSesEventsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly assetsBucket: s3.Bucket;
@@ -85,6 +92,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly captureTokenSecret: secretsmanager.Secret;
   public readonly vercelProtectionBypassSecret: secretsmanager.Secret;
   public readonly internalApiSecret: secretsmanager.Secret;
+  public readonly marketingClickTokenSecret: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: WebpresaDataStackProps) {
     super(scope, id, props);
@@ -618,6 +626,147 @@ export class WebpresaDataStack extends cdk.Stack {
     this.operationsDismissalsTable = operationsDismissals.table;
 
     // ───────────────────────────────────────────────────────────────────────
+    // Marketing (Marketing stage — SES Drip Campaign)
+    //
+    // Entity naming: this stage's per-business enrollment record is called
+    // `MarketingOutreach`, not "BusinessCampaign" — this repo already has an
+    // unrelated `Campaign`/`campaignId` concept (Stage 21 Lob/QR mail
+    // campaigns, `campaigns`/`campaign-recipients` tables above). Every new
+    // table/field here uses `marketingCampaignId` instead, and MVP's single
+    // campaign uses a fixed constant id (see web/lib/marketing/constants.ts),
+    // not a generated one — the same natural-key-no-race reasoning
+    // DomainConnections/CustomerBillingProfiles above already use.
+    // ───────────────────────────────────────────────────────────────────────
+
+    // MarketingCampaigns
+    //   PK: marketingCampaignId
+    //   No GSI — single row for MVP, always a direct GetItem.
+    const marketingCampaigns = new WebpresaTable(this, 'MarketingCampaigns', {
+      config,
+      tableName: 'marketing-campaigns',
+      partitionKey: { name: 'marketingCampaignId', type: S },
+    });
+    this.marketingCampaignsTable = marketingCampaigns.table;
+
+    // MarketingEmailTemplates
+    //   PK: marketingCampaignId   SK: emailSequence
+    //   No GSI — exactly 3 rows for MVP, fetched together via Query(PK) or
+    //   individually via GetItem.
+    const marketingEmailTemplates = new WebpresaTable(this, 'MarketingEmailTemplates', {
+      config,
+      tableName: 'marketing-email-templates',
+      partitionKey: { name: 'marketingCampaignId', type: S },
+      sortKey: { name: 'emailSequence', type: dynamodb.AttributeType.NUMBER },
+    });
+    this.marketingEmailTemplatesTable = marketingEmailTemplates.table;
+
+    // MarketingOutreach
+    //   PK: businessId   SK: marketingCampaignId
+    //   GSIs: campaign-next-action-index (sparse — the daily cron's sole
+    //           query, only 'active' rows with a pending step set
+    //           nextActionAt; terminal rows REMOVE it)
+    //         campaign-id-index (SK: createdAt — admin list/filter query,
+    //           mirrors CampaignRecipients' own campaign-id-index)
+    //         unsubscribe-token-index (high-cardinality — the public
+    //           unsubscribe route's sole lookup)
+    //   The composite PK/SK itself is the enroll-once guard — a conditional
+    //   PutItem (attribute_not_exists(marketingCampaignId)) needs no
+    //   separate reservation item.
+    const marketingOutreach = new WebpresaTable(this, 'MarketingOutreach', {
+      config,
+      tableName: 'marketing-outreach',
+      partitionKey: { name: 'businessId', type: S },
+      sortKey: { name: 'marketingCampaignId', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'campaign-next-action-index',
+          partitionKey: { name: 'marketingCampaignId', type: S },
+          sortKey: { name: 'nextActionAt', type: S },
+        },
+        {
+          indexName: 'campaign-id-index',
+          partitionKey: { name: 'marketingCampaignId', type: S },
+          sortKey: createdAtSortKey,
+        },
+        {
+          indexName: 'unsubscribe-token-index',
+          partitionKey: { name: 'unsubscribeToken', type: S },
+        },
+      ],
+    });
+    this.marketingOutreachTable = marketingOutreach.table;
+
+    // MarketingSuppressions
+    //   PK: emailNormalized (natural key — same reasoning as
+    //     DomainConnections' normalizedDomain)
+    //   No GSI — unifies unsubscribe/hard-bounce/complaint/admin-suppression
+    //   into one GetItem checked before every send. Address-scoped, not
+    //   enrollment-scoped, so it stays correct if a business is ever
+    //   enrolled in a second future campaign.
+    const marketingSuppressions = new WebpresaTable(this, 'MarketingSuppressions', {
+      config,
+      tableName: 'marketing-suppressions',
+      partitionKey: { name: 'emailNormalized', type: S },
+    });
+    this.marketingSuppressionsTable = marketingSuppressions.table;
+
+    // MarketingMessages
+    //   PK: businessId   SK: sortKey (`${marketingCampaignId}#${emailSequence}`)
+    //   GSI: ses-message-id-index (sparse — the SES webhook's primary
+    //     lookup, mirrors Postcards.provider-postcard-id-index)
+    //   The SK itself is the send-once idempotency key — a conditional
+    //   PutItem (attribute_not_exists(sortKey)) is the entire dedup
+    //   mechanism, mirroring PostcardWebhookEvent.lobEventId.
+    const marketingMessages = new WebpresaTable(this, 'MarketingMessages', {
+      config,
+      tableName: 'marketing-messages',
+      partitionKey: { name: 'businessId', type: S },
+      sortKey: { name: 'sortKey', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'ses-message-id-index',
+          partitionKey: { name: 'sesMessageId', type: S },
+        },
+      ],
+    });
+    this.marketingMessagesTable = marketingMessages.table;
+
+    // MarketingClicks
+    //   PK: messageId   SK: sortKey (`CLICK#<isoTimestamp>#<random>`)
+    //   No GSI — exact mirror of ScanHits: durable event log, "recent
+    //   clicks for one message" is a plain Query(PK=messageId), rollup
+    //   fields live on the parent MarketingMessage.
+    const marketingClicks = new WebpresaTable(this, 'MarketingClicks', {
+      config,
+      tableName: 'marketing-clicks',
+      partitionKey: { name: 'messageId', type: S },
+      sortKey: { name: 'sortKey', type: S },
+    });
+    this.marketingClicksTable = marketingClicks.table;
+
+    // MarketingSesEvents
+    //   PK: snsMessageId (SNS envelope's own unique id — the dedup key,
+    //     exact mirror of PostcardWebhookEvents.lobEventId)
+    //   GSI: ses-message-id-index (SK: receivedAt — the admin timeline's
+    //     chronological-events-per-message display, mirrors
+    //     PostcardWebhookEvents.postcard-id-index)
+    //   No TTL — event history must never auto-expire, same as
+    //   PostcardWebhookEvents.
+    const marketingSesEvents = new WebpresaTable(this, 'MarketingSesEvents', {
+      config,
+      tableName: 'marketing-ses-events',
+      partitionKey: { name: 'snsMessageId', type: S },
+      globalSecondaryIndexes: [
+        {
+          indexName: 'ses-message-id-index',
+          partitionKey: { name: 'sesMessageId', type: S },
+          sortKey: { name: 'receivedAt', type: S },
+        },
+      ],
+    });
+    this.marketingSesEventsTable = marketingSesEvents.table;
+
+    // ───────────────────────────────────────────────────────────────────────
     // Customer identity (Stage 17 — Website Claim Flow)
     //
     // Amazon Cognito User Pool for customer accounts only — the admin auth
@@ -761,5 +910,18 @@ export class WebpresaDataStack extends cdk.Stack {
       jsonKeys: ['sharedSecret'],
     });
     this.internalApiSecret = internalApi.secret;
+
+    // Marketing stage — symmetric encryption key for click-tracking
+    // redirect tokens (see web/lib/marketing/click-token.ts, `/e/[token]`).
+    // Not a third-party credential — generated and held entirely within
+    // this platform, provisioned the same way as capture-token above: a
+    // random placeholder at creation, a real value populated out-of-band.
+    const marketingClickToken = new WebpresaSecret(this, 'MarketingClickTokenSecret', {
+      config,
+      secretName: 'marketing-click-token',
+      description: 'Marketing email click-tracking token encryption key (Marketing stage)',
+      jsonKeys: ['encryptionKey'],
+    });
+    this.marketingClickTokenSecret = marketingClickToken.secret;
   }
 }

@@ -26,6 +26,10 @@
     "deploy:postcard-render-repo:prod": "WEBPRESA_APP_BASE_URL=https://www.webpresa.com cdk deploy WebpresaProdPostcardRenderRepositoryStack --profile webpresa-prod --context env=prod",
     "diff:postcard-render:prod": "WEBPRESA_APP_BASE_URL=https://www.webpresa.com cdk diff WebpresaProdPostcardRenderStack --profile webpresa-prod --context env=prod",
     "deploy:postcard-render:prod": "WEBPRESA_APP_BASE_URL=https://www.webpresa.com cdk deploy WebpresaProdPostcardRenderStack --profile webpresa-prod --context env=prod",
+    "diff:ses": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk diff WebpresaDevSesStack --profile webpresa-dev --context env=dev",
+    "deploy:ses": "WEBPRESA_APP_BASE_URL=https://webpresa-git-dev-andrew-mudges-projects.vercel.app cdk deploy WebpresaDevSesStack --profile webpresa-dev --context env=dev",
+    "diff:ses:prod": "WEBPRESA_APP_BASE_URL=https://www.webpresa.com cdk diff WebpresaProdSesStack --profile webpresa-prod --context env=prod",
+    "deploy:ses:prod": "WEBPRESA_APP_BASE_URL=https://www.webpresa.com cdk deploy WebpresaProdSesStack --profile webpresa-prod --context env=prod",
     "test": "vitest run",
     "test:watch": "vitest"
   },

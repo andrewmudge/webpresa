@@ -53,6 +53,20 @@ export interface LogFields {
   retryable?: boolean;
   attempt?: number;
   durationMs?: number;
+  /**
+   * Marketing stage — deliberately a distinct key from `campaignId` above,
+   * which already means the unrelated Stage 21 Lob/QR mail-campaign concept
+   * (`campaigns`/`campaign-recipients` tables). Always the fixed MVP
+   * constant `mktgcampaign_postcard_followup` for now — see
+   * `lib/marketing/constants.ts`.
+   */
+  marketingCampaignId?: string;
+  /** The `MarketingMessage.messageId` a log line concerns, if any. */
+  marketingMessageId?: string;
+  /** Which of the 3 drip-campaign steps (1, 2, or 3) a log line concerns. */
+  emailSequence?: number;
+  /** SES's own message id, once a send has succeeded. */
+  sesMessageId?: string;
 }
 
 const ALLOWED_KEYS: readonly (keyof LogFields)[] = [
@@ -79,6 +93,10 @@ const ALLOWED_KEYS: readonly (keyof LogFields)[] = [
   'retryable',
   'attempt',
   'durationMs',
+  'marketingCampaignId',
+  'marketingMessageId',
+  'emailSequence',
+  'sesMessageId',
 ];
 
 const DEFAULT_SERVICE = 'webpresa';

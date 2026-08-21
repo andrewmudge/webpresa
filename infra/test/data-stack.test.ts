@@ -33,8 +33,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly sixteen DynamoDB tables (Stage 24 adds StripeWebhookFailures and OperationsDismissals)', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 16);
+  it('creates exactly twenty-three DynamoDB tables (Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables)', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 23);
   });
 });
 
@@ -499,9 +499,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 46 outputs — 32 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals), 2 bucket outputs, 10 secret ARN outputs, 2 Cognito outputs', () => {
+  it('creates 61 outputs — 46 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables), 2 bucket outputs, 11 secret ARN outputs, 2 Cognito outputs', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(46);
+    expect(Object.keys(outputs)).toHaveLength(61);
   });
 });
 
@@ -736,8 +736,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly ten secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 10);
+  it('creates exactly eleven secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 11);
   });
 
   const devSecretNames = [

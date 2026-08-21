@@ -9,11 +9,18 @@ import { createHmac } from 'node:crypto';
 
 vi.mock('server-only', () => ({}));
 
-const { mockGetLobSecret, mockGetPostcardByProviderPostcardId, mockApplyPostcardWebhookRollup, mockPutPostcardWebhookEvent } = vi.hoisted(() => ({
+const {
+  mockGetLobSecret,
+  mockGetPostcardByProviderPostcardId,
+  mockApplyPostcardWebhookRollup,
+  mockPutPostcardWebhookEvent,
+  mockStartMarketingOutreach,
+} = vi.hoisted(() => ({
   mockGetLobSecret: vi.fn(),
   mockGetPostcardByProviderPostcardId: vi.fn(),
   mockApplyPostcardWebhookRollup: vi.fn(),
   mockPutPostcardWebhookEvent: vi.fn(),
+  mockStartMarketingOutreach: vi.fn(),
 }));
 
 vi.mock('@/lib/secrets', () => ({ getLobSecret: mockGetLobSecret }));
@@ -22,6 +29,7 @@ vi.mock('@/lib/db/postcards', () => ({
   applyPostcardWebhookRollup: mockApplyPostcardWebhookRollup,
 }));
 vi.mock('@/lib/db/postcard-webhook-events', () => ({ putPostcardWebhookEvent: mockPutPostcardWebhookEvent }));
+vi.mock('@/lib/marketing/campaign-start', () => ({ startMarketingOutreach: mockStartMarketingOutreach }));
 
 import { POST } from '@/app/api/webhooks/lob/route';
 
@@ -55,10 +63,17 @@ function billedEventPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const BUSINESS_ID = 'biz_1';
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetLobSecret.mockResolvedValue({ apiKey: 'test_x', webhookSecret: WEBHOOK_SECRET });
-  mockGetPostcardByProviderPostcardId.mockResolvedValue({ postcardId: POSTCARD_ID, providerPostcardId: PROVIDER_POSTCARD_ID });
+  mockGetPostcardByProviderPostcardId.mockResolvedValue({
+    postcardId: POSTCARD_ID,
+    businessId: BUSINESS_ID,
+    providerPostcardId: PROVIDER_POSTCARD_ID,
+    campaignRecipientId: 'recipient_1',
+  });
   mockPutPostcardWebhookEvent.mockResolvedValue(true);
 });
 
@@ -119,6 +134,32 @@ describe('POST /api/webhooks/lob — happy path', () => {
     expect(recordedEvent.eventType).toBe('postcard.in_transit');
     expect(recordedEvent.mappedStatus).toBeUndefined();
     expect(mockApplyPostcardWebhookRollup).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/webhooks/lob — Marketing stage: delivery triggers enrollment', () => {
+  it('starts the marketing outreach campaign on a newly-recorded delivered event', async () => {
+    const response = await POST(makeRequest(billedEventPayload({ event_type: { id: 'postcard.delivered' } })));
+
+    expect(response.status).toBe(200);
+    expect(mockStartMarketingOutreach).toHaveBeenCalledWith(BUSINESS_ID, {
+      postcardId: POSTCARD_ID,
+      campaignRecipientId: 'recipient_1',
+      deliveredAt: '2026-08-08T12:00:00.000Z',
+    });
+  });
+
+  it('does not start the campaign for a non-delivery event (e.g. billed/mailed)', async () => {
+    const response = await POST(makeRequest(billedEventPayload()));
+    expect(response.status).toBe(200);
+    expect(mockStartMarketingOutreach).not.toHaveBeenCalled();
+  });
+
+  it('does not start the campaign a second time on a duplicate delivered webhook (dedup no-op)', async () => {
+    mockPutPostcardWebhookEvent.mockResolvedValue(false);
+    const response = await POST(makeRequest(billedEventPayload({ event_type: { id: 'postcard.delivered' } })));
+    expect(response.status).toBe(200);
+    expect(mockStartMarketingOutreach).not.toHaveBeenCalled();
   });
 });
 

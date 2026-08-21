@@ -406,6 +406,22 @@ Deliberately named differently from the `webpresa-dev-stock-images` **bucket** b
 
 Owned by `WebpresaStockImagesStack`, not `WebpresaDataStack` — co-located with the stock-images bucket/CDN since bucket, CDN, and table are all one self-contained feature.
 
+### Marketing tables (Marketing stage)
+
+Seven new tables, all owned by `WebpresaDataStack`, none with a `status-index` GSI (each already has a purpose-built, higher-cardinality index for its real access patterns — see `infra/lib/stacks/data-stack.ts` for the full per-table rationale):
+
+| Table | Key | GSIs |
+|---|---|---|
+| `webpresa-dev-marketing-campaigns` | PK `marketingCampaignId` | none — single row for MVP |
+| `webpresa-dev-marketing-email-templates` | PK `marketingCampaignId`, SK `emailSequence` | none — 3 rows, fetched together |
+| `webpresa-dev-marketing-outreach` | PK `businessId`, SK `marketingCampaignId` | `campaign-next-action-index` (PK `marketingCampaignId`, SK `nextActionAt`, sparse — the daily cron's sole query); `campaign-id-index` (PK `marketingCampaignId`, SK `createdAt` — admin list/filter); `unsubscribe-token-index` (PK `unsubscribeToken`) |
+| `webpresa-dev-marketing-suppressions` | PK `emailNormalized` (natural key) | none |
+| `webpresa-dev-marketing-messages` | PK `businessId`, SK `` `${marketingCampaignId}#${emailSequence}` `` (the send-once idempotency key) | `ses-message-id-index` (PK `sesMessageId`, sparse — the SES webhook's lookup) |
+| `webpresa-dev-marketing-clicks` | PK `messageId`, SK `` CLICK#<ts>#<random> `` | none — mirrors `ScanHits` |
+| `webpresa-dev-marketing-ses-events` | PK `snsMessageId` (SNS's own dedup key) | `ses-message-id-index` (PK `sesMessageId`, SK `receivedAt` — the admin timeline) |
+
+`MarketingOutreach`'s composite key is itself the enroll-once guard (conditional `PutItem`); `MarketingMessage`'s SK is itself the send-once/skip-once guard — both mirror `PostcardWebhookEvent.lobEventId`'s conditional-write dedup pattern rather than adding a separate reservation item.
+
 > ⚠ **Status GSIs are low-cardinality and must be reassessed before production deployment.** See the pre-production note in `infra/lib/stacks/data-stack.ts`.
 
 The `createdAt` sort key on `business-id-index` for SitePreviews, ScanEvents, Postcards, and CampaignRecipients enables chronological queries and newest-first pagination for all records belonging to one business.
@@ -501,6 +517,7 @@ See `build_log.md`, "Stock image repository — curated hero-photo fallback (Pha
 | `webpresa-{env}-vercel-protection-bypass` | `{ bypassSecret }` | Stage 14 — Vercel "Protection Bypass for Automation" secret, generated in Vercel's dashboard (not by this platform). Read-only by the screenshot Lambda's own execution role; the Next.js app has no code path that touches it at all — see "Playwright Screenshots (Stage 14)" below, "Platform-level access". |
 | `webpresa-{env}-internal-api` | `{ sharedSecret }` | Stage 16 — authenticates Step Functions' `HttpInvoke` calls into `/api/internal/scan/*`. Not a third-party credential — an internally-generated shared secret read by this app (`lib/internal-auth.ts`) and sourced by the EventBridge Connection in `scan-workflow-stack.ts` to send as a request header; nothing else ever reads or writes it. |
 | `webpresa-{env}-vercel-api` | `{ accessToken, teamId?, projectId }` | Stage 19.x, Part 2 — Vercel Project Domains API credentials (`lib/vercel/client.ts`). `teamId` only included when the project belongs to a Vercel team. Not yet populated with a real value. |
+| `webpresa-{env}-marketing-click-token` | `{ encryptionKey }` | Marketing stage — symmetric key encrypting the `/e/[token]` click-tracking redirect token (`lib/marketing/click-token.ts`, JWE `dir`/`A256GCM`). Not a third-party credential — internally generated, held entirely within this platform, the same provisioning shape as `capture-token`. |
 
 Customer identity itself (email, password, verification, lockout) is **not** a Secrets Manager entry at all — it lives in the Cognito User Pool described under "Authentication" below, which manages its own credential storage.
 
@@ -1278,6 +1295,48 @@ Mirrors `lib/operations/`'s split exactly: `dashboard-types.ts` (client-safe), `
 ### `/admin/analytics` UI
 
 `web/app/admin/(dashboard)/analytics/page.tsx` plus presentational sub-components matching the existing admin design system exactly (bordered white cards, `--color-brand` tokens, the campaigns-table styling) — no chart library exists anywhere in this repo, so the MRR trend and funnel bars are hand-built `<div>`/inline-style bar charts, not a new dependency. `PostcardPerformanceTable.tsx` is the only `'use client'` component (local column-sort only, mirroring `NeedsAttentionSection.tsx`'s "thin client wrapper around server-computed data" precedent).
+
+---
+
+## Marketing — SES Drip Campaign
+
+**Implemented, not yet deployed.** `/admin/marketing` — a 3-email SES drip campaign automatically triggered by Lob's `postcard.delivered` webhook event, plus the admin dashboard to monitor and operate it. Listed in `AdminSidebar.tsx`'s `NAV_ITEMS` between Analytics and Operations.
+
+### Trigger and scheduling
+
+The existing Lob webhook (`app/api/webhooks/lob/route.ts`) calls `startMarketingOutreach()` (`lib/marketing/campaign-start.ts`) only when a newly-recorded event produces a `deliveredAt` — never on postcard creation or send. Enrollment is idempotent (the `MarketingOutreach` composite key's conditional write) and re-checks eligibility once at enrollment time, so a business already claimed/converted between mailing and delivery is never enrolled.
+
+Only the *next* step is ever scheduled — `MarketingOutreach.nextActionSequence`/`nextActionAt` — never all 3 upfront. `computeNextActionAt()` (`lib/marketing/schedule.ts`) always anchors on the original `deliveredAt`, so a late-sent step never drifts the following ones. A new Vercel Cron (`app/api/internal/marketing/send-due-emails`, `0 13 * * *`, `vercel.json`) runs once daily — this app's second use of Vercel Cron, and deliberately not EventBridge Scheduler (no such precedent exists anywhere in `infra/`) — queries the sparse `campaign-next-action-index` GSI for due steps, and calls `attemptSendForOutreach()` (`lib/marketing/send.ts`) per item inside its own try/catch, so one item's failure never aborts the sweep.
+
+### Eligibility (send-time, never assumed)
+
+`checkMarketingEligibility()` (`lib/marketing/eligibility.ts`) is the single function called fresh immediately before every send — the Lob-enrollment hook, the cron, and the manual "send now" admin action all call it, never trusting a prior check. In order: campaign enabled (global kill switch, defaults `'disabled'` in every environment) → outreach still `'active'` → business not `'claimed'`/`'customer'` (`'cancelled'` is deliberately not a stop condition) → target email not in `MarketingSuppression` (unifies unsubscribe/hard-bounce/complaint/admin-suppression) → postcard not engaged (reads `CampaignRecipient.totalScans` directly, Stage 21's existing model, no duplicated flag).
+
+### SES sending and events
+
+`lib/ses/send-marketing-email.ts` — a sibling to Stage 20's `sendLeadNotificationEmail`, using a distinct `MARKETING_SES_FROM_EMAIL` identity (different sending purpose/reputation) and tagging sends with the new `SES_CONFIGURATION_SET_NAME` when set. New CDK stack `infra/lib/stacks/ses-stack.ts` (`WebpresaSesStack`) provisions the Configuration Set, an SNS topic, and an HTTPS subscription straight into `app/api/webhooks/ses/route.ts` (CDK-managed — unlike Lob, no manual dashboard registration step). Matches `send`/`delivery`/`bounce`/`complaint`/`reject` events only — deliberately excludes `open` (unreliable, de-emphasized per product requirements) and `click` (this feature does its own attribution, below).
+
+The webhook (`lib/ses/verify-sns-signature.ts` — the real AWS signature algorithm, no dependency added; SSRF-guarded by validating `SigningCertURL`'s hostname before ever fetching it) mirrors the Lob/Stripe webhook shape: verify → durable write first (`MarketingSesEvent`, conditional on the SNS envelope's own `MessageId`) → conditional rollup only when newly recorded. `Delivery` updates `MarketingMessage`; a hard (`Permanent`) `Bounce` or any `Complaint` writes a `MarketingSuppression` and ends the outreach; soft bounces record only; `Reject` is diagnostic-only.
+
+### Click tracking
+
+`app/e/[token]/route.ts` — a self-contained encrypted JWE (`lib/marketing/click-token.ts`, `jose`, `dir`/`A256GCM`, keyed by the new `marketing-click-token` secret), not a database-backed lookup token, and deliberately separate from `/r/[campaignCode]` (Stage 21's postcard-QR redirect, a different token scheme entirely). An invalid/tampered token is a 404 — unlike the QR redirect, this token is never human-typed or guessable, so there's no enumeration concern to hide behind a generic fallback. `renderTemplate()` wraps `{{previewUrl}}` through this redirect only in the HTML body (the text body uses the raw URL — click tracking only matters for HTML link rendering).
+
+### Unsubscribe
+
+`app/unsubscribe/[token]/route.ts` — public, no auth. `MarketingOutreach.unsubscribeToken` is generated once at enrollment and stored **plaintext** (not hashed like `lib/claim/token.ts`'s claim tokens) — a deliberate deviation, since it must be re-embedded verbatim across 3 emails sent days apart and only ever grants "stop emailing this business," never account takeover. The route resolves the token via `unsubscribe-token-index`, writes a `MarketingSuppression`, ends the outreach if not already terminal, and redirects to a static confirmation page — idempotent, and an unknown token never distinguishes "invalid" from "already used."
+
+### Email templates
+
+Each of the 3 steps is a single plain-text `body` (not separate HTML/text fields) — kept intentionally simple to edit. `renderTemplate()` (`lib/marketing/render-template.ts`) derives both outputs at send time: the text body via plain substitution, the HTML body by HTML-escaping the plain text being converted to markup (a literal `<` in an admin's prose must not be interpreted as a tag) and rendering `{{previewUrl}}`/`{{unsubscribeUrl}}` as real anchor tags. Only `{{businessName}}`, `{{previewUrl}}`, `{{unsubscribeUrl}}` are supported; `validateTemplateVariables()` rejects anything else at save time (Zod `.refine()`) and defensively leaves unrecognized tokens as literal text at render time rather than throwing. Templates resolve at send time (an admin edit takes effect on the next send), but every actual send snapshots its rendered subject/HTML/text onto the `MarketingMessage` row — the durable "what was sent" audit trail. "Send Test Email" calls the identical `renderTemplate()`/`sendMarketingCampaignEmail()` path as a real send (true WYSIWYG parity) but never touches `MarketingOutreach`/`MarketingMessage`, and is still gated by the non-prod recipient allowlist.
+
+### Dev/prod safety
+
+`MarketingCampaign.status` defaults `'disabled'` in every environment. `MARKETING_TEST_RECIPIENT_ALLOWLIST` (`lib/marketing/test-recipient-allowlist.ts`) gates every send outside `production` — both the real send path and "Send Test Email" — to a comma-separated set of exact addresses/`@domain` suffixes; outside production with nothing allowlisted, no marketing email can be sent to anyone.
+
+### `/admin/marketing` UI
+
+`page.tsx` (server component, `force-dynamic` — unlike Analytics' cached view, staleness during active monitoring/manual controls is undesirable) reads `getMarketingDashboardData()` (`lib/marketing/dashboard.ts`, bounded direct reads — `listOutreachForCampaign` via GSI, `listAllMarketingMessages`/`listAllBusinesses` via capped `Scan`, the same "GSI for point lookups, Scan for admin/analytics aggregation" split Analytics/Operations already established). KPI grid deliberately has no open-rate tile. `OutreachTable.tsx` mirrors `BusinessTable.tsx`'s split (server-side status filter via `FilterBar`, client-side instant name/email/business-ID/postcard-ID search over loaded rows); row detail is an **expandable row**, not a drawer, matching this repo's `CollapsibleCard` precedent over its one drawer-like component (a picker modal, not a detail view). `templates/` is its own sub-route with 3 `TemplateEditorCard`s (subject/body, sample-data preview, Save/Reset-with-confirm/Send-Test-Email). All admin mutations are Server Actions with Zod, matching every other admin surface in this app — no new REST routes for admin operations.
 
 ---
 

@@ -5,6 +5,7 @@ import { getPostcardByProviderPostcardId, applyPostcardWebhookRollup } from '@/l
 import { putPostcardWebhookEvent } from '@/lib/db/postcard-webhook-events';
 import { createPostcardWebhookEvent } from '@/domain/factories/postcard-webhook-event.factory';
 import { log } from '@/lib/logging/log';
+import { startMarketingOutreach } from '@/lib/marketing/campaign-start';
 
 /**
  * Lob webhook Route Handler (Stage 22 Phase 5) — structured like
@@ -96,6 +97,18 @@ export async function POST(request: Request): Promise<Response> {
 
     if (newlyRecorded && (mapped.status || mapped.mailedAt || mapped.deliveredAt || mapped.failureReason)) {
       await applyPostcardWebhookRollup(postcard.postcardId, mapped);
+
+      // Marketing stage — a newly recorded, genuine delivery event starts
+      // the Postcard Follow-Up drip campaign. Never on postcard creation or
+      // send — only on the provider-reported deliveredAt timestamp (see
+      // implementation.md, Marketing stage, "Drip campaign timing").
+      if (mapped.deliveredAt) {
+        await startMarketingOutreach(postcard.businessId, {
+          postcardId: postcard.postcardId,
+          campaignRecipientId: postcard.campaignRecipientId,
+          deliveredAt: mapped.deliveredAt,
+        });
+      }
     }
 
     log({

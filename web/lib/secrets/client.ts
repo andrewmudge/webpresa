@@ -76,6 +76,12 @@ export const SECRET_CLAIM_TOKEN = () => getSecretName('CLAIM_TOKEN_SECRET_NAME')
 // remove a custom domain on the Webpresa Vercel project). Never sent to the
 // browser; read only from `lib/vercel/client.ts`.
 export const SECRET_VERCEL_API = () => getSecretName('VERCEL_API_SECRET_NAME');
+// Marketing stage — symmetric encryption key for click-tracking redirect
+// tokens (see web/lib/marketing/click-token.ts, `/e/[token]`). Held
+// entirely within this platform, provisioned the same way as
+// capture-token above: a random placeholder at creation, a real value
+// populated out-of-band.
+export const SECRET_MARKETING_CLICK_TOKEN = () => getSecretName('MARKETING_CLICK_TOKEN_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval

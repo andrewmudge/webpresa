@@ -63,6 +63,13 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     scanHitsTable: dataStack.scanHitsTable,
     stripeWebhookFailuresTable: dataStack.stripeWebhookFailuresTable,
     operationsDismissalsTable: dataStack.operationsDismissalsTable,
+    marketingCampaignsTable: dataStack.marketingCampaignsTable,
+    marketingEmailTemplatesTable: dataStack.marketingEmailTemplatesTable,
+    marketingOutreachTable: dataStack.marketingOutreachTable,
+    marketingSuppressionsTable: dataStack.marketingSuppressionsTable,
+    marketingMessagesTable: dataStack.marketingMessagesTable,
+    marketingClicksTable: dataStack.marketingClicksTable,
+    marketingSesEventsTable: dataStack.marketingSesEventsTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -76,6 +83,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     captureTokenSecret: dataStack.captureTokenSecret,
     vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
     internalApiSecret: dataStack.internalApiSecret,
+    marketingClickTokenSecret: dataStack.marketingClickTokenSecret,
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
     postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
@@ -91,8 +99,8 @@ beforeAll(() => {
 });
 
 describe('resource shape', () => {
-  it('creates exactly two managed policies', () => {
-    dev.resourceCountIs('AWS::IAM::ManagedPolicy', 2);
+  it('creates exactly three managed policies (Marketing stage split its grants into a dedicated third policy — see below)', () => {
+    dev.resourceCountIs('AWS::IAM::ManagedPolicy', 3);
   });
 
   it('creates no IAM user or access keys — the user is imported, not created', () => {
@@ -104,16 +112,25 @@ describe('resource shape', () => {
 describe('naming convention', () => {
   it('policy names follow webpresa-{env}-{resource}', () => {
     dev.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-dev-vercel-data-access' });
+    dev.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-dev-vercel-marketing-data-access' });
     dev.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-dev-vercel-compute-invoke' });
     prod.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-prod-vercel-data-access' });
+    prod.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-prod-vercel-marketing-data-access' });
     prod.hasResourceProperties('AWS::IAM::ManagedPolicy', { ManagedPolicyName: 'webpresa-prod-vercel-compute-invoke' });
   });
 });
 
-describe('both policies attach to the imported webpresa-vercel-{env} user', () => {
+describe('all three policies attach to the imported webpresa-vercel-{env} user', () => {
   it('data-access policy is attached to webpresa-vercel-dev', () => {
     dev.hasResourceProperties('AWS::IAM::ManagedPolicy', {
       ManagedPolicyName: 'webpresa-dev-vercel-data-access',
+      Users: ['webpresa-vercel-dev'],
+    });
+  });
+
+  it('marketing-data-access policy is attached to webpresa-vercel-dev', () => {
+    dev.hasResourceProperties('AWS::IAM::ManagedPolicy', {
+      ManagedPolicyName: 'webpresa-dev-vercel-marketing-data-access',
       Users: ['webpresa-vercel-dev'],
     });
   });
@@ -134,7 +151,7 @@ describe('both policies attach to the imported webpresa-vercel-{env} user', () =
 });
 
 describe('data-access policy statements', () => {
-  it('grants the seven DynamoDB actions on every table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), stripe-webhook-failures/operations-dismissals (Stage 24), and BatchGetItem (Stage 29, for listCampaignRecipientsByIds)', () => {
+  it('grants the seven DynamoDB actions on every non-Marketing table and its indexes, including scan-executions (Stage 16), claims (Stage 17), customer-billing-profiles (Stage 18), customer-onboarding/domain-connections (Stage 19.x), leads (Stage 20), campaigns/campaign-recipients/scan-hits (Stage 21), postcard-webhook-events (Stage 22), stripe-webhook-failures/operations-dismissals (Stage 24), and BatchGetItem (Stage 29, for listCampaignRecipientsByIds) — Marketing-stage tables live in their own policy below', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -198,7 +215,7 @@ describe('data-access policy statements', () => {
     expect(statement.Action).not.toContain('s3:GetObject');
   });
 
-  it('grants secretsmanager:GetSecretValue on all 10 secrets, including claim-token (Stage 17) and vercel-api (Stage 19.x)', () => {
+  it('grants secretsmanager:GetSecretValue on all 10 non-Marketing secrets, including claim-token (Stage 17) and vercel-api (Stage 19.x) — marketing-click-token lives in its own policy below', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
@@ -227,6 +244,44 @@ describe('data-access policy statements', () => {
     );
     // No wildcard admin/global actions — least privilege.
     expect(statement.Action).not.toContain('cognito-idp:*');
+  });
+});
+
+describe('marketing-data-access policy statements (Marketing stage — split from DataAccessPolicy after it exceeded IAM\'s 6,144-byte managed-policy size limit on first deploy attempt)', () => {
+  it('grants the seven DynamoDB actions on all 7 marketing-* tables and their indexes', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-marketing-data-access' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string[]; Resource: unknown[] }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'DynamoDbMarketingTables')!;
+
+    expect(statement.Action).toEqual(
+      expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:BatchGetItem']),
+    );
+    // 7 marketing tables × (table + index/*) = 14 resource entries.
+    expect(statement.Resource).toHaveLength(14);
+  });
+
+  it('grants secretsmanager:GetSecretValue scoped to only the marketing-click-token secret', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-marketing-data-access' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Resource: unknown }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SecretsManagerMarketing')!;
+    // A single-resource PolicyStatement synthesizes as one Fn::ImportValue
+    // object, not a 1-element array — unlike the multi-secret SecretsManager
+    // statement above.
+    expect(statement.Resource).toEqual(expect.objectContaining({ 'Fn::ImportValue': expect.any(String) }));
+  });
+
+  it('grants ses:SendEmail with an unscoped resource for marketing drip-campaign email, as a separate Sid from lead notifications', () => {
+    const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
+      Properties: { ManagedPolicyName: 'webpresa-dev-vercel-marketing-data-access' },
+    });
+    const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Action: string | string[]; Resource: unknown }> } } };
+    const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SesSendMarketingEmails')!;
+    expect(statement.Action).toEqual('ses:SendEmail');
+    expect(statement.Resource).toEqual('*');
   });
 });
 

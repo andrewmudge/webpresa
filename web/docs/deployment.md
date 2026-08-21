@@ -1364,3 +1364,83 @@ Added at the user's request after the initial Stage 24 rollout — the "Dismiss"
 | `SCREENSHOT_DLQ_URL` unset or wrong | `getScreenshotDlqDepth()` returns `null` (never throws) — the Operations page simply omits the DLQ item and shows `screenshotDlqDepth: null` rather than failing to load |
 | `webpresa-vercel-{env}` missing `sqs:GetQueueAttributes` | Same as above — an `AccessDeniedException` from the SQS call is caught the same way, returns `null` |
 | `webpresa-vercel-{env}` missing the new table grant | `AccessDeniedException` from DynamoDB — same `try/catch` behavior as any other missing-permission case elsewhere in this app |
+
+---
+
+## Marketing stage — SES Drip Campaign deployment guidance
+
+**Implemented, not yet deployed to either account.** Seven new DynamoDB tables, one new secret, one new CDK stack (`WebpresaSesStack`), a second Vercel Cron schedule, and — unlike every table added since Stage 22 — a manual, non-CDK SES/SNS step (SNS's own subscription-confirmation handshake, auto-completed by the app itself, but the Configuration Set/topic/subscription are otherwise fully CDK-managed here, unlike Lob's webhook registration).
+
+### Deploy sequence
+
+```bash
+cd infra
+
+# 1. Data stack — adds the 7 marketing-* tables and the marketing-click-token secret:
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevDataStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevDataStack --profile webpresa-dev
+
+# 2. Vercel access stack — grants the 7 new tables + indexes, the new secret,
+#    and the new SesSendMarketingEmails IAM statement (same bare Resource: '*'
+#    rationale as SesSendLeadNotifications — see architecture.md):
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk diff WebpresaDevVercelAccessStack --profile webpresa-dev
+WEBPRESA_APP_BASE_URL=<real dev app URL> npx cdk deploy WebpresaDevVercelAccessStack --profile webpresa-dev
+
+# 3. SES stack — Configuration Set, SNS topic, HTTPS subscription. Always use
+#    the dedicated npm script, never a raw `cdk deploy` (see AGENTS.md):
+npm run diff:ses
+npm run deploy:ses
+```
+
+Repeat with `--profile webpresa-prod --context env=prod` (and `npm run diff:ses:prod`/`deploy:ses:prod`) for production, after dev is verified end-to-end.
+
+### SES/SNS setup (mostly CDK-managed — narrower manual step than Stage 20)
+
+1. `webpresa.com`'s SES sending identity, DKIM, and production access are already in place from Stage 20 — no new domain verification needed. Confirm current status any time with `aws sesv2 get-account --profile <dev|prod> --query 'ProductionAccessEnabled'`, and re-check the account isn't back in the sandbox (a new region or a fresh account would default to it).
+2. After `npm run deploy:ses`, the SNS topic's HTTPS subscription is created but left `PendingConfirmation` until SNS actually delivers a `SubscriptionConfirmation` message — this happens automatically shortly after deploy; `app/api/webhooks/ses/route.ts` auto-confirms it (fetches `SubscribeURL`) the first time it receives that message. Confirm the subscription reached `Confirmed` via `aws sns list-subscriptions-by-topic --topic-arn <arn> --profile webpresa-dev`.
+3. Populate the `marketing-click-token` secret's real value: `aws secretsmanager put-secret-value --secret-id webpresa-dev-marketing-click-token --secret-string '{"encryptionKey":"<32+ random bytes, e.g. openssl rand -base64 32>"}' --profile webpresa-dev`.
+
+### New Vercel environment variables
+
+| Variable | Value |
+|---|---|
+| `MARKETING_CAMPAIGNS_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-campaigns-name` |
+| `MARKETING_EMAIL_TEMPLATES_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-email-templates-name` |
+| `MARKETING_OUTREACH_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-outreach-name` |
+| `MARKETING_SUPPRESSIONS_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-suppressions-name` |
+| `MARKETING_MESSAGES_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-messages-name` |
+| `MARKETING_CLICKS_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-clicks-name` |
+| `MARKETING_SES_EVENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-marketing-ses-events-name` |
+| `MARKETING_CLICK_TOKEN_SECRET_NAME` | `webpresa-dev-marketing-click-token` |
+| `MARKETING_SES_FROM_EMAIL` | A branded address under the verified `webpresa.com` domain, e.g. `andrew@webpresa.com` — deliberately distinct from `SES_FROM_EMAIL` |
+| `SES_CONFIGURATION_SET_NAME` | CloudFormation export `webpresa-dev-ses-configuration-set-name` (`webpresa-dev-marketing`) |
+| `MARKETING_TEST_RECIPIENT_ALLOWLIST` | Comma-separated real inboxes you control, e.g. `mudge.andrew+test@gmail.com`. **Required** in every non-production environment before any real or test send can succeed at all. |
+
+### Vercel Cron
+
+`web/vercel.json` gains a second entry: `GET /api/internal/marketing/send-due-emails` at `0 13 * * *` (once daily, an hour offset from the existing lead-retry cron). Same Hobby-plan daily cap already documented above for Stage 20's cron — confirm the current plan's cron limits (both interval AND total job count) before assuming this second entry deploys cleanly; if the account is still on Hobby, verify via the Cron Jobs dashboard tab after deploy rather than assuming.
+
+### Manual verification procedure
+
+1. In DynamoDB, confirm `webpresa-dev-marketing-campaigns` has no row yet — visiting `/admin/marketing` for the first time lazily creates it `'disabled'` and seeds the 3 default templates.
+2. Enable the campaign via the Campaign Settings toggle on `/admin/marketing`.
+3. On `/admin/marketing/templates`, edit Email 1's body, save, confirm the version increments and the preview pane updates; use "Send Test Email" to an allowlisted address and confirm it arrives clearly marked `[TEST]`.
+4. Attempt "Send Test Email" to a non-allowlisted address — confirm it's rejected with a clear error and nothing sends.
+5. Trigger a real (or manually-simulated) Lob `postcard.delivered` webhook for a dev-safe test business whose email is on the allowlist; confirm a `MarketingOutreach` row appears with `nextActionSequence: 1` and `nextActionAt` ~24h out.
+6. Manually invoke the cron (`curl -H "Authorization: Bearer $CRON_SECRET" https://<dev-url>/api/internal/marketing/send-due-emails`) after temporarily backdating that row's `nextActionAt` in DynamoDB (or wait for the real schedule) — confirm Email 1 arrives, a `MarketingMessage` row is written with `outcome: 'sent'`, and `nextActionSequence` advances to 2.
+7. Click the email's preview link — confirm it redirects to `/b/[slug]` and `MarketingMessage.clickCount` increments.
+8. Click the unsubscribe link — confirm a `MarketingSuppression` row is written, the outreach transitions to `'suppressed'`, and re-visiting the same link is a harmless no-op.
+9. From `/admin/marketing`, exercise Pause/Resume/Suppress/Cancel/"Send Next Email Now" (with its confirm step) on a test row and confirm each transition and its audit log line (`admin.marketing.*` events, structured logs).
+10. Simulate a hard bounce and a complaint against the SES webhook (SES's own mailbox simulator addresses, e.g. `bounce@simulator.amazonses.com`) and confirm both suppress the recipient and end the outreach.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `MarketingCampaign.status` is `'disabled'` | No new enrollments; existing due steps are skipped every cron pass with no state change (never marked terminal) — they resume automatically once re-enabled |
+| `MARKETING_TEST_RECIPIENT_ALLOWLIST` unset or the recipient doesn't match, outside production | The send is short-circuited; recorded as `MarketingMessage.outcome: 'skipped'`, `skipReason: 'non_prod_recipient_not_allowlisted'` for a real send, or surfaced as a form error for "Send Test Email" — never a silent pretend-send |
+| `MARKETING_SES_FROM_EMAIL` unset | Every send attempt fails fast with `error: 'marketing_ses_from_email_not_configured'`, recorded as a failed `MarketingOutreach.sendAttemptCount` increment, retried up to 3 times with a 6h backoff before the outreach is marked `'failed'` |
+| SES send fails (e.g. `MessageRejected`) | No `MarketingMessage` row is written for that attempt (cheap to retry, unlike a paid Lob postcard); `sendAttemptCount` increments; retried up to 3 times, 6h apart, before giving up |
+| SNS subscription never reaches `Confirmed` | No SES events ever reach the app — deliveries/bounces/complaints silently never update `MarketingMessage`/`MarketingSuppression`. Check subscription status directly; there is no other symptom until a real bounce should have suppressed someone and didn't |
+| `webpresa-vercel-{env}` missing the new table/secret grants | `AccessDeniedException` from DynamoDB/Secrets Manager — same `try/catch`-and-log behavior as any other missing-permission case elsewhere in this app |
+| Cron secret unset/wrong | `/api/internal/marketing/send-due-emails` returns 401 for every scheduled invocation; due emails accumulate unsent until fixed |

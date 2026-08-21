@@ -6091,6 +6091,81 @@ Forecasting, LTV modeling, cohort retention heatmaps, geographic heat maps, adva
 
 ---
 
+# Marketing stage — SES Drip Campaign
+
+## Status
+
+Complete. `npm run lint`, `npx tsc --noEmit`, `npm test` (155 test files, 1632 tests), and `npm run build` all pass. New infrastructure: 7 DynamoDB tables, 1 Secrets Manager secret, and a new CDK stack (`WebpresaSesStack` — Configuration Set, SNS topic, HTTPS subscription). Not yet deployed to any AWS account — see `deployment.md`, "Marketing stage deployment" for the outstanding manual steps (SES domain/DKIM already verified from Stage 20; production access already approved).
+
+## Objective
+
+Automate the follow-up after a postcard is delivered: a 3-email SES drip campaign (Email 1 at +24h, Email 2 at +4d, Email 3 at +10d, all anchored on Lob's `postcard.delivered` timestamp), stopped immediately by claim/paid-customer/unsubscribe/hard-bounce/complaint/postcard-engagement/admin-suppression, with a new `/admin/marketing` dashboard to monitor and operate it. Analytics answers "how is the business doing"; Operations answers "is the system healthy"; Marketing answers "what has each prospect received, what's next, and how are they responding."
+
+## Architectural decisions
+
+- **Scheduling: Vercel Cron, not EventBridge Scheduler.** This app had zero EventBridge Scheduler/async-Lambda precedent before this stage — every existing scheduled job (`app/api/internal/leads/retry-notifications`) is Vercel Cron. A new daily cron (`app/api/internal/marketing/send-due-emails`) queries a sparse GSI for due steps and re-checks eligibility per item. Once-daily granularity is acceptable — the campaign's own timing is already "approximately" +1/+4/+10 days, and the existing cron's actual `vercel.json` schedule (`0 6 * * *`, daily) is itself evidence a more frequent interval may not be available on the current Vercel plan; confirm before assuming a second daily cron is free.
+- **SES events: SNS → HTTPS webhook, not SNS → Lambda.** A new CDK stack (`ses-stack.ts`) wires the Configuration Set to an SNS topic with an HTTPS subscription into `app/api/webhooks/ses/route.ts`, structurally identical to the existing Lob/Stripe webhook handlers. No new Lambda.
+- **Entity naming**: the per-business enrollment record is `MarketingOutreach`, not "BusinessCampaign" — this repo already has an unrelated `Campaign`/`campaignId` concept (Stage 21 Lob/QR mail campaigns). Every new field uses `marketingCampaignId`; the MVP's single campaign uses a fixed constant id (`lib/marketing/constants.ts`, `MARKETING_CAMPAIGN_ID`), not a generated one — the same natural-key-no-race reasoning `DomainConnections`/`CustomerBillingProfiles` already use.
+
+## Domain model (new tables)
+
+All new, additive — see `infra/lib/stacks/data-stack.ts` for the authoritative PK/SK/GSI definitions and their access-pattern justifications:
+
+- `marketing-campaigns` — single row for MVP, `status: 'enabled'|'disabled'`, defaults `'disabled'` in every environment. Lazily get-or-created (`lib/marketing/campaign.ts`, `ensureMarketingCampaignExists()`), which also seeds the 3 default templates on first read.
+- `marketing-email-templates` — PK `marketingCampaignId`, SK `emailSequence`. A single plain-text `body` field per template (not separate HTML/text), kept intentionally simple to edit; `renderTemplate()` derives both the HTML and text output at send time.
+- `marketing-outreach` — PK `businessId`, SK `marketingCampaignId`. One row per enrollment; only the *next* scheduled step is ever tracked (`nextActionSequence`/`nextActionAt`), never all 3 upfront. `unsubscribeToken` is generated once at enrollment and stored **plaintext** (not hashed like `lib/claim/token.ts`'s claim tokens) — deliberate: it must be re-embedded verbatim across 3 emails sent days apart, and only ever grants "stop emailing this business," not account takeover.
+- `marketing-suppressions` — PK `emailNormalized` (natural key). Unifies unsubscribe/hard-bounce/complaint/admin-suppression into one lookup, address-scoped rather than enrollment-scoped.
+- `marketing-messages` — PK `businessId`, SK `` `${marketingCampaignId}#${emailSequence}` ``. The SK is itself the send-once/skip-once idempotency key (conditional `PutItem`, mirrors `PostcardWebhookEvent.lobEventId`). Snapshots the actually-rendered subject/HTML/text at send time — the durable "what was sent" audit trail, since templates resolve at send time and are otherwise mutable current-state.
+- `marketing-clicks` — durable per-click log, mirrors `ScanHits`' relationship to `CampaignRecipient`.
+- `marketing-ses-events` — durable per-SNS-event log, mirrors `PostcardWebhookEvents`.
+
+Postcard-engagement stop condition reads `CampaignRecipient.totalScans` directly (Stage 21's existing model) — no duplicated flag.
+
+## Core library (`web/lib/marketing/`)
+
+- `eligibility.ts` — `checkMarketingEligibility()`, the single function called fresh before every send (enrollment, cron, manual "send now"): campaign enabled → outreach active → business not claimed/customer → not in `MarketingSuppression` → postcard not engaged. `'cancelled'` business status is deliberately NOT a stop condition (not in the spec's list).
+- `schedule.ts` — `computeNextActionAt(deliveredAt, sequence)`, always anchored on the original `deliveredAt`, never "now" or a prior send's actual timestamp.
+- `campaign-start.ts` — `startMarketingOutreach()`, called from the Lob webhook on a newly-recorded `deliveredAt`. No retroactive backfill: a postcard delivered while the campaign is disabled never auto-enrolls later.
+- `send.ts` — `attemptSendForOutreach()`, the single function shared by the cron sweep and the manual "send now" admin action.
+- `render-template.ts` / `template-variables.ts` / `default-templates.ts` — variable substitution (`{{businessName}}`, `{{previewUrl}}`, `{{unsubscribeUrl}}` only; unknown variables rejected at save time, left as literal text defensively at render time), HTML-escaping of the plain-text body being converted to HTML, click-tracking wrapping (HTML body only, never the text body).
+- `click-token.ts` — self-contained encrypted JWE (`jose`, `dir`/`A256GCM`) for the `/e/[token]` redirect, not a DB-backed lookup token.
+- `test-recipient-allowlist.ts` — `MARKETING_TEST_RECIPIENT_ALLOWLIST` enforcement outside production.
+- `dashboard.ts` / `next-action-label.ts` / `preview-sample.ts` — admin dashboard data aggregation and display helpers.
+
+## Lob webhook extension
+
+`app/api/webhooks/lob/route.ts` calls `startMarketingOutreach()` inside the existing newly-recorded-rollup branch, only when `mapped.deliveredAt` is set — never on postcard creation or send.
+
+## Cron sweep
+
+`app/api/internal/marketing/send-due-emails/route.ts`, `verifyVercelCronRequest`-gated, queries `listDueOutreach()` and calls `attemptSendForOutreach()` per item inside its own try/catch — one item's failure never aborts the sweep. Added to `vercel.json` (`0 13 * * *`, an hour offset from the existing lead-retry cron).
+
+## SES infrastructure and webhook
+
+New `infra/lib/stacks/ses-stack.ts` (`WebpresaSesStack`): Configuration Set (`webpresa-{env}-marketing`), SNS topic, HTTPS subscription to `{appBaseUrl}/api/webhooks/ses` (CDK-managed — no manual dashboard registration, unlike Lob). Matching events: `send`/`delivery`/`bounce`/`complaint`/`reject` — deliberately excludes `open` (unreliable, de-emphasized per spec) and `click` (this feature does its own attribution). `app/api/webhooks/ses/route.ts` verifies the SNS signature (`lib/ses/verify-sns-signature.ts`, real AWS algorithm, SSRF-guarded `SigningCertURL` hostname check), auto-confirms the subscription handshake, and on a newly-recorded event: `Delivery` updates the rollup; hard `Bounce`/`Complaint` write a `MarketingSuppression` and end the outreach; soft bounces record only; `Reject` is diagnostic-only (does not auto-suppress).
+
+## Click tracking
+
+`app/e/[token]/route.ts` decrypts the click token, writes a durable `MarketingClick`, best-effort updates the `MarketingMessage` rollup (never blocks the redirect), then 302s to the destination. An invalid/tampered token is a 404 — this token is never human-typed or guessable, unlike `/r/[campaignCode]`.
+
+## Unsubscribe
+
+`app/unsubscribe/[token]/route.ts` (public, no auth) resolves the token via `unsubscribe-token-index`, writes `MarketingSuppression`, transitions the outreach to `'suppressed'` if not already terminal, and redirects to a static confirmation page — idempotent, a repeat visit is a harmless no-op. An unknown token redirects to a generic "not valid" page, never a 500, never distinguished from "already used."
+
+## Admin UI (`web/app/admin/(dashboard)/marketing/`)
+
+`AdminSidebar.tsx`'s `NAV_ITEMS` gained `Marketing` between Analytics and Operations. `page.tsx` (server component, `force-dynamic`): KPI grid (Postcards Delivered, Email 1/2/3 Sent, Clicks, Postcard Engagements, Claims, Customers, Unsubscribes, Bounces — deliberately **no open-rate tile**), Campaign Settings (enable/disable toggle), a `FilterBar` (server-side status filter, GET form) plus `OutreachTable` (client component, instant name/email/business-ID/postcard-ID search over loaded rows, mirrors `BusinessTable.tsx`'s split). Row detail is an **expandable row**, not a drawer — matches this repo's `CollapsibleCard` precedent; shows a chronological timeline and the manual admin controls (pause/resume/suppress/cancel remaining/send-next-now, the last requiring inline confirm). `templates/` is its own sub-route: 3 `TemplateEditorCard`s (subject/body editor, sample-data live preview, Save/Reset-with-confirm/Send-Test-Email). All admin mutations are Server Actions with Zod — no new REST API routes for admin operations (REST stays reserved for external webhooks/cron).
+
+## Security
+
+Unknown template variables are rejected at save time (Zod `.refine()` calling `validateTemplateVariables()`) and defensively left as literal text at render time. The plain-text template body is HTML-escaped when converted to an HTML email (it is data being converted to markup, not trusted HTML). "Send Test Email" calls the exact same `renderTemplate()`/`sendMarketingCampaignEmail()` path as a real send (WYSIWYG parity) but never touches `MarketingOutreach`/`MarketingMessage`, and is still subject to the non-prod allowlist. The unsubscribe token never exposes a raw internal id, and only ever mutates the exact business it resolves to.
+
+## Deferred work
+
+SMS, Quo API, cold calling, AI-generated copy, a multi-step/visual campaign builder, A/B testing, advanced segmentation, newsletters, bulk broadcasts, multiple simultaneous campaigns, lead scoring, the future "engaged but not claimed" drip sequence, send-time optimization, elaborate open-tracking analytics — all explicitly out of MVP scope per the original spec. A `MarketingMessage`/`MarketingClick` event stream is in place for a future Analytics-page integration (postcard→engagement/claim/paid conversion rates, per-step click rates, email-assisted conversions) without redesigning Analytics itself.
+
+---
+
 # Recommended execution milestones
 
 The numbered stages above remain the canonical implementation references. The milestones below group them into business outcomes.

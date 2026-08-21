@@ -29,6 +29,13 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly stripeWebhookFailuresTable: dynamodb.ITable;
   readonly operationsDismissalsTable: dynamodb.ITable;
   readonly stockImagesTable: dynamodb.ITable;
+  readonly marketingCampaignsTable: dynamodb.ITable;
+  readonly marketingEmailTemplatesTable: dynamodb.ITable;
+  readonly marketingOutreachTable: dynamodb.ITable;
+  readonly marketingSuppressionsTable: dynamodb.ITable;
+  readonly marketingMessagesTable: dynamodb.ITable;
+  readonly marketingClicksTable: dynamodb.ITable;
+  readonly marketingSesEventsTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
   readonly openAiSecret: secretsmanager.ISecret;
@@ -41,6 +48,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly captureTokenSecret: secretsmanager.ISecret;
   readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly internalApiSecret: secretsmanager.ISecret;
+  readonly marketingClickTokenSecret: secretsmanager.ISecret;
   readonly screenshotLambdaFunction: lambda.IFunction;
   /** Stage 22 Phase 2 — invoked synchronously from web/lib/postcards/render.ts. */
   readonly postcardRenderLambdaFunction: lambda.IFunction;
@@ -64,7 +72,10 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
  * grants. Customer-managed policies allow 6,144 characters *each*, and a
  * user can have up to 10 attached — comfortably enough for every grant this
  * project needs for years, reviewed the same way as every other resource
- * here from now on.
+ * here from now on. (That per-policy 6,144-byte ceiling is itself real, not
+ * theoretical — the Marketing stage's 7 new tables pushed `DataAccessPolicy`
+ * over it on first deploy attempt; see `MarketingDataAccessPolicy` below,
+ * a second attached policy rather than a bigger one.)
  *
  * Deliberately does NOT create or manage the IAM user itself, or its access
  * keys — a long-lived secret access key should never flow through a
@@ -80,6 +91,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
  */
 export class WebpresaVercelAccessStack extends cdk.Stack {
   public readonly dataAccessPolicy: iam.ManagedPolicy;
+  public readonly marketingDataAccessPolicy: iam.ManagedPolicy;
   public readonly computeInvokePolicy: iam.ManagedPolicy;
 
   constructor(scope: Construct, id: string, props: WebpresaVercelAccessStackProps) {
@@ -112,6 +124,27 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.scanHitsTable,
       props.stripeWebhookFailuresTable,
       props.operationsDismissalsTable,
+    ];
+
+    // Marketing stage tables/secret/SES statement live in their own
+    // ManagedPolicy (below), not this array — adding all 7 new tables plus
+    // their `/index/*` resources to the already-large DataAccessPolicy blew
+    // past IAM's hard 6,144-character customer-managed-policy size limit on
+    // first deploy attempt (confirmed the hard way: a real `cdk deploy`
+    // failed with `ServiceLimitExceeded: Cannot exceed quota for
+    // PolicySize: 6144`, auto-rolled back safely). This is the same
+    // "split by concern into another attached policy" fix this stack's own
+    // class doc already describes for the original five inline policies —
+    // a user can have up to 10 managed policies attached, comfortably
+    // enough for years yet.
+    const marketingTablesWithIndexes = [
+      props.marketingCampaignsTable,
+      props.marketingEmailTemplatesTable,
+      props.marketingOutreachTable,
+      props.marketingSuppressionsTable,
+      props.marketingMessagesTable,
+      props.marketingClicksTable,
+      props.marketingSesEventsTable,
     ];
 
     this.dataAccessPolicy = new iam.ManagedPolicy(this, 'DataAccessPolicy', {
@@ -209,6 +242,39 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       ],
     });
     this.dataAccessPolicy.attachToUser(vercelUser);
+
+    // Marketing stage — split out into its own managed policy (see
+    // `marketingTablesWithIndexes`'s comment above for why) rather than
+    // folded into DataAccessPolicy. Same Vercel user, same grant shapes,
+    // just a second attached policy.
+    this.marketingDataAccessPolicy = new iam.ManagedPolicy(this, 'MarketingDataAccessPolicy', {
+      managedPolicyName: `webpresa-${config.suffix}-vercel-marketing-data-access`,
+      description: 'DynamoDB and Secrets Manager access for the Marketing stage SES drip campaign (split from DataAccessPolicy — see class-level comment)',
+      statements: [
+        new iam.PolicyStatement({
+          sid: 'DynamoDbMarketingTables',
+          actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:BatchGetItem'],
+          resources: marketingTablesWithIndexes.flatMap((table) => [table.tableArn, `${table.tableArn}/index/*`]),
+        }),
+        new iam.PolicyStatement({
+          sid: 'SecretsManagerMarketing',
+          actions: ['secretsmanager:GetSecretValue'],
+          resources: [props.marketingClickTokenSecret.secretArn],
+        }),
+        // Marketing stage — drip-campaign email. Separate Sid from
+        // SesSendLeadNotifications above purely for clearer CloudTrail/cost
+        // attribution (different sending purpose/reputation) even though
+        // the action list and the bare-wildcard-resource rationale are
+        // identical — see that statement's comment for why '*' is
+        // deliberate here, not an oversight.
+        new iam.PolicyStatement({
+          sid: 'SesSendMarketingEmails',
+          actions: ['ses:SendEmail'],
+          resources: ['*'],
+        }),
+      ],
+    });
+    this.marketingDataAccessPolicy.attachToUser(vercelUser);
 
     this.computeInvokePolicy = new iam.ManagedPolicy(this, 'ComputeInvokePolicy', {
       managedPolicyName: `webpresa-${config.suffix}-vercel-compute-invoke`,

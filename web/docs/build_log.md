@@ -8897,3 +8897,97 @@ web/:
 ```
 
 Not yet done: after this deploys, resend one of the two captured `customer.subscription.updated` events from Stripe's dashboard to re-run reconciliation against the fixed code and correct the test business's stored `cancelAtPeriodEnd` — its DynamoDB record still reflects the pre-fix (wrong) value until then.
+
+---
+
+**Date:** 2026-08-21
+
+**Marketing stage — SES Drip Campaign, implemented end-to-end (not yet deployed to AWS).** Full feature: `/admin/marketing`, a Lob-delivery-triggered 3-email drip campaign sent via Amazon SES, and every supporting piece — data model, scheduling, eligibility, click tracking, unsubscribe, SES event ingestion, admin UI, and tests. Planned via a dedicated plan-mode session (three parallel Explore agents surveying admin UI patterns, Lob/AWS infra, and audit/logging conventions; a Plan agent synthesizing the design) before any code was written. Two architectural forks were resolved with the user up front: Vercel Cron (not EventBridge Scheduler — no prior precedent in `infra/`) for scheduling, and SNS→HTTPS webhook (not SNS→Lambda) for SES event ingestion, both chosen to extend this repo's existing webhook/cron patterns rather than introduce new AWS compute.
+
+Key judgment calls (all documented inline at their point of use): the per-business enrollment entity is `MarketingOutreach`, not "BusinessCampaign," to avoid colliding with the unrelated Stage 21 `Campaign` concept; the unsubscribe token is stored plaintext (not hashed like claim tokens) since it must be re-embedded verbatim across 3 emails and only ever grants "stop emailing," never account takeover; only the *next* drip step is ever scheduled at a time, never all 3 upfront; each template is a single plain-text `body` (not separate HTML/text fields) with `renderTemplate()` deriving both at send time; row detail on `/admin/marketing` is an expandable row, not a drawer.
+
+## Files changed
+
+```
+# Infra (CDK)
+infra/lib/stacks/data-stack.ts                      MODIFIED — 7 marketing-* tables, marketing-click-token secret
+infra/lib/stacks/vercel-access-stack.ts              MODIFIED — grants for the above, SesSendMarketingEmails statement
+infra/lib/stacks/ses-stack.ts                        NEW — Configuration Set, SNS topic, HTTPS subscription
+infra/bin/webpresa.ts                                MODIFIED — wires the new stack + props
+infra/test/vercel-access-stack.test.ts               MODIFIED — updated resource counts, new SES statement assertion
+infra/test/data-stack.test.ts                        MODIFIED — table/secret/output counts updated for the 7 new tables + 1 new secret
+infra/package.json                                   MODIFIED — diff:ses / deploy:ses (+ :prod) scripts
+
+# Domain layer
+web/domain/models/{marketing-campaign,email-template,marketing-outreach,marketing-suppression,marketing-message,marketing-click,marketing-ses-event}.ts   NEW
+web/domain/schemas/{same 7 names}.schema.ts          NEW
+web/domain/factories/{same 7 names}.factory.ts       NEW (email-template.factory.ts also exports updateEmailTemplate)
+
+# Core marketing library
+web/lib/marketing/{constants,schedule,eligibility,campaign,campaign-start,send,render-template,template-variables,default-templates,click-token,dashboard,next-action-label,preview-sample,test-recipient-allowlist}.ts   NEW
+web/lib/ses/send-marketing-email.ts                  NEW
+web/lib/ses/verify-sns-signature.ts                  NEW
+web/lib/db/marketing-{campaigns,email-templates,outreach,suppressions,messages,clicks,ses-events}.ts   NEW
+web/lib/db/client.ts                                 MODIFIED — 7 new TABLE_MARKETING_* exports
+web/lib/secrets/{client,index}.ts                    MODIFIED — marketing-click-token secret accessor
+web/lib/logging/log.ts                                MODIFIED — marketingCampaignId/marketingMessageId/emailSequence/sesMessageId added to the closed LogFields allowlist
+
+# Routes
+web/app/api/webhooks/lob/route.ts                    MODIFIED — calls startMarketingOutreach() on a newly-recorded deliveredAt
+web/app/api/webhooks/ses/route.ts                     NEW
+web/app/api/internal/marketing/send-due-emails/route.ts   NEW
+web/app/e/[token]/route.ts                            NEW — click-tracking redirect
+web/app/unsubscribe/[token]/route.ts                  NEW
+web/app/unsubscribe/{confirmed,invalid}/page.tsx      NEW
+web/vercel.json                                       MODIFIED — second cron entry
+
+# Admin UI
+web/app/admin/(dashboard)/AdminSidebar.tsx            MODIFIED — Marketing nav item between Analytics and Operations
+web/app/admin/(dashboard)/marketing/{page,KpiGrid,FilterBar,OutreachStatusBadge,OutreachTable,CampaignSettingsCard,settings-actions,outreach-actions}.tsx|ts   NEW
+web/app/admin/(dashboard)/marketing/templates/{page,TemplateEditorCard,actions}.tsx|ts   NEW
+
+# Config
+web/.env.local.example                                MODIFIED — new Marketing-stage section
+
+# Docs
+web/docs/implementation.md                            MODIFIED — new "Marketing stage — SES Drip Campaign" section
+web/docs/architecture.md                              MODIFIED — new tables, new secret, new architecture section
+web/docs/deployment.md                                MODIFIED — new "Marketing stage" deployment guidance section
+web/docs/build_log.md                                 MODIFIED — this entry
+
+# Tests (new)
+web/lib/marketing/__tests__/{schedule,template-variables,eligibility,render-template,click-token}.test.ts
+web/lib/db/__tests__/marketing-outreach.test.ts
+web/lib/ses/__tests__/verify-sns-signature.test.ts
+web/app/api/webhooks/ses/__tests__/route.test.ts
+web/app/api/internal/marketing/send-due-emails/__tests__/route.test.ts
+web/app/admin/(dashboard)/marketing/templates/__tests__/actions.test.ts
+web/app/e/[token]/__tests__/route.test.ts
+web/app/unsubscribe/[token]/__tests__/route.test.ts
+web/app/api/webhooks/lob/__tests__/route.test.ts      MODIFIED — 3 new tests for the enrollment hook
+```
+
+## Verification
+
+```
+infra/:
+  npm run build (tsc)   — clean
+  npm test               — CDK synth-based assertions, all passing
+
+web/:
+  npm run lint       — clean
+  npx tsc --noEmit   — clean
+  npm test            — 155 test files, 1632 tests, all passing
+  npm run build        — production build succeeds; every new route registered
+                         (/admin/marketing, /admin/marketing/templates,
+                          /api/webhooks/ses, /api/internal/marketing/send-due-emails,
+                          /e/[token], /unsubscribe/[token], /unsubscribe/confirmed,
+                          /unsubscribe/invalid)
+```
+
+## Not yet done
+
+- **Not deployed to any AWS account.** No `cdk deploy` was run — see `deployment.md`, "Marketing stage — SES Drip Campaign deployment guidance" for the full sequence and manual SNS-subscription/secret-population steps.
+- No end-to-end manual test against real AWS infra (Lob webhook → enrollment → cron send → SES delivery/bounce/complaint round-trip → click → unsubscribe) — only unit-level, fully mocked coverage exists so far.
+- Analytics-page integration (postcard→engagement/claim/paid conversion rates, per-step click rates) deferred — the event stream (`MarketingMessage`/`MarketingClick`) is in place for it, per `implementation.md`'s "Deferred work" for this stage.
+- `web/docs/operations.md` (the runbook referenced from `/admin/operations`) was not updated with Marketing-specific troubleshooting guidance — worth a follow-up once this is live and any real operational patterns emerge.

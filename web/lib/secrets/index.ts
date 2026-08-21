@@ -10,6 +10,7 @@ import {
   SECRET_INTERNAL_API,
   SECRET_CLAIM_TOKEN,
   SECRET_VERCEL_API,
+  SECRET_MARKETING_CLICK_TOKEN,
 } from './client';
 
 /**
@@ -80,6 +81,11 @@ export interface VercelApiSecret {
   projectId: string;
 }
 
+/** Marketing stage — symmetric key encrypting click-tracking redirect tokens (see lib/marketing/click-token.ts). */
+export interface MarketingClickTokenSecret {
+  encryptionKey: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -114,4 +120,8 @@ export async function getClaimTokenSecret(): Promise<ClaimTokenSecret> {
 
 export async function getVercelApiSecret(): Promise<VercelApiSecret> {
   return (await getSecretJson(SECRET_VERCEL_API())) as unknown as VercelApiSecret;
+}
+
+export async function getMarketingClickTokenSecret(): Promise<MarketingClickTokenSecret> {
+  return (await getSecretJson(SECRET_MARKETING_CLICK_TOKEN())) as unknown as MarketingClickTokenSecret;
 }
