@@ -531,6 +531,8 @@ Customer identity itself (email, password, verification, lockout) is **not** a S
 
 The `webpresa-vercel-dev` IAM user's `webpresa-dev-vercel-data-access` **CDK-managed policy** (`infra/lib/stacks/vercel-access-stack.ts`) grants `secretsmanager:GetSecretValue` scoped to all 9 dev secret ARNs, including `webpresa-dev-claim-token`, `webpresa-dev-capture-token`, and `webpresa-dev-internal-api`. This was five separate hand-run inline policies (one per grant category) until 2026-07-24, when a `put-user-policy` call adding Stage 16's grants hit a hard, non-adjustable 2048-byte aggregate inline-policy-size limit — see `deployment.md`, "AWS credentials for Vercel", for the full migration record. New secrets now only require adding their ARN to this one managed policy in code, reviewed via `cdk diff` like every other resource. Stage 14's screenshot-capture Lambda is the first dedicated execution role with its own narrower Secrets Manager grant (`secretsmanager:GetSecretValue` on just the capture-token secret) rather than reusing this policy — Stages 18 and 22 remain expected future adopters of the same narrower pattern. The same managed policy also grants a minimal, explicit set of `cognito-idp:*` actions (`SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`, `InitiateAuth`, `ForgotPassword`, `ConfirmForgotPassword`, `ListUsers` — no wildcard, no `Admin*` action) scoped to the Stage 17 customer User Pool ARN.
 
+**Marketing stage (2026-08-21) is the first feature to outgrow this single policy** — adding its 7 tables' grants directly to `DataAccessPolicy` exceeded IAM's 6,144-byte per-policy size ceiling (`ServiceLimitExceeded`, hit on a real deploy attempt, cleanly auto-rolled back). Fixed by attaching a **second** managed policy to the same `webpresa-vercel-{env}` user — `webpresa-{env}-vercel-marketing-data-access` (`MarketingDataAccessPolicy`) — carrying the 7 marketing tables' DynamoDB grants, the `marketing-click-token` secret grant, and `SesSendMarketingEmails`. The 10-managed-policies-per-user ceiling this stack's own doc comment already anticipated is what made this the easy fix rather than a harder one; the next feature needing new grants should default to adding a third policy here too, well before this one has any real chance of also filling up.
+
 ---
 
 ## Brand Theme System
@@ -1300,7 +1302,7 @@ Mirrors `lib/operations/`'s split exactly: `dashboard-types.ts` (client-safe), `
 
 ## Marketing — SES Drip Campaign
 
-**Implemented, not yet deployed.** `/admin/marketing` — a 3-email SES drip campaign automatically triggered by Lob's `postcard.delivered` webhook event, plus the admin dashboard to monitor and operate it. Listed in `AdminSidebar.tsx`'s `NAV_ITEMS` between Analytics and Operations.
+**Implemented and deployed to dev** (prod not yet deployed). `/admin/marketing` — a 3-email SES drip campaign automatically triggered by Lob's `postcard.delivered` webhook event, plus the admin dashboard to monitor and operate it. Listed in `AdminSidebar.tsx`'s `NAV_ITEMS` between Analytics and Operations.
 
 ### Trigger and scheduling
 

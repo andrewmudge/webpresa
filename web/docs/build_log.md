@@ -8991,3 +8991,48 @@ web/:
 - No end-to-end manual test against real AWS infra (Lob webhook → enrollment → cron send → SES delivery/bounce/complaint round-trip → click → unsubscribe) — only unit-level, fully mocked coverage exists so far.
 - Analytics-page integration (postcard→engagement/claim/paid conversion rates, per-step click rates) deferred — the event stream (`MarketingMessage`/`MarketingClick`) is in place for it, per `implementation.md`'s "Deferred work" for this stage.
 - `web/docs/operations.md` (the runbook referenced from `/admin/operations`) was not updated with Marketing-specific troubleshooting guidance — worth a follow-up once this is live and any real operational patterns emerge.
+
+---
+
+**Date:** 2026-08-21 (continued)
+
+**Deployed the Marketing stage to dev — two real deploy-time issues found and fixed, both now documented in `deployment.md` for the prod deploy.**
+
+1. **`DataAccessPolicy` exceeded IAM's 6,144-byte managed-policy size limit** the moment the 7 new marketing tables' grants were added — `cdk deploy` failed with `ServiceLimitExceeded: Cannot exceed quota for PolicySize: 6144`, CloudFormation auto-rolled back cleanly (no broken state). Fixed by splitting Marketing's DynamoDB/Secrets Manager/SES grants into a new second managed policy, `MarketingDataAccessPolicy` (`webpresa-{env}-vercel-marketing-data-access`), attached to the same Vercel IAM user — the same "split by concern into another attached policy" fix `vercel-access-stack.ts`'s own class doc already describes for the five original inline policies it replaced. `infra/test/vercel-access-stack.test.ts` updated (18 tests now, was 15) to reflect the split.
+2. **The SNS subscription confirmation never reached the app** — Vercel Deployment Protection redirects every unauthenticated request, including SNS's own delivery POSTs, to Vercel's SSO gate at the edge before Next.js ever runs (confirmed with a direct `curl -X POST`, a `302` to `vercel.com/sso-api`). Same class of problem this repo already solved for the Stripe webhook. Fixed by embedding the `vercel-protection-bypass` secret as a `?x-vercel-protection-bypass=` query parameter directly in the CDK-managed SNS subscription URL (`WebpresaSesStack`), rather than a manual out-of-band step — this subscription is fully CDK-managed, unlike Stripe/Lob's dashboard registration. Verified end-to-end: after the fix redeployed, the subscription's `SubscriptionArn` changed from `PendingConfirmation` to a real ARN. New `infra/test/ses-stack.test.ts` (8 tests) added — this stack had no test coverage at all in the earlier commit today, an oversight caught only because the deploy itself surfaced the bug.
+
+Also deployed: `WebpresaDevDataStack` (7 tables + `marketing-click-token` secret), `WebpresaDevVercelAccessStack` (IAM grants), `WebpresaDevSesStack` (Configuration Set/SNS/subscription). Populated the `marketing-click-token` secret with a real random value. Set all 11 new Vercel Preview env vars, including `MARKETING_SES_FROM_EMAIL=andrew@webpresa.com` and `MARKETING_TEST_RECIPIENT_ALLOWLIST=*` (dev-only wildcard opt-out of the non-prod recipient allowlist, added as new supported syntax in `lib/marketing/test-recipient-allowlist.ts` — deliberate, since dev already has SES production access and the team accepted the wider risk surface over the app-level guard). Pushed to `origin/dev` in 3 commits; Vercel auto-deployed and the new routes were confirmed live via direct `curl`.
+
+## Files changed (beyond the same-day entry above)
+
+```
+infra/lib/stacks/vercel-access-stack.ts   MODIFIED — split into DataAccessPolicy + MarketingDataAccessPolicy
+infra/test/vercel-access-stack.test.ts    MODIFIED — updated for the policy split
+infra/lib/stacks/ses-stack.ts             MODIFIED — embeds vercel-protection-bypass secret in the subscription URL
+infra/test/ses-stack.test.ts              NEW — 8 tests (previously missing entirely)
+infra/bin/webpresa.ts                     MODIFIED — passes vercelProtectionBypassSecret to WebpresaSesStack
+web/lib/marketing/test-recipient-allowlist.ts        MODIFIED — "*" wildcard support
+web/lib/marketing/__tests__/test-recipient-allowlist.test.ts   NEW — 7 tests
+web/docs/deployment.md                    MODIFIED — both fixes documented in the Marketing deployment section
+web/docs/implementation.md                MODIFIED — status updated to deployed
+web/docs/architecture.md                  MODIFIED — status updated, IAM policy-split noted
+web/docs/build_log.md                     MODIFIED — this entry
+```
+
+## Verification
+
+```
+infra/: npm run build (tsc) — clean; npm test — 12 files, 240 tests, all passing
+web/:   npm run lint — clean; npx tsc --noEmit — clean; npm test — 156 files, 1639 tests, all passing
+
+Live verification against dev:
+  curl /admin/marketing            → 302 (redirects to sign-in, not 404 — route exists)
+  curl /unsubscribe/<bad-token>     → 302 (redirects to /unsubscribe/invalid)
+  aws sns list-subscriptions-by-topic → SubscriptionArn is a real ARN, not PendingConfirmation
+```
+
+## Not yet done
+
+- **Prod not deployed.** Same sequence as dev, documented in `deployment.md` — needs its own `MARKETING_SES_FROM_EMAIL`/allowlist decisions (prod should almost certainly NOT use the `*` wildcard the way dev does).
+- No real end-to-end functional test yet (enroll a business, receive an actual email, click it, unsubscribe, trigger a bounce/complaint) — only infra-level verification (routes respond, SNS confirmed) has been done so far.
+- The orphaned pre-fix SNS subscription (still `PendingConfirmation`, detached from the CDK stack) will self-expire in a few days; no manual cleanup needed.

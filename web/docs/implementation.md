@@ -6095,7 +6095,7 @@ Forecasting, LTV modeling, cohort retention heatmaps, geographic heat maps, adva
 
 ## Status
 
-Complete. `npm run lint`, `npx tsc --noEmit`, `npm test` (155 test files, 1632 tests), and `npm run build` all pass. New infrastructure: 7 DynamoDB tables, 1 Secrets Manager secret, and a new CDK stack (`WebpresaSesStack` — Configuration Set, SNS topic, HTTPS subscription). Not yet deployed to any AWS account — see `deployment.md`, "Marketing stage deployment" for the outstanding manual steps (SES domain/DKIM already verified from Stage 20; production access already approved).
+Complete and deployed to dev (2026-08-21); prod not yet deployed. `npm run lint`, `npx tsc --noEmit`, `npm test` (156 test files, 1639 tests web-side; 12 test files, 240 tests infra-side), and `npm run build` all pass. New infrastructure: 7 DynamoDB tables, 2 Secrets Manager secrets-worth of grants (a new `marketing-click-token` secret, plus a second IAM managed policy — `MarketingDataAccessPolicy` — split out after the original `DataAccessPolicy` exceeded IAM's 6,144-byte size limit on first deploy), and a new CDK stack (`WebpresaSesStack` — Configuration Set, SNS topic, HTTPS subscription, with the Vercel-protection-bypass secret embedded in the subscription URL after Vercel's Deployment Protection was found to block SNS's confirmation POST at the edge). See `deployment.md`, "Marketing stage — SES Drip Campaign deployment guidance" for the full record of both fixes and the prod deploy sequence.
 
 ## Objective
 
