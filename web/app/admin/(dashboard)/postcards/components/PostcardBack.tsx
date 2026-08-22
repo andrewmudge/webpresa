@@ -63,7 +63,15 @@ export default function PostcardBack({ recipientName, recipientAddress, showGuid
             space below built for trust... make the questions and learn more
             sections bigger... make the 3 claims larger") so the panel's own
             content fills the column instead of leaving slack in the middle
-            and at the bottom; the footer stays pinned via `mt-auto`. */}
+            and at the bottom. Three direct flex children: the top block
+            (natural height), the feature list (`flex-1 justify-center` — the
+            one flexible child, so it's vertically centered in whatever space
+            is actually left between the subtext and the footer, not just
+            top-anchored under a fixed margin — 2026-08-21 feedback: "center
+            [the 3 claims] between the bottom of the subheader and the bottom
+            of the contact card... still a white gap below"), and the footer
+            (natural height, pinned to the bottom for free since the feature
+            list is the only child absorbing slack). */}
         <div
           className="flex h-full flex-col"
           style={{ width: '56%', paddingLeft: CONTENT_LEFT, paddingTop: CONTENT_TOP, paddingBottom: CONTENT_BOTTOM, paddingRight: '2cqw' }}
@@ -83,34 +91,38 @@ export default function PostcardBack({ recipientName, recipientAddress, showGuid
               </span>
             </h2>
 
+            {/* Explicit two-line wrap (2026-08-21 feedback), not the browser's
+                natural reflow. */}
             <p className="mt-[1.6cqh] text-[1.3cqw] leading-snug text-gray-600">
-              A modern, mobile-friendly website that helps you look professional and attract more customers.
+              A modern, mobile-friendly website that helps you
+              <br />
+              look professional and attract more customers.
             </p>
-
-            <div className="mt-[2.4cqh] flex flex-col">
-              {FEATURES.map((feature, i) => (
-                <div key={feature.label}>
-                  {i > 0 && <div className="my-[1.3cqh] h-px w-full bg-gray-200" />}
-                  <div className="flex items-center gap-[1.2cqw]">
-                    <span
-                      className="flex h-[4.2cqw] w-[4.2cqw] shrink-0 items-center justify-center rounded-full"
-                      style={{ backgroundColor: `${POSTCARD_BLUE}1A` }}
-                    >
-                      <feature.Icon className="h-[2.2cqw] w-[2.2cqw]" style={{ color: POSTCARD_BLUE }} strokeWidth={2} />
-                    </span>
-                    <div>
-                      <p className="text-[1.85cqw] font-bold" style={{ color: POSTCARD_BLUE }}>
-                        {feature.label}
-                      </p>
-                      <p className="text-[1.4cqw] text-gray-600">{feature.sub}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
-          <div className="mt-auto pt-[1.2cqh]">
+          <div className="flex flex-1 flex-col justify-center">
+            {FEATURES.map((feature, i) => (
+              <div key={feature.label}>
+                {i > 0 && <div className="my-[1.3cqh] h-px w-full bg-gray-200" />}
+                <div className="flex items-center gap-[1.2cqw]">
+                  <span
+                    className="flex h-[4.2cqw] w-[4.2cqw] shrink-0 items-center justify-center rounded-full"
+                    style={{ backgroundColor: `${POSTCARD_BLUE}1A` }}
+                  >
+                    <feature.Icon className="h-[2.2cqw] w-[2.2cqw]" style={{ color: POSTCARD_BLUE }} strokeWidth={2} />
+                  </span>
+                  <div>
+                    <p className="text-[1.85cqw] font-bold" style={{ color: POSTCARD_BLUE }}>
+                      {feature.label}
+                    </p>
+                    <p className="text-[1.4cqw] text-gray-600">{feature.sub}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
             <div className="flex items-stretch overflow-hidden rounded-lg" style={{ backgroundColor: POSTCARD_NAVY }}>
               <div className="flex flex-1 items-center gap-[1.1cqw] px-[1.4cqw] py-[1.2cqh]">
                 <span className="flex h-[3.4cqw] w-[3.4cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
