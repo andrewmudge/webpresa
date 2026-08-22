@@ -17,6 +17,7 @@ export interface CreateMarketingMessageInput {
   subjectSnapshot?: string;
   htmlBodySnapshot?: string;
   textBodySnapshot?: string;
+  recipientEmail?: string;
   sesMessageId?: string;
 }
 
@@ -45,6 +46,7 @@ export function createMarketingMessage(input: CreateMarketingMessageInput): Mark
     ...(input.subjectSnapshot !== undefined && { subjectSnapshot: input.subjectSnapshot }),
     ...(input.htmlBodySnapshot !== undefined && { htmlBodySnapshot: input.htmlBodySnapshot }),
     ...(input.textBodySnapshot !== undefined && { textBodySnapshot: input.textBodySnapshot }),
+    ...(input.recipientEmail !== undefined && { recipientEmail: input.recipientEmail }),
     ...(input.sesMessageId !== undefined && { sesMessageId: input.sesMessageId }),
     clickCount: 0,
     createdAt: now,

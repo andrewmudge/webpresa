@@ -17,6 +17,7 @@ export const MarketingMessageSchema = z.object({
   subjectSnapshot: z.string().optional(),
   htmlBodySnapshot: z.string().optional(),
   textBodySnapshot: z.string().optional(),
+  recipientEmail: z.string().email().optional(),
   sesMessageId: z.string().min(1).optional(),
   sesEventStatus: z.enum(MARKETING_SES_EVENT_STATUSES).optional(),
   deliveredAt: IsoTimestampSchema.optional(),

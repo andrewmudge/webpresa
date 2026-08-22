@@ -39,6 +39,8 @@ export interface MarketingMessage extends MutableTimestampedRecord {
   subjectSnapshot?: string;
   htmlBodySnapshot?: string;
   textBodySnapshot?: string;
+  /** The address this was actually sent to at send time — snapshotted for the same reason subject/body are: `Business.email`/`leadNotificationEmail` can change afterward, and the audit trail should reflect who it really went to, not who the business currently lists. Set only on `outcome === 'sent'`. */
+  recipientEmail?: string;
   /** SES's own message id — set only on `outcome === 'sent'`; the SES webhook's correlation key via `ses-message-id-index`. */
   sesMessageId?: string;
   sesEventStatus?: MarketingSesEventStatus;

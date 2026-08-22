@@ -206,6 +206,7 @@ export async function attemptSendForOutreach(outreach: MarketingOutreach): Promi
     subjectSnapshot: rendered.subject,
     htmlBodySnapshot: rendered.htmlBody,
     textBodySnapshot: rendered.textBody,
+    recipientEmail: eligibility.targetEmail,
     sesMessageId: sendResult.sesMessageId,
   });
   const messageWasNew = await putMarketingMessageIfNotExists(sentMessage);
