@@ -9036,3 +9036,44 @@ Live verification against dev:
 - **Prod not deployed.** Same sequence as dev, documented in `deployment.md` — needs its own `MARKETING_SES_FROM_EMAIL`/allowlist decisions (prod should almost certainly NOT use the `*` wildcard the way dev does).
 - No real end-to-end functional test yet (enroll a business, receive an actual email, click it, unsubscribe, trigger a bounce/complaint) — only infra-level verification (routes respond, SNS confirmed) has been done so far.
 - The orphaned pre-fix SNS subscription (still `PendingConfirmation`, detached from the CDK stack) will self-expire in a few days; no manual cleanup needed.
+
+---
+
+**Date:** 2026-08-21 (continued — prod deployment)
+
+**Deployed the Marketing stage to production and fast-forwarded `main` to match `dev`.** Both fixes found during the dev rollout (IAM policy split, SNS/Vercel-protection-bypass embed) were already in the code, so neither recurred on the prod deploy — all 3 stacks (`WebpresaProdDataStack`, `WebpresaProdVercelAccessStack`, `WebpresaProdSesStack`) diffed clean and deployed without incident.
+
+Pre-flight checks done before touching anything: confirmed `origin/main` had zero commits `origin/dev` didn't already have (`git log origin/dev..origin/main` — empty), so "make main match dev" was a safe fast-forward, never a force-push/reset — nothing was at risk of being lost. Confirmed `webpresa.com`'s SES identity/DKIM and production access were already verified in the prod AWS account (Stage 20). Confirmed via this repo's own prior testing (`deployment.md`, Stripe/Lob webhook sections) that Production, unlike Preview/dev, is not behind Vercel Deployment Protection.
+
+Deploy order: CDK infra (3 stacks) → populate `marketing-click-token` secret with a **fresh**, independently-generated value (never reused across environments) → set 10 Vercel Production env vars (`MARKETING_TEST_RECIPIENT_ALLOWLIST` deliberately **not** set — it's unconditionally bypassed in production by `isNonProdRecipientAllowed()`, so it would be inert and only risk misleading a future reader) → `git push origin dev:main` (fast-forward, `259b874..2842c46`) → Vercel auto-deployed Production.
+
+One deploy-order lesson, hit identically on both dev and prod: the SNS subscription is created (by the SES stack deploy) before the app code that serves the webhook route is actually live, so its first confirmation attempt always fails and it sits at `PendingConfirmation`. Fixed both times by re-running `aws sns subscribe` with the exact subscribed URL once the endpoint was reachable, which resends confirmation against the existing subscription rather than creating a duplicate. Documented in `deployment.md` as a known, expected step — not a bug — for the next environment/re-deploy.
+
+## Files changed
+
+```
+web/docs/deployment.md        MODIFIED — prod deploy record, SNS subscription-order lesson documented
+web/docs/implementation.md    MODIFIED — status updated to deployed (dev + prod)
+web/docs/architecture.md      MODIFIED — status updated to deployed (dev + prod)
+web/docs/build_log.md         MODIFIED — this entry
+```
+
+No application code changed in this entry — infra/config only. `git log origin/dev..origin/main` confirmed empty both before and after the fast-forward (main still exactly matches dev).
+
+## Verification
+
+```
+Live verification against prod (www.webpresa.com):
+  curl /admin/marketing                → 307 (redirects to sign-in, not 404 — route exists)
+  curl /unsubscribe/<bad-token>         → 307 (redirects to /unsubscribe/invalid)
+  curl -X POST /api/webhooks/ses        → 400 (reached the route and was rejected for an invalid
+                                           payload/signature — not a 302 to Vercel SSO, confirming
+                                           prod is directly reachable)
+  aws sns list-subscriptions-by-topic   → SubscriptionArn is a real ARN, not PendingConfirmation
+```
+
+## Not yet done
+
+- No real end-to-end functional test in production (enroll a business, receive an actual email, click through, unsubscribe, trigger a bounce/complaint) — same gap noted for dev, now doubly true for prod given the real stakes.
+- The campaign is still `disabled` in prod — intentional; nothing sends until an admin explicitly enables it via `/admin/marketing`.
+- The orphaned pre-confirmation SNS subscription in prod (same as dev) will self-expire in a few days; no manual cleanup needed.

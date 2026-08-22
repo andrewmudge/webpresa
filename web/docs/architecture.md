@@ -1302,7 +1302,7 @@ Mirrors `lib/operations/`'s split exactly: `dashboard-types.ts` (client-safe), `
 
 ## Marketing — SES Drip Campaign
 
-**Implemented and deployed to dev** (prod not yet deployed). `/admin/marketing` — a 3-email SES drip campaign automatically triggered by Lob's `postcard.delivered` webhook event, plus the admin dashboard to monitor and operate it. Listed in `AdminSidebar.tsx`'s `NAV_ITEMS` between Analytics and Operations.
+**Implemented and deployed to both dev and prod (2026-08-21).** `/admin/marketing` — a 3-email SES drip campaign automatically triggered by Lob's `postcard.delivered` webhook event, plus the admin dashboard to monitor and operate it. Listed in `AdminSidebar.tsx`'s `NAV_ITEMS` between Analytics and Operations. The campaign itself defaults to `'disabled'` in every environment, including prod — deployment alone never causes a real send.
 
 ### Trigger and scheduling
 
