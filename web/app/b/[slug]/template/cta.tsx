@@ -24,19 +24,10 @@ export function resolvePreviewCta({
   cta,
   contact,
   variant,
-  leadCaptureEnabled = true,
 }: {
   cta: PreviewCta | undefined;
   contact: PreviewContact;
   variant: 'primary' | 'secondary';
-  /**
-   * Stage 20 — lead capture is a Growth-plan-only capability
-   * (`hasPlanCapability`, `lib/auth/customer-authorization.ts`). Defaults to
-   * `true` so every other CTA type (and every existing call site/test) is
-   * unaffected; `resolvePreviewCtaConfig` below is the one real caller that
-   * passes a business's actual entitlement.
-   */
-  leadCaptureEnabled?: boolean;
 }): ResolvedCta | null {
   if (!cta || cta.type === 'none' || !cta.label.trim()) return null;
 
@@ -64,15 +55,14 @@ export function resolvePreviewCta({
     case 'request_service':
       // Opens the reusable RequestServiceForm (see RequestServiceModal.tsx /
       // CtaButton.tsx) instead of navigating — needs no contact info to
-      // resolve, so it's always available as a default secondary action.
-      // `href` is a harmless in-page anchor; CtaButton never actually
-      // navigates it, it intercepts the click. Gated on `leadCaptureEnabled`
-      // (Stage 20) — a Basic-plan business must not render a "Request
-      // Service" button that would silently no-op on click; falling through
-      // to `null` here means the rest of the CTA-resolution pipeline (e.g.
-      // collapsing an identical primary/secondary pair) behaves exactly as
-      // if this CTA were never configured.
-      if (!leadCaptureEnabled) return null;
+      // resolve, so it's always available as a default secondary action,
+      // regardless of the business's subscription status. `href` is a
+      // harmless in-page anchor; CtaButton never actually navigates it, it
+      // intercepts the click. Whether a submission through it is actually
+      // persisted as a lead is gated separately, server-side, in
+      // `submitLeadAction` (`app/b/[slug]/actions.ts`) — rendering the
+      // button is unconditional so every business's preview looks and
+      // behaves the same regardless of plan.
       return { type: 'request_service', label: cta.label, href: '#request-service', variant };
     default:
       return null;
@@ -107,22 +97,17 @@ export const DEFAULT_SECONDARY_CTA: PreviewCta = { type: 'request_service', labe
  * This is the single source every template section reads from — do not
  * construct CTA links ad hoc in individual components.
  */
-export function resolvePreviewCtaConfig(
-  content: PreviewContent,
-  /** Stage 20 — whether this business's plan includes lead capture; see `resolvePreviewCta`. */
-  leadCaptureEnabled = true,
-): {
+export function resolvePreviewCtaConfig(content: PreviewContent): {
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 } {
   const config = content.cta ?? normalizeLegacyCtaConfig(content);
 
-  const primary = resolvePreviewCta({ cta: config.primary, contact: content.contact, variant: 'primary', leadCaptureEnabled });
+  const primary = resolvePreviewCta({ cta: config.primary, contact: content.contact, variant: 'primary' });
   let secondary = resolvePreviewCta({
     cta: config.secondary ?? DEFAULT_SECONDARY_CTA,
     contact: content.contact,
     variant: 'secondary',
-    leadCaptureEnabled,
   });
 
   // Two CTAs resolving to the same action + destination collapse to one.

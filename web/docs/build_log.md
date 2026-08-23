@@ -9077,3 +9077,36 @@ Live verification against prod (www.webpresa.com):
 - No real end-to-end functional test in production (enroll a business, receive an actual email, click through, unsubscribe, trigger a bounce/complaint) — same gap noted for dev, now doubly true for prod given the real stakes.
 - The campaign is still `disabled` in prod — intentional; nothing sends until an admin explicitly enables it via `/admin/marketing`.
 - The orphaned pre-confirmation SNS subscription in prod (same as dev) will self-expire in a few days; no manual cleanup needed.
+
+---
+
+**Date:** 2026-08-22
+
+**Fixed: "Request Service" CTA button/modal wrongly hidden for unsubscribed businesses.** Reported after a prod business import: newly imported businesses only ever showed one CTA ("Call Us"), and an admin explicitly configuring a "Request Service" secondary CTA on such a business in `/admin/businesses/[businessId]` saw it appear on neither the preview nor the live site after Publish.
+
+Root cause: Stage 20's `leadCaptureEnabled` gate (`hasPlanCapability`, tied to `business.subscriptionStatus === 'active'`) was checked at CTA *render* time, not just at lead-*persistence* time — `resolvePreviewCta`'s `request_service` case (`template/cta.tsx`) and `RequestServiceModal.tsx`'s `openRequestService()` both suppressed the button/modal outright for any business without an active subscription. A freshly imported/prospected business never has a subscription, so this fired every time, whether "Request Service" was the auto-default secondary or an admin-configured one. Not a caching or publish-plumbing bug — `/b/[slug]` is `force-dynamic` with no cache layer and preview/live share one render path.
+
+Decision (confirmed with the user): the button and modal should always render, for every business regardless of subscription status; only actual lead persistence stays restricted to paying customers. `submitLeadAction` (`app/b/[slug]/actions.ts`) already re-checks `hasPlanCapability` server-side and silently returns `{ status: 'success' }` without writing a `Lead` for a non-entitled business — exactly the desired "form appears to work, nothing saved" behavior — so it needed no change.
+
+Removed the `leadCaptureEnabled` parameter/prop entirely from the CTA-resolution/render path: `resolvePreviewCta`/`resolvePreviewCtaConfig` (`template/cta.tsx`), `RequestServiceProvider` (`template/RequestServiceModal.tsx`), `GeneratedWebsite` (`template/index.tsx`), and its computation/pass-through in `app/b/[slug]/page.tsx`. Updated the `hasPlanCapability` doc comment in `lib/auth/customer-authorization.ts` to reflect it's now only checked at lead-persistence time (`submitLeadAction`) and in the customer dashboard's leads page, not at CTA-resolution time. Updated the stale Stage 20 CTA-gating description in `architecture.md`.
+
+## Files changed
+
+```
+web/app/b/[slug]/template/cta.tsx                          MODIFIED — removed leadCaptureEnabled gating/param from resolvePreviewCta and resolvePreviewCtaConfig
+web/app/b/[slug]/template/RequestServiceModal.tsx           MODIFIED — removed leadCaptureEnabled prop; openRequestService() always opens
+web/app/b/[slug]/template/index.tsx                         MODIFIED — removed leadCaptureEnabled prop/threading
+web/app/b/[slug]/page.tsx                                   MODIFIED — removed leadCaptureEnabled computation/prop pass; dropped now-unused hasPlanCapability import
+web/lib/auth/customer-authorization.ts                      MODIFIED — updated hasPlanCapability doc comment
+web/app/b/[slug]/template/__tests__/cta.test.ts             MODIFIED — removed the two leadCaptureEnabled-gating describe blocks (6 tests) that encoded the old, now-reverted behavior
+web/docs/architecture.md                                    MODIFIED — Stage 20 CTA-gating description corrected
+web/docs/build_log.md                                       MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files, 1638 tests, all passing; npm run build — clean
+```
+
+No manual browser verification performed (this repo's standing instruction: no unprompted dev-server/visual checks for general UI changes — lint/type-check/test/build is the verification bar).

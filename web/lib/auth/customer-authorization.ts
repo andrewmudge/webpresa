@@ -120,10 +120,12 @@ export type PlanCapability = 'lead_capture';
  * capturing new leads a business may not stay billed to keep is the wrong
  * default, unlike e.g. merely viewing already-captured data.
  *
- * Checked independently at every call site that matters (both where the
- * public "Request Service" CTA is resolved and inside the submission
- * handler itself) — a hidden or absent form must never be the only thing
- * standing between an unpaid business and lead capture.
+ * The public "Request Service" CTA itself renders unconditionally for every
+ * business, regardless of entitlement — only the two things that actually
+ * matter check this: `submitLeadAction` (`app/b/[slug]/actions.ts`), which
+ * silently no-ops (never persists a lead, never distinguishes the response)
+ * for a business that doesn't pass this check, and the customer dashboard's
+ * leads page/actions, which gate viewing already-captured leads.
  */
 export function hasPlanCapability(access: BusinessAccessResult, _capability: PlanCapability): boolean {
   return access.mode === 'full';

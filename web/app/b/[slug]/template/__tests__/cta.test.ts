@@ -134,33 +134,6 @@ describe('resolvePreviewCta — request_service', () => {
   });
 });
 
-describe('resolvePreviewCta — request_service, leadCaptureEnabled gating (Stage 20)', () => {
-  it('resolves normally when leadCaptureEnabled is omitted (defaults to true)', () => {
-    const result = resolvePreviewCta({ cta: { type: 'request_service', label: 'Request Service' }, contact: {}, variant: 'secondary' });
-    expect(result?.type).toBe('request_service');
-  });
-
-  it('resolves when leadCaptureEnabled is explicitly true', () => {
-    const result = resolvePreviewCta({
-      cta: { type: 'request_service', label: 'Request Service' },
-      contact: {},
-      variant: 'secondary',
-      leadCaptureEnabled: true,
-    });
-    expect(result?.type).toBe('request_service');
-  });
-
-  it('returns null when leadCaptureEnabled is false — a Basic-plan business must not render a dead button', () => {
-    const result = resolvePreviewCta({
-      cta: { type: 'request_service', label: 'Request Service' },
-      contact: {},
-      variant: 'secondary',
-      leadCaptureEnabled: false,
-    });
-    expect(result).toBeNull();
-  });
-});
-
 describe('resolvePreviewCta — none', () => {
   it('always returns null for type "none"', () => {
     const result = resolvePreviewCta({
@@ -275,36 +248,6 @@ describe('resolvePreviewCtaConfig — structured config', () => {
     const { primary, secondary } = resolvePreviewCtaConfig(content);
     expect(primary).toBeNull();
     expect(secondary).toBeNull();
-  });
-});
-
-describe('resolvePreviewCtaConfig — leadCaptureEnabled gating (Stage 20)', () => {
-  it('omits the default Request Service secondary entirely when leadCaptureEnabled is false', () => {
-    const content = baseContent({
-      contact: { phone: '512-555-0100' },
-      cta: { primary: { type: 'phone', label: 'Call Now' } },
-    });
-    const { primary, secondary } = resolvePreviewCtaConfig(content, false);
-    expect(primary).not.toBeNull();
-    expect(secondary).toBeNull();
-  });
-
-  it('still resolves a non-request_service secondary when leadCaptureEnabled is false', () => {
-    const content = baseContent({
-      contact: { phone: '512-555-0100', email: 'hello@acme.com' },
-      cta: { primary: { type: 'phone', label: 'Call Now' }, secondary: { type: 'email', label: 'Email Us' } },
-    });
-    const { secondary } = resolvePreviewCtaConfig(content, false);
-    expect(secondary?.type).toBe('email');
-  });
-
-  it('defaults to leadCaptureEnabled: true when the parameter is omitted', () => {
-    const content = baseContent({
-      contact: { phone: '512-555-0100' },
-      cta: { primary: { type: 'phone', label: 'Call Now' } },
-    });
-    const { secondary } = resolvePreviewCtaConfig(content);
-    expect(secondary?.type).toBe('request_service');
   });
 });
 

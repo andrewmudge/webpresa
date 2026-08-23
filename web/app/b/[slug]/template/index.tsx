@@ -24,8 +24,6 @@ interface Props {
   isAdmin: boolean;
   /** Whether this request is the screenshot Lambda capturing this preview for a postcard — never shown the claim banner, regardless of draft/published status. */
   isCapture: boolean;
-  /** Stage 20 — whether this business's plan includes lead capture (`hasPlanCapability`, computed by the caller). */
-  leadCaptureEnabled: boolean;
 }
 
 export function GeneratedWebsite({
@@ -39,12 +37,11 @@ export function GeneratedWebsite({
   isDraft,
   isAdmin,
   isCapture,
-  leadCaptureEnabled,
 }: Props) {
   const { content, theme } = preview;
   const phone = isValidPhone(content.contact.phone) ? content.contact.phone : undefined;
   const email = isValidEmail(content.contact.email) ? content.contact.email : undefined;
-  const { primary, secondary } = resolvePreviewCtaConfig(content, leadCaptureEnabled);
+  const { primary, secondary } = resolvePreviewCtaConfig(content);
 
   // Load the business's stored section configuration (falling back to the
   // computed default when absent), validate/sanitize it, and drop any
@@ -80,7 +77,7 @@ export function GeneratedWebsite({
         unreadable text (see build_log.md, "Request Service dialog theming
         fix").
       */}
-      <RequestServiceProvider businessName={businessName} phone={phone} slug={business.slug} leadCaptureEnabled={leadCaptureEnabled}>
+      <RequestServiceProvider businessName={businessName} phone={phone} slug={business.slug}>
         {/* Admin draft indicator */}
         {isDraft && isAdmin && (
           <div className="bg-yellow-400 text-yellow-900 text-center text-xs font-bold py-2 px-4 sticky top-0 z-[60]">
