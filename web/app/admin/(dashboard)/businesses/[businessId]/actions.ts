@@ -203,23 +203,36 @@ export async function updateBusinessDetailsAction(
       updatedAt: new Date().toISOString(),
     });
 
-    // Dual-write: admin-entered social links apply to the live preview
-    // immediately, not just the next regeneration — same reasoning as the
-    // theme/photo-slot dual-writes below. Only ever patches when the admin
-    // has non-empty social links to apply — an empty/cleared field is left
-    // alone so this can never silently wipe out Firecrawl-discovered links
-    // that a prior enrichment run already put on the current preview
+    // Dual-write: admin-entered social links and contact fields
+    // (phone/email/address) apply to the live preview immediately, not just
+    // the next regeneration — same reasoning as the theme/photo-slot
+    // dual-writes below. Only ever patches a field when the admin submitted
+    // a non-empty value for it — a cleared field is left alone so this can
+    // never silently wipe out a value a prior enrichment run or the
+    // separate Contact section editor already put on the current preview
     // (mirrors generatePreviewContent's own "Business wins only when
-    // non-empty" rule).
-    if (socialLinks.length > 0) {
+    // non-empty" rule). `ownAddress` is formatted identically to
+    // `generation-context.ts`'s `ownAddress` so a dual-written value matches
+    // what a regeneration would have produced.
+    const ownAddress = address
+      ? [address.line1, address.city, address.state, address.postalCode].filter(Boolean).join(', ')
+      : undefined;
+    const contactPatch: Partial<PreviewContact> = {
+      ...(data.phone ? { phone: data.phone } : {}),
+      ...(data.email ? { email: data.email } : {}),
+      ...(ownAddress ? { address: ownAddress } : {}),
+    };
+    if (socialLinks.length > 0 || Object.keys(contactPatch).length > 0) {
       const previews = await listPreviewsForBusiness(businessId);
       const latest = previews[0];
       if (latest) {
-        const newSocialLinks: PreviewSocialLink[] = socialLinks.map((url) => ({
-          platform: classifySocialPlatform(url),
-          url,
-        }));
-        const content: PreviewContent = { ...latest.content, socialLinks: newSocialLinks };
+        const content: PreviewContent = {
+          ...latest.content,
+          ...(socialLinks.length > 0
+            ? { socialLinks: socialLinks.map((url) => ({ platform: classifySocialPlatform(url), url }) as PreviewSocialLink) }
+            : {}),
+          contact: { ...latest.content.contact, ...contactPatch },
+        };
         PreviewContentSchema.parse(content);
         await putSitePreview({ ...latest, content, updatedAt: new Date().toISOString() });
       }

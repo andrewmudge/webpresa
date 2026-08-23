@@ -9110,3 +9110,34 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files
 ```
 
 No manual browser verification performed (this repo's standing instruction: no unprompted dev-server/visual checks for general UI changes — lint/type-check/test/build is the verification bar).
+
+---
+
+**Date:** 2026-08-22 (continued)
+
+**Fixed: a manually-entered business email (or phone/address) on the "Business Details" admin form never reached the live site's contact card.** Reported alongside a question about why a Firecrawl scan hadn't picked up an email visibly printed on the business's own homepage.
+
+Two separate things, investigated together:
+
+1. **Why Firecrawl can miss an on-page email.** The extraction schema/prompt (`lib/firecrawl/client.ts`) do ask for `contact.emails`, but `lib/firecrawl/normalize.ts` validated each candidate with a bare `z.string().email()` — unlike every other extracted field, never sanitized first. A `mailto:` prefix, angle brackets, or trailing punctuation (a sentence-ending period) would fail strict validation and silently drop the address with no logging. Hardened: added `sanitizeEmailCandidate()` (trims, strips a `mailto:` prefix, strips surrounding `<...>`, strips trailing `.,;:`) run over each candidate before validation. Not guaranteed to be what happened in this specific case — the raw scan output for that business wasn't inspectable — but a safe, no-downside correctness fix either way. Also: even a successfully-found email only lands in the `WebsiteEnrichmentSnapshot`, never auto-written to `Business.email` — that still requires an explicit "Apply" click on the admin's "Found Contact Info" card (`FoundContactInfo.tsx`/`applyFoundContactFieldAction`), unchanged by this fix.
+
+2. **The actual reproducible bug.** The public contact card renders from `SitePreview.content.contact`, a snapshot baked in once at generation time. `updateBusinessDetailsAction` (`app/admin/(dashboard)/businesses/[businessId]/actions.ts`) only ever wrote `Business.email`/`phone`/`address` — it had no equivalent write to the preview content, unlike `socialLinks`, which already got a "dual-write" treatment in this exact same function (see `architecture.md`, "Social-links dual-write"). That's why phone/address displayed correctly (set before the business's first generation) while a later-added email didn't. Fixed by extending that same dual-write block to also patch `content.contact.{phone,email,address}`, using the identical non-destructive rule (only patch a field with a non-empty submitted value; never clear on blank), formatting the address string exactly the way `lib/firecrawl/generation-context.ts` does at generation time so the dual-written value matches what a regeneration would have produced.
+
+## Files changed
+
+```
+web/app/admin/(dashboard)/businesses/[businessId]/actions.ts                              MODIFIED — extended the socialLinks dual-write to also cover phone/email/address
+web/app/admin/(dashboard)/businesses/[businessId]/__tests__/business-details-actions.test.ts  MODIFIED — 4 new tests for the contact-field dual-write
+web/lib/firecrawl/normalize.ts                                                            MODIFIED — added sanitizeEmailCandidate(), applied before email validation
+web/lib/firecrawl/__tests__/normalize.test.ts                                             MODIFIED — 1 new test for mailto:/angle-bracket/trailing-punctuation email candidates
+web/docs/architecture.md                                                                  MODIFIED — updated the "Social-links dual-write" entry to cover the contact-field extension
+web/docs/build_log.md                                                                     MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files, 1643 tests, all passing; npm run build — clean
+```
+
+No manual browser verification performed (same standing instruction as above).

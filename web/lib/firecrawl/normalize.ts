@@ -52,6 +52,23 @@ function sanitizeText(value: string | undefined, maxLen: number): string | undef
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen).trim() : cleaned;
 }
 
+/**
+ * Normalizes a raw extracted email candidate before validation — strips a
+ * `mailto:` prefix, surrounding angle brackets, and leading/trailing
+ * whitespace or punctuation a page's markup/prose commonly appends (e.g. a
+ * sentence-ending period), so an otherwise-valid address the extraction LLM
+ * returned isn't silently dropped by the strict `z.string().email()` check
+ * below.
+ */
+function sanitizeEmailCandidate(value: string): string {
+  return value
+    .trim()
+    .replace(/^mailto:/i, '')
+    .replace(/^<|>$/g, '')
+    .replace(/[.,;:]+$/, '')
+    .trim();
+}
+
 function isValidHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -146,9 +163,9 @@ export function normalizeFirecrawlResponse(input: NormalizeInput): WebsiteEnrich
     new Set((extraction.callsToAction ?? []).map((c) => sanitizeText(c, 100)).filter((c): c is string => !!c)),
   ).slice(0, 10);
 
-  const emails = Array.from(new Set(extraction.contact?.emails ?? []))
-    .filter((e) => z.string().email().safeParse(e).success)
-    .slice(0, 5);
+  const emails = Array.from(
+    new Set((extraction.contact?.emails ?? []).map(sanitizeEmailCandidate).filter((e) => z.string().email().safeParse(e).success)),
+  ).slice(0, 5);
   const phones = Array.from(
     new Set((extraction.contact?.phones ?? []).map((p) => sanitizeText(p, 50)).filter((p): p is string => !!p)),
   ).slice(0, 5);

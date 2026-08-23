@@ -100,6 +100,14 @@ describe('normalizeFirecrawlResponse', () => {
     expect(snapshot.contact.emails).toEqual(['valid@example.com']);
   });
 
+  it('sanitizes a mailto: prefix, angle brackets, and trailing punctuation before validating an email', () => {
+    const data = baseData({
+      json: { contact: { emails: ['mailto:info@acme.com', '<hi@acme.com>', 'sales@acme.com.', '  spaced@acme.com  '] } },
+    });
+    const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data });
+    expect(snapshot.contact.emails).toEqual(['info@acme.com', 'hi@acme.com', 'sales@acme.com', 'spaced@acme.com']);
+  });
+
   it('produces deterministic, schema-valid output even from an empty response', () => {
     const snapshot = normalizeFirecrawlResponse({ sourceUrl: 'https://example.com/', data: { metadata: { statusCode: 200 } } });
     expect(snapshot.services).toEqual([]);

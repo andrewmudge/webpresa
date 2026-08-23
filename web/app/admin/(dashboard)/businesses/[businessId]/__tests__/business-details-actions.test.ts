@@ -114,6 +114,7 @@ import {
   updatePhotosAction,
 } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
 import type { Business } from '@/domain/models/business';
+import type { SitePreview } from '@/domain/models/site-preview';
 
 function makeFormData(fields: Record<string, string>): FormData {
   const fd = new FormData();
@@ -136,6 +137,25 @@ const EXISTING_BUSINESS: Business = {
 };
 
 const REDIRECT_TO = `/admin/businesses/${EXISTING_BUSINESS.businessId}`;
+
+const EXISTING_PREVIEW: SitePreview = {
+  previewId: 'preview_00000000-0000-0000-0000-000000000001',
+  businessId: EXISTING_BUSINESS.businessId,
+  slug: EXISTING_BUSINESS.slug,
+  version: 1,
+  status: 'published',
+  templateId: 'local-business-v1',
+  content: {
+    hero: { headline: 'Acme Plumbing', subheadline: 'Reliable service.', ctaText: 'Get a Free Quote' },
+    services: [{ name: 'Drain Cleaning', description: 'Fast drain service.' }],
+    tagline: 'Trusted local plumbing.',
+    aboutText: 'We are Acme Plumbing.',
+    contact: { phone: '512-555-0100' },
+  },
+  theme: { primaryColor: '#0F356B', accentColor: '#ED7023', fontFamily: 'sans-serif' },
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -246,6 +266,80 @@ describe('updateBusinessDetailsAction', () => {
     );
     expect(result?.errors?.email).toBeDefined();
     expect(mockPutBusiness).not.toHaveBeenCalled();
+  });
+
+  it('dual-writes a newly-entered email onto the latest preview\'s content.contact, without touching the preview otherwise', async () => {
+    mockListPreviewsForBusiness.mockResolvedValue([EXISTING_PREVIEW]);
+
+    await expect(
+      updateBusinessDetailsAction(
+        EXISTING_BUSINESS.businessId,
+        REDIRECT_TO,
+        undefined,
+        makeFormData({ ...DETAILS_FIELDS, email: 'hello@acme.com' }),
+      ),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutSitePreview).toHaveBeenCalledTimes(1);
+    const savedPreview = mockPutSitePreview.mock.calls[0][0];
+    expect(savedPreview.content.contact).toEqual({ phone: '512-555-0100', email: 'hello@acme.com' });
+    expect(savedPreview.content.hero).toEqual(EXISTING_PREVIEW.content.hero);
+  });
+
+  it('dual-writes phone/email/address together, formatting address the same way generation does', async () => {
+    mockListPreviewsForBusiness.mockResolvedValue([EXISTING_PREVIEW]);
+
+    await expect(
+      updateBusinessDetailsAction(
+        EXISTING_BUSINESS.businessId,
+        REDIRECT_TO,
+        undefined,
+        makeFormData({
+          ...DETAILS_FIELDS,
+          phone: '512-555-9999',
+          email: 'hello@acme.com',
+          addressLine1: '123 Main St',
+          addressCity: 'Austin',
+          addressState: 'TX',
+          addressPostalCode: '78701',
+        }),
+      ),
+    ).rejects.toThrow('REDIRECT:');
+
+    const savedPreview = mockPutSitePreview.mock.calls[0][0];
+    expect(savedPreview.content.contact).toEqual({
+      phone: '512-555-9999',
+      email: 'hello@acme.com',
+      address: '123 Main St, Austin, TX, 78701',
+    });
+  });
+
+  it('leaves the preview untouched when no contact field or social link was submitted', async () => {
+    mockListPreviewsForBusiness.mockResolvedValue([EXISTING_PREVIEW]);
+
+    await expect(
+      updateBusinessDetailsAction(EXISTING_BUSINESS.businessId, REDIRECT_TO, undefined, makeFormData(DETAILS_FIELDS)),
+    ).rejects.toThrow('REDIRECT:');
+
+    expect(mockPutSitePreview).not.toHaveBeenCalled();
+  });
+
+  it('never wipes an existing preview contact field when the corresponding form field is left blank', async () => {
+    mockListPreviewsForBusiness.mockResolvedValue([
+      { ...EXISTING_PREVIEW, content: { ...EXISTING_PREVIEW.content, contact: { phone: '512-555-0100', email: 'old@acme.com' } } },
+    ]);
+
+    await expect(
+      updateBusinessDetailsAction(
+        EXISTING_BUSINESS.businessId,
+        REDIRECT_TO,
+        undefined,
+        makeFormData({ ...DETAILS_FIELDS, phone: '512-555-0100' }),
+      ),
+    ).rejects.toThrow('REDIRECT:');
+
+    const savedPreview = mockPutSitePreview.mock.calls[0][0];
+    expect(savedPreview.content.contact.email).toBe('old@acme.com');
   });
 });
 
