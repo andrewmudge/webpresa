@@ -9245,3 +9245,30 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files
 ```
 
 No manual browser verification performed (standing instruction) — the real-sharp fixture test in `favicon.test.ts` is the closest available check on actual visual output; say the word and I'll use the dev server against a real business to see it rendered.
+
+---
+
+**Date:** 2026-08-24
+
+**Auto-apply a Firecrawl-found email onto Business.email, when currently blank.** Reported against a real prod business (`biz_bd86764b-d993-40f0-9dd1-46a1aeb540d8`): its homepage email was correctly found by a full scan and shown in the admin's "Contact Info Found on Website" card, but still required a manual per-business "Apply" click to land on the record — the user doesn't want to do that by hand for every business. Scoped to email only, per explicit request — phone stays manual.
+
+Both ways a "full scan" actually runs (the admin's "Enrich Website" button and the Stage 16 Step Functions `/api/internal/scan/crawl` step) funnel into the same `runAttempt()` in `lib/firecrawl/enrich-business.ts`, whose own doc comment previously stated "no Firecrawl-discovered content is ever written back onto [Business]" — true until now. Added one conditional key to the existing completion `updateBusiness` call: `email` is set from `snapshot.contact.emails[0]` only when `business.email` is currently blank, mirroring the "business wins, snapshot only fills a blank field" convention `generation-context.ts`'s `buildGenerationContext` already established for generation-time contact resolution — an admin/customer-set email is never silently overwritten.
+
+No changes needed to `FoundContactInfo.tsx`/`applyFoundContactFieldAction` — that card's existing `found !== current` filter naturally stops showing email as actionable once this auto-apply has run on a scan, and the manual "Apply"/"Overwrite" button stays exactly as-is (still there for phone, still usable as an explicit overwrite path for email). The specific business reported won't retroactively get this — its scan already completed under the old behavior; needs either one manual "Apply" click (still available) or a rescan.
+
+## Files changed
+
+```
+lib/firecrawl/enrich-business.ts                  MODIFIED — auto-applies a found email onto Business.email when blank; updated the file's own "never mutated" doc comment
+lib/firecrawl/__tests__/enrich-business.test.ts    MODIFIED — 3 new tests (applies when blank, never overwrites, no-op when none found); updated the "Business is canonical" invariant test's allowed-keys set
+web/docs/architecture.md                          MODIFIED — updated "Firecrawl Website Enrichment" ownership-boundaries section
+web/docs/build_log.md                             MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files, 1687 tests, all passing (3 new); npm run build — clean
+```
+
+No manual browser verification performed (standing instruction). Confirm in prod by manually clicking "Apply" once for `biz_bd86764b-d993-40f0-9dd1-46a1aeb540d8` specifically (or re-scanning it), then verifying a fresh full scan on a business with no email on file populates it without a click.

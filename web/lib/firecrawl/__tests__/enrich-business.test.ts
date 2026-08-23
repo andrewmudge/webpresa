@@ -205,12 +205,16 @@ describe('enrichBusinessWebsite — provenance', () => {
 });
 
 describe('enrichBusinessWebsite — Business is canonical', () => {
-  it('never writes Firecrawl content onto Business — only enrichment-disposition fields', async () => {
+  it('never writes Firecrawl content onto Business — only enrichment-disposition fields, plus the email carve-out', async () => {
     mockGetBusinessById.mockResolvedValue(makeBusiness());
 
     await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
 
-    const allowedKeys = new Set(['enrichmentStatus', 'manualApprovalReason', 'manualApprovalNote']);
+    // 'email' is the one deliberate exception (2026-08-24) — see the
+    // "auto-applies a found email" describe block below for its own,
+    // narrower coverage. VALID_SNAPSHOT has no email by default, so this
+    // particular run never actually exercises that branch.
+    const allowedKeys = new Set(['enrichmentStatus', 'manualApprovalReason', 'manualApprovalNote', 'email']);
     for (const call of mockUpdateBusiness.mock.calls) {
       const updates = call[1] as Record<string, unknown>;
       for (const key of Object.keys(updates)) {
@@ -229,6 +233,50 @@ describe('enrichBusinessWebsite — Business is canonical', () => {
       business,
       expect.objectContaining({ enrichment: expect.objectContaining({ snapshot: VALID_SNAPSHOT }) }),
     );
+  });
+});
+
+describe('enrichBusinessWebsite — auto-applies a found email', () => {
+  it('writes the found email onto Business.email when it is currently blank', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness({ email: undefined }));
+    mockNormalizeFirecrawlResponse.mockReturnValue({
+      ...VALID_SNAPSHOT,
+      contact: { phones: [], emails: ['piratedrainsolution@gmail.com'], addresses: [] },
+    });
+
+    await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    const completionCall = mockUpdateBusiness.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>).enrichmentStatus === 'enrichment_completed',
+    );
+    expect((completionCall?.[1] as Record<string, unknown>).email).toBe('piratedrainsolution@gmail.com');
+  });
+
+  it('never overwrites an already-set Business.email with a found one', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness({ email: 'owner@already-set.com' }));
+    mockNormalizeFirecrawlResponse.mockReturnValue({
+      ...VALID_SNAPSHOT,
+      contact: { phones: [], emails: ['found@example.com'], addresses: [] },
+    });
+
+    await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    const completionCall = mockUpdateBusiness.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>).enrichmentStatus === 'enrichment_completed',
+    );
+    expect((completionCall?.[1] as Record<string, unknown>).email).toBeUndefined();
+  });
+
+  it('does not add an email key at all when Firecrawl found none', async () => {
+    mockGetBusinessById.mockResolvedValue(makeBusiness({ email: undefined }));
+    // VALID_SNAPSHOT's default contact.emails is already [].
+
+    await enrichBusinessWebsite('biz_00000000-0000-0000-0000-000000000001');
+
+    const completionCall = mockUpdateBusiness.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>).enrichmentStatus === 'enrichment_completed',
+    );
+    expect('email' in (completionCall?.[1] as Record<string, unknown>)).toBe(false);
   });
 });
 

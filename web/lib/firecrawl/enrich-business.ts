@@ -20,8 +20,12 @@ import { log } from '@/lib/logging/log';
  * 20-checkpoint flow from implementation.md, Stage 13, split into small
  * named steps rather than one unreadable function. `Business` is loaded
  * once and never mutated except for its `enrichmentStatus`/
- * `manualApprovalReason`/`manualApprovalNote` disposition fields — no
- * Firecrawl-discovered content is ever written back onto it.
+ * `manualApprovalReason`/`manualApprovalNote` disposition fields, plus one
+ * deliberate carve-out: a found email auto-fills `Business.email` when it's
+ * currently blank (2026-08-24 — see the completion `updateBusiness` call
+ * below). No other Firecrawl-discovered content is written back onto it —
+ * phone/address and everything else still require the admin's manual
+ * "Apply"/"Overwrite" action (`FoundContactInfo.tsx`).
  */
 
 const NO_WEBSITE_NOTE =
@@ -287,9 +291,19 @@ async function runAttempt(business: Business, queuedScan: ScanEvent, sourceUrl: 
   // merges partial updates against a freshly re-fetched record, so it's
   // never safe to pass explicit `undefined` to it (see its DynamoDB
   // UpdateExpression implementation) — every field set below is defined.
+  //
+  // Auto-apply a found email — but only when Business.email is currently
+  // blank, mirroring generation-context.ts's "business wins, snapshot only
+  // fills a blank field" convention, so a deliberately-set email is never
+  // silently replaced. Phone/address stay manual-only (FoundContactInfo.tsx's
+  // "Apply"/"Overwrite" card) — this carve-out is email-specific, requested
+  // explicitly rather than applied to every found contact field.
+  const foundEmail = snapshot.contact.emails[0];
+
   await updateBusiness(business.businessId, {
     enrichmentStatus: 'enrichment_completed',
     ...(!hasAcceptedImages ? { manualApprovalReason: 'no_usable_images' as const, manualApprovalNote: NO_USABLE_IMAGES_NOTE } : {}),
+    ...(!business.email?.trim() && foundEmail ? { email: foundEmail } : {}),
   });
 
   return { status: 'completed', scanId: scan.scanId, previewId: preview.previewId };
