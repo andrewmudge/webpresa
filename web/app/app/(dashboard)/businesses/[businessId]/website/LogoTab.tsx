@@ -48,13 +48,13 @@ export function LogoTab({ businessId, business, isReadOnly }: Props) {
             </p>
           </div>
 
-          <form action={updateFaviconActionCustomer.bind(null, businessId)} className="flex items-center gap-3">
+          <form action={updateFaviconActionCustomer.bind(null, businessId)} className="flex flex-wrap items-center gap-3">
             <input
               type="file"
               name="favicon"
               accept="image/*"
               disabled={isReadOnly}
-              className="text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-700 hover:file:bg-gray-50 disabled:opacity-50"
+              className="min-w-0 max-w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-700 hover:file:bg-gray-50 disabled:opacity-50"
             />
             <SaveButton label="Upload" pendingLabel="Uploading…" disabled={isReadOnly} />
           </form>
