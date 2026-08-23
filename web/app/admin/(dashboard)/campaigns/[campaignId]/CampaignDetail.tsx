@@ -480,6 +480,7 @@ function RecipientCard({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showScans, setShowScans] = useState(false);
   const [showOverride, setShowOverride] = useState(recipient.destinationType === 'custom');
+  const [regeneratedAt, setRegeneratedAt] = useState<number | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const redirectUrl = `/r/${recipient.campaignCode}`;
@@ -518,6 +519,20 @@ function RecipientCard({
     });
   }
 
+  function handleRegenerate() {
+    if (!postcard) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await retryRenderPostcardAction(postcard.postcardId);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setRegeneratedAt(Date.now());
+      router.refresh();
+    });
+  }
+
   return (
     <li className="rounded-lg border border-gray-200 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -525,7 +540,15 @@ function RecipientCard({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qrUrl} alt={`QR code for ${redirectUrl}`} width={96} height={96} className="rounded-lg border border-gray-100" />
           <div className="text-sm">
-            <p className="font-medium text-gray-900">{business ? business.name : recipient.businessId}</p>
+            <p className="font-medium text-gray-900">
+              {business ? (
+                <a href={`/admin/businesses/${business.businessId}`} className="hover:underline hover:text-(--color-brand)">
+                  {business.name}
+                </a>
+              ) : (
+                recipient.businessId
+              )}
+            </p>
             <p className="text-gray-500 font-mono text-xs mt-0.5">{formatCampaignCodeForDisplay(recipient.campaignCode)}</p>
             <p className="mt-1">
               <a href={qrUrl} download={`campaign-${recipient.campaignCode}.png`} className="text-(--color-brand) hover:underline text-xs">
@@ -580,9 +603,23 @@ function RecipientCard({
       </div>
 
       <div className="mt-3">
-        <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
-          {showOverride ? 'Hide destination override' : 'Override destination'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => setShowOverride((v) => !v)} className="text-xs text-(--color-brand) hover:underline">
+            {showOverride ? 'Hide destination override' : 'Override destination'}
+          </button>
+          {postcard && (
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={isPending || derivePostcardStatus(postcard) === 'submitted'}
+              title={derivePostcardStatus(postcard) === 'submitted' ? 'Already submitted to Lob — cannot regenerate' : undefined}
+              className="text-xs text-(--color-brand) hover:underline disabled:opacity-60 disabled:no-underline disabled:cursor-not-allowed"
+            >
+              Regenerate PDF
+            </button>
+          )}
+          {regeneratedAt && <span className="text-xs text-green-600">Regenerated</span>}
+        </div>
         {showOverride && (
           <form onSubmit={handleSaveDestination} className="mt-2 flex flex-wrap items-end gap-2">
             <div className="flex-1 min-w-[220px]">

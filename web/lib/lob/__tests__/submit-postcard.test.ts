@@ -18,6 +18,7 @@ const {
   mockAdvanceBusinessStatus,
   mockGetLobSenderAddress,
   mockGetSignedAssetUrl,
+  mockRenderPostcardArtifacts,
 } = vi.hoisted(() => ({
   mockLobRequest: vi.fn(),
   mockGetPostcardById: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockAdvanceBusinessStatus: vi.fn(),
   mockGetLobSenderAddress: vi.fn(),
   mockGetSignedAssetUrl: vi.fn(),
+  mockRenderPostcardArtifacts: vi.fn(),
 }));
 
 const MockLobApiError = vi.hoisted(
@@ -53,6 +55,7 @@ vi.mock('@/lib/db/postcards', () => ({
 vi.mock('@/lib/db/businesses', () => ({ getBusinessById: mockGetBusinessById, advanceBusinessStatus: mockAdvanceBusinessStatus }));
 vi.mock('@/lib/env/lob-sender-address', () => ({ getLobSenderAddress: mockGetLobSenderAddress }));
 vi.mock('@/lib/s3/assets', () => ({ getSignedAssetUrl: mockGetSignedAssetUrl }));
+vi.mock('@/lib/postcards/render', () => ({ renderPostcardArtifacts: mockRenderPostcardArtifacts }));
 
 import { submitPostcardToLob } from '../submit-postcard';
 import type { Postcard } from '@/domain/models/postcard';
@@ -103,6 +106,7 @@ beforeEach(() => {
   mockTransitionPostcardToSubmitting.mockResolvedValue(true);
   mockLobRequest.mockResolvedValue({ id: 'psc_abc123', price: 1.23 });
   mockAdvanceBusinessStatus.mockResolvedValue(true);
+  mockRenderPostcardArtifacts.mockResolvedValue({ status: 'rendered' });
 });
 
 describe('submitPostcardToLob — eligibility checks', () => {
@@ -149,6 +153,65 @@ describe('submitPostcardToLob — idempotency', () => {
     mockTransitionPostcardToSubmitting.mockResolvedValue(false);
     const result = await submitPostcardToLob(POSTCARD_ID);
     expect(result.status).toBe('conflict');
+    expect(mockLobRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('submitPostcardToLob — re-render before submission', () => {
+  it('re-renders fresh artwork before transitioning to submitting, and before calling Lob', async () => {
+    const callOrder: string[] = [];
+    mockRenderPostcardArtifacts.mockImplementation(async () => {
+      callOrder.push('render');
+      return { status: 'rendered' };
+    });
+    mockTransitionPostcardToSubmitting.mockImplementation(async () => {
+      callOrder.push('transition');
+      return true;
+    });
+    mockLobRequest.mockImplementation(async () => {
+      callOrder.push('lob');
+      return { id: 'psc_abc123', price: 1.23 };
+    });
+
+    await submitPostcardToLob(POSTCARD_ID);
+
+    expect(mockRenderPostcardArtifacts).toHaveBeenCalledWith(POSTCARD_ID);
+    expect(callOrder).toEqual(['render', 'transition', 'lob']);
+  });
+
+  it('uses the artifact keys from the post-render fetch, not the pre-render one, in case the render changed them', async () => {
+    mockGetPostcardById
+      .mockResolvedValueOnce(basePostcard())
+      .mockResolvedValueOnce(basePostcard({ frontArtifactKey: 'postcards/refreshed/front.pdf', backArtifactKey: 'postcards/refreshed/back.pdf' }));
+
+    await submitPostcardToLob(POSTCARD_ID);
+
+    const requestBody = JSON.parse(mockLobRequest.mock.calls[0][1].body);
+    expect(requestBody.front).toBe('https://signed.example.com/postcards/refreshed/front.pdf');
+    expect(requestBody.back).toBe('https://signed.example.com/postcards/refreshed/back.pdf');
+  });
+
+  it('aborts the submission without claiming the postcard when the re-render fails', async () => {
+    mockRenderPostcardArtifacts.mockResolvedValue({ status: 'failed', message: 'Postcard render Lambda failed rendering the front.' });
+
+    const result = await submitPostcardToLob(POSTCARD_ID);
+
+    expect(result).toEqual({ status: 'failed', message: 'Postcard render Lambda failed rendering the front.' });
+    expect(mockTransitionPostcardToSubmitting).not.toHaveBeenCalled();
+    expect(mockLobRequest).not.toHaveBeenCalled();
+    expect(mockMarkPostcardSubmissionFailed).not.toHaveBeenCalled();
+  });
+
+  it('maps a "not_eligible" re-render outcome (e.g. a concurrent submission already claimed it) to conflict', async () => {
+    mockRenderPostcardArtifacts.mockResolvedValue({
+      status: 'not_eligible',
+      message: "This postcard is past the 'pending' stage (currently 'submitting') and can no longer be re-rendered.",
+    });
+
+    const result = await submitPostcardToLob(POSTCARD_ID);
+
+    expect(result.status).toBe('conflict');
+    expect(mockTransitionPostcardToSubmitting).not.toHaveBeenCalled();
     expect(mockLobRequest).not.toHaveBeenCalled();
   });
 });

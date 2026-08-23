@@ -76,7 +76,11 @@ export default async function PostcardDetailPage({ params }: Props) {
 
       <div className="grid max-w-5xl gap-8 lg:grid-cols-2">
         <div className="space-y-4">
-          <h1 className="text-xl font-semibold text-gray-900">{business.name}</h1>
+          <h1 className="text-xl font-semibold text-gray-900">
+            <Link href={`/admin/businesses/${business.businessId}`} className="hover:underline hover:text-(--color-brand)">
+              {business.name}
+            </Link>
+          </h1>
           <p className="text-sm text-gray-500">
             {postcard.provider.toUpperCase()} · <span className="capitalize">{postcard.status}</span>
           </p>

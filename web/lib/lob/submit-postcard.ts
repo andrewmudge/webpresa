@@ -4,6 +4,7 @@ import { lobRequest, LobApiError } from './client';
 import { getPostcardById, transitionPostcardToSubmitting, markPostcardSubmitted, markPostcardSubmissionFailed } from '@/lib/db/postcards';
 import { getBusinessById, advanceBusinessStatus } from '@/lib/db/businesses';
 import { getLobSenderAddress } from '@/lib/env/lob-sender-address';
+import { renderPostcardArtifacts } from '@/lib/postcards/render';
 import { getSignedAssetUrl } from '@/lib/s3/assets';
 import { log } from '@/lib/logging/log';
 
@@ -108,15 +109,35 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
     return { status: 'not_eligible', message: 'Sender/return address is not configured (WEBPRESA_LOB_SENDER_* environment variables).' };
   }
 
+  // Re-render fresh artwork immediately before submission — the underlying
+  // S3 PDF is otherwise only ever captured once, at postcard-creation time,
+  // and never automatically refreshed. A business edited after that would
+  // silently mail stale artwork otherwise. Must run before
+  // transitionPostcardToSubmitting below: renderPostcardArtifacts only
+  // re-renders while status is still 'pending'. A failure here aborts the
+  // submission entirely rather than falling back to whatever stale artifact
+  // already exists.
+  const renderResult = await renderPostcardArtifacts(postcardId);
+  if (renderResult.status !== 'rendered') {
+    if (renderResult.status === 'not_eligible') {
+      return { status: 'conflict', message: renderResult.message ?? 'This postcard is not in a state that can be re-rendered.' };
+    }
+    return { status: 'failed', message: renderResult.message ?? 'Failed to render up-to-date postcard artwork before submission.' };
+  }
+  const freshPostcard = await getPostcardById(postcardId);
+  if (!freshPostcard?.frontArtifactKey || !freshPostcard?.backArtifactKey) {
+    return { status: 'failed', message: 'Rendered artwork keys are missing after re-render.' };
+  }
+
   const claimed = await transitionPostcardToSubmitting(postcardId);
   if (!claimed) {
-    return { status: 'conflict', message: `This postcard is not in a submittable state (current status: '${postcard.status}').` };
+    return { status: 'conflict', message: `This postcard is not in a submittable state (current status: '${freshPostcard.status}').` };
   }
 
   try {
     const [frontUrl, backUrl] = await Promise.all([
-      getSignedAssetUrl(postcard.frontArtifactKey, ARTIFACT_URL_TTL_SECONDS),
-      getSignedAssetUrl(postcard.backArtifactKey, ARTIFACT_URL_TTL_SECONDS),
+      getSignedAssetUrl(freshPostcard.frontArtifactKey, ARTIFACT_URL_TTL_SECONDS),
+      getSignedAssetUrl(freshPostcard.backArtifactKey, ARTIFACT_URL_TTL_SECONDS),
     ]);
 
     const recipientName = truncateLobName(business.name);

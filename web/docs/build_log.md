@@ -9141,3 +9141,34 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files
 ```
 
 No manual browser verification performed (same standing instruction as above).
+
+---
+
+**Date:** 2026-08-23
+
+**Fixed: postcards were mailed with stale artwork if the business's site was edited after the postcard was created.** Reported as: the admin postcard-review preview correctly reflects site edits, but the stored S3 PDF (and therefore whatever Lob actually prints/mails) does not — because it's only ever rendered once, at postcard-creation time, and the "live-looking" review preview is a separate code path (same React components, re-rendered live from current data on every page load) with no connection to that stored artifact.
+
+Fixed by having `submitPostcardToLob` (`lib/lob/submit-postcard.ts`) call `renderPostcardArtifacts` (`lib/postcards/render.ts`) itself immediately before submission, then re-fetching the `Postcard` record for the (possibly new) artifact keys before signing the URLs handed to Lob — so what gets mailed always matches current site content at the moment of submission, not creation. Must run before `transitionPostcardToSubmitting` (which flips `status` away from `'pending'`, the state `renderPostcardArtifacts` requires); a render failure now aborts the submission (`'failed'`, or `'conflict'` if a concurrent submission already claimed the postcard) rather than silently falling back to stale artwork.
+
+Also added, per explicit request:
+- A manual **"Regenerate PDF"** button in the campaign recipient card (`CampaignDetail.tsx`), next to "Override destination" — reuses the existing `retryRenderPostcardAction` (previously only reachable via the `render_failed` recovery path), disabled once the postcard is `'submitted'`. Lets an admin refresh the artifact ahead of approval, not just have it silently fixed at submission time.
+- The business name in the campaign recipient card, and on `/admin/postcards/[postcardId]`, now links back to `/admin/businesses/[businessId]`.
+
+## Files changed
+
+```
+web/lib/lob/submit-postcard.ts                                                    MODIFIED — re-renders fresh artwork before submission, before claiming the postcard
+web/lib/lob/__tests__/submit-postcard.test.ts                                     MODIFIED — 5 new tests for the re-render step (ordering, refreshed keys, failure/conflict mapping)
+web/app/admin/(dashboard)/campaigns/[campaignId]/CampaignDetail.tsx               MODIFIED — "Regenerate PDF" button next to "Override destination"; business name links to /admin/businesses/[businessId]
+web/app/admin/(dashboard)/postcards/[postcardId]/page.tsx                         MODIFIED — business name links to /admin/businesses/[businessId]
+web/docs/architecture.md                                                         MODIFIED — documented the stale-artifact bug and fix under Stage 22 Phase 4
+web/docs/build_log.md                                                            MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files, 1647 tests, all passing; npm run build — clean
+```
+
+No manual browser verification performed (same standing instruction as above).
