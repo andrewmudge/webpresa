@@ -9172,3 +9172,32 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files
 ```
 
 No manual browser verification performed (same standing instruction as above).
+
+---
+
+**Date:** 2026-08-23 (continued)
+
+**Fixed: Discover search always capped at 20 results, despite pagination logic added 2026-08-12 that was supposed to reach Google's 60-result ceiling.** Reported as "plumbers in Pensacola FL" returning far fewer results than the admin knew actually existed.
+
+Root cause: `FIELD_MASK` in `web/lib/google-places/client.ts` (the `X-Goog-FieldMask` header sent on every Text Search request) listed only `places.*` fields — it never included the top-level `nextPageToken` field. Places API (New) strictly filters the *entire* response by this mask, not just the `places` array, so Google silently stripped `nextPageToken` from every response even when far more than 20 places matched. `searchPlacesText()`'s pagination loop (added 2026-08-12, `if (!nextPageToken) break;`) was working exactly as written — it just never received a token to follow, so every search silently stopped after page 1 (20 results) regardless of how many more actually matched.
+
+The existing pagination test suite (`lib/google-places/__tests__/client.test.ts`) didn't catch this because its mocks hand back `nextPageToken` directly in the fake response body, independent of what field mask was actually sent — good coverage of the loop logic, no coverage of the real API's field-mask-driven response filtering that actually caused the bug.
+
+Fix: added `'nextPageToken'` to `FIELD_MASK`. Added an assertion to the existing field-mask test confirming `nextPageToken` is present, so a future regression (someone refactoring `FIELD_MASK` without it) fails a test instead of silently re-capping every search at 20.
+
+## Files changed
+
+```
+web/lib/google-places/client.ts                       MODIFIED — added 'nextPageToken' to FIELD_MASK
+web/lib/google-places/__tests__/client.test.ts         MODIFIED — asserts the field mask includes nextPageToken
+web/docs/architecture.md                               MODIFIED — documented the pagination addition and this fix under "Google Places Discovery Boundary"
+web/docs/build_log.md                                  MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files, 1647 tests, all passing; npm run build — clean
+```
+
+No manual browser verification performed (same standing instruction as above) — this also can't be verified against the real Google API from here; confirm by re-running a Discover search for a category/city known to have more than 20 matches.

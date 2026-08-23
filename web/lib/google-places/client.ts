@@ -25,8 +25,16 @@ const PLACES_DETAILS_URL = 'https://places.googleapis.com/v1/places';
  * and downstream eligibility need. See implementation.md, Stage 12,
  * "Economical field-mask requirements". Deliberately excludes any photo
  * field — Stage 12 never requests, downloads, or stores Google Place photos.
+ *
+ * `nextPageToken` is a top-level response field, not nested under `places.`
+ * — Places API (New) strictly filters the *entire* response by this mask,
+ * so omitting it here silently strips the token from every response (even
+ * when far more than `TEXT_SEARCH_PAGE_SIZE` results actually match), which
+ * makes `searchPlacesText`'s pagination loop below stop after page 1 every
+ * time. Must stay in this mask for pagination past 20 results to work at all.
  */
 const FIELD_MASK = [
+  'nextPageToken',
   'places.id',
   'places.displayName',
   'places.formattedAddress',

@@ -38,6 +38,11 @@ describe('searchPlacesText', () => {
     expect(url).toBe('https://places.googleapis.com/v1/places:searchText');
     expect(init.headers['X-Goog-Api-Key']).toBe('test-key');
     expect(init.headers['X-Goog-FieldMask']).not.toMatch(/photo/i);
+    // Places API (New) strictly filters the whole response by this mask —
+    // nextPageToken must be requested explicitly or Google silently strips
+    // it from every response, capping every search at one page (20 results)
+    // regardless of how many more places actually match.
+    expect(init.headers['X-Goog-FieldMask'].split(',')).toContain('nextPageToken');
     expect(JSON.parse(init.body)).toEqual({ textQuery: 'plumbers in Austin, TX', pageSize: 20 });
 
     vi.unstubAllGlobals();
