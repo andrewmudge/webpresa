@@ -64,7 +64,6 @@ export const sectionRegistry: Record<WebsiteSectionType, (ctx: SectionRenderCont
     <GeneratedHero
       headline={ctx.content.hero.headline}
       subheadline={ctx.content.hero.subheadline}
-      serviceArea={ctx.content.serviceAreas?.[0]}
       heroImageUrl={ctx.theme.heroImageUrl}
       heroImageUrlMobile={ctx.theme.heroImageUrlMobile}
       logoUrl={ctx.logoUrl}

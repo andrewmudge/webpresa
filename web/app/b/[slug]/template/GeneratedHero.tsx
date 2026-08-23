@@ -12,7 +12,6 @@ import type { ThemeName } from '@/domain/constants/themes';
 interface Props {
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   heroImageUrl?: string;
   /**
    * Optional mobile-only hero photo, independent of `heroImageUrl`/`heroStyle`
@@ -137,7 +136,6 @@ function HeroCornerImage({
 interface HeroTextContentProps {
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -151,23 +149,11 @@ interface HeroTextContentProps {
  * — that one hardcodes white text for a dark scrim over a full-bleed photo,
  * which would be illegible on a light theme's plain background.
  */
-function HeroTextContent({ headline, subheadline, serviceArea, primary, secondary }: HeroTextContentProps) {
+function HeroTextContent({ headline, subheadline, primary, secondary }: HeroTextContentProps) {
   return (
     <div className="max-w-xl">
       {/* Capped to 75% width so it never runs under a photo anchored to the right. */}
       <div className="max-w-[75%] lg:max-w-none">
-        {serviceArea && (
-          <div
-            className="inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 mb-5"
-            style={{ backgroundColor: V.surface, borderColor: V.border }}
-          >
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20" style={{ color: V.primary }}>
-              <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-            <span className="text-sm font-medium text-(--site-text)">Serving {serviceArea}</span>
-          </div>
-        )}
-
         <h1
           className="font-extrabold text-(--site-text) leading-[1.1] mb-5 tracking-tight"
           style={{ fontSize: 'clamp(2.4rem, 5.5vw, 4rem)' }}
@@ -211,7 +197,6 @@ function HeroTextContent({ headline, subheadline, serviceArea, primary, secondar
 interface SplitHeroSectionProps {
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
   desktopImageSrc: string;
@@ -246,7 +231,6 @@ interface SplitHeroSectionProps {
 function SplitHeroSection({
   headline,
   subheadline,
-  serviceArea,
   primary,
   secondary,
   desktopImageSrc,
@@ -265,7 +249,7 @@ function SplitHeroSection({
             height (no artificial min-height), which is what lets the image
             below match it exactly instead of overshooting. */}
         <div className="relative z-10 lg:order-1 px-4 sm:px-6 lg:pl-12 xl:pl-20 lg:pr-8 py-12 lg:py-20">
-          <HeroTextContent headline={headline} subheadline={subheadline} serviceArea={serviceArea} primary={primary} secondary={secondary} />
+          <HeroTextContent headline={headline} subheadline={subheadline} primary={primary} secondary={secondary} />
         </div>
 
         <HeroCornerImage
@@ -283,7 +267,6 @@ function SplitHeroSection({
 interface HeroOverlayContentProps {
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -296,20 +279,10 @@ interface HeroOverlayContentProps {
  * in the content itself. Deliberately separate from `HeroTextContent` — see
  * that component's doc comment for why they can't be merged.
  */
-function HeroOverlayContent({ headline, subheadline, serviceArea, primary, secondary }: HeroOverlayContentProps) {
+function HeroOverlayContent({ headline, subheadline, primary, secondary }: HeroOverlayContentProps) {
   return (
     <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-24 w-full">
       <div className="max-w-2xl">
-        {/* Eyebrow */}
-        {serviceArea && (
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-sm border border-white/25 px-4 py-1.5 mb-5">
-            <svg className="w-3.5 h-3.5 text-white/80" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-            <span className="text-sm font-medium text-white/90">Serving {serviceArea}</span>
-          </div>
-        )}
-
         {/* Headline */}
         <h1
           className="font-extrabold text-white leading-[1.1] mb-5 tracking-tight"
@@ -354,7 +327,6 @@ interface FullBleedHeroSectionProps {
   imageSrc: string;
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -371,7 +343,7 @@ interface FullBleedHeroSectionProps {
  * a sufficiently dark photo, which isn't guaranteed on mobile's differently
  * cropped/chosen image).
  */
-function FullBleedHeroSection({ imageSrc, headline, subheadline, serviceArea, primary, secondary }: FullBleedHeroSectionProps) {
+function FullBleedHeroSection({ imageSrc, headline, subheadline, primary, secondary }: FullBleedHeroSectionProps) {
   return (
     <section className="relative flex items-center min-h-[88vh] overflow-hidden">
       <Image src={imageSrc} alt="" fill className="object-cover object-center" priority sizes="100vw" />
@@ -379,7 +351,7 @@ function FullBleedHeroSection({ imageSrc, headline, subheadline, serviceArea, pr
         className="absolute inset-0"
         style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.45) 60%, rgba(0,0,0,0.15) 100%)' }}
       />
-      <HeroOverlayContent headline={headline} subheadline={subheadline} serviceArea={serviceArea} primary={primary} secondary={secondary} />
+      <HeroOverlayContent headline={headline} subheadline={subheadline} primary={primary} secondary={secondary} />
     </section>
   );
 }
@@ -396,7 +368,6 @@ interface MobileFullBleedHeroPhotoProps {
   imageSrc: string;
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -414,7 +385,7 @@ interface MobileFullBleedHeroPhotoProps {
  * right. No artificial min-height — the section's height is driven entirely
  * by the normal in-flow text content, keeping it compact.
  */
-function MobileFullBleedHeroPhoto({ imageSrc, headline, subheadline, serviceArea, primary, secondary }: MobileFullBleedHeroPhotoProps) {
+function MobileFullBleedHeroPhoto({ imageSrc, headline, subheadline, primary, secondary }: MobileFullBleedHeroPhotoProps) {
   return (
     <section className="relative overflow-hidden lg:hidden">
       <Image src={imageSrc} alt="" fill className="object-cover object-right" priority sizes="100vw" />
@@ -426,7 +397,7 @@ function MobileFullBleedHeroPhoto({ imageSrc, headline, subheadline, serviceArea
         }}
       />
       <div className="relative z-10 px-4 sm:px-6 py-12">
-        <HeroTextContent headline={headline} subheadline={subheadline} serviceArea={serviceArea} primary={primary} secondary={secondary} />
+        <HeroTextContent headline={headline} subheadline={subheadline} primary={primary} secondary={secondary} />
       </div>
     </section>
   );
@@ -437,7 +408,6 @@ interface LegacyFallbackSectionProps {
   industry?: Industry;
   headline: string;
   subheadline: string;
-  serviceArea?: string;
   primary: ResolvedCta | null;
   secondary: ResolvedCta | null;
 }
@@ -455,7 +425,6 @@ function LegacyFallbackSection({
   industry,
   headline,
   subheadline,
-  serviceArea,
   primary,
   secondary,
 }: LegacyFallbackSectionProps) {
@@ -495,7 +464,7 @@ function LegacyFallbackSection({
         style={{ background: 'linear-gradient(135deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.15) 100%)' }}
       />
 
-      <HeroOverlayContent headline={headline} subheadline={subheadline} serviceArea={serviceArea} primary={primary} secondary={secondary} />
+      <HeroOverlayContent headline={headline} subheadline={subheadline} primary={primary} secondary={secondary} />
     </section>
   );
 }
@@ -503,7 +472,6 @@ function LegacyFallbackSection({
 export function GeneratedHero({
   headline,
   subheadline,
-  serviceArea,
   heroImageUrl,
   heroImageUrlMobile,
   logoUrl,
@@ -540,7 +508,6 @@ export function GeneratedHero({
       <SplitHeroSection
         headline={headline}
         subheadline={subheadline}
-        serviceArea={serviceArea}
         primary={primary}
         secondary={secondary}
         desktopImageSrc={illustrationSrc}
@@ -562,7 +529,6 @@ export function GeneratedHero({
           <SplitHeroSection
             headline={headline}
             subheadline={subheadline}
-            serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
             desktopImageSrc={illustrationSrc}
@@ -576,7 +542,6 @@ export function GeneratedHero({
           <SplitHeroSection
             headline={headline}
             subheadline={subheadline}
-            serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
             desktopImageSrc={heroImageUrl}
@@ -592,7 +557,6 @@ export function GeneratedHero({
             imageSrc={heroImageUrl!}
             headline={headline}
             subheadline={subheadline}
-            serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
           />
@@ -604,7 +568,6 @@ export function GeneratedHero({
           industry={industry}
           headline={headline}
           subheadline={subheadline}
-          serviceArea={serviceArea}
           primary={primary}
           secondary={secondary}
         />
@@ -618,7 +581,6 @@ export function GeneratedHero({
             imageSrc={heroImageUrlMobile!}
             headline={headline}
             subheadline={subheadline}
-            serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
           />
@@ -638,7 +600,6 @@ export function GeneratedHero({
       <SplitHeroSection
         headline={headline}
         subheadline={subheadline}
-        serviceArea={serviceArea}
         primary={primary}
         secondary={secondary}
         desktopImageSrc={heroImageUrl}
@@ -660,7 +621,6 @@ export function GeneratedHero({
       imageSrc={heroImageUrl!}
       headline={headline}
       subheadline={subheadline}
-      serviceArea={serviceArea}
       primary={primary}
       secondary={secondary}
     />
@@ -670,7 +630,6 @@ export function GeneratedHero({
       industry={industry}
       headline={headline}
       subheadline={subheadline}
-      serviceArea={serviceArea}
       primary={primary}
       secondary={secondary}
     />
@@ -693,7 +652,6 @@ export function GeneratedHero({
           <SplitHeroSection
             headline={headline}
             subheadline={subheadline}
-            serviceArea={serviceArea}
             primary={primary}
             secondary={secondary}
             desktopImageSrc={mobileHeroSrc}
