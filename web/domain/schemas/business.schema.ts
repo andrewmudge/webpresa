@@ -72,6 +72,8 @@ export const BusinessSchema = z.object({
   socialLinks: z.array(z.string().url()).max(6).optional(),
   logoUrl: UrlOrPathSchema.optional(),
   photoUrls: z.array(UrlOrPathSchema).max(6).optional(),
+  faviconUrl: UrlOrPathSchema.optional(),
+  faviconSource: z.enum(['auto', 'manual']).optional(),
   heroPhotoUrl: PhotoSlotOverrideSchema,
   heroPhotoUrlMobile: PhotoSlotOverrideSchema,
   aboutPhotoUrl: PhotoSlotOverrideSchema,

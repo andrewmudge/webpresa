@@ -10,11 +10,16 @@ type PhotoManagerAction = (prevState: PhotoManagerState, formData: FormData) => 
 interface PhotoManagerProps {
   logoUrl?: string;
   photoUrls: string[];
+  faviconUrl?: string;
+  faviconSource?: 'auto' | 'manual';
   addPhotosAction: PhotoManagerAction;
   deletePhotoAction: PhotoManagerAction;
   updateLogoAction: PhotoManagerAction;
+  updateFaviconAction: PhotoManagerAction;
+  resetFaviconAction: PhotoManagerAction;
   onPhotosChange: (photoUrls: string[]) => void;
   onLogoChange: (logoUrl: string | undefined) => void;
+  onFaviconChange: (faviconUrl: string | undefined, faviconSource: 'auto' | 'manual' | undefined) => void;
 }
 
 /** Mirrors business.schema.ts's photoUrls cap — same duplicated-constant convention actions.ts already uses. */
@@ -35,11 +40,16 @@ const ARM_TIMEOUT_MS = 3000;
 export function PhotoManager({
   logoUrl,
   photoUrls,
+  faviconUrl,
+  faviconSource,
   addPhotosAction,
   deletePhotoAction,
   updateLogoAction,
+  updateFaviconAction,
+  resetFaviconAction,
   onPhotosChange,
   onLogoChange,
+  onFaviconChange,
 }: PhotoManagerProps) {
   const router = useRouter();
   const [logoState, dispatchLogo, isLogoPending] = useActionState<PhotoManagerState, FormData>(updateLogoAction, undefined);
@@ -48,16 +58,25 @@ export function PhotoManager({
     deletePhotoAction,
     undefined,
   );
+  const [faviconState, dispatchFavicon, isFaviconPending] = useActionState<PhotoManagerState, FormData>(
+    updateFaviconAction,
+    undefined,
+  );
+  const [resetFaviconState, dispatchResetFavicon, isResetFaviconPending] = useActionState<PhotoManagerState, FormData>(
+    resetFaviconAction,
+    undefined,
+  );
 
   const [armedUrl, setArmedUrl] = useState<string | null>(null);
   const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isAnyPending = isLogoPending || isAddPending || isDeletePending;
+  const isAnyPending = isLogoPending || isAddPending || isDeletePending || isFaviconPending || isResetFaviconPending;
 
   useEffect(() => {
     if (logoState?.logoUrl) {
       onLogoChange(logoState.logoUrl);
+      onFaviconChange(logoState.faviconUrl, logoState.faviconSource);
       router.refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,10 +94,27 @@ export function PhotoManager({
     if (deleteState?.photoUrls) {
       onPhotosChange(deleteState.photoUrls);
       onLogoChange(deleteState.logoUrl);
+      onFaviconChange(deleteState.faviconUrl, deleteState.faviconSource);
       router.refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deleteState]);
+
+  useEffect(() => {
+    if (faviconState?.faviconSource) {
+      onFaviconChange(faviconState.faviconUrl, faviconState.faviconSource);
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [faviconState]);
+
+  useEffect(() => {
+    if (resetFaviconState?.faviconSource) {
+      onFaviconChange(resetFaviconState.faviconUrl, resetFaviconState.faviconSource);
+      router.refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetFaviconState]);
 
   useEffect(() => {
     return () => {
@@ -93,6 +129,19 @@ export function PhotoManager({
     const fd = new FormData();
     fd.set('logo', file);
     dispatchLogo(fd);
+  }
+
+  function handleFaviconFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const fd = new FormData();
+    fd.set('favicon', file);
+    dispatchFavicon(fd);
+  }
+
+  function handleResetFavicon() {
+    dispatchResetFavicon(new FormData());
   }
 
   function handleAddFiles(e: ChangeEvent<HTMLInputElement>) {
@@ -145,6 +194,45 @@ export function PhotoManager({
           </label>
         </div>
         {logoState?.message && <p className="mt-1.5 text-xs text-red-600">{logoState.message}</p>}
+      </div>
+
+      <div className="mb-5">
+        <span className="block text-xs text-gray-500 mb-1.5">Browser tab icon</span>
+        <div className="flex items-center gap-3">
+          {faviconUrl ? (
+            <PhotoThumbnail url={faviconUrl} label="Browser tab icon" />
+          ) : (
+            <div className="w-16 h-16 rounded-lg border border-dashed border-gray-300 flex items-center justify-center text-[10px] text-gray-400 text-center px-1">
+              No icon yet
+            </div>
+          )}
+          <div>
+            <label
+              className={`inline-block rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors ${
+                isAnyPending ? 'opacity-50 pointer-events-none' : 'cursor-pointer hover:bg-gray-50'
+              }`}
+            >
+              {isFaviconPending ? 'Uploading…' : 'Upload custom image'}
+              <input type="file" accept="image/*" className="hidden" disabled={isAnyPending} onChange={handleFaviconFile} />
+            </label>
+            {faviconSource === 'manual' && (
+              <button
+                type="button"
+                onClick={handleResetFavicon}
+                disabled={isAnyPending}
+                className="ml-2 text-xs text-(--color-brand) hover:underline disabled:opacity-50"
+              >
+                {isResetFaviconPending ? 'Resetting…' : 'Reset to automatic'}
+              </button>
+            )}
+            <p className="mt-1 text-[11px] text-gray-400">
+              {faviconSource === 'manual' ? 'Custom image.' : 'Automatically created from your logo.'} The small icon shown
+              in browser tabs and bookmarks.
+            </p>
+          </div>
+        </div>
+        {faviconState?.message && <p className="mt-1.5 text-xs text-red-600">{faviconState.message}</p>}
+        {resetFaviconState?.message && <p className="mt-1.5 text-xs text-red-600">{resetFaviconState.message}</p>}
       </div>
 
       <div>

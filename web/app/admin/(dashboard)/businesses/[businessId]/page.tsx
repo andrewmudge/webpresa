@@ -22,6 +22,8 @@ import {
   addBusinessPhotosAction,
   deleteBusinessPhotoAction,
   updateBusinessLogoAction,
+  updateBusinessFaviconAction,
+  resetBusinessFaviconAction,
   saveWebsiteSectionsAction,
   autoSaveWebsiteSectionsAction,
   applyRecommendedSectionsAction,
@@ -363,6 +365,8 @@ export default async function BusinessDetailPage({ params, searchParams }: Props
           addPhotosAction={addBusinessPhotosAction.bind(null, businessId)}
           deletePhotoAction={deleteBusinessPhotoAction.bind(null, businessId)}
           updateLogoAction={updateBusinessLogoAction.bind(null, businessId)}
+          updateFaviconAction={updateBusinessFaviconAction.bind(null, businessId)}
+          resetFaviconAction={resetBusinessFaviconAction.bind(null, businessId)}
           defaults={business}
           submitLabel="Save Photos"
           heroPhotoWarnings={heroPhotoWarnings}

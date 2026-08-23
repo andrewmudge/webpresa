@@ -41,9 +41,16 @@ import { INDUSTRIES } from '@/domain/constants/industries';
 import { BRAND_TONES } from '@/domain/constants/brand-tone';
 import { THEME_NAMES } from '@/domain/constants/themes';
 import { BUSINESS_SOURCES } from '@/domain/models/business';
-import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl } from '@/lib/s3/business-assets';
+import {
+  uploadBusinessAsset,
+  uploadBusinessAssetWithBuffer,
+  appendBusinessPhotos,
+  assetKeyFromUrl,
+  regenerateBusinessFavicon,
+  regenerateFaviconFromLogoUrl,
+} from '@/lib/s3/business-assets';
 import { deleteAsset } from '@/lib/s3/assets';
-import { UploadValidationError } from '@/lib/s3/upload-validation';
+import { UploadValidationError, validateImageUpload } from '@/lib/s3/upload-validation';
 import { log } from '@/lib/logging/log';
 import { sanitizeAndDedupeSocialLinks } from '@/lib/firecrawl/normalize';
 import { classifySocialPlatform } from '@/lib/social-links';
@@ -526,7 +533,9 @@ export async function updatePhotosAction(
 // without a full page reload.
 // ---------------------------------------------------------------------------
 
-export type PhotoManagerState = { message?: string; photoUrls?: string[]; logoUrl?: string } | undefined;
+export type PhotoManagerState =
+  | { message?: string; photoUrls?: string[]; logoUrl?: string; faviconUrl?: string; faviconSource?: 'auto' | 'manual' }
+  | undefined;
 
 export async function addBusinessPhotosAction(
   businessId: string,
@@ -591,7 +600,7 @@ export async function deleteBusinessPhotoAction(
     const existingPhotoUrls = existing.photoUrls ?? [];
     if (!existingPhotoUrls.includes(photoUrl)) {
       // Already gone (e.g. a second tab deleted it first) — succeed idempotently.
-      return { photoUrls: existingPhotoUrls, logoUrl: existing.logoUrl };
+      return { photoUrls: existingPhotoUrls, logoUrl: existing.logoUrl, faviconUrl: existing.faviconUrl, faviconSource: existing.faviconSource };
     }
 
     const photoUrls = existingPhotoUrls.filter((u) => u !== photoUrl);
@@ -602,6 +611,12 @@ export async function deleteBusinessPhotoAction(
     const whyChooseUsCleared = existing.whyChooseUsPhotoUrl === photoUrl;
     const servicesCleared = existing.servicesPhotoUrl === photoUrl;
     const logoCleared = existing.logoUrl === photoUrl;
+    // A manual favicon lives at its own dedicated S3 key, never inside
+    // photoUrls, so it's structurally immune to this whole "clear any slot
+    // pointing at the deleted photo" flow — this only ever cascades an
+    // *auto* favicon (which is derived from the logo) when the logo itself
+    // is the photo being deleted.
+    const faviconCleared = logoCleared && existing.faviconSource !== 'manual';
 
     const heroPhotoUrl = heroCleared ? undefined : existing.heroPhotoUrl;
     const heroPhotoUrlMobile = heroMobileCleared ? undefined : existing.heroPhotoUrlMobile;
@@ -609,6 +624,7 @@ export async function deleteBusinessPhotoAction(
     const whyChooseUsPhotoUrl = whyChooseUsCleared ? undefined : existing.whyChooseUsPhotoUrl;
     const servicesPhotoUrl = servicesCleared ? undefined : existing.servicesPhotoUrl;
     const logoUrl = logoCleared ? undefined : existing.logoUrl;
+    const faviconUrl = faviconCleared ? undefined : existing.faviconUrl;
 
     await putBusiness({
       ...existing,
@@ -619,6 +635,7 @@ export async function deleteBusinessPhotoAction(
       whyChooseUsPhotoUrl,
       servicesPhotoUrl,
       logoUrl,
+      faviconUrl,
       updatedAt: new Date().toISOString(),
     });
 
@@ -660,7 +677,7 @@ export async function deleteBusinessPhotoAction(
       }
     }
 
-    return { photoUrls, logoUrl };
+    return { photoUrls, logoUrl, faviconUrl, faviconSource: existing.faviconSource };
   } catch (err) {
     console.error('Failed to delete business photo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to delete photo. Please try again.' };
@@ -682,14 +699,86 @@ export async function updateBusinessLogoAction(
     const existing = await getBusinessById(businessId);
     if (!existing) return { message: 'Business not found' };
 
-    const logoUrl = await uploadBusinessAsset(businessId, file, 'logo');
-    await putBusiness({ ...existing, logoUrl, updatedAt: new Date().toISOString() });
+    const { url: logoUrl, buffer } = await uploadBusinessAssetWithBuffer(businessId, file, 'logo');
 
-    return { logoUrl };
+    // Regenerate the browser-tab icon from the new logo, unless an
+    // admin/customer has explicitly uploaded their own — see
+    // `Business.faviconSource`'s doc comment.
+    const faviconUrl =
+      existing.faviconSource === 'manual' ? existing.faviconUrl : await regenerateBusinessFavicon(businessId, buffer);
+    const faviconSource = existing.faviconSource === 'manual' ? 'manual' : 'auto';
+
+    await putBusiness({ ...existing, logoUrl, faviconUrl, faviconSource, updatedAt: new Date().toISOString() });
+
+    return { logoUrl, faviconUrl, faviconSource };
   } catch (err) {
     if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update business logo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to upload logo. Please try again.' };
+  }
+}
+
+const UpdateFaviconSchema = z.object({ favicon: z.instanceof(File) });
+
+/**
+ * Uploads a manual "Browser tab icon" override — runs through the same
+ * square/transparent-pad pipeline as an auto-derived one (see
+ * `lib/image/favicon.ts`), so output stays consistently sized/formatted
+ * regardless of what was uploaded. Marks `faviconSource: 'manual'` so
+ * future logo changes never overwrite it.
+ */
+export async function updateBusinessFaviconAction(
+  businessId: string,
+  _prevState: PhotoManagerState,
+  formData: FormData,
+): Promise<PhotoManagerState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  const parsed = UpdateFaviconSchema.safeParse({ favicon: formData.get('favicon') });
+  if (!parsed.success || parsed.data.favicon.size === 0) return { message: 'Choose an image to upload.' };
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const { buffer } = await validateImageUpload(parsed.data.favicon);
+    const faviconUrl = await regenerateBusinessFavicon(businessId, buffer);
+    await putBusiness({ ...existing, faviconUrl, faviconSource: 'manual', updatedAt: new Date().toISOString() });
+
+    return { faviconUrl, faviconSource: 'manual' };
+  } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
+    console.error('Failed to update business favicon:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to upload icon. Please try again.' };
+  }
+}
+
+/**
+ * Clears a manual "Browser tab icon" override and regenerates it fresh
+ * from the current logo (never lazily — immediately, at the moment of
+ * reset). Clears `faviconUrl` entirely when there's no logo to derive one
+ * from.
+ */
+export async function resetBusinessFaviconAction(
+  businessId: string,
+  _prevState: PhotoManagerState,
+  _formData: FormData,
+): Promise<PhotoManagerState> {
+  const session = await getSession();
+  if (!session) return { message: 'Unauthorized' };
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const faviconUrl = existing.logoUrl ? await regenerateFaviconFromLogoUrl(businessId, existing.logoUrl) : undefined;
+    await putBusiness({ ...existing, faviconUrl, faviconSource: 'auto', updatedAt: new Date().toISOString() });
+
+    return { faviconUrl, faviconSource: 'auto' };
+  } catch (err) {
+    console.error('Failed to reset business favicon:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to reset icon. Please try again.' };
   }
 }
 

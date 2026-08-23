@@ -9201,3 +9201,47 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 157 files
 ```
 
 No manual browser verification performed (same standing instruction as above) — this also can't be verified against the real Google API from here; confirm by re-running a Discover search for a category/city known to have more than 20 matches.
+
+---
+
+**Date:** 2026-08-23 (continued)
+
+**Added: per-business "Browser tab icon" (favicon), for both admin and customer.** Neither surface had any way to set one before. Since most customers don't know what "favicon" means, every user-facing label says "Browser tab icon" instead — internal code/file/prop names still say "favicon."
+
+Design: auto-derive from the business's logo by default (zero effort for almost everyone), with an optional manual override for anyone who wants something distinct. `Business.faviconUrl?: string` + `faviconSource?: 'auto' | 'manual'` (unset treated as `'auto'`, no backfill needed). New `lib/image/favicon.ts` (`generateFaviconBuffer`) derives a 256×256 transparent-padded PNG via `sharp`'s `fit: 'contain'` (never crops a wide wordmark logo — tradeoff: a wide logo shrinks a lot further downscaled to real browser tab sizes, accepted as the universal default since the manual override exists for anyone who cares). New `lib/s3/business-assets.ts` helpers (`uploadBusinessAssetWithBuffer`, `putBusinessAssetBuffer`, `regenerateBusinessFavicon`, `regenerateFaviconFromLogoUrl`) wire this into both the admin (`updateBusinessLogoAction`/new `updateBusinessFaviconAction`/`resetBusinessFaviconAction`) and customer (`updateCustomerLogo`/new `updateCustomerFavicon`/`resetCustomerFavicon`) logo-editing paths — both auto-regenerate the favicon whenever the logo changes, unless a manual override is on file, and both logo-deletion paths now also cascade-clear an *auto* favicon (never a manual one) for consistency. Rendering: new `app/b/[slug]/favicon-icons.ts` (`resolveFaviconIcons`) feeds `generateMetadata()`'s `icons` field — `faviconUrl` → raw `logoUrl` (self-healing interim state, no backfill script) → the existing root `app/favicon.ico` default. Confirmed against the installed Next.js 16.2.10's own local docs (not general knowledge) that `generateMetadata`'s `icons` field is the correct per-route mechanism — a root `favicon.ico` file is root-only and can't be overridden per business.
+
+UI: admin `PhotoManager.tsx` gained a "Browser tab icon" block (preview, upload, "Reset to automatic") next to the existing Logo block, threaded through `PhotosForm.tsx` and both its call sites; customer `LogoTab.tsx` gained a second Card with the same controls and plain-language copy.
+
+## Files changed
+
+```
+domain/models/business.ts                                                                       MODIFIED — faviconUrl/faviconSource fields
+domain/schemas/business.schema.ts                                                                MODIFIED — matching schema fields
+lib/image/favicon.ts                                                                             NEW — generateFaviconBuffer (sharp square-crop transform)
+lib/image/__tests__/favicon.test.ts                                                              NEW — real-sharp fixture tests
+lib/s3/business-assets.ts                                                                         MODIFIED — uploadBusinessAssetWithBuffer, putBusinessAssetBuffer, regenerateBusinessFavicon, regenerateFaviconFromLogoUrl
+lib/s3/__tests__/business-assets.test.ts                                                          NEW — this module's first tests, scoped to what this feature touches
+app/admin/(dashboard)/businesses/[businessId]/actions.ts                                          MODIFIED — logo action auto-regenerates favicon; new updateBusinessFaviconAction/resetBusinessFaviconAction; delete-photo cascades an auto favicon clear
+app/admin/(dashboard)/businesses/[businessId]/__tests__/photos-actions.test.ts                    MODIFIED — extended mocks + new favicon test coverage
+lib/customer-editing/photos.ts                                                                    MODIFIED — updateCustomerLogo auto-regenerates favicon; new updateCustomerFavicon/resetCustomerFavicon; delete-photo cascades an auto favicon clear
+lib/customer-editing/__tests__/photos.test.ts                                                     NEW — this module's first tests, scoped to the favicon-touching surface
+app/app/(dashboard)/businesses/[businessId]/actions.ts                                            MODIFIED — updateFaviconActionCustomer/resetFaviconActionCustomer
+app/admin/(dashboard)/businesses/PhotoManager.tsx                                                 MODIFIED — Browser tab icon block, upload/reset actions
+app/admin/(dashboard)/businesses/PhotosForm.tsx                                                   MODIFIED — threads favicon state/actions to PhotoManager
+app/admin/(dashboard)/businesses/[businessId]/page.tsx                                            MODIFIED — wires the two new admin favicon actions
+app/admin/(dashboard)/businesses/[businessId]/onboarding/photos/page.tsx                          MODIFIED — same, for the onboarding wizard step
+app/app/(dashboard)/businesses/[businessId]/website/LogoTab.tsx                                   MODIFIED — second Card, "Browser tab icon" controls
+app/b/[slug]/favicon-icons.ts                                                                     NEW — resolveFaviconIcons (pure, mirrors indexability.ts)
+app/b/[slug]/__tests__/favicon-icons.test.ts                                                      NEW
+app/b/[slug]/page.tsx                                                                              MODIFIED — generateMetadata() sets icons
+web/docs/architecture.md                                                                          MODIFIED — new entry under "Photo slot assignment"
+web/docs/build_log.md                                                                             MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files, 1684 tests, all passing (41 new); npm run build — clean
+```
+
+No manual browser verification performed (standing instruction) — the real-sharp fixture test in `favicon.test.ts` is the closest available check on actual visual output; say the word and I'll use the dev server against a real business to see it rendered.

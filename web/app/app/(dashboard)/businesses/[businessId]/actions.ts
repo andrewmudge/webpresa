@@ -23,6 +23,8 @@ import {
   updateCustomerWhyChooseUsPhotoSlot,
   updateCustomerServicesPhotoSlot,
   updateCustomerLogo,
+  updateCustomerFavicon,
+  resetCustomerFavicon,
 } from '@/lib/customer-editing/photos';
 import { publishCustomerDraft } from '@/lib/customer-editing/publish';
 import { updateCustomerDraftNoticePreference } from '@/lib/customer-editing/notification-preference';
@@ -218,6 +220,18 @@ export async function updateThemeCardActionCustomer(businessId: string, formData
 export async function updateLogoActionCustomer(businessId: string, formData: FormData): Promise<void> {
   await requireEditAccess(businessId);
   const result = await updateCustomerLogo(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'logo'));
+}
+
+export async function updateFaviconActionCustomer(businessId: string, formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const result = await updateCustomerFavicon(businessId, formData);
+  redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'logo'));
+}
+
+export async function resetFaviconActionCustomer(businessId: string, _formData: FormData): Promise<void> {
+  await requireEditAccess(businessId);
+  const result = await resetCustomerFavicon(businessId);
   redirect(withError(`/app/businesses/${businessId}/website`, result?.message, 'logo'));
 }
 

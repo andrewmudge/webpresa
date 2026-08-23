@@ -1,6 +1,7 @@
 import 'server-only';
-import { putAsset } from './assets';
+import { putAsset, getAsset } from './assets';
 import { validateImageUpload } from './upload-validation';
+import { generateFaviconBuffer } from '@/lib/image/favicon';
 
 /**
  * Business logo/photo upload helpers, shared by the business detail page's
@@ -39,10 +40,64 @@ export function fileExtension(file: File): string {
  * is too large or isn't a decodable JPEG/PNG/WebP image.
  */
 export async function uploadBusinessAsset(businessId: string, file: File, keyPrefix: string): Promise<string> {
+  return (await uploadBusinessAssetWithBuffer(businessId, file, keyPrefix)).url;
+}
+
+/**
+ * Same as `uploadBusinessAsset`, but also returns the decoded bytes —
+ * for a call site that needs both the stored URL and the raw image data
+ * without a second S3 round-trip (e.g. deriving a favicon from a freshly
+ * uploaded logo, see `regenerateBusinessFavicon` below).
+ */
+export async function uploadBusinessAssetWithBuffer(
+  businessId: string,
+  file: File,
+  keyPrefix: string,
+): Promise<{ url: string; buffer: Buffer }> {
   const { buffer, contentType, extension } = await validateImageUpload(file);
   const key = `businesses/${businessId}/assets/${keyPrefix}.${extension}`;
   await putAsset(key, buffer, contentType);
+  return { url: `/api/assets/${key}`, buffer };
+}
+
+/** Uploads already-decoded image bytes (not a form `File`) under a business's asset prefix. */
+export async function putBusinessAssetBuffer(
+  businessId: string,
+  buffer: Buffer,
+  contentType: string,
+  extension: string,
+  keyPrefix: string,
+): Promise<string> {
+  const key = `businesses/${businessId}/assets/${keyPrefix}.${extension}`;
+  await putAsset(key, buffer, contentType);
   return `/api/assets/${key}`;
+}
+
+/**
+ * Derives a square browser-tab icon from a logo's decoded bytes and stores
+ * it at a fixed key (`favicon.png`, always overwritten in place — same
+ * convention as `logoUrl`'s fixed `logo` key) — one active favicon per
+ * business. Callers are responsible for checking `Business.faviconSource`
+ * isn't `'manual'` before calling this (see `actions.ts`/`photos.ts`).
+ */
+export async function regenerateBusinessFavicon(businessId: string, logoBuffer: Buffer): Promise<string> {
+  const favicon = await generateFaviconBuffer(logoBuffer);
+  return putBusinessAssetBuffer(businessId, favicon, 'image/png', 'png', 'favicon');
+}
+
+/**
+ * Same as `regenerateBusinessFavicon`, but starting from an existing
+ * `logoUrl` instead of bytes already in hand — used when "picking" an
+ * existing photo as the logo (no fresh upload buffer exists) and by
+ * "Reset to Auto". Returns `undefined` if the URL isn't one of our own
+ * assets or the object is missing.
+ */
+export async function regenerateFaviconFromLogoUrl(businessId: string, logoUrl: string): Promise<string | undefined> {
+  const key = assetKeyFromUrl(logoUrl);
+  if (!key) return undefined;
+  const buffer = await getAsset(key);
+  if (!buffer) return undefined;
+  return regenerateBusinessFavicon(businessId, buffer);
 }
 
 /**

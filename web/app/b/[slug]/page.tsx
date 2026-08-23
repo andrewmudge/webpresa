@@ -11,6 +11,7 @@ import { CAPTURE_TOKEN_COOKIE_NAME, verifyCaptureToken } from '@/lib/capture-tok
 import { getClaimBannerState } from '@/lib/claim/banner-state';
 import { CLAIM_INTENT_COOKIE_NAME, verifyClaimIntent } from '@/lib/auth/claim-intent';
 import { resolveIsIndexable } from './indexability';
+import { resolveFaviconIcons } from './favicon-icons';
 import { GeneratedWebsite } from './template';
 
 export const dynamic = 'force-dynamic';
@@ -157,6 +158,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     title: preview.content.seo?.title ?? preview.content.hero.headline,
     description: preview.content.seo?.description ?? preview.content.hero.subheadline,
     robots: isIndexable ? 'index, follow' : 'noindex, nofollow',
+    icons: resolveFaviconIcons(business),
   };
 }
 

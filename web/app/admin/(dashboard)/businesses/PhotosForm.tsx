@@ -14,6 +14,8 @@ interface PhotosFormProps {
   addPhotosAction: PhotoManagerAction;
   deletePhotoAction: PhotoManagerAction;
   updateLogoAction: PhotoManagerAction;
+  updateFaviconAction: PhotoManagerAction;
+  resetFaviconAction: PhotoManagerAction;
   defaults?: Partial<Business>;
   submitLabel?: string;
   /**
@@ -43,6 +45,8 @@ export function PhotosForm({
   addPhotosAction,
   deletePhotoAction,
   updateLogoAction,
+  updateFaviconAction,
+  resetFaviconAction,
   defaults,
   submitLabel = 'Save',
   heroPhotoWarnings,
@@ -58,6 +62,8 @@ export function PhotosForm({
   // can never clobber a just-applied optimistic update.
   const [photoUrls, setPhotoUrls] = useState<string[]>(defaults?.photoUrls ?? []);
   const [logoUrl, setLogoUrl] = useState<string | undefined>(defaults?.logoUrl);
+  const [faviconUrl, setFaviconUrl] = useState<string | undefined>(defaults?.faviconUrl);
+  const [faviconSource, setFaviconSource] = useState<'auto' | 'manual' | undefined>(defaults?.faviconSource);
 
   // Tracks the Desktop hero image picker's current value client-side so the
   // warning below can update the instant the admin picks a different photo,
@@ -78,11 +84,19 @@ export function PhotosForm({
       <PhotoManager
         logoUrl={logoUrl}
         photoUrls={photoUrls}
+        faviconUrl={faviconUrl}
+        faviconSource={faviconSource}
         addPhotosAction={addPhotosAction}
         deletePhotoAction={deletePhotoAction}
         updateLogoAction={updateLogoAction}
+        updateFaviconAction={updateFaviconAction}
+        resetFaviconAction={resetFaviconAction}
         onPhotosChange={setPhotoUrls}
         onLogoChange={setLogoUrl}
+        onFaviconChange={(url, source) => {
+          setFaviconUrl(url);
+          setFaviconSource(source);
+        }}
       />
 
       <form action={formAction} className="space-y-6">

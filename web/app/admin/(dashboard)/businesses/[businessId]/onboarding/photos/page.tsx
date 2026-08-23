@@ -4,7 +4,14 @@ import { getBusinessById } from '@/lib/db/businesses';
 import { listAllStockImages } from '@/lib/db/stock-images';
 import { describeHeroDimensionWarningsForPhotos } from '@/lib/image/hero-dimensions';
 import { PhotosForm } from '../../../PhotosForm';
-import { updatePhotosAction, addBusinessPhotosAction, deleteBusinessPhotoAction, updateBusinessLogoAction } from '../../actions';
+import {
+  updatePhotosAction,
+  addBusinessPhotosAction,
+  deleteBusinessPhotoAction,
+  updateBusinessLogoAction,
+  updateBusinessFaviconAction,
+  resetBusinessFaviconAction,
+} from '../../actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +69,8 @@ export default async function OnboardingPhotosPage({ params }: Props) {
           addPhotosAction={addBusinessPhotosAction.bind(null, businessId)}
           deletePhotoAction={deleteBusinessPhotoAction.bind(null, businessId)}
           updateLogoAction={updateBusinessLogoAction.bind(null, businessId)}
+          updateFaviconAction={updateBusinessFaviconAction.bind(null, businessId)}
+          resetFaviconAction={resetBusinessFaviconAction.bind(null, businessId)}
           defaults={business}
           submitLabel={submitLabel}
           heroPhotoWarnings={heroPhotoWarnings}

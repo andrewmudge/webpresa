@@ -222,6 +222,14 @@ export interface Business extends MutableTimestampedRecord {
 
   logoUrl?: string;
   photoUrls?: string[];
+  /** Square, browser-tab-ready icon derived from `logoUrl` (or a manual override) — see `faviconSource`. Never used directly as `logoUrl`. */
+  faviconUrl?: string;
+  /**
+   * Unset or `'auto'` — `faviconUrl` is regenerated from `logoUrl` whenever
+   * the logo changes or is cleared. `'manual'` — an admin/customer uploaded
+   * a distinct icon; logo changes must never overwrite or clear it.
+   */
+  faviconSource?: 'auto' | 'manual';
 
   // -------------------------------------------------------------------------
   // Photo slot assignment overrides

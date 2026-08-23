@@ -16,22 +16,32 @@ const {
   mockPutBusiness,
   mockGetSession,
   mockUploadBusinessAsset,
+  mockUploadBusinessAssetWithBuffer,
   mockAppendBusinessPhotos,
   mockAssetKeyFromUrl,
   mockDeleteAsset,
   mockListPreviewsForBusiness,
   mockPutSitePreview,
+  mockRegenerateBusinessFavicon,
+  mockRegenerateFaviconFromLogoUrl,
+  mockValidateImageUpload,
 } = vi.hoisted(() => ({
   mockGetBusinessById: vi.fn(),
   mockPutBusiness: vi.fn(),
   mockGetSession: vi.fn(),
   mockUploadBusinessAsset: vi.fn(),
+  mockUploadBusinessAssetWithBuffer: vi.fn(),
   mockAppendBusinessPhotos: vi.fn(),
   mockAssetKeyFromUrl: vi.fn(),
   mockDeleteAsset: vi.fn(),
   mockListPreviewsForBusiness: vi.fn(),
   mockPutSitePreview: vi.fn(),
+  mockRegenerateBusinessFavicon: vi.fn(),
+  mockRegenerateFaviconFromLogoUrl: vi.fn(),
+  mockValidateImageUpload: vi.fn(),
 }));
+
+const MockUploadValidationError = vi.hoisted(() => class extends Error {});
 
 vi.mock('@/lib/db/businesses', () => ({
   getBusinessById: mockGetBusinessById,
@@ -93,13 +103,21 @@ vi.mock('@/lib/google-places/reviews', () => ({
 
 vi.mock('@/lib/s3/business-assets', () => ({
   uploadBusinessAsset: mockUploadBusinessAsset,
+  uploadBusinessAssetWithBuffer: mockUploadBusinessAssetWithBuffer,
   appendBusinessPhotos: mockAppendBusinessPhotos,
   assetKeyFromUrl: mockAssetKeyFromUrl,
   fileExtension: vi.fn(() => 'jpg'),
+  regenerateBusinessFavicon: mockRegenerateBusinessFavicon,
+  regenerateFaviconFromLogoUrl: mockRegenerateFaviconFromLogoUrl,
 }));
 
 vi.mock('@/lib/s3/assets', () => ({
   deleteAsset: mockDeleteAsset,
+}));
+
+vi.mock('@/lib/s3/upload-validation', () => ({
+  validateImageUpload: mockValidateImageUpload,
+  UploadValidationError: MockUploadValidationError,
 }));
 
 vi.mock('@/lib/image/hero-dimensions', () => ({
@@ -121,6 +139,8 @@ import {
   addBusinessPhotosAction,
   deleteBusinessPhotoAction,
   updateBusinessLogoAction,
+  updateBusinessFaviconAction,
+  resetBusinessFaviconAction,
 } from '@/app/admin/(dashboard)/businesses/[businessId]/actions';
 import type { Business } from '@/domain/models/business';
 import type { SitePreview } from '@/domain/models/site-preview';
@@ -152,6 +172,13 @@ beforeEach(() => {
   mockAssetKeyFromUrl.mockImplementation((url: string) =>
     url.startsWith('/api/assets/') ? url.slice('/api/assets/'.length) : null,
   );
+  mockUploadBusinessAssetWithBuffer.mockResolvedValue({
+    url: '/api/assets/businesses/biz_1/assets/logo.png',
+    buffer: Buffer.from('fake-logo-bytes'),
+  });
+  mockRegenerateBusinessFavicon.mockResolvedValue('/api/assets/businesses/biz_1/assets/favicon.png');
+  mockRegenerateFaviconFromLogoUrl.mockResolvedValue('/api/assets/businesses/biz_1/assets/favicon.png');
+  mockValidateImageUpload.mockResolvedValue({ buffer: Buffer.from('fake-favicon-bytes'), contentType: 'image/png', extension: 'png' });
 });
 
 // ---------------------------------------------------------------------------
@@ -273,6 +300,40 @@ describe('deleteBusinessPhotoAction', () => {
     expect(saved.aboutPhotoUrl).toBe(other);
   });
 
+  it('also clears an auto-derived favicon when the deleted photo was pinned as the logo', async () => {
+    const target = '/api/assets/businesses/biz_1/assets/photos/target.jpg';
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      photoUrls: [target],
+      logoUrl: target,
+      faviconUrl: '/api/assets/businesses/biz_1/assets/favicon.png',
+      faviconSource: 'auto',
+    });
+
+    const result = await deleteBusinessPhotoAction(EXISTING_BUSINESS.businessId, undefined, fd(target));
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.faviconUrl).toBeUndefined();
+    expect(result?.faviconUrl).toBeUndefined();
+  });
+
+  it('never clears a manually-set favicon, even when the deleted photo was pinned as the logo', async () => {
+    const target = '/api/assets/businesses/biz_1/assets/photos/target.jpg';
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      photoUrls: [target],
+      logoUrl: target,
+      faviconUrl: '/api/assets/businesses/biz_1/assets/custom.png',
+      faviconSource: 'manual',
+    });
+
+    const result = await deleteBusinessPhotoAction(EXISTING_BUSINESS.businessId, undefined, fd(target));
+
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/custom.png');
+    expect(result?.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/custom.png');
+  });
+
   it('dual-writes the latest SitePreview.theme only when a slot was actually cleared', async () => {
     const target = '/api/assets/businesses/biz_1/assets/photos/target.jpg';
     mockGetBusinessById.mockResolvedValue({
@@ -341,15 +402,137 @@ describe('updateBusinessLogoAction', () => {
   });
 
   it('uploads the file and sets Business.logoUrl', async () => {
-    mockUploadBusinessAsset.mockResolvedValue('/api/assets/businesses/biz_1/assets/logo.png');
     const fd = new FormData();
     fd.set('logo', makeFile('logo.png'));
 
     const result = await updateBusinessLogoAction(EXISTING_BUSINESS.businessId, undefined, fd);
 
-    expect(mockUploadBusinessAsset).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, expect.any(File), 'logo');
+    expect(mockUploadBusinessAssetWithBuffer).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, expect.any(File), 'logo');
     expect(result?.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
     const saved = mockPutBusiness.mock.calls[0][0];
     expect(saved.logoUrl).toBe('/api/assets/businesses/biz_1/assets/logo.png');
+  });
+
+  it('regenerates the favicon from the new logo when faviconSource is unset (auto)', async () => {
+    const fd = new FormData();
+    fd.set('logo', makeFile('logo.png'));
+
+    const result = await updateBusinessLogoAction(EXISTING_BUSINESS.businessId, undefined, fd);
+
+    expect(mockRegenerateBusinessFavicon).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, Buffer.from('fake-logo-bytes'));
+    expect(result?.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/favicon.png');
+    expect(result?.faviconSource).toBe('auto');
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/favicon.png');
+    expect(saved.faviconSource).toBe('auto');
+  });
+
+  it('does not regenerate the favicon when faviconSource is already manual', async () => {
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      faviconUrl: '/api/assets/businesses/biz_1/assets/favicon.png',
+      faviconSource: 'manual',
+    });
+    const fd = new FormData();
+    fd.set('logo', makeFile('logo.png'));
+
+    const result = await updateBusinessLogoAction(EXISTING_BUSINESS.businessId, undefined, fd);
+
+    expect(mockRegenerateBusinessFavicon).not.toHaveBeenCalled();
+    expect(result?.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/favicon.png');
+    expect(result?.faviconSource).toBe('manual');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateBusinessFaviconAction
+// ---------------------------------------------------------------------------
+
+describe('updateBusinessFaviconAction', () => {
+  it('requires an authenticated session', async () => {
+    mockGetSession.mockResolvedValue(null);
+    const fd = new FormData();
+    fd.set('favicon', makeFile('icon.png'));
+    const result = await updateBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, fd);
+    expect(result?.message).toBe('Unauthorized');
+    expect(mockPutBusiness).not.toHaveBeenCalled();
+  });
+
+  it('returns a message when no file is chosen', async () => {
+    const result = await updateBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+    expect(result?.message).toMatch(/choose an image/i);
+    expect(mockPutBusiness).not.toHaveBeenCalled();
+  });
+
+  it('uploads, regenerates, and marks the favicon manual', async () => {
+    const fd = new FormData();
+    fd.set('favicon', makeFile('icon.png'));
+
+    const result = await updateBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, fd);
+
+    expect(mockValidateImageUpload).toHaveBeenCalledWith(expect.any(File));
+    expect(mockRegenerateBusinessFavicon).toHaveBeenCalledWith(EXISTING_BUSINESS.businessId, Buffer.from('fake-favicon-bytes'));
+    expect(result?.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/favicon.png');
+    expect(result?.faviconSource).toBe('manual');
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.faviconSource).toBe('manual');
+  });
+
+  it('surfaces an UploadValidationError message without persisting', async () => {
+    mockValidateImageUpload.mockRejectedValue(new MockUploadValidationError('Unsupported file type.'));
+    const fd = new FormData();
+    fd.set('favicon', makeFile('icon.png'));
+
+    const result = await updateBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, fd);
+
+    expect(result?.message).toBe('Unsupported file type.');
+    expect(mockPutBusiness).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resetBusinessFaviconAction
+// ---------------------------------------------------------------------------
+
+describe('resetBusinessFaviconAction', () => {
+  it('requires an authenticated session', async () => {
+    mockGetSession.mockResolvedValue(null);
+    const result = await resetBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+    expect(result?.message).toBe('Unauthorized');
+  });
+
+  it('regenerates immediately from the current logo and marks the favicon auto', async () => {
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      logoUrl: '/api/assets/businesses/biz_1/assets/logo.png',
+      faviconUrl: '/api/assets/businesses/biz_1/assets/custom.png',
+      faviconSource: 'manual',
+    });
+
+    const result = await resetBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+
+    expect(mockRegenerateFaviconFromLogoUrl).toHaveBeenCalledWith(
+      EXISTING_BUSINESS.businessId,
+      '/api/assets/businesses/biz_1/assets/logo.png',
+    );
+    expect(result?.faviconUrl).toBe('/api/assets/businesses/biz_1/assets/favicon.png');
+    expect(result?.faviconSource).toBe('auto');
+    const saved = mockPutBusiness.mock.calls[0][0];
+    expect(saved.faviconSource).toBe('auto');
+  });
+
+  it('clears the favicon entirely when there is no logo to derive one from', async () => {
+    mockGetBusinessById.mockResolvedValue({
+      ...EXISTING_BUSINESS,
+      logoUrl: undefined,
+      faviconUrl: '/api/assets/businesses/biz_1/assets/custom.png',
+      faviconSource: 'manual',
+    });
+
+    const result = await resetBusinessFaviconAction(EXISTING_BUSINESS.businessId, undefined, new FormData());
+
+    expect(mockRegenerateFaviconFromLogoUrl).not.toHaveBeenCalled();
+    expect(result?.faviconUrl).toBeUndefined();
+    expect(result?.faviconSource).toBe('auto');
   });
 });

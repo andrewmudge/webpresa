@@ -6,9 +6,16 @@ import { PreviewThemeSchema } from '@/domain/schemas/site-preview.schema';
 import { getBusinessById, putBusiness, updateBusiness } from '@/lib/db/businesses';
 import { ensureDraftPreview, putSitePreview } from '@/lib/db/site-previews';
 import { checkHeroPhotoDimensions } from '@/lib/image/hero-dimensions';
-import { uploadBusinessAsset, appendBusinessPhotos, assetKeyFromUrl } from '@/lib/s3/business-assets';
+import {
+  uploadBusinessAsset,
+  uploadBusinessAssetWithBuffer,
+  appendBusinessPhotos,
+  assetKeyFromUrl,
+  regenerateBusinessFavicon,
+  regenerateFaviconFromLogoUrl,
+} from '@/lib/s3/business-assets';
 import { deleteAsset } from '@/lib/s3/assets';
-import { UploadValidationError } from '@/lib/s3/upload-validation';
+import { UploadValidationError, validateImageUpload } from '@/lib/s3/upload-validation';
 
 /**
  * Customer-scoped counterpart to the admin's `updatePhotosAction` /
@@ -28,7 +35,9 @@ import { UploadValidationError } from '@/lib/s3/upload-validation';
  */
 const MAX_BUSINESS_PHOTOS = 6;
 
-export type CustomerPhotoState = { message?: string; photoUrls?: string[]; logoUrl?: string } | undefined;
+export type CustomerPhotoState =
+  | { message?: string; photoUrls?: string[]; logoUrl?: string; faviconUrl?: string; faviconSource?: 'auto' | 'manual' }
+  | undefined;
 
 export async function addCustomerBusinessPhotos(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
   const files = formData.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
@@ -96,7 +105,7 @@ export async function deleteCustomerBusinessPhoto(businessId: string, photoUrl: 
 
     const existingPhotoUrls = existing.photoUrls ?? [];
     if (!existingPhotoUrls.includes(photoUrl)) {
-      return { photoUrls: existingPhotoUrls, logoUrl: existing.logoUrl };
+      return { photoUrls: existingPhotoUrls, logoUrl: existing.logoUrl, faviconUrl: existing.faviconUrl, faviconSource: existing.faviconSource };
     }
 
     const photoUrls = existingPhotoUrls.filter((u) => u !== photoUrl);
@@ -108,6 +117,9 @@ export async function deleteCustomerBusinessPhoto(businessId: string, photoUrl: 
       services: existing.servicesPhotoUrl === photoUrl,
     };
     const logoCleared = existing.logoUrl === photoUrl;
+    // See the identical comment in the admin's deleteBusinessPhotoAction —
+    // a manual favicon is never cleared by a logo deletion, only an auto one.
+    const faviconCleared = logoCleared && existing.faviconSource !== 'manual';
 
     await putBusiness({
       ...existing,
@@ -118,6 +130,7 @@ export async function deleteCustomerBusinessPhoto(businessId: string, photoUrl: 
       whyChooseUsPhotoUrl: cleared.whyChooseUs ? undefined : existing.whyChooseUsPhotoUrl,
       servicesPhotoUrl: cleared.services ? undefined : existing.servicesPhotoUrl,
       logoUrl: logoCleared ? undefined : existing.logoUrl,
+      faviconUrl: faviconCleared ? undefined : existing.faviconUrl,
       updatedAt: new Date().toISOString(),
     });
 
@@ -130,7 +143,12 @@ export async function deleteCustomerBusinessPhoto(businessId: string, photoUrl: 
 
     await dualWriteClearedSlots(businessId, cleared);
 
-    return { photoUrls, logoUrl: logoCleared ? undefined : existing.logoUrl };
+    return {
+      photoUrls,
+      logoUrl: logoCleared ? undefined : existing.logoUrl,
+      faviconUrl: faviconCleared ? undefined : existing.faviconUrl,
+      faviconSource: existing.faviconSource,
+    };
   } catch (err) {
     console.error('Failed to delete customer business photo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to delete photo. Please try again.' };
@@ -394,20 +412,79 @@ export async function updateCustomerLogo(businessId: string, formData: FormData)
 
     const file = formData.get('logoPhotoFile');
     let logoUrl: string | undefined;
+    let logoBuffer: Buffer | undefined;
     if (file instanceof File && file.size > 0) {
-      logoUrl = await uploadBusinessAsset(businessId, file, `logo/${crypto.randomUUID()}`);
+      ({ url: logoUrl, buffer: logoBuffer } = await uploadBusinessAssetWithBuffer(businessId, file, `logo/${crypto.randomUUID()}`));
     } else {
       const picked = (formData.get('logoPhotoUrl') as string) || undefined;
       logoUrl = resolveLogoUrl(picked, existing.logoUrl);
     }
 
-    if (logoUrl === existing.logoUrl) return { logoUrl };
+    if (logoUrl === existing.logoUrl) return { logoUrl, faviconUrl: existing.faviconUrl, faviconSource: existing.faviconSource };
 
-    await updateBusiness(businessId, { logoUrl });
-    return { logoUrl };
+    // Regenerate the browser-tab icon from the new logo, unless a manual
+    // override is on file — see Business.faviconSource's doc comment.
+    let faviconUrl = existing.faviconUrl;
+    if (existing.faviconSource !== 'manual') {
+      faviconUrl = logoBuffer
+        ? await regenerateBusinessFavicon(businessId, logoBuffer)
+        : logoUrl
+          ? await regenerateFaviconFromLogoUrl(businessId, logoUrl)
+          : undefined;
+    }
+    const faviconSource = existing.faviconSource === 'manual' ? 'manual' : 'auto';
+
+    await updateBusiness(businessId, { logoUrl, faviconUrl, faviconSource });
+    return { logoUrl, faviconUrl, faviconSource };
   } catch (err) {
     if (err instanceof UploadValidationError) return { message: err.message };
     console.error('Failed to update customer logo:', err instanceof Error ? err.message : err);
     return { message: 'Failed to save changes. Please try again.' };
+  }
+}
+
+/**
+ * Uploads a manual "Browser tab icon" override — customer-scoped
+ * counterpart to `updateBusinessFaviconAction`. Runs through the same
+ * square/transparent-pad pipeline as an auto-derived one, and marks
+ * `faviconSource: 'manual'` so future logo changes never overwrite it.
+ */
+export async function updateCustomerFavicon(businessId: string, formData: FormData): Promise<CustomerPhotoState> {
+  const file = formData.get('favicon');
+  if (!(file instanceof File) || file.size === 0) return { message: 'Choose an image to upload.' };
+
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const { buffer } = await validateImageUpload(file);
+    const faviconUrl = await regenerateBusinessFavicon(businessId, buffer);
+    await updateBusiness(businessId, { faviconUrl, faviconSource: 'manual' });
+
+    return { faviconUrl, faviconSource: 'manual' };
+  } catch (err) {
+    if (err instanceof UploadValidationError) return { message: err.message };
+    console.error('Failed to update customer favicon:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to upload icon. Please try again.' };
+  }
+}
+
+/**
+ * Clears a manual "Browser tab icon" override and regenerates it fresh
+ * from the current logo immediately — customer-scoped counterpart to
+ * `resetBusinessFaviconAction`.
+ */
+export async function resetCustomerFavicon(businessId: string): Promise<CustomerPhotoState> {
+  try {
+    const existing = await getBusinessById(businessId);
+    if (!existing) return { message: 'Business not found' };
+
+    const faviconUrl = existing.logoUrl ? await regenerateFaviconFromLogoUrl(businessId, existing.logoUrl) : undefined;
+    await updateBusiness(businessId, { faviconUrl, faviconSource: 'auto' });
+
+    return { faviconUrl, faviconSource: 'auto' };
+  } catch (err) {
+    console.error('Failed to reset customer favicon:', err instanceof Error ? err.message : err);
+    return { message: 'Failed to reset icon. Please try again.' };
   }
 }
