@@ -3,7 +3,6 @@ import type { Address } from '@/domain/models/common';
 import { lobRequest, LobApiError } from './client';
 import { getPostcardById, transitionPostcardToSubmitting, markPostcardSubmitted, markPostcardSubmissionFailed } from '@/lib/db/postcards';
 import { getBusinessById, advanceBusinessStatus } from '@/lib/db/businesses';
-import { getLobSenderAddress } from '@/lib/env/lob-sender-address';
 import { renderPostcardArtifacts } from '@/lib/postcards/render';
 import { getSignedAssetUrl } from '@/lib/s3/assets';
 import { log } from '@/lib/logging/log';
@@ -11,14 +10,20 @@ import { log } from '@/lib/logging/log';
 /**
  * Stage 22 Phase 4 — submits an approved, rendered postcard to Lob.
  *
- * `size`/`mail_type`/`use_type` and the `to`/`from` address field names
- * are confirmed against Lob's live API docs (docs.lob.com), not guessed.
+ * `size`/`mail_type`/`use_type` and the `to` address field names are
+ * confirmed against Lob's live API docs (docs.lob.com), not guessed.
  * `front`/`back` are the signed S3 URLs of the PDFs the Phase 2 render
  * Lambda already produced — Lob fetches artwork by URL, so no local file
  * upload step is needed. The recipient's address is passed structurally
  * (`to`), never drawn as text in our own artwork — confirmed Lob overlays
  * it automatically and discards whatever's in that artwork region (see
  * `PostcardBack.tsx`'s doc comment).
+ *
+ * `from` is deliberately omitted: Lob's docs mark it required only when
+ * `to` is international, and Lob prints a return-address block on the
+ * physical piece derived from whatever `from` it receives — sending one
+ * here would put Webpresa's address on every recipient's mail, which is
+ * not wanted.
  */
 
 const LOB_POSTCARD_SIZE = '6x9';
@@ -102,13 +107,6 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
   if (!business) return { status: 'failed', message: 'Business not found.' };
   if (!business.address) return { status: 'not_eligible', message: 'This business has no mailing address on file.' };
 
-  let senderAddress;
-  try {
-    senderAddress = getLobSenderAddress();
-  } catch {
-    return { status: 'not_eligible', message: 'Sender/return address is not configured (WEBPRESA_LOB_SENDER_* environment variables).' };
-  }
-
   // Re-render fresh artwork immediately before submission — the underlying
   // S3 PDF is otherwise only ever captured once, at postcard-creation time,
   // and never automatically refreshed. A business edited after that would
@@ -156,7 +154,6 @@ export async function submitPostcardToLob(postcardId: string): Promise<SubmitPos
       method: 'POST',
       body: JSON.stringify({
         to: toLobAddress(business.name, business.address),
-        from: toLobAddress(senderAddress.name, senderAddress),
         front: frontUrl,
         back: backUrl,
         size: LOB_POSTCARD_SIZE,

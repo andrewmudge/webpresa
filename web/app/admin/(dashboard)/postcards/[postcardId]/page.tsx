@@ -9,7 +9,6 @@ import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 import { generateCampaignQrPng } from '@/lib/campaign/qr';
 import { formatCampaignCodeForDisplay } from '@/lib/campaign/code-format';
 import { resolveAppBaseUrl } from '@/lib/env/app-base-url';
-import { getLobSenderAddress, type LobSenderAddress } from '@/lib/env/lob-sender-address';
 import { isLobLiveMode } from '@/lib/lob/client';
 import PostcardFront from '../components/PostcardFront';
 import PostcardBack from '../components/PostcardBack';
@@ -53,13 +52,6 @@ export default async function PostcardDetailPage({ params }: Props) {
     const png = await generateCampaignQrPng(recipient.campaignCode, resolveAppBaseUrl());
     qrDataUri = `data:image/png;base64,${png.toString('base64')}`;
     accessCodeDisplay = formatCampaignCodeForDisplay(recipient.campaignCode);
-  }
-
-  let senderAddress: LobSenderAddress | undefined;
-  try {
-    senderAddress = getLobSenderAddress();
-  } catch {
-    senderAddress = undefined;
   }
 
   const isLiveMode = await isLobLiveMode();
@@ -128,7 +120,6 @@ export default async function PostcardDetailPage({ params }: Props) {
                 label={beforeShots.desktopSrc ? 'Existing-site screenshot captured' : 'No existing-site screenshot yet'}
               />
               <ChecklistItem ok={Boolean(recipient)} label={recipient ? `QR destination: /r/${recipient.campaignCode}` : 'No CampaignRecipient — no QR destination'} />
-              <ChecklistItem ok={Boolean(senderAddress)} label={senderAddress ? 'Sender/return address configured' : 'Sender/return address not configured'} />
               <ChecklistItem
                 ok={Boolean(postcard.frontArtifactKey && postcard.backArtifactKey)}
                 label={postcard.frontArtifactKey && postcard.backArtifactKey ? `Rendered artifact stored (${postcard.renderedAt})` : 'No rendered artifact yet'}

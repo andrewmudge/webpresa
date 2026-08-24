@@ -16,7 +16,6 @@ const {
   mockMarkPostcardSubmissionFailed,
   mockGetBusinessById,
   mockAdvanceBusinessStatus,
-  mockGetLobSenderAddress,
   mockGetSignedAssetUrl,
   mockRenderPostcardArtifacts,
 } = vi.hoisted(() => ({
@@ -27,7 +26,6 @@ const {
   mockMarkPostcardSubmissionFailed: vi.fn(),
   mockGetBusinessById: vi.fn(),
   mockAdvanceBusinessStatus: vi.fn(),
-  mockGetLobSenderAddress: vi.fn(),
   mockGetSignedAssetUrl: vi.fn(),
   mockRenderPostcardArtifacts: vi.fn(),
 }));
@@ -53,7 +51,6 @@ vi.mock('@/lib/db/postcards', () => ({
   markPostcardSubmissionFailed: mockMarkPostcardSubmissionFailed,
 }));
 vi.mock('@/lib/db/businesses', () => ({ getBusinessById: mockGetBusinessById, advanceBusinessStatus: mockAdvanceBusinessStatus }));
-vi.mock('@/lib/env/lob-sender-address', () => ({ getLobSenderAddress: mockGetLobSenderAddress }));
 vi.mock('@/lib/s3/assets', () => ({ getSignedAssetUrl: mockGetSignedAssetUrl }));
 vi.mock('@/lib/postcards/render', () => ({ renderPostcardArtifacts: mockRenderPostcardArtifacts }));
 
@@ -94,14 +91,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetPostcardById.mockResolvedValue(basePostcard());
   mockGetBusinessById.mockResolvedValue(baseBusiness());
-  mockGetLobSenderAddress.mockReturnValue({
-    name: 'Webpresa',
-    line1: '4600 Baybrook Dr',
-    city: 'Pensacola',
-    state: 'FL',
-    postalCode: '32514',
-    country: 'US',
-  });
   mockGetSignedAssetUrl.mockImplementation(async (key: string) => `https://signed.example.com/${key}`);
   mockTransitionPostcardToSubmitting.mockResolvedValue(true);
   mockLobRequest.mockResolvedValue({ id: 'psc_abc123', price: 1.23 });
@@ -138,14 +127,6 @@ describe('submitPostcardToLob — eligibility checks', () => {
     expect(mockTransitionPostcardToSubmitting).not.toHaveBeenCalled();
   });
 
-  it('refuses when the sender address is not configured', async () => {
-    mockGetLobSenderAddress.mockImplementation(() => {
-      throw new Error('WEBPRESA_LOB_SENDER_NAME environment variable is not set');
-    });
-    const result = await submitPostcardToLob(POSTCARD_ID);
-    expect(result.status).toBe('not_eligible');
-    expect(mockTransitionPostcardToSubmitting).not.toHaveBeenCalled();
-  });
 });
 
 describe('submitPostcardToLob — idempotency', () => {
@@ -217,7 +198,7 @@ describe('submitPostcardToLob — re-render before submission', () => {
 });
 
 describe('submitPostcardToLob — happy path', () => {
-  it('builds the request from structured to/from addresses and signed artifact URLs, records success', async () => {
+  it('builds the request from a structured to address and signed artifact URLs, records success', async () => {
     const result = await submitPostcardToLob(POSTCARD_ID);
 
     expect(mockLobRequest).toHaveBeenCalledWith(
@@ -236,7 +217,7 @@ describe('submitPostcardToLob — happy path', () => {
       address_zip: '62701',
       address_country: 'US',
     });
-    expect(requestBody.from.name).toBe('Webpresa');
+    expect(requestBody.from).toBeUndefined();
     expect(requestBody.front).toBe(`https://signed.example.com/postcards/${BUSINESS_ID}/${POSTCARD_ID}/front.pdf`);
     expect(requestBody.size).toBe('6x9');
     expect(requestBody.mail_type).toBe('usps_first_class');

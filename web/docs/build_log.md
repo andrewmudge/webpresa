@@ -9272,3 +9272,33 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files
 ```
 
 No manual browser verification performed (standing instruction). Confirm in prod by manually clicking "Apply" once for `biz_bd86764b-d993-40f0-9dd1-46a1aeb540d8` specifically (or re-scanning it), then verifying a fresh full scan on a business with no email on file populates it without a click.
+
+---
+
+**Date:** 2026-08-24
+
+**Stop sending Webpresa's own address as `from` on Lob postcard submissions.** Reported by the user from Lob's dashboard: the back of a submitted postcard showed a printed return address ("WEBPRESA 4800 BAYBROOK DR, PENSACOLA FL 32514"), despite believing that had already been turned off.
+
+It had only been half turned off. Commit `d040072` ("Remove sender address from postcard back") had removed a hand-drawn, duplicate return-address text block from `PostcardBack.tsx`'s own artwork, under the stated belief that a return address "isn't required on this mail class per Lob/USPS docs" — but it never touched `web/lib/lob/submit-postcard.ts`, which still sent a fully-populated `from` field to Lob's `/postcards` API on every submission (sourced from `WEBPRESA_LOB_SENDER_*` env vars via `getLobSenderAddress()`), and hard-blocked submission entirely if that wasn't configured. Lob uses `from` to print its own return-address block on the physical mailpiece — the same overlay mechanism it uses for the recipient's `to` address — so removing only the artwork copy left the real cause (the API field) fully intact. Fetched Lob's live API docs (docs.lob.com, Postcards) at the user's direction to confirm `from` is documented as required only when `to` is international — optional for all-domestic mail, which is what Webpresa sends — so it's safe to omit rather than replace.
+
+Removed the `from` field from the `/postcards` request body and the `not_eligible` eligibility guard that required a configured sender address. Deleted `web/lib/env/lob-sender-address.ts` entirely (now unreferenced) and its "Sender/return address configured" checklist item on the admin postcard review page (`postcards/[postcardId]/page.tsx`). `WEBPRESA_LOB_SENDER_*` Vercel env vars are now unused but were left in place — noted as safe-to-remove manually in `deployment.md` rather than touched here, per `AGENTS.md`'s infra-change rules.
+
+## Files changed
+
+```
+lib/lob/submit-postcard.ts                        MODIFIED — removed sender-address fetch/guard and `from` field from the Lob request body; updated doc comment
+lib/env/lob-sender-address.ts                      DELETED — no longer referenced
+app/admin/(dashboard)/postcards/[postcardId]/page.tsx  MODIFIED — removed sender-address checklist item and its import
+lib/lob/__tests__/submit-postcard.test.ts          MODIFIED — removed sender-address mock/test; happy-path test now asserts `from` is absent from the request body
+web/docs/architecture.md                           MODIFIED — Phase 4 description updated to reflect `from` is deliberately omitted, with the root-cause note
+web/docs/deployment.md                             MODIFIED — marked `WEBPRESA_LOB_SENDER_*` env vars as no longer read by the app
+web/docs/build_log.md                              MODIFIED — this entry
+```
+
+## Verification
+
+```
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files, 1686 tests, all passing; npm run build — clean
+```
+
+No manual browser verification performed (standing instruction; this is a backend API-payload change, not a UI change). Actually submitting a real postcard to Lob to visually confirm the return address is gone is out of scope here (real cost against the live Lob account) — final confirmation needs a check of the next real postcard submitted through Lob's dashboard.
