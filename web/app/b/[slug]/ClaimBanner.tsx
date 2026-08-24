@@ -30,7 +30,7 @@ export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClai
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-4">
         <div className="flex items-center gap-3 text-center sm:text-left">
           <Image
-            src="/webpresa_w.png"
+            src="/webpresa_w_nobg.png"
             alt=""
             width={692}
             height={394}
