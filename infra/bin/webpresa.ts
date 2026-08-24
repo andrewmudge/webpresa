@@ -40,16 +40,13 @@ const env = {
 // runtime (they can't be: that's the whole point of checking them).
 assertAccountMatchesEnvironment(envName, config, env.account);
 
-const dataStack = new WebpresaDataStack(app, `Webpresa${label}DataStack`, {
-  config,
-  env,
-  description: `Webpresa ${label} data layer — DynamoDB tables managed by CDK`,
-});
-
 // Stage 14 — the public app origin the screenshot Lambda constructs
 // generated-preview URLs from (SitePreview stores only a slug, never an
 // absolute URL — see implementation.md, Stage 14, "Lambda payload"). Also
-// feeds the Stage 16 scan workflow's HttpInvoke endpoints. Read from the
+// feeds the Stage 16 scan workflow's HttpInvoke endpoints, and (since the
+// Google federation feature) the customer User Pool Client's OAuth
+// `callbackUrls`/`logoutUrls` in `WebpresaDataStack` itself — resolved
+// before *any* stack is constructed for that reason. Read from the
 // environment, with no placeholder fallback: a prior version of this file
 // silently fell back to a fake ".invalid" URL when this var was unset,
 // which CloudFormation deployed without complaint on 2026-07-28, breaking
@@ -102,6 +99,13 @@ if (matchedMarker) {
       'Set it to the real dev/prod app origin — see web/docs/deployment.md.',
   );
 }
+
+const dataStack = new WebpresaDataStack(app, `Webpresa${label}DataStack`, {
+  config,
+  env,
+  description: `Webpresa ${label} data layer — DynamoDB tables managed by CDK`,
+  appBaseUrl,
+});
 
 // Deployed independently and BEFORE the screenshot stack — see
 // WebpresaScreenshotRepositoryStack's doc comment for why a container-image

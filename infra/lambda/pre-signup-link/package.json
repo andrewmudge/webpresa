@@ -1,0 +1,8 @@
+{
+  "name": "webpresa-pre-signup-link",
+  "private": true,
+  "description": "Cognito Pre Sign-up trigger — links a Google-federated sign-in to an existing native user by email. Deployed via lambda.Code.fromAsset('src') with zero build step: the Node.js 24.x Lambda runtime bundles @aws-sdk/client-cognito-identity-provider, so this package.json is documentation only, not an install/bundle target. If a deploy ever fails with a module-not-found error for that package, that assumption was wrong — switch webpresa-user-pool.ts's Lambda construct to a bundled NodejsFunction instead.",
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1085.0"
+  }
+}

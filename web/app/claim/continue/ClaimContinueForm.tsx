@@ -3,6 +3,7 @@ import { useActionState, useState } from 'react';
 import { Mail, Phone, KeyRound, UserPlus } from 'lucide-react';
 import { passwordMeetsPolicy } from '@/lib/auth/password-policy';
 import { IconField, PlainField, SubmitButton, ErrorAlert } from '@/components/access/fields';
+import { GoogleGIcon } from '@/components/icons/GoogleGIcon';
 import {
   signUpForClaimAction,
   confirmSignUpForClaimAction,
@@ -100,6 +101,19 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
         <p className="mt-1.5 text-sm text-gray-500">
           Claiming <span className="font-medium text-gray-700">{businessName}</span>
         </p>
+      </div>
+
+      <a
+        href="/api/auth/google/start"
+        className="mb-4 flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+      >
+        <GoogleGIcon className="h-4 w-4" />
+        Continue with Google
+      </a>
+      <div className="mb-4 flex items-center gap-3 text-xs text-gray-400">
+        <div className="h-px flex-1 bg-gray-200" />
+        or
+        <div className="h-px flex-1 bg-gray-200" />
       </div>
 
       <div className="mb-5 flex gap-5 border-b border-gray-200 text-sm">

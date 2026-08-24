@@ -12,6 +12,8 @@ import { WebpresaUserPool } from '../constructs/webpresa-user-pool';
 
 export interface WebpresaDataStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
+  /** The Next.js app's public base URL — needed here (not just the screenshot/scan-workflow/postcard-render/SES stacks) because the customer User Pool Client's Google OAuth `callbackUrls` is built from it. See `bin/webpresa.ts`. */
+  readonly appBaseUrl: string;
 }
 
 /**
@@ -81,6 +83,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly marketingSesEventsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
+  public readonly customerUserPoolHostedUiDomain: string;
   public readonly assetsBucket: s3.Bucket;
   public readonly openAiSecret: secretsmanager.Secret;
   public readonly firecrawlSecret: secretsmanager.Secret;
@@ -97,7 +100,7 @@ export class WebpresaDataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: WebpresaDataStackProps) {
     super(scope, id, props);
 
-    const { config } = props;
+    const { config, appBaseUrl } = props;
     const S = dynamodb.AttributeType.STRING;
 
     // Apply mandatory stack-level tags here so they are present during both
@@ -766,17 +769,35 @@ export class WebpresaDataStack extends cdk.Stack {
     });
     this.marketingSesEventsTable = marketingSesEvents.table;
 
+    // Google OAuth client credentials for Cognito "Sign in with Google"
+    // federation — created here (not in the secrets block below) because
+    // `WebpresaUserPool` needs it immediately below. Not granted to the
+    // Vercel IAM role like the secrets further down: the Next.js app never
+    // reads Google OAuth credentials directly, only Cognito's Hosted UI
+    // does (via CDK's dynamic reference at deploy time).
+    const googleOAuth = new WebpresaSecret(this, 'GoogleOAuthSecret', {
+      config,
+      secretName: 'google-oauth',
+      description: 'Google OAuth client credentials for Cognito Hosted UI federation ("Sign in with Google")',
+      jsonKeys: ['clientSecret', 'clientId'],
+    });
+
     // ───────────────────────────────────────────────────────────────────────
-    // Customer identity (Stage 17 — Website Claim Flow)
+    // Customer identity (Stage 17 — Website Claim Flow; Google federation)
     //
     // Amazon Cognito User Pool for customer accounts only — the admin auth
     // system (single hardcoded operator, scrypt + JWT) is completely
     // separate and untouched. See `webpresa-user-pool.ts` for the full
-    // rationale.
+    // rationale, including the two-phase Google federation deploy.
     // ───────────────────────────────────────────────────────────────────────
-    const customerAuth = new WebpresaUserPool(this, 'CustomerUserPool', { config });
+    const customerAuth = new WebpresaUserPool(this, 'CustomerUserPool', {
+      config,
+      appBaseUrl,
+      googleOAuthSecret: googleOAuth.secret,
+    });
     this.customerUserPool = customerAuth.userPool;
     this.customerUserPoolClient = customerAuth.userPoolClient;
+    this.customerUserPoolHostedUiDomain = customerAuth.hostedUiBaseUrl;
 
     // ───────────────────────────────────────────────────────────────────────
     // Assets bucket — private object storage for scan artifacts, preview

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { signInCustomer } from './customer-cognito';
 import { createCustomerSession, deleteCustomerSession } from './customer-session';
+import { safeCustomerRedirectPath } from './safe-redirect';
 import { log } from '@/lib/logging/log';
 
 /**
@@ -20,18 +21,9 @@ const SignInSchema = z.object({
 
 export type CustomerSignInState = { error?: string } | undefined;
 
-/**
- * Stage 19 adds `/app` as a second allowed prefix — a sign-in-to-continue
- * flow from `/app/*` (proxy.ts) must be able to land the customer back in
- * the dashboard, not just `/account/*`.
- */
-const ALLOWED_REDIRECT_PREFIXES = ['/account', '/app'];
-const DEFAULT_REDIRECT = '/app';
-
-/** No open redirect — only an internal `/account/*` or `/app/*` path is ever honored. */
+/** No open redirect — only an internal `/account/*` or `/app/*` path is ever honored (see `safe-redirect.ts`). */
 function safeNextPath(next: FormDataEntryValue | null): string {
-  const value = typeof next === 'string' ? next : '';
-  return ALLOWED_REDIRECT_PREFIXES.some((prefix) => value.startsWith(prefix)) ? value : DEFAULT_REDIRECT;
+  return safeCustomerRedirectPath(typeof next === 'string' ? next : null);
 }
 
 export async function customerSignInAction(

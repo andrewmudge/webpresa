@@ -10,7 +10,7 @@ let prod: Template;
 
 function buildStack(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
   const app = new App();
-  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config });
+  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config, appBaseUrl: 'https://test.webpresa.example' });
   const sesStack = new WebpresaSesStack(app, `${appId}SesStack`, {
     config,
     appBaseUrl: 'https://app.example-test.invalid',

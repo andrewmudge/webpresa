@@ -17,6 +17,7 @@ beforeAll(() => {
   dev = Template.fromStack(
     new WebpresaDataStack(devApp, 'WebpresaDevDataStack', {
       config: ENVIRONMENTS.dev,
+      appBaseUrl: 'https://test.webpresa.example',
     }),
   );
 
@@ -24,6 +25,7 @@ beforeAll(() => {
   prod = Template.fromStack(
     new WebpresaDataStack(prodApp, 'WebpresaProdDataStack', {
       config: ENVIRONMENTS.prod,
+      appBaseUrl: 'https://test.webpresa.example',
     }),
   );
 });
@@ -499,9 +501,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 61 outputs — 46 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables), 2 bucket outputs, 11 secret ARN outputs, 2 Cognito outputs', () => {
+  it('creates 63 outputs — 46 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables), 2 bucket outputs, 12 secret ARN outputs (Google federation adds GoogleOAuthSecret), 3 Cognito outputs (Google federation adds HostedUiDomain)', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(61);
+    expect(Object.keys(outputs)).toHaveLength(63);
   });
 });
 
@@ -736,8 +738,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly eleven secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 11);
+  it('creates exactly twelve secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 12);
   });
 
   const devSecretNames = [
@@ -751,6 +753,7 @@ describe('secrets', () => {
     'webpresa-dev-capture-token',
     'webpresa-dev-vercel-protection-bypass',
     'webpresa-dev-internal-api',
+    'webpresa-dev-google-oauth',
   ];
 
   it.each(devSecretNames)('dev secret %s exists', (name) => {
@@ -848,10 +851,55 @@ describe('customer Cognito User Pool', () => {
     });
   });
 
-  it('creates no Lambda triggers on the User Pool', () => {
+  it('wires a Pre Sign-up Lambda trigger (Google-federation account linking)', () => {
     const pools = dev.findResources('AWS::Cognito::UserPool');
-    const pool = Object.values(pools)[0] as { Properties: { LambdaConfig?: unknown } };
-    expect(pool.Properties.LambdaConfig).toBeUndefined();
+    const pool = Object.values(pools)[0] as { Properties: { LambdaConfig?: { PreSignUp?: unknown } } };
+    expect(pool.Properties.LambdaConfig?.PreSignUp).toBeDefined();
+  });
+
+  it('creates the Hosted UI domain', () => {
+    dev.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      Domain: 'webpresa-dev-customers',
+    });
+  });
+
+  it('creates the Pre Sign-up linking Lambda with least-privilege Cognito permissions', () => {
+    dev.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'webpresa-dev-customers-pre-signup-link',
+      Runtime: 'nodejs24.x',
+      Handler: 'index.handler',
+    });
+    dev.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(['cognito-idp:ListUsers', 'cognito-idp:AdminLinkProviderForUser']),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('creates no Google identity provider for prod while its googleOAuthClientId is unset (Phase A of the two-phase deploy)', () => {
+    prod.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+  });
+
+  it('creates the Google identity provider and OAuth app-client config for dev now that googleOAuthClientId is set (Phase B)', () => {
+    dev.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 1);
+    dev.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+      ProviderName: 'Google',
+      ProviderType: 'Google',
+      ProviderDetails: Match.objectLike({
+        client_id: '671031439561-d0tlff811su81on3t9lbh151me124laj.apps.googleusercontent.com',
+        authorize_scopes: 'profile email openid',
+      }),
+    });
+    dev.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      SupportedIdentityProviders: ['COGNITO', 'Google'],
+      AllowedOAuthFlows: ['code'],
+      AllowedOAuthScopes: Match.arrayWith(['openid', 'email', 'profile']),
+      CallbackURLs: ['https://test.webpresa.example/api/auth/google/callback'],
+    });
   });
 
   it('prod User Pool name carries the prod suffix', () => {

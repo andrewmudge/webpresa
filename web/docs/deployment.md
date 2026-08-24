@@ -112,6 +112,8 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `COGNITO_USER_POOL_CLIENT_ID` | CloudFormation export `webpresa-dev-customers-user-pool-client-id` | Stage 17 — deployed |
 | `CUSTOMER_SESSION_SECRET` | `openssl rand -base64 32` | Stage 17 — signs customer JWT session cookies; deliberately a separate secret from `SESSION_SECRET` |
 | `CLAIM_ATTEMPT_SECRET` | `openssl rand -base64 32` | Stage 17 — signs the short-lived claim-attempt cookie; deliberately a third, separate secret |
+| `COGNITO_HOSTED_UI_DOMAIN` | CloudFormation export `webpresa-dev-customers-hosted-ui-domain` | "Sign in with Google" — Cognito Hosted UI base URL (e.g. `https://webpresa-dev-customers.auth.us-east-1.amazoncognito.com`), read by `lib/auth/google-oauth.ts`. See "Google federation ('Sign in with Google') deployment guidance" below |
+| `GOOGLE_OAUTH_STATE_SECRET` | `openssl rand -base64 32` | "Sign in with Google" — signs the short-lived OAuth `state` token (`lib/auth/google-oauth-state.ts`); its own dedicated secret, separate from `CLAIM_ATTEMPT_SECRET`/`CUSTOMER_SESSION_SECRET` |
 | `CUSTOMER_BILLING_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-billing-profiles-name` | Stage 18 — deployed (`webpresa-dev-customer-billing-profiles`); not yet added to Vercel |
 | `STRIPE_PRICE_ID_BASIC` | Stripe Price ID (Preview: test-mode; Production: **live-mode**, see "Stripe live mode setup" below) | Stage 18 — Preview holds the test-mode Price (`price_1TyjryHTxTryrfUCNCT4A9Yn`); Production updated 2026-08-19 to the live-mode Price (`price_1U66jNHTxTryrfUCnt0mOcSp`, $39.00/month). Not a secret, but server-only (never `NEXT_PUBLIC_`) |
 | `STRIPE_PRICE_ID_GROWTH` | Stripe test-mode Price ID (created via CLI, see below) | Stage 18 — created (`price_1TyjsnHTxTryrfUCMeAT0q3K`); added to Vercel Production + Preview. Not a secret, but server-only (never `NEXT_PUBLIC_`). Still test-mode on Production too — Growth has no live Price yet since it isn't customer-purchasable |
@@ -1263,6 +1265,29 @@ Production is wired for live-mode Lob, pending the Production redeploy triggered
 - `LOB_SECRET_NAME` and the (since-removed, see above) `WEBPRESA_LOB_SENDER_*` vars were already correctly configured on Vercel Production (confirmed present via `vercel env ls production`) — no Vercel env var changes were needed for this cutover, only the Secrets Manager write above.
 - **Code change** (unlike the Stripe cutover, which needed none): `SubmitButton.tsx` previously hardcoded "Uses the Lob test-mode API key currently on file — no real mail is sent," which would have become false and misleading once live. Added `isLobLiveMode()` (`web/lib/lob/client.ts`) — the same `apiKey.startsWith('live_')` check `lobRequest` already does, exposed standalone — threaded through `postcards/[postcardId]/page.tsx` as an `isLiveMode` prop so the button's copy now accurately reflects whichever mode is actually configured, on any environment, without needing a manual edit at cutover time.
 - **Not yet done**: the live end-to-end smoke test (one real postcard, real charge, real mail) — deliberately held off per the user's request; do this before trusting live mode for actual customers.
+
+---
+
+## Google federation ("Sign in with Google") deployment guidance
+
+Adds a Cognito Hosted UI domain, an optional Google identity provider, a Pre Sign-up Lambda trigger (account linking), and app-side OAuth routes (`/api/auth/google/start`, `/api/auth/google/callback`). Requires a two-phase deploy per environment, because the Google OAuth client's redirect URI must point at Cognito's real Hosted UI domain, which only exists once deployed — and CDK can't create the identity provider without a real Google Client ID at synth time.
+
+**Phase A** — domain + Pre Sign-up trigger only (no Google IdP yet). With `googleOAuthClientId: ''` in `infra/lib/config/environments.ts` for the target environment, `WebpresaUserPool` (`infra/lib/constructs/webpresa-user-pool.ts`) skips creating `UserPoolIdentityProviderGoogle` and the App Client's `oAuth`/`supportedIdentityProviders` block entirely — only the `UserPoolDomain` and the linking Lambda deploy. Deploy via `npm run diff`/`deploy:dev` (or `:prod`) — the same `WebpresaDevDataStack`/`WebpresaProdDataStack` these already target, since the Google OAuth secret and Cognito changes live inside `WebpresaDataStack`. Note the `HostedUiDomain` CloudFormation output afterward.
+
+**Manual step** (cannot be automated — requires a real Google Cloud account):
+1. In Google Cloud Console, create (or reuse) a project, configure the OAuth consent screen if not already done, and create an OAuth 2.0 Client ID of type "Web application".
+2. Set its Authorized redirect URI to `{HostedUiDomain output}/oauth2/idpresponse` exactly (Cognito's fixed federation callback path — not the app's own `/api/auth/google/callback`).
+3. Copy the Client ID and Client Secret.
+4. `aws secretsmanager put-secret-value --secret-id webpresa-{env}-google-oauth --secret-string '{"clientId":"...","clientSecret":"..."}' --profile webpresa-{env}`.
+5. Set `googleOAuthClientId` in `infra/lib/config/environments.ts` for that environment to the real Client ID (not sensitive — committed to source like `expectedAccountId`).
+
+**Phase B** — redeploy the same stack (`npm run diff`/`deploy:dev` or `:prod`). This time `UserPoolIdentityProviderGoogle` and the App Client's OAuth config get created, since `googleOAuthClientId` is now non-empty.
+
+**Vercel env vars** — add `COGNITO_HOSTED_UI_DOMAIN` (the `HostedUiDomain` output) and a freshly generated `GOOGLE_OAUTH_STATE_SECRET` (`openssl rand -base64 32`) to the target environment. No other Vercel changes needed — the Vercel IAM role gets no new Cognito permissions for this feature (the app never calls `AdminLinkProviderForUser`; only the Pre Sign-up Lambda does, and the OAuth token exchange is a plain HTTPS call to Cognito's Hosted UI, not an AWS SDK call).
+
+**Account linking** — a Pre Sign-up Lambda trigger (`infra/lambda/pre-signup-link/`, deployed as part of Phase A) links a new Google sign-in to an existing native (password) user with the same verified email via `AdminLinkProviderForUser`, so the resulting session's Cognito `sub` matches the original account rather than minting a duplicate. Verify end-to-end after Phase B: sign up with a password, then sign in with Google using the same email — the CloudWatch logs for `webpresa-{env}-customers-pre-signup-link` should show the link happening, and the resulting session should carry the same `sub`/`Business.ownerUserId` as the password account.
+
+**Repeat for prod** once dev is verified — either a second Google OAuth client (recommended, matches every other per-env credential in this repo) or a second redirect URI added to the same client.
 
 ---
 

@@ -67,6 +67,23 @@ export interface EnvironmentConfig {
   readonly monthlyBudgetUsd: number;
   /** Email address notified when `monthlyBudgetUsd` is forecasted/actually exceeded (Stage 24). */
   readonly budgetAlertEmail: string;
+  /**
+   * Google OAuth 2.0 Web application Client ID for Cognito "Sign in with
+   * Google" federation, or `''` if not yet configured. Not sensitive (OAuth
+   * client IDs are routinely public/client-embedded), so it's committed here
+   * like `expectedAccountId` rather than living in Secrets Manager — the
+   * paired client *secret* does live in Secrets Manager
+   * (`webpresa-{env}-google-oauth`, see `data-stack.ts`).
+   *
+   * Deliberately gates whether `webpresa-user-pool.ts` provisions the actual
+   * `UserPoolIdentityProviderGoogle`/OAuth app-client config at all — empty
+   * string here means "domain + Lambda trigger only, no Google IdP yet"
+   * (Phase A of the two-phase deploy this feature requires, since the real
+   * Client ID can only be created in Google Cloud Console *after* the
+   * Hosted UI domain exists to register as the redirect URI). Set to the
+   * real value once that manual step is done, then redeploy (Phase B).
+   */
+  readonly googleOAuthClientId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +111,11 @@ export const ENVIRONMENTS: Record<string, EnvironmentConfig> = {
     screenshotLambdaReservedConcurrency: 5,
     monthlyBudgetUsd: 25,
     budgetAlertEmail: 'mudge.andrew@gmail.com',
+    // Real Google Cloud OAuth Client ID (Phase B of the two-phase deploy —
+    // see this field's doc comment and deployment.md's "Google federation
+    // deployment guidance"). Its redirect URI is registered as
+    // https://webpresa-dev-customers.auth.us-east-1.amazoncognito.com/oauth2/idpresponse.
+    googleOAuthClientId: '671031439561-d0tlff811su81on3t9lbh151me124laj.apps.googleusercontent.com',
   },
 
   // ── Production config: base infra deployed in Stage 22.5; application
@@ -112,6 +134,7 @@ export const ENVIRONMENTS: Record<string, EnvironmentConfig> = {
     screenshotLambdaReservedConcurrency: 5,
     monthlyBudgetUsd: 25,
     budgetAlertEmail: 'mudge.andrew@gmail.com',
+    googleOAuthClientId: '',
   },
 };
 

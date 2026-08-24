@@ -3,17 +3,12 @@ import { redirect } from 'next/navigation';
 import { cookies, headers } from 'next/headers';
 import { z } from 'zod';
 import { validateClaimToken, hashIp } from '@/lib/claim/validate-token';
-import { getClaimById, consumeClaim } from '@/lib/db/claims';
-import { getCustomerSession, createCustomerSession } from '@/lib/auth/customer-session';
-import {
-  CLAIM_INTENT_COOKIE_NAME,
-  CLAIM_INTENT_MAX_AGE_SECONDS,
-  signClaimIntent,
-  verifyClaimIntent,
-} from '@/lib/auth/claim-intent';
+import { getCustomerSession } from '@/lib/auth/customer-session';
+import { CLAIM_INTENT_COOKIE_NAME, CLAIM_INTENT_MAX_AGE_SECONDS, signClaimIntent, verifyClaimIntent } from '@/lib/auth/claim-intent';
 import { signUpCustomer, confirmCustomerSignUp, resendCustomerConfirmationCode, signInCustomer } from '@/lib/auth/customer-cognito';
 import { recordCustomerSubmittedBusinessInfo } from '@/lib/db/claims';
 import { passwordMeetsPolicy } from '@/lib/auth/password-policy';
+import { completeClaimIntent } from '@/lib/claim/complete-claim-intent';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -36,35 +31,6 @@ async function setClaimIntentCookie(params: { claimId: string; businessId: strin
     maxAge: CLAIM_INTENT_MAX_AGE_SECONDS,
     path: '/',
   });
-}
-
-/**
- * Runs the ownership-reservation transaction for the claim referenced by the
- * current `claim_intent` cookie, then establishes the customer session and
- * redirects — the single completion path shared by the sign-up-then-confirm
- * flow and the direct sign-in flow (see implementation.md, Stage 17,
- * "Detailed workflow", steps 7-9). Always ends in a redirect (never returns).
- *
- * Cross-checks the cookie's `businessId` against the freshly-loaded `Claim`'s
- * own `businessId` — defense in depth only; a `Claim`'s `businessId` never
- * changes after creation, so these should never actually diverge, but the
- * cookie is client-held and every claim carried in it must be re-verified
- * against the database regardless.
- */
-async function completeClaimIntent(sub: string, email: string): Promise<never> {
-  const cookieStore = await cookies();
-  const intent = await verifyClaimIntent(cookieStore.get(CLAIM_INTENT_COOKIE_NAME)?.value);
-  if (!intent) redirect('/claim?error=1');
-
-  const claim = await getClaimById(intent.claimId);
-  if (!claim || claim.businessId !== intent.businessId) redirect('/claim?error=1');
-
-  const result = await consumeClaim({ claimId: claim.claimId, businessId: claim.businessId, userId: sub });
-  if (result.outcome === 'conflict') redirect('/claim?error=1');
-
-  await createCustomerSession({ sub, email });
-  cookieStore.delete(CLAIM_INTENT_COOKIE_NAME);
-  redirect('/account/claim-status');
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +177,8 @@ export async function confirmSignUpForClaimAction(
   const signedIn = await signInCustomer(email, password);
   if (!signedIn.ok) return { error: 'Something went wrong. Please sign in from /claim again.' };
 
-  await completeClaimIntent(signedIn.sub, signedIn.email);
+  const result = await completeClaimIntent(signedIn.sub, signedIn.email);
+  redirect(result.redirectTo);
 }
 
 export async function resendConfirmationCodeAction(formData: FormData): Promise<void> {
@@ -243,5 +210,6 @@ export async function signInForClaimAction(
     return { error: 'Invalid email or password.' };
   }
 
-  await completeClaimIntent(result.sub, result.email);
+  const completion = await completeClaimIntent(result.sub, result.email);
+  redirect(completion.redirectTo);
 }

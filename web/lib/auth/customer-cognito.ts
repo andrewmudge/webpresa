@@ -11,6 +11,7 @@ import {
   AdminUpdateUserAttributesCommand,
   AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { decodeIdTokenClaims } from './decode-id-token';
 
 /**
  * Cognito-backed customer identity (Stage 17). Amazon Cognito is the
@@ -187,25 +188,6 @@ function mapSignInError(err: unknown): SignInFailureReason {
       return 'rate_limited';
     default:
       return 'unknown';
-  }
-}
-
-/**
- * The ID token returned by `InitiateAuth` comes directly from a trusted,
- * server-to-server AWS SDK call over TLS — not from client input — so its
- * claims are decoded without a second signature-verification pass (the same
- * trust level as any other AWS API response).
- */
-function decodeIdTokenClaims(idToken: string): { sub: string; email: string } | null {
-  try {
-    const payloadSegment = idToken.split('.')[1];
-    if (!payloadSegment) return null;
-    const json = Buffer.from(payloadSegment, 'base64url').toString('utf8');
-    const claims = JSON.parse(json) as { sub?: string; email?: string };
-    if (!claims.sub || !claims.email) return null;
-    return { sub: claims.sub, email: claims.email };
-  } catch {
-    return null;
   }
 }
 

@@ -9302,3 +9302,60 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 161 files
 ```
 
 No manual browser verification performed (standing instruction; this is a backend API-payload change, not a UI change). Actually submitting a real postcard to Lob to visually confirm the return address is gone is out of scope here (real cost against the live Lob account) — final confirmation needs a check of the next real postcard submitted through Lob's dashboard.
+
+---
+
+**Date:** 2026-08-24
+
+**"Sign in with Google" implemented — Cognito federation with account linking, code-complete, not yet deployed.** Requested: a Google button on the customer signup page (`/claim/continue`), backed by Cognito federated identity, with a hard requirement of no duplicate accounts — a password user who later signs in with Google on the same email must land on the same account. Scope was widened to also cover `/account/sign-in` (returning sign-in) once it became clear the underlying work (Cognito config, the linking Lambda, the OAuth routes) is identical either way — only the button's placement differs.
+
+**Infra** (`infra/lib/constructs/webpresa-user-pool.ts`, `infra/lib/config/environments.ts`, `infra/lib/stacks/data-stack.ts`, `infra/bin/webpresa.ts`): added a Cognito Hosted UI `UserPoolDomain`; a new `google-oauth` Secrets Manager secret (`clientId`/`clientSecret`); a `googleOAuthClientId` field on `EnvironmentConfig` that gates whether `UserPoolIdentityProviderGoogle` and the App Client's `oAuth`/`supportedIdentityProviders` config get created at all — empty for both dev and prod today, since creating the real Google OAuth client is a manual step requiring the Hosted UI domain to exist first. This makes the feature a two-phase deploy per environment (domain first, then the manual Google Cloud Console step + secret populate, then a second deploy for the actual identity provider) — documented in full under "Google federation deployment guidance" in `deployment.md`. `appBaseUrl` (previously resolved only after `WebpresaDataStack` was constructed) had to move earlier in `bin/webpresa.ts`, since the OAuth App Client's `callbackUrls` now needs it inside that same stack.
+
+**Account linking** (`infra/lambda/pre-signup-link/`): a new Pre Sign-up Lambda trigger — plain `lambda.Function`, not this repo's usual Docker-image pattern (a ~40-line, single-dependency trigger doesn't need a container image; the Node 24.x Lambda runtime bundles the AWS SDK v3, so zero build step). On every `PreSignUp_ExternalProvider` event with a verified email, it looks up an existing native (password) user with that email via `ListUsers` and, if found, links the incoming Google identity to it via `AdminLinkProviderForUser` before Cognito would otherwise mint a separate user — so the resulting `sub` is always the original account's, and `Business.ownerUserId`/`requireBusinessOwnership()` needed zero changes (already keyed on `sub`, not email). Hit and fixed a genuine circular CDK dependency along the way: granting the Lambda's IAM role permissions scoped to `userPool.userPoolArn` creates UserPool → Lambda (trigger) → the Lambda's own IAM policy (CDK's auto-added `DependsOn`) → UserPool (the ARN reference) — a real cycle CDK's synth-time cyclic-dependency check rejects. Fixed by scoping the grant to `resources: ['*']` with an `aws:ResourceAccount` condition instead of the literal ARN, which breaks the cycle without meaningfully widening the grant (this account only has one Cognito pool).
+
+**App** (`web/lib/auth/`, `web/lib/claim/`, `web/app/api/auth/google/`): new `google-oauth.ts` (Hosted UI authorize-URL builder + `/oauth2/token` code exchange — plain HTTPS, no AWS SDK, no client secret needed since the App Client has `generateSecret: false`), `google-oauth-state.ts` (the OAuth `state` param is itself a short-lived signed JWT carrying the post-sign-in `next` path, not a nonce-plus-cookie pair — one fewer moving part for equivalent CSRF protection), and two Route Handlers (`start`/`callback`). `decodeIdTokenClaims` extracted from `customer-cognito.ts` into `decode-id-token.ts` (both the password `InitiateAuth` path and the new OAuth callback need it); the `next`-redirect allowlist extracted from `customer-actions.ts` into `safe-redirect.ts` (same reuse reason). `completeClaimIntent` moved out of `app/claim/actions.ts` into a plain lib module, `lib/claim/complete-claim-intent.ts`, so the new Route Handler can call the identical function a Server Action can — it now returns a `{status, redirectTo}` result instead of calling `redirect()` itself, since `redirect()` isn't the right tool inside a Route Handler.
+
+**A planned fix turned out to be unnecessary**: the plan called for handling "the same identity re-authenticates via Google on a business it already claimed" as a special case, since a naive reading suggested `consumeClaim`'s ownership-conflict guard would error on it. Checking the actual code found `consumeClaim()` (`lib/db/claims.ts`) already distinguishes `already_consumed_by_user` from a genuine `conflict`, and `completeClaimIntent` already only treats `conflict` as an error — so this case was already handled correctly, and needed no change, just a test confirming it (`complete-claim-intent.test.ts`).
+
+New "Continue with Google" button on both `/claim/continue` (`ClaimContinueForm.tsx`, above the signup/signin tabs since Google covers both in one click) and `/account/sign-in` (`SignInForm.tsx`, forwarding the page's existing `next` param) — a plain `<a href="/api/auth/google/start">`, no client JS. New `GoogleGIcon` (`components/icons/GoogleGIcon.tsx`) — a hand-rolled inline SVG of Google's official "G" mark; `lucide-react` has no brand icons and one icon doesn't warrant a new dependency.
+
+**Not yet deployed** — this is infra + app code only. Before this is live: Phase A deploy (dev), the manual Google Cloud Console OAuth client step, secret population, Phase B deploy, new Vercel env vars (`COGNITO_HOSTED_UI_DOMAIN`, `GOOGLE_OAUTH_STATE_SECRET`), then a real end-to-end test (password sign-up → Google sign-in with the same email → confirm identical `sub`) before repeating for prod. All deferred to the user per `AGENTS.md`'s deploy-approval rule and the manual, un-automatable Google Console step.
+
+## Files changed
+
+```
+infra/lib/config/environments.ts                          MODIFIED — added googleOAuthClientId field
+infra/lib/constructs/webpresa-user-pool.ts                 MODIFIED — Hosted UI domain, optional Google IdP, OAuth app-client config, Pre Sign-up trigger wiring
+infra/lib/stacks/data-stack.ts                             MODIFIED — appBaseUrl prop threaded through; new google-oauth secret
+infra/bin/webpresa.ts                                      MODIFIED — appBaseUrl resolution moved before WebpresaDataStack construction
+infra/lambda/pre-signup-link/src/index.mjs                 NEW — Pre Sign-up account-linking trigger
+infra/lambda/pre-signup-link/package.json                  NEW — documentation only (zero-build-step Lambda)
+infra/test/data-stack.test.ts                               MODIFIED — secret/output counts updated; new Cognito federation assertions
+infra/test/{monitoring,screenshot,postcard-render,ses,vercel-access,scan-workflow}-stack.test.ts  MODIFIED — pass appBaseUrl to WebpresaDataStack
+web/lib/auth/decode-id-token.ts                             NEW — extracted from customer-cognito.ts
+web/lib/auth/safe-redirect.ts                               NEW — extracted from customer-actions.ts
+web/lib/auth/google-oauth.ts                                NEW — Hosted UI authorize URL + token exchange
+web/lib/auth/google-oauth-state.ts                          NEW — signed OAuth state token
+web/lib/claim/complete-claim-intent.ts                      NEW — moved out of app/claim/actions.ts, now returns a result instead of redirecting
+web/app/api/auth/google/start/route.ts                      NEW
+web/app/api/auth/google/callback/route.ts                   NEW
+web/components/icons/GoogleGIcon.tsx                        NEW
+web/lib/auth/customer-cognito.ts                            MODIFIED — decodeIdTokenClaims now imported, not local
+web/lib/auth/customer-actions.ts                             MODIFIED — safeNextPath now delegates to safe-redirect.ts
+web/app/claim/actions.ts                                     MODIFIED — completeClaimIntent now imported; call sites redirect on its result
+web/app/claim/continue/ClaimContinueForm.tsx                 MODIFIED — Google button
+web/app/account/sign-in/SignInForm.tsx                       MODIFIED — Google button
+web/docs/architecture.md                                     MODIFIED — new "Sign in with Google" subsection
+web/docs/deployment.md                                       MODIFIED — new env vars, new deployment-guidance section
+web/docs/build_log.md                                        MODIFIED — this entry
+(+ 6 new/updated test files under web/lib/auth/__tests__, web/lib/claim/__tests__, web/app/api/auth/google/*/__tests__)
+```
+
+## Verification
+
+```
+infra/: npm run build — clean; npm test — 244 tests, all passing (includes new Cognito federation assertions in data-stack.test.ts); npx cdk synth WebpresaDevDataStack — clean
+web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 168 files, 1728 tests, all passing (42 new); npm run build — clean
+```
+
+No manual browser verification performed (standing instruction) and none is possible yet regardless — the feature isn't deployed (no Hosted UI domain, no Google IdP, no Vercel env vars exist yet in any real environment). End-to-end verification is listed above as a required step before this ships.

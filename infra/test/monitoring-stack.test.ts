@@ -22,7 +22,7 @@ let prod: Template;
 
 function buildStack(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
   const app = new App();
-  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config });
+  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config, appBaseUrl: 'https://test.webpresa.example' });
   const repositoryStack = new WebpresaScreenshotRepositoryStack(app, `${appId}ScreenshotRepositoryStack`, { config });
   const screenshotStack = new WebpresaScreenshotStack(app, `${appId}ScreenshotStack`, {
     config,

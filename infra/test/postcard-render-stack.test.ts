@@ -17,7 +17,7 @@ let prod: Template;
 
 function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
   const app = new App();
-  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config });
+  const dataStack = new WebpresaDataStack(app, `${appId}DataStack`, { config, appBaseUrl: 'https://test.webpresa.example' });
   const repositoryStack = new WebpresaPostcardRenderRepositoryStack(app, `${appId}PostcardRenderRepositoryStack`, { config });
   const postcardRenderStack = new WebpresaPostcardRenderStack(app, `${appId}PostcardRenderStack`, {
     config,
