@@ -880,8 +880,20 @@ describe('customer Cognito User Pool', () => {
     });
   });
 
-  it('creates no Google identity provider for prod while its googleOAuthClientId is unset (Phase A of the two-phase deploy)', () => {
-    prod.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+  it('creates no Google identity provider while googleOAuthClientId is unset (Phase A of the two-phase deploy)', () => {
+    // A synthetic stack, not `dev`/`prod` — both now carry real Client IDs
+    // (Phase B is live in both environments), so this test's own point
+    // (verifying the *gating*, not any particular environment's current
+    // state) needs its own unset-config stack rather than relying on either
+    // living environment staying unconfigured indefinitely.
+    const phaseAApp = new App();
+    const phaseAStack = Template.fromStack(
+      new WebpresaDataStack(phaseAApp, 'WebpresaPhaseATestDataStack', {
+        config: { ...ENVIRONMENTS.dev, googleOAuthClientId: '' },
+        appBaseUrl: 'https://test.webpresa.example',
+      }),
+    );
+    phaseAStack.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
   });
 
   it('creates the Google identity provider and OAuth app-client config for dev now that googleOAuthClientId is set (Phase B)', () => {
@@ -902,9 +914,39 @@ describe('customer Cognito User Pool', () => {
     });
   });
 
+  it('creates the Google identity provider for prod, with prod\'s own distinct Client ID', () => {
+    prod.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 1);
+    prod.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+      ProviderName: 'Google',
+      ProviderDetails: Match.objectLike({
+        client_id: '671031439561-ao23q3if9l72vhbsng62nalql4qerirq.apps.googleusercontent.com',
+      }),
+    });
+  });
+
   it('prod User Pool name carries the prod suffix', () => {
     prod.hasResourceProperties('AWS::Cognito::UserPool', {
       UserPoolName: 'webpresa-prod-customers',
     });
+  });
+
+  it('prod uses its real custom Hosted UI domain (auth.webpresa.com), not the default Amazon domain', () => {
+    prod.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      Domain: 'auth.webpresa.com',
+      CustomDomainConfig: Match.objectLike({
+        CertificateArn: 'arn:aws:acm:us-east-1:994748688217:certificate/0b317a19-0c96-418a-9fcc-05562e4a5bd9',
+      }),
+    });
+    const outputs = prod.findOutputs('*');
+    const [, hostedUiDomainOutput] = Object.entries(outputs).find(([key]) => key.includes('HostedUiDomain')) ?? [];
+    expect((hostedUiDomainOutput as { Value?: string } | undefined)?.Value).toBe('https://auth.webpresa.com');
+  });
+
+  it('outputs the CloudFront target domain for the second (post-deploy) DNS record, only when using a custom domain', () => {
+    const outputs = prod.findOutputs('*');
+    expect(Object.keys(outputs).some((key) => key.includes('HostedUiCloudFrontTarget'))).toBe(true);
+
+    const devOutputs = dev.findOutputs('*');
+    expect(Object.keys(devOutputs).some((key) => key.includes('HostedUiCloudFrontTarget'))).toBe(false);
   });
 });

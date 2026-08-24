@@ -9359,3 +9359,39 @@ web/: npm run lint — clean; npx tsc --noEmit — clean; npm test — 168 files
 ```
 
 No manual browser verification performed (standing instruction) and none is possible yet regardless — the feature isn't deployed (no Hosted UI domain, no Google IdP, no Vercel env vars exist yet in any real environment). End-to-end verification is listed above as a required step before this ships.
+
+---
+
+**Date:** 2026-08-24
+
+**Sign in with Google deployed to both dev and prod, plus a custom Hosted UI domain for prod.** Continuation of the same-day "Sign in with Google" work above — that entry covered the code; this one covers the actual rollout, done live with the user driving each manual step (Google Cloud Console, DNS, secret population) as we went.
+
+**Dev**: Phase A (`WebpresaDevDataStack` — Hosted UI domain, `google-oauth` secret placeholder, Pre Sign-up linking Lambda) deployed, then the user created a Google Cloud OAuth client with redirect URI `https://webpresa-dev-customers.auth.us-east-1.amazoncognito.com/oauth2/idpresponse`, populated the secret, and Phase B (the actual `UserPoolIdentityProviderGoogle` + OAuth app-client config) deployed. `COGNITO_HOSTED_UI_DOMAIN`/`GOOGLE_OAUTH_STATE_SECRET` added to Vercel Preview. App code committed and pushed to `dev` (`dc067f1`).
+
+**A real problem surfaced immediately after the dev deploy**: Google's "Choose an account" screen showed `to continue to webpresa-dev-customers.auth.us-east-1.amazoncognito.com` — expected once explained (that screen shows the literal `redirect_uri` domain, which is Cognito's Hosted UI, not this app's, and no OAuth consent-screen branding setting can override it), but not something the user wanted live on production. Fixed for prod only (dev stays on the default domain — not worth the DNS/cert overhead there) via a Cognito custom domain, `auth.webpresa.com`.
+
+**Custom domain implementation** (`infra/lib/config/environments.ts`, `infra/lib/constructs/webpresa-user-pool.ts`): two new `EnvironmentConfig` fields, `cognitoHostedUiCustomDomainName`/`cognitoHostedUiCertificateArn`, gate whether `webpresa-user-pool.ts` creates a `customDomain` (CloudFront-backed) or keeps the default `cognitoDomain` (prefix) — same "empty string = not ready yet" pattern as `googleOAuthClientId`, and deliberately decoupled from it (a stack can have a real Google Client ID without a custom domain, or vice versa). `webpresa.com`'s DNS is managed at GoDaddy, not Route 53 (confirmed against the existing SES DKIM precedent), so this couldn't be a fully CDK-managed `DnsValidatedCertificate` — the ACM certificate was requested and validated out-of-band via the AWS CLI (`aws acm request-certificate`/`describe-certificate`), with the user adding the DNS validation CNAME at GoDaddy manually. Once `ISSUED`, a second CDK deploy created the actual `AWS::Cognito::UserPoolDomain` with `CustomDomainConfig` — confirmed via `cdk diff` that this is a resource **replacement** (delete+recreate), acceptable since nothing depended on the Hosted UI being live yet. A second manual DNS step followed: CNAME `auth.webpresa.com` → the `HostedUiCloudFrontTarget` output (the CloudFront distribution Cognito's custom domain creates).
+
+**Prod rollout**, done in the same sequence as dev but combining Phase B with the custom domain in one deploy (necessary, not just convenient — prod's Google OAuth client was registered against `auth.webpresa.com`'s redirect URI from the start, since the cert validated before Phase B was reached, so deploying the Google IdP without the custom domain would have created a `redirect_uri` mismatch): Phase A deployed (`webpresa-prod-google-oauth` secret, domain, linking Lambda) → user created a second, prod-specific Google Cloud OAuth client (`auth.webpresa.com/oauth2/idpresponse` redirect URI) → secret populated → cert requested/validated at GoDaddy → Phase B deployed (Google IdP + custom domain together, confirmed clean via `cdk diff` — no unrelated pending changes, since prod hadn't been redeployed in a while) → second DNS CNAME added → `COGNITO_HOSTED_UI_DOMAIN`/`GOOGLE_OAUTH_STATE_SECRET` added to Vercel Production (a fresh, independently-generated state secret — never reused across environments, same convention as every other per-environment secret in this app).
+
+**A recurring operational note**: every `cdk deploy` touching IAM (Phase A, both environments) required the user to run it themselves in their own terminal — Claude Code's auto-mode classifier blocks non-interactive execution of IAM-sensitive infrastructure changes even with explicit chat approval and even with `--require-approval never`, by design. Phase B deploys (no IAM changes) went through directly. Worth remembering for any future Cognito/IAM-touching infra work in this repo.
+
+**Test fixes**: three `data-stack.test.ts` assertions had been written against "dev/prod's `googleOAuthClientId` is empty" as a permanent property of those environments rather than the *gating behavior itself* — once real Client IDs were wired in for real, those tests broke. Fixed by decoupling the Phase-A/gating assertion into its own synthetic unset-config stack, and adding real assertions against `dev`/`prod`'s actual (now Phase-B) state instead of asserting an absence that no longer holds.
+
+## Files changed
+
+```
+infra/lib/config/environments.ts             MODIFIED — cognitoHostedUiCustomDomainName/cognitoHostedUiCertificateArn fields; real Google Client IDs and cert ARN for dev/prod
+infra/lib/constructs/webpresa-user-pool.ts   MODIFIED — conditional custom domain, HostedUiCloudFrontTarget output, cloudFrontEndpoint (non-deprecated) API
+infra/test/data-stack.test.ts                MODIFIED — decoupled Phase-A gating test from live env values; new real Phase-B/custom-domain assertions for both dev and prod
+web/docs/deployment.md                       MODIFIED — new "Cognito Hosted UI custom domain (prod only)" guidance section
+web/docs/build_log.md                        MODIFIED — this entry
+```
+
+## Verification
+
+```
+infra/: npm run build — clean; npm test — 248 tests, all passing; npx cdk diff (dev, prod) reviewed before each deploy
+```
+
+Real deploys, not just synth: dev Phase A + Phase B, prod Phase A + Phase B, all confirmed via CloudFormation outputs. `COGNITO_HOSTED_UI_DOMAIN` (`https://auth.webpresa.com` for prod, the default Amazon domain for dev) and `GOOGLE_OAUTH_STATE_SECRET` confirmed present in the correct Vercel environments via `vercel env ls`. Not yet done: the actual end-to-end sign-in test against prod (password sign-up → Google sign-in, same account) — blocked on DNS propagation for the second `auth.webpresa.com` CNAME and the app code landing on `main`.

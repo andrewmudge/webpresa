@@ -1289,6 +1289,35 @@ Adds a Cognito Hosted UI domain, an optional Google identity provider, a Pre Sig
 
 **Repeat for prod** once dev is verified — either a second Google OAuth client (recommended, matches every other per-env credential in this repo) or a second redirect URI added to the same client.
 
+### Cognito Hosted UI custom domain (prod only)
+
+Google's OAuth "Choose an account" screen shows the literal domain of the `redirect_uri` it's sent — for Google federation that's Cognito's own Hosted UI domain, not this app's, so without a custom domain it reads "to continue to `webpresa-{env}-customers.auth.{region}.amazoncognito.com`" instead of anything under `webpresa.com`. Dev deliberately stays on that default domain (not worth the DNS/cert overhead for a dev environment); prod uses `auth.webpresa.com`.
+
+`webpresa.com`'s DNS is managed at **GoDaddy**, not Route 53 (same as the SES DKIM records) — so unlike a typical CDK-managed `DnsValidatedCertificate`, this needs the ACM certificate requested and validated manually, *before* the CDK-managed custom domain is deployed.
+
+**1. Request the certificate** (already done 2026-08-24 for `auth.webpresa.com`, ARN `arn:aws:acm:us-east-1:994748688217:certificate/0b317a19-0c96-418a-9fcc-05562e4a5bd9` — reference for future re-runs or other subdomains):
+```
+aws acm request-certificate --domain-name auth.webpresa.com --validation-method DNS --region us-east-1 --profile webpresa-prod
+```
+Always `us-east-1`, regardless of the environment's own region — Cognito Hosted UI custom domains are CloudFront-backed, and CloudFront/ACM integration requires the certificate there.
+
+**2. Get the DNS validation record**:
+```
+aws acm describe-certificate --certificate-arn <arn> --region us-east-1 --profile webpresa-prod \
+  --query 'Certificate.DomainValidationOptions[0].ResourceRecord' --output json
+```
+Add the returned `Name`/`Value` as a **CNAME** record in GoDaddy's DNS panel for `webpresa.com` — GoDaddy's "Host" field takes the name with the trailing `.webpresa.com.` (and trailing dot) stripped, e.g. `_817d570998d21a8958ecef83a365d8ee.auth`; the "Value"/"Points to" field similarly drops the trailing dot.
+
+**3. Wait for validation** — poll `aws acm describe-certificate --certificate-arn <arn> --region us-east-1 --profile webpresa-prod --query 'Certificate.Status'` until it reports `ISSUED` (typically minutes once the CNAME propagates, but DNS propagation time varies).
+
+**4. Wire it into CDK** — set both `cognitoHostedUiCustomDomainName` (`'auth.webpresa.com'`) and `cognitoHostedUiCertificateArn` (the validated cert's ARN) on prod's `EnvironmentConfig` in `infra/lib/config/environments.ts`. Leaving `cognitoHostedUiCertificateArn` empty is what keeps prod on the default domain in the meantime — `webpresa-user-pool.ts` only creates the custom domain when *both* fields are set, so this is safe to leave partially configured for as long as needed.
+
+**5. Deploy** (`npm run diff:prod`/`deploy:prod`) — creates the Cognito custom domain (`AWS::Cognito::UserPoolDomain` with `CustomDomainConfig`), backed by a CloudFront distribution Cognito manages. Note the new `HostedUiCloudFrontTarget` output.
+
+**6. Add the second DNS record** — a CNAME/ALIAS at GoDaddy: `auth.webpresa.com` → the `HostedUiCloudFrontTarget` output value. This is separate from the validation CNAME in step 2 (that one only proved domain ownership; this one actually routes traffic).
+
+**7. Update the prod Google OAuth client's redirect URI** to `https://auth.webpresa.com/oauth2/idpresponse` (was the default Amazon domain's equivalent) and `COGNITO_HOSTED_UI_DOMAIN` on Vercel Production to `https://auth.webpresa.com`.
+
 ---
 
 ## Stage 24 — Operational Monitoring, Failure Recovery, and Operations Center deployment guidance

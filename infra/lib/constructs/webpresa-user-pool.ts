@@ -3,6 +3,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as path from 'path';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environments';
@@ -121,11 +122,23 @@ export class WebpresaUserPool extends Construct {
       removalPolicy: config.removalPolicy,
     });
 
-    this.userPoolDomain = this.userPool.addDomain('Domain', {
-      cognitoDomain: { domainPrefix: `webpresa-${config.suffix}-customers` },
-    });
+    const usesCustomHostedUiDomain = Boolean(config.cognitoHostedUiCustomDomainName && config.cognitoHostedUiCertificateArn);
+
+    this.userPoolDomain = usesCustomHostedUiDomain
+      ? this.userPool.addDomain('Domain', {
+          customDomain: {
+            domainName: config.cognitoHostedUiCustomDomainName,
+            certificate: acm.Certificate.fromCertificateArn(this, 'HostedUiCertificate', config.cognitoHostedUiCertificateArn),
+          },
+        })
+      : this.userPool.addDomain('Domain', {
+          cognitoDomain: { domainPrefix: `webpresa-${config.suffix}-customers` },
+        });
+
     const region = cdk.Stack.of(this).region;
-    this.hostedUiBaseUrl = `https://${this.userPoolDomain.domainName}.auth.${region}.amazoncognito.com`;
+    this.hostedUiBaseUrl = usesCustomHostedUiDomain
+      ? `https://${config.cognitoHostedUiCustomDomainName}`
+      : `https://${this.userPoolDomain.domainName}.auth.${region}.amazoncognito.com`;
 
     const googleIdp = config.googleOAuthClientId
       ? new cognito.UserPoolIdentityProviderGoogle(this, 'GoogleIdp', {
@@ -213,5 +226,20 @@ export class WebpresaUserPool extends Construct {
       exportName: `webpresa-${config.suffix}-customers-hosted-ui-domain`,
       description: `Cognito Hosted UI base URL for webpresa-${config.suffix}-customers (becomes the app's COGNITO_HOSTED_UI_DOMAIN; also the base for the Google OAuth client's redirect URI, {this value}/oauth2/idpresponse)`,
     });
+
+    if (usesCustomHostedUiDomain) {
+      // The DNS target for the custom domain's own CNAME/ALIAS record —
+      // Cognito custom domains are CloudFront-backed, so
+      // `config.cognitoHostedUiCustomDomainName` (e.g. auth.webpresa.com)
+      // must be pointed at this, separately from the ACM validation CNAME
+      // (which only proves domain ownership, before this resource even
+      // exists). See deployment.md's "Cognito Hosted UI custom domain"
+      // guidance for the exact record to add at GoDaddy.
+      new cdk.CfnOutput(this, 'HostedUiCloudFrontTarget', {
+        value: this.userPoolDomain.cloudFrontEndpoint,
+        exportName: `webpresa-${config.suffix}-customers-hosted-ui-cloudfront-target`,
+        description: `CloudFront distribution domain to CNAME/ALIAS ${config.cognitoHostedUiCustomDomainName} to`,
+      });
+    }
   }
 }
