@@ -12,7 +12,7 @@ function PreviewMockup() {
       initial={{ opacity: 0, y: 20, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.7, delay: 0.4, ease: "easeOut" }}
-      className="relative rounded-2xl shadow-2xl border border-white/10 overflow-hidden w-full max-w-sm mx-auto"
+      className="relative rounded-2xl shadow-2xl border border-white/10 overflow-hidden w-full max-w-[499px] mx-auto"
     >
       <Image
         src="/marketing/preview-landscaping-full.png"

@@ -40,10 +40,10 @@ export default function Navbar() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 flex-shrink-0">
           <Image
-            src="/webpresa_logo.png"
+            src="/webpresa_logo_horizontal_cropped_nobg.png"
             alt="Webpresa"
-            width={40}
-            height={40}
+            width={146}
+            height={24}
             priority
           />
         </Link>

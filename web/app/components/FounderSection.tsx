@@ -61,17 +61,12 @@ export default function FounderSection() {
               Built for the businesses that keep communities running.
             </h2>
 
-            <p className="text-lg text-gray-500 leading-relaxed mb-5">
-              After years of watching talented tradespeople, shop owners, and
-              service providers lose customers to competitors with better
-              websites, I built Webpresa to fix that.
-            </p>
-
             <p className="text-lg text-gray-500 leading-relaxed mb-8">
-              Local businesses are the backbone of every community. You
-              shouldn&apos;t have to choose between running your business and
-              maintaining a professional online presence. Webpresa handles the
-              web so you can focus on what you do best.
+              As a small business owner myself, I know firsthand how much
+              time it takes to build a great website. That is why I started
+              Webpresa. You shouldn&apos;t have to choose between running
+              your business and managing your online presence. We handle the
+              web so you can focus on growing.
             </p>
 
             <Link

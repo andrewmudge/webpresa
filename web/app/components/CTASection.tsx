@@ -54,12 +54,12 @@ export default function CTASection() {
                 </Link>
               </motion.div>
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                <Link
-                  href="#examples"
+                <a
+                  href="mailto:hello@webpresa.com"
                   className="inline-flex items-center justify-center bg-white/10 text-white font-semibold text-base px-8 py-4 rounded-xl border border-white/20 hover:bg-white/20 transition-colors duration-200"
                 >
-                  See Examples
-                </Link>
+                  Contact Us
+                </a>
               </motion.div>
             </div>
 

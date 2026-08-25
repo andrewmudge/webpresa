@@ -25,7 +25,7 @@ const columns = [
       "Managed hosting",
       "Security monitoring",
       "Ongoing maintenance",
-      "Monthly performance review",
+      "Automatic backups",
     ],
   },
 ];

@@ -31,10 +31,10 @@ export default function Footer() {
           <div className="md:col-span-1">
             <Link href="/" className="inline-block mb-4">
               <Image
-                src="/webpresa_logo.png"
+                src="/webpresa_logo_horizontal_cropped_nobg.png"
                 alt="Webpresa"
-                width={28}
-                height={28}
+                width={122}
+                height={20}
               />
             </Link>
             <p className="text-sm text-gray-400 leading-relaxed max-w-xs">

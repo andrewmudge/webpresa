@@ -7,25 +7,29 @@ import Image from "next/image";
 
 function OldWebsiteMockup() {
   return (
-    <Image
-      src="/marketing/before.png"
-      alt="An outdated website for a local plumbing business"
-      width={1052}
-      height={802}
-      className="w-full h-auto rounded-2xl shadow-md border border-gray-200"
-    />
+    <div className="rounded-2xl shadow-md border border-gray-200 bg-white p-1.5">
+      <Image
+        src="/marketing/before.png"
+        alt="An outdated website for a local plumbing business"
+        width={1052}
+        height={802}
+        className="w-full h-auto"
+      />
+    </div>
   );
 }
 
 function NewWebsiteMockup() {
   return (
-    <Image
-      src="/marketing/after.png"
-      alt="A modern website Webpresa built for the same plumbing business"
-      width={1048}
-      height={772}
-      className="w-full h-auto rounded-2xl shadow-xl border border-gray-100"
-    />
+    <div className="rounded-2xl shadow-xl border border-gray-100 bg-white p-1.5">
+      <Image
+        src="/marketing/after.png"
+        alt="A modern website Webpresa built for the same plumbing business"
+        width={1048}
+        height={772}
+        className="w-full h-auto"
+      />
+    </div>
   );
 }
 
@@ -90,6 +94,13 @@ export default function WhyStartFromScratch() {
             </ul>
           </motion.div>
 
+          {/* Mobile arrow between mockups */}
+          <div className="flex lg:hidden justify-center my-4">
+            <div className="w-10 h-10 rounded-full bg-brand-muted flex items-center justify-center shadow-sm rotate-90">
+              <ArrowRight size={18} className="text-brand" />
+            </div>
+          </div>
+
           {/* Arrow */}
           <motion.div
             initial={{ opacity: 0, scale: 0.7 }}
@@ -125,13 +136,6 @@ export default function WhyStartFromScratch() {
               ))}
             </ul>
           </motion.div>
-        </div>
-
-        {/* Mobile arrow between mockups */}
-        <div className="flex lg:hidden justify-center my-4">
-          <div className="w-10 h-10 rounded-full bg-brand-muted flex items-center justify-center shadow-sm rotate-90">
-            <ArrowRight size={18} className="text-brand" />
-          </div>
         </div>
       </div>
     </section>

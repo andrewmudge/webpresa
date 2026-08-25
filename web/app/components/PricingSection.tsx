@@ -135,9 +135,11 @@ export default function PricingSection() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-400 mb-8">
-                Cancel anytime — no long-term contract.
-              </p>
+              {!isAnnual && (
+                <p className="text-sm text-gray-400 mb-8">
+                  Cancel anytime — no long-term contract.
+                </p>
+              )}
 
               {/* Features */}
               <ul className="space-y-3.5 mb-6" role="list">
