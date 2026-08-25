@@ -79,7 +79,9 @@ export function BuildWizard() {
   function fieldValue(name: string): string {
     if (!formRef.current) return '';
     const el = formRef.current.elements.namedItem(name);
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value.trim();
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+      return el.value.trim();
+    }
     return '';
   }
 
