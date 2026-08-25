@@ -108,6 +108,40 @@ describe('definition contains every documented workflow state', () => {
   it.each(expectedStateNames)('includes the %s state', (name) => {
     expect(renderedDefinition()).toContain(`"${name}"`);
   });
+
+  /**
+   * The full definition, parsed as JSON — unlike `renderedDefinition()`
+   * (string-fragment `.toContain()` checks only), this reconstructs every
+   * `Fn::Join` fragment (substituting a placeholder for the non-string
+   * `Ref`/`Fn::GetAtt` interpolations, which only ever appear inside ARN
+   * strings) so individual states' `Parameters` can be asserted on
+   * precisely rather than by brittle substring slicing.
+   */
+  function parsedDefinition(): { States: Record<string, { Parameters?: { RequestBody?: { updates?: Record<string, unknown> } } }> } {
+    const resources = dev.findResources('AWS::StepFunctions::StateMachine');
+    const machine = Object.values(resources)[0] as DefinitionStringJoin;
+    const [, fragments] = machine.Properties.DefinitionString['Fn::Join'];
+    const text = fragments.map((f) => (typeof f === 'string' ? f : '')).join('');
+    return JSON.parse(text);
+  }
+
+  /**
+   * `CrawlWebsite` already generates and persists a `SitePreview` as a side
+   * effect of any successful scrape, before lead-qualification scoring
+   * ever runs — `FinalizeReject`/`FinalizeManualReviewFromScore` only mean
+   * "not worth an admin's time as a sales lead," never "no preview
+   * exists." Both finalize states must carry `previewId` forward (not just
+   * the qualified path) so a self-service build — which doesn't care about
+   * lead qualification — can still find and publish its preview regardless
+   * of how the business scores. See `lib/build/complete-self-service-build.ts`.
+   */
+  it('FinalizeReject and FinalizeManualReviewFromScore both carry crawlResult.previewId forward', () => {
+    const { States } = parsedDefinition();
+    for (const stateName of ['FinalizeReject', 'FinalizeManualReviewFromScore', 'FinalizeQualifiedFromCrawl']) {
+      const updates = States[stateName]?.Parameters?.RequestBody?.updates;
+      expect(updates?.['previewId.$']).toBe('$.crawlResult.ResponseBody.previewId');
+    }
+  });
 });
 
 describe('EventBridge connection auth', () => {

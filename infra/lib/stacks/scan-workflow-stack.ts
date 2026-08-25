@@ -321,12 +321,22 @@ export class WebpresaScanWorkflowStack extends cdk.Stack {
       status: 'reject',
       qualification: sfn.JsonPath.stringAt('$.scoreResult.ResponseBody.qualification'),
       leadPriority: sfn.JsonPath.stringAt('$.scoreResult.ResponseBody.leadPriority'),
+      // CrawlWebsite already generated (and persisted) a SitePreview as a
+      // side effect of any successful scrape, before qualification ever ran
+      // — "reject"/"manual_review" only mean "not worth an admin's time as a
+      // sales lead," never "no preview exists." Carrying previewId through
+      // here too (not just on the qualified path below) is what lets a
+      // self-service build (which doesn't care about lead qualification at
+      // all — see `lib/build/complete-self-service-build.ts`) still find and
+      // publish its preview regardless of how this business scores.
+      previewId: sfn.JsonPath.stringAt('$.crawlResult.ResponseBody.previewId'),
     }).next(succeed);
 
     const finalizeManualReviewFromScore = finalize('FinalizeManualReviewFromScore', {
       status: 'manual_review',
       qualification: sfn.JsonPath.stringAt('$.scoreResult.ResponseBody.qualification'),
       leadPriority: sfn.JsonPath.stringAt('$.scoreResult.ResponseBody.leadPriority'),
+      previewId: sfn.JsonPath.stringAt('$.crawlResult.ResponseBody.previewId'),
       manualReviewReason: sfn.JsonPath.stringAt('$.scoreResult.ResponseBody.message'),
     }).next(succeed);
 
