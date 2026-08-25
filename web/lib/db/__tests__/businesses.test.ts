@@ -37,6 +37,8 @@ import {
   getBusinessesByOwnerUserId,
   releaseOwnership,
   advanceBusinessStatus,
+  buildSelfServiceRateLimitKey,
+  checkAndIncrementSelfServiceBuildRateLimit,
 } from '@/lib/db/businesses';
 import { createBusiness } from '@/domain/factories/business.factory';
 import { createDefaultWebsiteSectionsConfig } from '@/domain/factories/website-sections.factory';
@@ -537,5 +539,26 @@ describe('advanceBusinessStatus', () => {
   it('rethrows an unexpected DynamoDB error', async () => {
     mockSend.mockRejectedValueOnce(new Error('boom'));
     await expect(advanceBusinessStatus('biz_x', 'outreach')).rejects.toThrow('boom');
+  });
+});
+
+describe('self-service build rate limiting', () => {
+  it('buildSelfServiceRateLimitKey matches the RATELIMIT#<scope>#<windowBucket> shape', () => {
+    expect(buildSelfServiceRateLimitKey('ip#abc', '12345')).toBe('RATELIMIT#ip#abc#12345');
+  });
+
+  it('checkAndIncrementSelfServiceBuildRateLimit succeeds under the limit, against the businesses table', async () => {
+    mockSend.mockResolvedValueOnce({});
+    const result = await checkAndIncrementSelfServiceBuildRateLimit({ bucketKey: 'RATELIMIT#ip#abc#1', limit: 3, ttlEpochSeconds: 1 });
+    expect(result).toBe(true);
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.TableName).toBe('webpresa-test-businesses');
+    expect(command.input.Key).toEqual({ businessId: 'RATELIMIT#ip#abc#1' });
+  });
+
+  it('returns false (never throws) once the window limit is reached', async () => {
+    mockSend.mockRejectedValueOnce(new ConditionalCheckFailedException({ message: 'conditional check failed', $metadata: {} }));
+    const result = await checkAndIncrementSelfServiceBuildRateLimit({ bucketKey: 'RATELIMIT#ip#abc#1', limit: 3, ttlEpochSeconds: 1 });
+    expect(result).toBe(false);
   });
 });

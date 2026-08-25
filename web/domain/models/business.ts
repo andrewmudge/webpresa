@@ -85,7 +85,7 @@ export interface BusinessProcessStep {
 export const BUSINESS_STATUSES = ['pending', 'outreach', 'engaged', 'claimed', 'customer', 'cancelled'] as const;
 export type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
-export const BUSINESS_SOURCES = ['scan', 'manual', 'import', 'google_places'] as const;
+export const BUSINESS_SOURCES = ['scan', 'manual', 'import', 'google_places', 'self_service'] as const;
 export type BusinessSource = (typeof BUSINESS_SOURCES)[number];
 
 // ---------------------------------------------------------------------------

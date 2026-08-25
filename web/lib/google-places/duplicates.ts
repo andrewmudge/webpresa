@@ -9,10 +9,13 @@ import { normalizeDomain, normalizePhone, normalizeName } from './normalize';
  * Duplicate-detection input — the minimum fields needed to run every
  * priority-ordered check. Reused for both the review-time search results
  * and the server-side re-check immediately before import (see
- * implementation.md, Stage 12, "Server-side duplicate detection").
+ * implementation.md, Stage 12, "Server-side duplicate detection"), and by
+ * self-service build intake (`lib/build/resolve-duplicate.ts`), which has no
+ * Google Place ID at all — `placeId` is optional for exactly that reason;
+ * `checkPlaceId` below is simply skipped when absent.
  */
 export interface DuplicateCandidate {
-  placeId: string;
+  placeId?: string;
   name: string;
   websiteUrl?: string;
   phone?: string;
@@ -120,7 +123,7 @@ async function checkPlaceId(placeId: string): Promise<DuplicateSignal | undefine
  * short-circuits the rest.
  */
 export async function findDuplicateSignals(candidate: DuplicateCandidate): Promise<DuplicateSignal[]> {
-  const placeIdSignal = await checkPlaceId(candidate.placeId);
+  const placeIdSignal = candidate.placeId ? await checkPlaceId(candidate.placeId) : undefined;
   if (placeIdSignal) return [placeIdSignal];
 
   const businesses = await listAllBusinesses();
@@ -139,6 +142,10 @@ export async function findDuplicateSignalsForBatch(
   const results = new Map<string, DuplicateSignal[]>();
 
   for (const candidate of candidates) {
+    // Google Places batch review always supplies a real placeId (used here
+    // as the result map's key) — this function is never called with
+    // placeId-less candidates.
+    if (!candidate.placeId) continue;
     const placeIdSignal = await checkPlaceId(candidate.placeId);
     results.set(
       candidate.placeId,

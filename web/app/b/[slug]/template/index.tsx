@@ -91,6 +91,7 @@ export function GeneratedWebsite({
             "Public claim-banner behavior"). */}
         {claimBannerState !== 'active' && !isDraft && !isCapture && (
           <ClaimBanner
+            businessId={business.businessId}
             businessName={businessName}
             state={claimBannerState}
             businessSlug={business.slug}

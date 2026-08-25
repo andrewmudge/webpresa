@@ -3,11 +3,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { ClaimBannerState } from '@/lib/claim/banner-state';
+import { startSelfServiceClaimAction } from './claim-actions';
 
 interface Props {
+  businessId: string;
   businessName: string;
   businessSlug: string;
-  /** Never rendered at all for `'active'` — callers only mount this for `'unclaimed'`/`'claimed_pending'`. */
+  /** Never rendered at all for `'active'` — callers only mount this for `'unclaimed'`/`'claimed_pending'`/`'self_service_ready'`. */
   state: Exclude<ClaimBannerState, 'active'>;
   /** Whether this browser holds a validated claim-intent cookie for this specific business (Stage 17). */
   hasMatchingClaimIntent: boolean;
@@ -16,9 +18,13 @@ interface Props {
 /**
  * Redesigned 2026-07-31 (bigger, Webpresa-branded, blue theme instead of
  * amber, a real button instead of an inline text link) — same three
- * states/copy as before, presentation only.
+ * states/copy as before, presentation only. `'self_service_ready'` added
+ * for the self-service `/build` funnel: its CTA submits a Server Action
+ * (not a plain link) because — unlike the other two states, which only
+ * ever navigate to an existing claim-intent/token entry point — this one
+ * has to issue a brand-new Claim record first (see `startSelfServiceClaimAction`).
  */
-export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClaimIntent }: Props) {
+export function ClaimBanner({ businessId, businessName, businessSlug, state, hasMatchingClaimIntent }: Props) {
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
@@ -42,6 +48,11 @@ export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClai
                 <span className="font-semibold">{businessName}</span> — this business has been claimed. Activation
                 pending.
               </>
+            ) : state === 'self_service_ready' ? (
+              <>
+                Your website is ready. Create your Webpresa account to publish it as{' '}
+                <span className="font-semibold">{businessName}</span>&apos;s live website and manage it anytime.
+              </>
             ) : hasMatchingClaimIntent ? (
               <>
                 Your website preview is ready. This site was prepared for{' '}
@@ -63,6 +74,15 @@ export function ClaimBanner({ businessName, businessSlug, state, hasMatchingClai
             >
               Activate Now
             </Link>
+          ) : state === 'self_service_ready' ? (
+            <form action={startSelfServiceClaimAction.bind(null, businessId)}>
+              <button
+                type="submit"
+                className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-(--color-brand-dark)"
+              >
+                Make It Mine
+              </button>
+            </form>
           ) : (
             <Link
               href={claimHref}

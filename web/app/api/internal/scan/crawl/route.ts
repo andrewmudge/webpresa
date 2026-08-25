@@ -27,5 +27,12 @@ export async function POST(request: Request) {
   const { businessId } = (await request.json()) as CrawlRequestBody;
   const outcome = await enrichBusinessWebsite(businessId);
   log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'crawl', requestId, businessId, status: outcome.status });
-  return NextResponse.json(outcome);
+  // `previewId` is always present in the response (as literal `null` when
+  // unset) rather than an omitted key — same reason the score route always
+  // includes `qualification`/`leadPriority` as `null`: the Step Functions
+  // state machine's `sfn.JsonPath.stringAt('$.crawlResult.ResponseBody.previewId')`
+  // references (in `FinalizeReject`/`FinalizeManualReviewFromScore`, reached
+  // whenever a self-service build's URL is unreachable/invalid) throw a
+  // States.Runtime error on a truly-absent key, not just a missing value.
+  return NextResponse.json({ ...outcome, previewId: outcome.previewId ?? null });
 }

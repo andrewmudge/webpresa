@@ -83,6 +83,20 @@ describe('startScanWorkflow', () => {
     expect(secondPutArg.executionArn).toBe('arn:aws:states:us-east-1:123456789012:execution:webpresa-dev-scan-workflow:x');
   });
 
+  it('defaults triggerSource to admin_manual when omitted', async () => {
+    await startScanWorkflow(BUSINESS_ID, 'admin');
+    const [firstPutArg] = mockPutScanExecution.mock.calls[0];
+    expect(firstPutArg.triggerSource).toBe('admin_manual');
+  });
+
+  it('accepts an explicit self_service triggerSource for the self-service build orchestration', async () => {
+    const result = await startScanWorkflow(BUSINESS_ID, BUSINESS_ID, 'self_service');
+    expect(result.status).toBe('started');
+    const [firstPutArg] = mockPutScanExecution.mock.calls[0];
+    expect(firstPutArg.triggerSource).toBe('self_service');
+    expect(firstPutArg.requestedBy).toBe(BUSINESS_ID);
+  });
+
   it('marks the execution failed when StartExecution itself throws, without leaking the raw error', async () => {
     mockSfnSend.mockRejectedValueOnce(new Error('AccessDeniedException: not authorized'));
 

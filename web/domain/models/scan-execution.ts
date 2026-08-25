@@ -63,7 +63,7 @@ export type ScanWorkflowFailureCategory = (typeof SCAN_WORKFLOW_FAILURE_CATEGORI
 export const SCAN_WORKFLOW_PROVIDERS = ['firecrawl', 'playwright', 'openai', 'internal'] as const;
 export type ScanWorkflowProvider = (typeof SCAN_WORKFLOW_PROVIDERS)[number];
 
-export const SCAN_WORKFLOW_TRIGGER_SOURCES = ['admin_manual'] as const;
+export const SCAN_WORKFLOW_TRIGGER_SOURCES = ['admin_manual', 'self_service'] as const;
 export type ScanWorkflowTriggerSource = (typeof SCAN_WORKFLOW_TRIGGER_SOURCES)[number];
 
 export interface ScanWorkflowFailure {

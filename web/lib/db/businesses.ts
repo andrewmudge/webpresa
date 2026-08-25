@@ -14,6 +14,7 @@ import { BUSINESS_STATUSES } from '@/domain/models/business';
 import { BusinessSchema } from '@/domain/schemas/business.schema';
 import { WEBSITE_SECTION_TYPES } from '@/domain/constants/website-sections';
 import { getDynamoDBClient, TABLE_BUSINESSES } from './client';
+import * as rateLimit from './rate-limit';
 
 // ---------------------------------------------------------------------------
 // Read-time tolerance for removed section types
@@ -565,4 +566,30 @@ export async function deleteBusinessById(businessId: string): Promise<void> {
       Key: { businessId },
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Self-service build rate limiting — a distinct item shape in this same
+// table, same pattern `leads.ts`'s `checkAndIncrementLeadRateLimit` already
+// uses (delegating to the table-agnostic `./rate-limit` helper) rather than
+// duplicating it. Folded into the Businesses table since that's the
+// resource self-service submissions actually create.
+// ---------------------------------------------------------------------------
+
+export function buildSelfServiceRateLimitKey(scope: string, windowBucket: string): string {
+  return rateLimit.buildRateLimitKey(scope, windowBucket);
+}
+
+export async function checkAndIncrementSelfServiceBuildRateLimit(params: {
+  bucketKey: string;
+  limit: number;
+  ttlEpochSeconds: number;
+}): Promise<boolean> {
+  return rateLimit.checkAndIncrementRateLimit({
+    tableName: TABLE_BUSINESSES(),
+    partitionKeyName: 'businessId',
+    bucketKey: params.bucketKey,
+    limit: params.limit,
+    ttlEpochSeconds: params.ttlEpochSeconds,
+  });
 }

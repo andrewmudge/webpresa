@@ -100,6 +100,12 @@ describe('checkDuplicatesAgainstList', () => {
     ]);
   });
 
+  it('works with no placeId at all (self-service intake has none)', () => {
+    const existing = makeBusiness({ phone: '5125550100' });
+    const signals = checkDuplicatesAgainstList({ name: 'Different Name', phone: '512-555-0100' }, [existing]);
+    expect(signals.some((s) => s.type === 'phone' && s.confidence === 'blocking')).toBe(true);
+  });
+
   it('returns no signals when nothing matches', () => {
     const existing = makeBusiness();
     const signals = checkDuplicatesAgainstList(
@@ -135,6 +141,15 @@ describe('findDuplicateSignals', () => {
 
     const signals = await findDuplicateSignals({ placeId: 'place_2', name: 'Other', phone: '512-555-0100' });
 
+    expect(signals.some((s) => s.type === 'phone')).toBe(true);
+  });
+
+  it('skips the Place ID lookup entirely when the candidate has none', async () => {
+    mockListAllBusinesses.mockResolvedValueOnce([makeBusiness({ phone: '5125550100' })]);
+
+    const signals = await findDuplicateSignals({ name: 'Other', phone: '512-555-0100' });
+
+    expect(mockGetBusinessByGooglePlaceId).not.toHaveBeenCalled();
     expect(signals.some((s) => s.type === 'phone')).toBe(true);
   });
 });

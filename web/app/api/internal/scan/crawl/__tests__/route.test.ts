@@ -51,4 +51,24 @@ describe('POST /api/internal/scan/crawl', () => {
     const body = await res.json();
     expect(body.status).toBe('manual_approval_required');
   });
+
+  it('reports previewId as null (not an omitted key) when no preview was generated', async () => {
+    // The Step Functions state machine's `sfn.JsonPath.stringAt(...previewId)`
+    // references (`FinalizeReject`/`FinalizeManualReviewFromScore`) throw a
+    // States.Runtime error on a truly-absent JSON key, not just a missing
+    // value — so this key must always be present, same as the score route's
+    // qualification/leadPriority normalization.
+    mockEnrichBusinessWebsite.mockResolvedValueOnce({
+      status: 'failed',
+      scanId: 'scan_3',
+      failureCategory: 'website_unreachable',
+      message: 'Could not reach the website.',
+    });
+
+    const res = await POST(makeRequest({ businessId: 'biz_3' }));
+
+    const body = await res.json();
+    expect(body).toHaveProperty('previewId');
+    expect(body.previewId).toBeNull();
+  });
 });

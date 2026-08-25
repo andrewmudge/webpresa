@@ -4,7 +4,7 @@ import { getStepFunctionsClient, getScanWorkflowStateMachineArn } from '@/lib/st
 import { getBusinessById } from '@/lib/db/businesses';
 import { listScanExecutionsForBusiness, putScanExecution } from '@/lib/db/scan-executions';
 import { createScanExecution } from '@/domain/factories/scan-execution.factory';
-import type { ScanExecution } from '@/domain/models/scan-execution';
+import type { ScanExecution, ScanWorkflowTriggerSource } from '@/domain/models/scan-execution';
 import { log } from '@/lib/logging/log';
 
 /**
@@ -89,8 +89,22 @@ async function startExecution(execution: ScanExecution, businessId: string): Pro
   return { status: 'started', scanExecutionId: execution.scanExecutionId };
 }
 
-/** Starts a fresh scan workflow for a business. Safe to call whether or not a prior execution exists — creates a brand-new `ScanExecution`. */
-export async function startScanWorkflow(businessId: string, requestedBy: string): Promise<StartScanWorkflowOutcome> {
+/**
+ * Starts a fresh scan workflow for a business. Safe to call whether or not a
+ * prior execution exists — creates a brand-new `ScanExecution`.
+ *
+ * `triggerSource` defaults to `'admin_manual'` (every existing caller passes
+ * only two arguments) — the self-service build orchestration
+ * (`lib/build/start-self-service-build.ts`) is the one caller that passes
+ * `'self_service'` explicitly, with `requestedBy` set to the businessId
+ * itself rather than an admin username, since there is no admin session
+ * behind that trigger.
+ */
+export async function startScanWorkflow(
+  businessId: string,
+  requestedBy: string,
+  triggerSource: ScanWorkflowTriggerSource = 'admin_manual',
+): Promise<StartScanWorkflowOutcome> {
   const business = await getBusinessById(businessId);
   if (!business) return { status: 'failed', message: 'Business not found.' };
 
@@ -99,7 +113,7 @@ export async function startScanWorkflow(businessId: string, requestedBy: string)
     return { status: 'conflict', message: SCAN_WORKFLOW_CONFLICT_MESSAGE };
   }
 
-  const execution = createScanExecution({ businessId, triggerSource: 'admin_manual', requestedBy });
+  const execution = createScanExecution({ businessId, triggerSource, requestedBy });
   await putScanExecution(execution);
 
   return startExecution(execution, businessId);

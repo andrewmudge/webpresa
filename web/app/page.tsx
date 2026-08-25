@@ -5,6 +5,7 @@ import ProblemSection from "@/app/components/ProblemSection";
 import WhyStartFromScratch from "@/app/components/WhyStartFromScratch";
 import HowItWorks from "@/app/components/HowItWorks";
 import PreviewSection from "@/app/components/PreviewSection";
+import SelfServiceCTASection from "@/app/components/SelfServiceCTASection";
 // import ExamplesSection from "@/app/components/ExamplesSection"; // Website examples section — temporarily hidden
 import FeaturesSection from "@/app/components/FeaturesSection";
 import PricingSection from "@/app/components/PricingSection";
@@ -33,6 +34,7 @@ export default function Home() {
       <main id="main-content">
         <Hero />
         <PreviewSection />
+        <SelfServiceCTASection />
         <ProblemSection />
         <WhyStartFromScratch />
         <HowItWorks />
