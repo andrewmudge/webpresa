@@ -323,25 +323,48 @@ export function BuildWizard() {
               <span />
             )}
 
-            {isLastStep ? (
-              <button
-                type="submit"
-                disabled={pending}
-                className="inline-flex items-center gap-2 rounded-xl bg-(--color-brand) px-8 py-3.5 text-sm font-bold text-white shadow-md hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {pending ? 'Building your website…' : 'Build My Website'}
-                {!pending && <ArrowRight size={16} />}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={goNext}
-                className="inline-flex items-center gap-2 rounded-xl bg-(--color-brand) px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-(--color-brand-dark) transition-colors"
-              >
-                Next
-                <ArrowRight size={16} />
-              </button>
-            )}
+            {/*
+              Two genuinely separate, always-mounted buttons — never one
+              slot whose `type` flips between "button" and "submit" via a
+              ternary. That pattern is a real React/DOM footgun: clicking
+              "Next" while it's still `type="button"` can trigger a state
+              update that re-renders the *same* DOM node as `type="submit"`
+              within the same tick, and some browsers then treat the
+              original click as landing on a submit button — silently
+              submitting the form a beat later without ever touching "Build
+              My Website" (see build_log.md / the 2026-08-26 bug report).
+            */}
+            <button
+              type="button"
+              onClick={goNext}
+              className={
+                isLastStep
+                  ? 'hidden'
+                  : 'inline-flex items-center gap-2 rounded-xl bg-(--color-brand) px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-(--color-brand-dark) transition-colors'
+              }
+            >
+              Next
+              <ArrowRight size={16} />
+            </button>
+            <button
+              type="submit"
+              // Disabled (not just visually hidden) on every step but the
+              // last — a `type="submit"` button sitting in the DOM, even
+              // hidden, is still a valid target for the browser's implicit
+              // "Enter submits the form" behavior. `disabled` removes it
+              // from consideration entirely, closing that gap without
+              // reintroducing the type-flip bug this button used to share a
+              // DOM slot with.
+              disabled={!isLastStep || pending}
+              className={
+                isLastStep
+                  ? 'inline-flex items-center gap-2 rounded-xl bg-(--color-brand) px-8 py-3.5 text-sm font-bold text-white shadow-md hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
+                  : 'hidden'
+              }
+            >
+              {pending ? 'Building your website…' : 'Build My Website'}
+              {!pending && <ArrowRight size={16} />}
+            </button>
           </div>
         </form>
       </main>
