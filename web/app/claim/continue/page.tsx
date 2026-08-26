@@ -36,6 +36,16 @@ export default async function ClaimContinuePage() {
   const business = await getBusinessById(claim.businessId);
   if (!business) redirect('/claim?error=1');
 
+  // A self-service business's name/address came from the customer
+  // themselves moments ago (`/build`) — pre-fill the signup form's
+  // "Business information" section instead of making them retype it.
+  // Every other source (Google Places import, admin, postcard scan) may be
+  // wrong, so that section stays a deliberate blank correction opportunity
+  // for those funnels — see lib/claim/start-self-service-claim.ts's own
+  // "source is the load-bearing check" comment for the same distinction
+  // used elsewhere in this flow.
+  const prefillFromBusiness = business.source === 'self_service';
+
   return (
     <AccessPageShell
       eyebrow="You&rsquo;re almost there"
@@ -48,7 +58,12 @@ export default async function ClaimContinuePage() {
       }
       cardMaxWidth="max-w-lg"
     >
-      <ClaimContinueForm businessName={business.name} accentColor={ACCESS_BLUE} />
+      <ClaimContinueForm
+        businessName={business.name}
+        accentColor={ACCESS_BLUE}
+        prefillFromBusiness={prefillFromBusiness}
+        initialAddress={business.address}
+      />
     </AccessPageShell>
   );
 }

@@ -4,6 +4,7 @@ import { Mail, Phone, KeyRound, UserPlus } from 'lucide-react';
 import { passwordMeetsPolicy } from '@/lib/auth/password-policy';
 import { IconField, PlainField, SubmitButton, ErrorAlert } from '@/components/access/fields';
 import { GoogleGIcon } from '@/components/icons/GoogleGIcon';
+import type { Address } from '@/domain/models/common';
 import {
   signUpForClaimAction,
   confirmSignUpForClaimAction,
@@ -15,9 +16,12 @@ import { PasswordStrengthChecklist } from './PasswordStrengthChecklist';
 interface Props {
   businessName: string;
   accentColor: string;
+  /** True only for a self-service (`/build`)-sourced business — the customer already typed this data in themselves moments ago, so pre-fill instead of asking again. Every other source may be wrong, so stays blank on purpose. */
+  prefillFromBusiness: boolean;
+  initialAddress?: Address;
 }
 
-export function ClaimContinueForm({ businessName, accentColor }: Props) {
+export function ClaimContinueForm({ businessName, accentColor, prefillFromBusiness, initialAddress }: Props) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,11 +29,11 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [businessNameInput, setBusinessNameInput] = useState('');
-  const [addressLine1, setAddressLine1] = useState('');
-  const [addressCity, setAddressCity] = useState('');
-  const [addressState, setAddressState] = useState('');
-  const [addressPostalCode, setAddressPostalCode] = useState('');
+  const [businessNameInput, setBusinessNameInput] = useState(prefillFromBusiness ? businessName : '');
+  const [addressLine1, setAddressLine1] = useState(prefillFromBusiness ? (initialAddress?.line1 ?? '') : '');
+  const [addressCity, setAddressCity] = useState(prefillFromBusiness ? (initialAddress?.city ?? '') : '');
+  const [addressState, setAddressState] = useState(prefillFromBusiness ? (initialAddress?.state ?? '') : '');
+  const [addressPostalCode, setAddressPostalCode] = useState(prefillFromBusiness ? (initialAddress?.postalCode ?? '') : '');
 
   const passwordValid = passwordMeetsPolicy(password);
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
@@ -218,7 +222,14 @@ export function ClaimContinueForm({ businessName, accentColor }: Props) {
               </div>
 
               <div className="pt-3 border-t border-gray-100">
-                <p className="text-xs font-semibold text-gray-500 mb-2.5">Business information</p>
+                <p className={prefillFromBusiness ? 'text-xs font-semibold text-gray-500 mb-1' : 'text-xs font-semibold text-gray-500 mb-2.5'}>
+                  Business information
+                </p>
+                {prefillFromBusiness && (
+                  <p className="text-xs text-gray-400 mb-2.5">
+                    Pulled from what you already told us — update it here if anything&apos;s changed.
+                  </p>
+                )}
                 <div className="space-y-3">
                   <PlainField
                     name="businessName"
