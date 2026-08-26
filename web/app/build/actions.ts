@@ -7,7 +7,8 @@ import {
   triggerSelfServiceScan,
 } from '@/lib/build/start-self-service-build';
 import { SelfServiceBuildCreateInputSchema } from '@/lib/build/schema';
-import { updateBusiness, buildSelfServiceRateLimitKey, checkAndIncrementSelfServiceBuildRateLimit } from '@/lib/db/businesses';
+import { updateBusiness } from '@/lib/db/businesses';
+import { buildSelfServiceBuildRateLimitKey, checkAndIncrementSelfServiceBuildRateLimit } from '@/lib/db/claims';
 import { appendBusinessPhotos, uploadBusinessAsset } from '@/lib/s3/business-assets';
 import { UploadValidationError } from '@/lib/s3/upload-validation';
 import { signBuildSession, BUILD_SESSION_COOKIE_NAME, BUILD_SESSION_MAX_AGE_SECONDS } from '@/lib/auth/build-session';
@@ -102,7 +103,7 @@ export async function submitBuildAction(_prevState: BuildFormState, formData: Fo
   const windowBucket = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS).toString();
   const rateLimitTtlEpochSeconds = Math.floor((Date.now() + RATE_LIMIT_TTL_BUFFER_MS) / 1000);
   const withinIpLimit = await checkAndIncrementSelfServiceBuildRateLimit({
-    bucketKey: buildSelfServiceRateLimitKey(`ip#${ipHash}`, windowBucket),
+    bucketKey: buildSelfServiceBuildRateLimitKey(`self_service_build#ip#${ipHash}`, windowBucket),
     limit: PER_IP_RATE_LIMIT,
     ttlEpochSeconds: rateLimitTtlEpochSeconds,
   });

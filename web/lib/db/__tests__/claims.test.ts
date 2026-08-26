@@ -27,6 +27,8 @@ import {
   consumeClaim,
   checkAndIncrementRateLimit,
   buildRateLimitKey,
+  checkAndIncrementSelfServiceBuildRateLimit,
+  buildSelfServiceBuildRateLimitKey,
 } from '@/lib/db/claims';
 import { createClaim } from '@/domain/factories/claim.factory';
 
@@ -242,6 +244,42 @@ describe('checkAndIncrementRateLimit', () => {
     const result = await checkAndIncrementRateLimit({
       bucketKey: 'RATELIMIT#abc#1',
       limit: 10,
+      ttlEpochSeconds: Math.floor(Date.now() / 1000) + 3600,
+    });
+    expect(result).toBe(false);
+  });
+});
+
+describe('buildSelfServiceBuildRateLimitKey', () => {
+  it('builds a RATELIMIT#<scope>#<windowBucket> key that cannot collide with a plain claim-validation key', () => {
+    const key = buildSelfServiceBuildRateLimitKey('self_service_build#ip#abc123', '999');
+    expect(key).toBe('RATELIMIT#self_service_build#ip#abc123#999');
+    expect(key).not.toBe(buildRateLimitKey('abc123', '999'));
+  });
+});
+
+describe('checkAndIncrementSelfServiceBuildRateLimit', () => {
+  it('writes against the Claims table, not Businesses — Businesses is fully Scanned elsewhere and would break', async () => {
+    mockSend.mockResolvedValueOnce({});
+    const result = await checkAndIncrementSelfServiceBuildRateLimit({
+      bucketKey: 'RATELIMIT#self_service_build#ip#abc#1',
+      limit: 3,
+      ttlEpochSeconds: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    expect(result).toBe(true);
+    const command = mockSend.mock.calls[0][0];
+    expect(command.input.TableName).toBe('webpresa-test-claims');
+    expect(command.input.Key).toEqual({ claimId: 'RATELIMIT#self_service_build#ip#abc#1' });
+  });
+
+  it('returns false (never throws) once the window limit is reached', async () => {
+    mockSend.mockRejectedValueOnce(
+      new ConditionalCheckFailedException({ message: 'conditional check failed', $metadata: {} }),
+    );
+    const result = await checkAndIncrementSelfServiceBuildRateLimit({
+      bucketKey: 'RATELIMIT#self_service_build#ip#abc#1',
+      limit: 3,
       ttlEpochSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
     expect(result).toBe(false);

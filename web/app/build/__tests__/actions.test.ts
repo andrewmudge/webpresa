@@ -31,9 +31,9 @@ vi.mock('@/lib/build/start-self-service-build', () => ({
   createOrAttachSelfServiceBusiness: mockCreateOrAttach,
   triggerSelfServiceScan: mockTriggerScan,
 }));
-vi.mock('@/lib/db/businesses', () => ({
-  updateBusiness: mockUpdateBusiness,
-  buildSelfServiceRateLimitKey: (scope: string, windowBucket: string) => `RATELIMIT#${scope}#${windowBucket}`,
+vi.mock('@/lib/db/businesses', () => ({ updateBusiness: mockUpdateBusiness }));
+vi.mock('@/lib/db/claims', () => ({
+  buildSelfServiceBuildRateLimitKey: (scope: string, windowBucket: string) => `RATELIMIT#${scope}#${windowBucket}`,
   checkAndIncrementSelfServiceBuildRateLimit: mockCheckRateLimit,
 }));
 vi.mock('@/lib/s3/business-assets', () => ({
@@ -184,7 +184,7 @@ describe('submitBuildAction', () => {
     await expect(submitBuildAction(undefined, baseFormData())).rejects.toThrow('REDIRECT:');
 
     const bucketKey: string = mockCheckRateLimit.mock.calls[0][0].bucketKey;
-    expect(bucketKey).toContain('RATELIMIT#ip#');
+    expect(bucketKey).toContain('RATELIMIT#self_service_build#ip#');
     expect(bucketKey).not.toContain('203.0.113.5');
   });
 });

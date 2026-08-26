@@ -14,7 +14,6 @@ import { BUSINESS_STATUSES } from '@/domain/models/business';
 import { BusinessSchema } from '@/domain/schemas/business.schema';
 import { WEBSITE_SECTION_TYPES } from '@/domain/constants/website-sections';
 import { getDynamoDBClient, TABLE_BUSINESSES } from './client';
-import * as rateLimit from './rate-limit';
 
 // ---------------------------------------------------------------------------
 // Read-time tolerance for removed section types
@@ -367,6 +366,13 @@ export async function listAllBusinesses(): Promise<Business[]> {
       new ScanCommand({
         TableName: TABLE_BUSINESSES(),
         Limit: 200,
+        // Defensive: this table must never carry a non-Business item shape
+        // (e.g. a rate-limit counter) the way leads/claims safely do — this
+        // scan, unlike a targeted GetItem/Query, would try to parse one as a
+        // Business and throw. `slug` is a required field only a real
+        // Business row ever has, so this filter is a no-op today and only
+        // matters if that invariant is ever violated again.
+        FilterExpression: 'attribute_exists(slug)',
         ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
       }),
     );
@@ -566,30 +572,4 @@ export async function deleteBusinessById(businessId: string): Promise<void> {
       Key: { businessId },
     }),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Self-service build rate limiting — a distinct item shape in this same
-// table, same pattern `leads.ts`'s `checkAndIncrementLeadRateLimit` already
-// uses (delegating to the table-agnostic `./rate-limit` helper) rather than
-// duplicating it. Folded into the Businesses table since that's the
-// resource self-service submissions actually create.
-// ---------------------------------------------------------------------------
-
-export function buildSelfServiceRateLimitKey(scope: string, windowBucket: string): string {
-  return rateLimit.buildRateLimitKey(scope, windowBucket);
-}
-
-export async function checkAndIncrementSelfServiceBuildRateLimit(params: {
-  bucketKey: string;
-  limit: number;
-  ttlEpochSeconds: number;
-}): Promise<boolean> {
-  return rateLimit.checkAndIncrementRateLimit({
-    tableName: TABLE_BUSINESSES(),
-    partitionKeyName: 'businessId',
-    bucketKey: params.bucketKey,
-    limit: params.limit,
-    ttlEpochSeconds: params.ttlEpochSeconds,
-  });
 }

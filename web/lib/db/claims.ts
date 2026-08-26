@@ -350,3 +350,35 @@ export async function checkAndIncrementRateLimit(params: RateLimitCheckParams): 
     ttlEpochSeconds: params.ttlEpochSeconds,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Self-service build rate limiting — a second, distinctly-scoped counter
+// shape sharing this same table (see `lib/build/`). Deliberately NOT folded
+// into the `businesses` table: that table is fully `Scan`ned by
+// `listAllBusinesses()` (self-service duplicate detection, Google Places
+// duplicate detection) and parses every scanned item as a `Business` — a
+// counter-shaped item there breaks that scan outright. Claims (like Leads)
+// is never fully scanned, so it's safe. `buildRateLimitKey` above already
+// takes an `ipHash` as its whole scope for claim-token validation; this
+// function takes a full custom scope string instead so
+// `RATELIMIT#self_service_build#ip#<hash>#<window>` can never collide with
+// a plain `RATELIMIT#<hash>#<window>` claim-validation counter.
+// ---------------------------------------------------------------------------
+
+export function buildSelfServiceBuildRateLimitKey(scope: string, windowBucket: string): string {
+  return rateLimit.buildRateLimitKey(scope, windowBucket);
+}
+
+export async function checkAndIncrementSelfServiceBuildRateLimit(params: {
+  bucketKey: string;
+  limit: number;
+  ttlEpochSeconds: number;
+}): Promise<boolean> {
+  return rateLimit.checkAndIncrementRateLimit({
+    tableName: TABLE_CLAIMS(),
+    partitionKeyName: 'claimId',
+    bucketKey: params.bucketKey,
+    limit: params.limit,
+    ttlEpochSeconds: params.ttlEpochSeconds,
+  });
+}
