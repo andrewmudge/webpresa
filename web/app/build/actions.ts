@@ -7,6 +7,7 @@ import { SelfServiceBuildInputSchema } from '@/lib/build/schema';
 import { buildSelfServiceBuildRateLimitKey, checkAndIncrementSelfServiceBuildRateLimit } from '@/lib/db/claims';
 import { signBuildSession, BUILD_SESSION_COOKIE_NAME, BUILD_SESSION_MAX_AGE_SECONDS } from '@/lib/auth/build-session';
 import { hashIp } from '@/lib/claim/validate-token';
+import { resolveRuntimeEnvironment } from '@/lib/env/runtime-environment';
 import {
   HONEYPOT_FIELD_NAME,
   FORM_RENDERED_AT_FIELD_NAME,
@@ -103,16 +104,24 @@ export async function submitBuildAction(_prevState: BuildFormState, formData: Fo
     return { error: GENERIC_ERROR };
   }
 
-  const ipHash = await resolveIpHash();
-  const windowBucket = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS).toString();
-  const rateLimitTtlEpochSeconds = Math.floor((Date.now() + RATE_LIMIT_TTL_BUFFER_MS) / 1000);
-  const withinIpLimit = await checkAndIncrementSelfServiceBuildRateLimit({
-    bucketKey: buildSelfServiceBuildRateLimitKey(`self_service_build#ip#${ipHash}`, windowBucket),
-    limit: PER_IP_RATE_LIMIT,
-    ttlEpochSeconds: rateLimitTtlEpochSeconds,
-  });
-  if (!withinIpLimit) {
-    return { error: RATE_LIMITED_ERROR };
+  // Enforced in production only — every non-production environment (dev,
+  // Preview deployments, local) is exempt so testing isn't throttled by the
+  // same abuse control real traffic needs. `resolveRuntimeEnvironment()`
+  // reads Vercel's own `VERCEL_ENV` (falling back to `NODE_ENV`), not a bare
+  // `NODE_ENV` check — Vercel sets `NODE_ENV=production` for every deployed
+  // build, Preview included, so `NODE_ENV` alone can't distinguish them.
+  if (resolveRuntimeEnvironment() === 'production') {
+    const ipHash = await resolveIpHash();
+    const windowBucket = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS).toString();
+    const rateLimitTtlEpochSeconds = Math.floor((Date.now() + RATE_LIMIT_TTL_BUFFER_MS) / 1000);
+    const withinIpLimit = await checkAndIncrementSelfServiceBuildRateLimit({
+      bucketKey: buildSelfServiceBuildRateLimitKey(`self_service_build#ip#${ipHash}`, windowBucket),
+      limit: PER_IP_RATE_LIMIT,
+      ttlEpochSeconds: rateLimitTtlEpochSeconds,
+    });
+    if (!withinIpLimit) {
+      return { error: RATE_LIMITED_ERROR };
+    }
   }
 
   const parsed = SelfServiceBuildInputSchema.safeParse(fieldsFromFormData(formData));

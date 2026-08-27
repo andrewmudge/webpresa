@@ -20,6 +20,7 @@ const mockHeadersGet = vi.hoisted(() => vi.fn());
 const mockStartSelfServiceBuild = vi.hoisted(() => vi.fn());
 const mockCheckRateLimit = vi.hoisted(() => vi.fn());
 const mockSignBuildSession = vi.hoisted(() => vi.fn());
+const mockResolveRuntimeEnvironment = vi.hoisted(() => vi.fn());
 
 vi.mock('server-only', () => ({}));
 vi.mock('next/navigation', () => ({ redirect: mockRedirect }));
@@ -37,6 +38,7 @@ vi.mock('@/lib/auth/build-session', () => ({
   BUILD_SESSION_COOKIE_NAME: 'webpresa_build_session',
   BUILD_SESSION_MAX_AGE_SECONDS: 7200,
 }));
+vi.mock('@/lib/env/runtime-environment', () => ({ resolveRuntimeEnvironment: mockResolveRuntimeEnvironment }));
 
 import { submitBuildAction } from '../actions';
 
@@ -59,6 +61,9 @@ beforeEach(() => {
   mockSignBuildSession.mockResolvedValue('signed-token');
   mockCheckRateLimit.mockResolvedValue(true);
   mockHeadersGet.mockReturnValue(null);
+  // Default to production so every existing test below still exercises the
+  // rate limit exactly as before — the dev-bypass tests override this.
+  mockResolveRuntimeEnvironment.mockReturnValue('production');
 });
 
 describe('submitBuildAction', () => {
@@ -163,5 +168,31 @@ describe('submitBuildAction', () => {
     const bucketKey: string = mockCheckRateLimit.mock.calls[0][0].bucketKey;
     expect(bucketKey).toContain('RATELIMIT#self_service_build#ip#');
     expect(bucketKey).not.toContain('203.0.113.5');
+  });
+
+  it('skips the rate limit entirely outside production (dev/Preview/local) — testing is never throttled', async () => {
+    mockResolveRuntimeEnvironment.mockReturnValue('development');
+    mockCheckRateLimit.mockResolvedValueOnce(false); // would reject if the check ran at all
+
+    await expect(submitBuildAction(undefined, baseFormData())).rejects.toThrow('REDIRECT:');
+
+    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('skips the rate limit on a Vercel Preview deployment too, not just plain "development"', async () => {
+    mockResolveRuntimeEnvironment.mockReturnValue('preview');
+
+    await expect(submitBuildAction(undefined, baseFormData())).rejects.toThrow('REDIRECT:');
+
+    expect(mockCheckRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('still enforces the rate limit when the resolved environment is genuinely production', async () => {
+    mockResolveRuntimeEnvironment.mockReturnValue('production');
+    mockCheckRateLimit.mockResolvedValueOnce(false);
+
+    const result = await submitBuildAction(undefined, baseFormData());
+
+    expect(result?.error).toContain('Too many attempts');
   });
 });

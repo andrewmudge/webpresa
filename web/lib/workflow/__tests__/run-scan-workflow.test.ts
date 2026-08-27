@@ -11,11 +11,15 @@ const {
   mockListScanExecutionsForBusiness,
   mockPutScanExecution,
   mockSfnSend,
+  mockIsStaleExecution,
+  mockMarkStaleExecutionFailed,
 } = vi.hoisted(() => ({
   mockGetBusinessById: vi.fn(),
   mockListScanExecutionsForBusiness: vi.fn(),
   mockPutScanExecution: vi.fn(),
   mockSfnSend: vi.fn(),
+  mockIsStaleExecution: vi.fn(),
+  mockMarkStaleExecutionFailed: vi.fn(),
 }));
 
 vi.mock('@/lib/db/businesses', () => ({ getBusinessById: mockGetBusinessById }));
@@ -26,6 +30,10 @@ vi.mock('@/lib/db/scan-executions', () => ({
 vi.mock('@/lib/stepfunctions/client', () => ({
   getStepFunctionsClient: () => ({ send: mockSfnSend }),
   getScanWorkflowStateMachineArn: () => 'arn:aws:states:us-east-1:123456789012:stateMachine:webpresa-dev-scan-workflow',
+}));
+vi.mock('../stale', () => ({
+  isStaleExecution: mockIsStaleExecution,
+  markStaleExecutionFailed: mockMarkStaleExecutionFailed,
 }));
 vi.mock('server-only', () => ({}));
 
@@ -38,6 +46,9 @@ beforeEach(() => {
   mockGetBusinessById.mockResolvedValue({ businessId: BUSINESS_ID });
   mockListScanExecutionsForBusiness.mockResolvedValue([]);
   mockSfnSend.mockResolvedValue({ executionArn: 'arn:aws:states:us-east-1:123456789012:execution:webpresa-dev-scan-workflow:x' });
+  // Default: nothing is stale — every existing test's fresh createScanExecution() calls stay "active".
+  mockIsStaleExecution.mockReturnValue(false);
+  mockMarkStaleExecutionFailed.mockResolvedValue({ status: 'marked_failed' });
 });
 
 describe('startScanWorkflow', () => {
@@ -97,6 +108,28 @@ describe('startScanWorkflow', () => {
     expect(firstPutArg.requestedBy).toBe(BUSINESS_ID);
   });
 
+  it('does not treat a stale queued/running execution as blocking, and heals it', async () => {
+    const stale = createScanExecution({ businessId: BUSINESS_ID, triggerSource: 'admin_manual', requestedBy: 'admin' });
+    mockListScanExecutionsForBusiness.mockResolvedValueOnce([{ ...stale, status: 'running' }]);
+    mockIsStaleExecution.mockReturnValue(true);
+
+    const result = await startScanWorkflow(BUSINESS_ID, 'admin');
+
+    expect(result.status).toBe('started');
+    expect(mockMarkStaleExecutionFailed).toHaveBeenCalledWith(BUSINESS_ID, stale.scanExecutionId);
+  });
+
+  it('never lets a stale-cleanup failure block starting the new execution', async () => {
+    const stale = createScanExecution({ businessId: BUSINESS_ID, triggerSource: 'admin_manual', requestedBy: 'admin' });
+    mockListScanExecutionsForBusiness.mockResolvedValueOnce([{ ...stale, status: 'running' }]);
+    mockIsStaleExecution.mockReturnValue(true);
+    mockMarkStaleExecutionFailed.mockRejectedValueOnce(new Error('conditional check failed'));
+
+    const result = await startScanWorkflow(BUSINESS_ID, 'admin');
+
+    expect(result.status).toBe('started');
+  });
+
   it('marks the execution failed when StartExecution itself throws, without leaking the raw error', async () => {
     mockSfnSend.mockRejectedValueOnce(new Error('AccessDeniedException: not authorized'));
 
@@ -118,6 +151,17 @@ describe('rerunScanWorkflow', () => {
 
     expect(result.status).toBe('conflict');
     expect(mockSfnSend).not.toHaveBeenCalled();
+  });
+
+  it('reruns a stale-but-still-"running" execution instead of permanently blocking on it', async () => {
+    const previous = createScanExecution({ businessId: BUSINESS_ID, triggerSource: 'admin_manual', requestedBy: 'admin' });
+    mockListScanExecutionsForBusiness.mockResolvedValueOnce([{ ...previous, status: 'running' }]);
+    mockIsStaleExecution.mockReturnValue(true);
+
+    const result = await rerunScanWorkflow(BUSINESS_ID, previous.scanExecutionId, 'admin');
+
+    expect(result.status).toBe('started');
+    expect(mockMarkStaleExecutionFailed).toHaveBeenCalledWith(BUSINESS_ID, previous.scanExecutionId);
   });
 
   it('returns failed when the prior execution cannot be found', async () => {

@@ -6,6 +6,7 @@ import { listScanExecutionsForBusiness, putScanExecution } from '@/lib/db/scan-e
 import { createScanExecution } from '@/domain/factories/scan-execution.factory';
 import type { ScanExecution, ScanWorkflowTriggerSource } from '@/domain/models/scan-execution';
 import { log } from '@/lib/logging/log';
+import { isStaleExecution, markStaleExecutionFailed } from './stale';
 
 /**
  * Stage 16 — starts (or reruns) the scan workflow for a business. Creates a
@@ -25,8 +26,48 @@ export interface StartScanWorkflowOutcome {
   message?: string;
 }
 
+/**
+ * `queued`/`running` alone isn't enough — a Step Functions execution that
+ * silently died without ever reaching `RecordFailure` (the AWS-side
+ * execution failed, timed out, or was stopped, but the DynamoDB write
+ * marking it terminal never landed) leaves the record stuck `queued`/
+ * `running` forever otherwise, permanently blocking that business from
+ * ever starting another scan — no admin recovery path exists for
+ * self-service, unlike the admin dashboard's own "mark stale" button.
+ * `isStaleExecution` (`lib/workflow/stale.ts`, Stage 24) already defines
+ * exactly this staleness window; reused here rather than duplicated.
+ */
 function hasActiveExecution(executions: ScanExecution[]): boolean {
-  return executions.some((e) => e.status === 'queued' || e.status === 'running');
+  return executions.some((e) => (e.status === 'queued' || e.status === 'running') && !isStaleExecution(e));
+}
+
+/**
+ * Best-effort cleanup: any execution just excluded from `hasActiveExecution`
+ * for being stale is still sitting in the database showing `queued`/
+ * `running` — mark it `failed` (matching what actually happened in AWS) so
+ * the history stays honest, using the exact same atomic transition the
+ * admin "mark stale" action already uses. Never allowed to block or fail
+ * the caller's real request; a failure here just means the next call
+ * re-attempts the same cleanup.
+ */
+async function healStaleExecutions(businessId: string, executions: ScanExecution[]): Promise<void> {
+  const stale = executions.filter((e) => (e.status === 'queued' || e.status === 'running') && isStaleExecution(e));
+  await Promise.all(
+    stale.map(async (e) => {
+      try {
+        await markStaleExecutionFailed(businessId, e.scanExecutionId);
+      } catch (err) {
+        log({
+          level: 'warn',
+          event: 'scan.workflow.stale_cleanup_failed',
+          component: 'scan-workflow',
+          businessId,
+          scanExecutionId: e.scanExecutionId,
+          message: err instanceof Error ? err.message : 'Failed to mark a stale execution failed.',
+        });
+      }
+    }),
+  );
 }
 
 async function startExecution(execution: ScanExecution, businessId: string): Promise<StartScanWorkflowOutcome> {
@@ -112,6 +153,7 @@ export async function startScanWorkflow(
   if (hasActiveExecution(existing)) {
     return { status: 'conflict', message: SCAN_WORKFLOW_CONFLICT_MESSAGE };
   }
+  await healStaleExecutions(businessId, existing);
 
   const execution = createScanExecution({ businessId, triggerSource, requestedBy });
   await putScanExecution(execution);
@@ -142,6 +184,7 @@ export async function rerunScanWorkflow(
   if (hasActiveExecution(existing)) {
     return { status: 'conflict', message: SCAN_WORKFLOW_CONFLICT_MESSAGE };
   }
+  await healStaleExecutions(businessId, existing);
 
   const previous = existing.find((e) => e.scanExecutionId === previousScanExecutionId);
   if (!previous) return { status: 'failed', message: 'Prior scan execution not found.' };
