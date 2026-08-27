@@ -26,5 +26,10 @@ export async function POST(request: Request) {
   const { businessId } = (await request.json()) as GeneratePreviewRequestBody;
   const outcome = await generateAndSaveWebsite(businessId);
   log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'generate-preview', requestId, businessId, status: outcome.status });
-  return NextResponse.json(outcome);
+  // `previewId`/`message` are each only set on some `GenerateAndSaveWebsiteOutcome`
+  // variants — normalized to explicit `null` rather than an omitted key for
+  // the same reason as the crawl/score routes: a Step Functions
+  // `sfn.JsonPath.stringAt(...)` reference throws States.Runtime on a truly-
+  // absent key, not just a missing value.
+  return NextResponse.json({ ...outcome, previewId: outcome.previewId ?? null, message: outcome.message ?? null });
 }

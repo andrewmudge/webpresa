@@ -27,12 +27,15 @@ export async function POST(request: Request) {
   const { businessId } = (await request.json()) as CrawlRequestBody;
   const outcome = await enrichBusinessWebsite(businessId);
   log({ event: 'internal.scan.request_completed', component: 'internal-api', operation: 'crawl', requestId, businessId, status: outcome.status });
-  // `previewId` is always present in the response (as literal `null` when
-  // unset) rather than an omitted key — same reason the score route always
-  // includes `qualification`/`leadPriority` as `null`: the Step Functions
-  // state machine's `sfn.JsonPath.stringAt('$.crawlResult.ResponseBody.previewId')`
-  // references (in `FinalizeReject`/`FinalizeManualReviewFromScore`, reached
-  // whenever a self-service build's URL is unreachable/invalid) throw a
-  // States.Runtime error on a truly-absent key, not just a missing value.
-  return NextResponse.json({ ...outcome, previewId: outcome.previewId ?? null });
+  // `previewId`/`message` are always present in the response (as literal
+  // `null` when unset) rather than an omitted key — same reason the score
+  // route always includes `qualification`/`leadPriority` as `null`: the
+  // Step Functions state machine's `sfn.JsonPath.stringAt(...)` references
+  // (`previewId` in `FinalizeReject`/`FinalizeManualReviewFromScore`;
+  // `message` in `FinalizeCrawlFailedManualReview`'s `manualReviewReason`)
+  // throw a States.Runtime error on a truly-absent key, not just a missing
+  // value — confirmed live: a 2026-08-27 self-service run crashed exactly
+  // this way when `EnrichmentOutcome`'s `'completed'` variant (no `message`
+  // field at all) reached a state expecting one.
+  return NextResponse.json({ ...outcome, previewId: outcome.previewId ?? null, message: outcome.message ?? null });
 }

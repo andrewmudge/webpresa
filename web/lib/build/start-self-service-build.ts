@@ -81,6 +81,7 @@ export async function createOrAttachSelfServiceBusiness(
   // already fails closed on any owned business before reaching this point,
   // so there is nothing here that could belong to someone else's account.
   await updateBusiness(businessId, {
+    name: input.name,
     industry: input.industry,
     ...(input.phone !== undefined && { phone: input.phone }),
     ...(input.email !== undefined && { email: input.email }),

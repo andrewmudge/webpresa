@@ -44,6 +44,7 @@ describe('POST /api/internal/scan/score', () => {
       qualification: 'qualified',
       leadPriority: 'high',
       websiteQualityScore: 82,
+      message: null,
     });
   });
 
@@ -57,5 +58,20 @@ describe('POST /api/internal/scan/score', () => {
     expect(body.qualification).toBeNull();
     expect(body.leadPriority).toBeNull();
     expect(body.websiteQualityScore).toBeNull();
+  });
+
+  it('reports message as null (not an omitted key) on a completed score with none — the exact 2026-08-27 States.Runtime crash', async () => {
+    // FinalizeManualReviewFromScore's manualReviewReason.$ reads
+    // $.scoreResult.ResponseBody.message — a truly-absent key (not just a
+    // missing value) throws States.Runtime. A genuinely completed
+    // ScoringOutcome never sets `message` at all.
+    mockScoreBusinessWebsite.mockResolvedValueOnce({ status: 'completed', scanId: 'scan_1', qualification: 'manual_review', leadPriority: 'high' });
+    mockGetBusinessById.mockResolvedValueOnce({ qualification: 'manual_review', leadPriority: 'high', websiteQualityScore: 49 });
+
+    const res = await POST(makeRequest({ businessId: 'biz_1' }));
+    const body = await res.json();
+
+    expect(body).toHaveProperty('message');
+    expect(body.message).toBeNull();
   });
 });

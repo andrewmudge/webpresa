@@ -30,13 +30,26 @@ describe('POST /api/internal/scan/crawl', () => {
     expect(mockEnrichBusinessWebsite).not.toHaveBeenCalled();
   });
 
-  it('delegates to enrichBusinessWebsite and returns its outcome verbatim', async () => {
+  it('delegates to enrichBusinessWebsite and normalizes the missing message key to null', async () => {
     mockEnrichBusinessWebsite.mockResolvedValueOnce({ status: 'completed', scanId: 'scan_1', previewId: 'preview_1' });
 
     const res = await POST(makeRequest({ businessId: 'biz_1' }));
 
     expect(mockEnrichBusinessWebsite).toHaveBeenCalledWith('biz_1');
-    expect(await res.json()).toEqual({ status: 'completed', scanId: 'scan_1', previewId: 'preview_1' });
+    expect(await res.json()).toEqual({ status: 'completed', scanId: 'scan_1', previewId: 'preview_1', message: null });
+  });
+
+  it('reports message as null (not an omitted key) on a completed outcome with none — the exact 2026-08-27 States.Runtime crash', async () => {
+    // FinalizeCrawlFailedManualReview's manualReviewReason.$ reads
+    // $.crawlResult.ResponseBody.message — a truly-absent key (not just a
+    // missing value) throws States.Runtime, not a graceful branch.
+    mockEnrichBusinessWebsite.mockResolvedValueOnce({ status: 'completed', scanId: 'scan_1', previewId: 'preview_1' });
+
+    const res = await POST(makeRequest({ businessId: 'biz_1' }));
+    const body = await res.json();
+
+    expect(body).toHaveProperty('message');
+    expect(body.message).toBeNull();
   });
 
   it('passes through the no-website manual_approval_required outcome unchanged', async () => {

@@ -30,16 +30,16 @@ describe('POST /api/internal/scan/generate-preview', () => {
     expect(mockGenerateAndSaveWebsite).not.toHaveBeenCalled();
   });
 
-  it('delegates to generateAndSaveWebsite and returns its outcome verbatim', async () => {
+  it('delegates to generateAndSaveWebsite and normalizes the missing message key to null', async () => {
     mockGenerateAndSaveWebsite.mockResolvedValueOnce({ status: 'completed', previewId: 'preview_1' });
 
     const res = await POST(makeRequest({ businessId: 'biz_1' }));
 
     expect(mockGenerateAndSaveWebsite).toHaveBeenCalledWith('biz_1');
-    expect(await res.json()).toEqual({ status: 'completed', previewId: 'preview_1' });
+    expect(await res.json()).toEqual({ status: 'completed', previewId: 'preview_1', message: null });
   });
 
-  it('passes through a not_eligible outcome unchanged', async () => {
+  it('passes through a not_eligible outcome and normalizes the missing previewId key to null', async () => {
     mockGenerateAndSaveWebsite.mockResolvedValueOnce({
       status: 'not_eligible',
       message: 'Add at least one service under "Services offered" before generating a website.',
@@ -49,5 +49,7 @@ describe('POST /api/internal/scan/generate-preview', () => {
 
     const body = await res.json();
     expect(body.status).toBe('not_eligible');
+    expect(body).toHaveProperty('previewId');
+    expect(body.previewId).toBeNull();
   });
 });

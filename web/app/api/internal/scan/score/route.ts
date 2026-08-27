@@ -37,5 +37,14 @@ export async function POST(request: Request) {
     qualification: business?.qualification ?? null,
     leadPriority: business?.leadPriority ?? null,
     websiteQualityScore: business?.websiteQualityScore ?? null,
+    // `message` is only set on some `ScoringOutcome` variants (e.g.
+    // `not_eligible`) — a genuinely `'completed'` score never sets it. The
+    // Step Functions state machine reads `manualReviewReason.$` from this
+    // field in `FinalizeManualReviewFromScore`/`FinalizeManualReviewNoWebsite`,
+    // which throws States.Runtime on a truly-absent key, not just a missing
+    // value — confirmed live: a 2026-08-27 self-service run crashed exactly
+    // this way. Same fix as the crawl/generate-preview routes' `message`/
+    // `previewId` normalization.
+    message: outcome.message ?? null,
   });
 }

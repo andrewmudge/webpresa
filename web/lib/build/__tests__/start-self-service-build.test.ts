@@ -90,6 +90,14 @@ describe('startSelfServiceBuild', () => {
     expect(mockStartScanWorkflow).toHaveBeenCalledWith('biz_existing', 'biz_existing', 'self_service');
   });
 
+  it('renames an attached-to business to the visitor-entered name — 2026-08-27 bug: attach path silently kept the old name', async () => {
+    mockResolveDuplicate.mockResolvedValueOnce({ outcome: 'attach', businessId: 'biz_existing' });
+
+    await startSelfServiceBuild({ ...BASE_INPUT, name: 'Tonys Plumbing' });
+
+    expect(mockUpdateBusiness).toHaveBeenCalledWith('biz_existing', expect.objectContaining({ name: 'Tonys Plumbing' }));
+  });
+
   it('defaults the address country to US without asking the visitor for it', async () => {
     mockResolveDuplicate.mockResolvedValueOnce({ outcome: 'create' });
 
