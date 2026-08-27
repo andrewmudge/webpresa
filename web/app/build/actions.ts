@@ -2,15 +2,9 @@
 
 import { redirect } from 'next/navigation';
 import { cookies, headers } from 'next/headers';
-import {
-  createOrAttachSelfServiceBusiness,
-  triggerSelfServiceScan,
-} from '@/lib/build/start-self-service-build';
-import { SelfServiceBuildCreateInputSchema } from '@/lib/build/schema';
-import { updateBusiness } from '@/lib/db/businesses';
+import { startSelfServiceBuild } from '@/lib/build/start-self-service-build';
+import { SelfServiceBuildInputSchema } from '@/lib/build/schema';
 import { buildSelfServiceBuildRateLimitKey, checkAndIncrementSelfServiceBuildRateLimit } from '@/lib/db/claims';
-import { appendBusinessPhotos, uploadBusinessAsset } from '@/lib/s3/business-assets';
-import { UploadValidationError } from '@/lib/s3/upload-validation';
 import { signBuildSession, BUILD_SESSION_COOKIE_NAME, BUILD_SESSION_MAX_AGE_SECONDS } from '@/lib/auth/build-session';
 import { hashIp } from '@/lib/claim/validate-token';
 import {
@@ -19,9 +13,6 @@ import {
   isHoneypotTripped,
   isSubmittedTooFast,
 } from '@/lib/leads/spam-guard';
-
-/** Matches `MAX_BUSINESS_PHOTOS` (`lib/customer-editing/photos.ts`) and `SelfServiceBuildInputSchema`'s own `photoUrls` cap. */
-const MAX_PHOTOS = 6;
 
 /**
  * A daily (not 10-minute, like leads') window — building a website is a
@@ -51,6 +42,15 @@ function textField(formData: FormData, name: string): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
+/**
+ * `logo`/`photos` are no longer raw `File`s by the time this runs — they're
+ * uploaded individually, on selection, by `/api/build/upload` (bundling
+ * every file into this one final submission hit Vercel's platform-level
+ * ~4.5MB serverless request-body ceiling; see that route's doc comment).
+ * The wizard instead submits the already-uploaded `/api/assets/...` URLs as
+ * plain hidden-input text, which `SelfServiceBuildInputSchema`'s
+ * `logoUrl`/`photoUrls` fields already accept.
+ */
 function fieldsFromFormData(formData: FormData) {
   const line1 = textField(formData, 'addressLine1');
   const city = textField(formData, 'addressCity');
@@ -60,6 +60,8 @@ function fieldsFromFormData(formData: FormData) {
   const socialLinks = ['facebook', 'instagram', 'linkedin', 'youtube', 'twitter']
     .map((key) => textField(formData, `social_${key}`))
     .filter((v): v is string => v !== undefined);
+
+  const photoUrls = formData.getAll('photoUrls').filter((v): v is string => typeof v === 'string' && v.trim() !== '');
 
   return {
     name: textField(formData, 'name') ?? '',
@@ -74,6 +76,8 @@ function fieldsFromFormData(formData: FormData) {
     description: textField(formData, 'description'),
     differentiators: textField(formData, 'differentiators'),
     ...(socialLinks.length > 0 ? { socialLinks } : {}),
+    logoUrl: textField(formData, 'logoUrl'),
+    ...(photoUrls.length > 0 ? { photoUrls } : {}),
   };
 }
 
@@ -111,55 +115,17 @@ export async function submitBuildAction(_prevState: BuildFormState, formData: Fo
     return { error: RATE_LIMITED_ERROR };
   }
 
-  const parsed = SelfServiceBuildCreateInputSchema.safeParse(fieldsFromFormData(formData));
+  const parsed = SelfServiceBuildInputSchema.safeParse(fieldsFromFormData(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Please check the highlighted fields.' };
   }
 
-  const created = await createOrAttachSelfServiceBusiness(parsed.data);
-  if (created.status === 'blocked') {
-    return { error: created.message };
+  const result = await startSelfServiceBuild(parsed.data);
+  if (result.status !== 'started') {
+    return { error: result.status === 'blocked' ? result.message : friendlyErrorMessage(result.message ?? GENERIC_ERROR) };
   }
 
-  const { businessId } = created;
-
-  // Uploads happen now, with a real businessId, before the scan workflow
-  // starts generating a preview from Business.photoUrls — see
-  // start-self-service-build.ts's doc comment for why this can't happen
-  // inside createOrAttachSelfServiceBusiness itself.
-  try {
-    const logoFile = formData.get('logo');
-    const photoFiles = formData.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
-
-    let logoUrl: string | undefined;
-    if (logoFile instanceof File && logoFile.size > 0) {
-      logoUrl = await uploadBusinessAsset(businessId, logoFile, 'logo');
-    }
-
-    let photoUrls: string[] | undefined;
-    if (photoFiles.length > 0) {
-      photoUrls = await appendBusinessPhotos(businessId, [], photoFiles.slice(0, MAX_PHOTOS));
-    }
-
-    if (logoUrl !== undefined || photoUrls !== undefined) {
-      await updateBusiness(businessId, {
-        ...(logoUrl !== undefined && { logoUrl }),
-        ...(photoUrls !== undefined && { photoUrls }),
-      });
-    }
-  } catch (err) {
-    if (err instanceof UploadValidationError) {
-      return { error: err.message };
-    }
-    return { error: 'Something went wrong uploading your photos. Please try again.' };
-  }
-
-  const triggered = await triggerSelfServiceScan(businessId);
-  if (triggered.status !== 'started') {
-    return { error: friendlyErrorMessage(triggered.message) };
-  }
-
-  const token = await signBuildSession({ businessId, buildId: triggered.scanExecutionId });
+  const token = await signBuildSession({ businessId: result.businessId, buildId: result.scanExecutionId });
   const cookieStore = await cookies();
   cookieStore.set(BUILD_SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -169,5 +135,5 @@ export async function submitBuildAction(_prevState: BuildFormState, formData: Fo
     path: '/',
   });
 
-  redirect(`/build/${triggered.scanExecutionId}`);
+  redirect(`/build/${result.scanExecutionId}`);
 }

@@ -1,8 +1,12 @@
 /**
  * Unit tests for submitBuildAction — the `/build` intake's single Server
- * Action: validate → create/attach business → upload any files under the
- * real businessId → trigger the scan workflow → mint the build-session
- * cookie → redirect to /build/[buildId].
+ * Action: validate → start the build (create/attach business, trigger the
+ * scan workflow) → mint the build-session cookie → redirect to
+ * /build/[buildId]. Logo/photo files are no longer part of this request at
+ * all — they're uploaded individually, on selection, by
+ * `/api/build/upload` (see that route's doc comment for why bundling them
+ * into this one final submission doesn't work on Vercel); this action only
+ * ever receives already-uploaded `logoUrl`/`photoUrls` as plain text.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -13,12 +17,8 @@ const mockRedirect = vi.hoisted(() =>
 );
 const mockCookieSet = vi.hoisted(() => vi.fn());
 const mockHeadersGet = vi.hoisted(() => vi.fn());
-const mockCreateOrAttach = vi.hoisted(() => vi.fn());
-const mockTriggerScan = vi.hoisted(() => vi.fn());
-const mockUpdateBusiness = vi.hoisted(() => vi.fn());
+const mockStartSelfServiceBuild = vi.hoisted(() => vi.fn());
 const mockCheckRateLimit = vi.hoisted(() => vi.fn());
-const mockUploadBusinessAsset = vi.hoisted(() => vi.fn());
-const mockAppendBusinessPhotos = vi.hoisted(() => vi.fn());
 const mockSignBuildSession = vi.hoisted(() => vi.fn());
 
 vi.mock('server-only', () => ({}));
@@ -27,23 +27,11 @@ vi.mock('next/headers', () => ({
   cookies: async () => ({ set: mockCookieSet }),
   headers: async () => ({ get: mockHeadersGet }),
 }));
-vi.mock('@/lib/build/start-self-service-build', () => ({
-  createOrAttachSelfServiceBusiness: mockCreateOrAttach,
-  triggerSelfServiceScan: mockTriggerScan,
-}));
-vi.mock('@/lib/db/businesses', () => ({ updateBusiness: mockUpdateBusiness }));
+vi.mock('@/lib/build/start-self-service-build', () => ({ startSelfServiceBuild: mockStartSelfServiceBuild }));
 vi.mock('@/lib/db/claims', () => ({
   buildSelfServiceBuildRateLimitKey: (scope: string, windowBucket: string) => `RATELIMIT#${scope}#${windowBucket}`,
   checkAndIncrementSelfServiceBuildRateLimit: mockCheckRateLimit,
 }));
-vi.mock('@/lib/s3/business-assets', () => ({
-  uploadBusinessAsset: mockUploadBusinessAsset,
-  appendBusinessPhotos: mockAppendBusinessPhotos,
-}));
-vi.mock('@/lib/s3/upload-validation', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/s3/upload-validation')>('@/lib/s3/upload-validation');
-  return actual;
-});
 vi.mock('@/lib/auth/build-session', () => ({
   signBuildSession: mockSignBuildSession,
   BUILD_SESSION_COOKIE_NAME: 'webpresa_build_session',
@@ -51,7 +39,6 @@ vi.mock('@/lib/auth/build-session', () => ({
 }));
 
 import { submitBuildAction } from '../actions';
-import { UploadValidationError } from '@/lib/s3/upload-validation';
 
 function baseFormData(overrides: Record<string, string> = {}) {
   const fd = new FormData();
@@ -68,8 +55,7 @@ function baseFormData(overrides: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockCreateOrAttach.mockResolvedValue({ status: 'ready', businessId: 'biz_1' });
-  mockTriggerScan.mockResolvedValue({ status: 'started', scanExecutionId: 'scanexec_1' });
+  mockStartSelfServiceBuild.mockResolvedValue({ status: 'started', businessId: 'biz_1', scanExecutionId: 'scanexec_1' });
   mockSignBuildSession.mockResolvedValue('signed-token');
   mockCheckRateLimit.mockResolvedValue(true);
   mockHeadersGet.mockReturnValue(null);
@@ -83,16 +69,15 @@ describe('submitBuildAction', () => {
     const result = await submitBuildAction(undefined, fd);
 
     expect(result?.error).toBeTruthy();
-    expect(mockCreateOrAttach).not.toHaveBeenCalled();
+    expect(mockStartSelfServiceBuild).not.toHaveBeenCalled();
   });
 
-  it('surfaces the blocked-duplicate message without triggering a scan', async () => {
-    mockCreateOrAttach.mockResolvedValueOnce({ status: 'blocked', message: 'This business may already be set up with Webpresa.' });
+  it('surfaces the blocked-duplicate message', async () => {
+    mockStartSelfServiceBuild.mockResolvedValueOnce({ status: 'blocked', message: 'This business may already be set up with Webpresa.' });
 
     const result = await submitBuildAction(undefined, baseFormData());
 
     expect(result?.error).toContain('already be set up');
-    expect(mockTriggerScan).not.toHaveBeenCalled();
   });
 
   it('redirects to /build/[scanExecutionId] on success and sets the build-session cookie', async () => {
@@ -106,40 +91,32 @@ describe('submitBuildAction', () => {
     );
   });
 
-  it('uploads a logo file under the real businessId before triggering the scan', async () => {
-    mockUploadBusinessAsset.mockResolvedValueOnce('/api/assets/businesses/biz_1/assets/logo.png');
+  it('passes already-uploaded logoUrl/photoUrls straight through as plain text — never expects a File', async () => {
     const fd = baseFormData();
-    fd.set('logo', new File([new Uint8Array([1, 2, 3])], 'logo.png', { type: 'image/png' }));
+    fd.set('logoUrl', '/api/assets/businesses/draft-x/assets/logo.png');
+    fd.append('photoUrls', '/api/assets/businesses/draft-x/assets/photos/1.png');
+    fd.append('photoUrls', '/api/assets/businesses/draft-x/assets/photos/2.png');
 
     await expect(submitBuildAction(undefined, fd)).rejects.toThrow('REDIRECT:');
 
-    expect(mockUploadBusinessAsset).toHaveBeenCalledWith('biz_1', expect.any(File), 'logo');
-    expect(mockUpdateBusiness).toHaveBeenCalledWith('biz_1', { logoUrl: '/api/assets/businesses/biz_1/assets/logo.png' });
-    // Upload must complete (and be persisted) before the workflow starts,
-    // so generation never races an in-flight photo upload.
-    const uploadCallOrder = mockUploadBusinessAsset.mock.invocationCallOrder[0];
-    const triggerCallOrder = mockTriggerScan.mock.invocationCallOrder[0];
-    expect(uploadCallOrder).toBeLessThan(triggerCallOrder);
+    const [input] = mockStartSelfServiceBuild.mock.calls[0];
+    expect(input.logoUrl).toBe('/api/assets/businesses/draft-x/assets/logo.png');
+    expect(input.photoUrls).toEqual([
+      '/api/assets/businesses/draft-x/assets/photos/1.png',
+      '/api/assets/businesses/draft-x/assets/photos/2.png',
+    ]);
   });
 
-  it('never calls updateBusiness a second time when no files were submitted', async () => {
+  it('omits logoUrl/photoUrls entirely when no files were uploaded', async () => {
     await expect(submitBuildAction(undefined, baseFormData())).rejects.toThrow('REDIRECT:');
-    expect(mockUpdateBusiness).not.toHaveBeenCalled();
-  });
 
-  it('surfaces an UploadValidationError message and never triggers the scan on a bad file', async () => {
-    mockUploadBusinessAsset.mockRejectedValueOnce(new UploadValidationError('Unsupported file type — only JPEG, PNG, and WebP images are allowed.'));
-    const fd = baseFormData();
-    fd.set('logo', new File([new Uint8Array([1, 2, 3])], 'logo.svg', { type: 'image/svg+xml' }));
-
-    const result = await submitBuildAction(undefined, fd);
-
-    expect(result?.error).toContain('JPEG, PNG, and WebP');
-    expect(mockTriggerScan).not.toHaveBeenCalled();
+    const [input] = mockStartSelfServiceBuild.mock.calls[0];
+    expect(input.logoUrl).toBeUndefined();
+    expect(input.photoUrls).toBeUndefined();
   });
 
   it('surfaces a friendlier message than the raw workflow-conflict text', async () => {
-    mockTriggerScan.mockResolvedValueOnce({ status: 'conflict', message: 'A scan workflow for this business is already queued or running.' });
+    mockStartSelfServiceBuild.mockResolvedValueOnce({ status: 'conflict', message: 'A scan workflow for this business is already queued or running.' });
 
     const result = await submitBuildAction(undefined, baseFormData());
 
@@ -149,7 +126,7 @@ describe('submitBuildAction', () => {
   it('requires a websiteUrl when hasExistingWebsite is true', async () => {
     const result = await submitBuildAction(undefined, baseFormData({ hasExistingWebsite: 'true' }));
     expect(result?.error).toContain('website');
-    expect(mockCreateOrAttach).not.toHaveBeenCalled();
+    expect(mockStartSelfServiceBuild).not.toHaveBeenCalled();
   });
 
   it('silently rejects a honeypot-tripped submission with a generic error, before any orchestration', async () => {
@@ -159,14 +136,14 @@ describe('submitBuildAction', () => {
     const result = await submitBuildAction(undefined, fd);
 
     expect(result?.error).toBeTruthy();
-    expect(mockCreateOrAttach).not.toHaveBeenCalled();
+    expect(mockStartSelfServiceBuild).not.toHaveBeenCalled();
   });
 
   it('rejects a too-fast submission (bot-speed) before any orchestration', async () => {
     const result = await submitBuildAction(undefined, baseFormData({ renderedAt: Date.now().toString() }));
 
     expect(result?.error).toBeTruthy();
-    expect(mockCreateOrAttach).not.toHaveBeenCalled();
+    expect(mockStartSelfServiceBuild).not.toHaveBeenCalled();
   });
 
   it('rejects once the per-IP daily rate limit is reached, before any orchestration', async () => {
@@ -175,7 +152,7 @@ describe('submitBuildAction', () => {
     const result = await submitBuildAction(undefined, baseFormData());
 
     expect(result?.error).toContain('Too many attempts');
-    expect(mockCreateOrAttach).not.toHaveBeenCalled();
+    expect(mockStartSelfServiceBuild).not.toHaveBeenCalled();
   });
 
   it('hashes the forwarded IP into the rate-limit bucket key rather than using it raw', async () => {

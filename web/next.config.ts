@@ -31,7 +31,11 @@ const CSP = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost} https://*.s3.${assetsBucketRegion}.amazonaws.com https://*.s3.amazonaws.com`,
+  // `blob:` — the self-service `/build` wizard's own logo/photo previews
+  // (`URL.createObjectURL(file)` in `app/build/BuildWizard.tsx`), rendered
+  // client-side before any upload happens; nothing else in the app creates
+  // object URLs for images.
+  `img-src 'self' data: blob: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost} https://*.s3.${assetsBucketRegion}.amazonaws.com https://*.s3.amazonaws.com`,
   "font-src 'self' data:",
   "connect-src 'self'",
   "frame-src 'self'",

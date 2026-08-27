@@ -63,6 +63,19 @@ export function BuildWizard() {
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [renderedAt] = useState(() => Date.now().toString());
 
+  // No businessId exists yet at this point in the flow — files upload
+  // under this client-generated draft id instead (see
+  // `app/api/build/upload/route.ts`'s doc comment). Uploading each file
+  // individually, on selection, keeps every request well under Vercel's
+  // platform-level serverless function body-size ceiling; bundling a logo
+  // plus several photos into the one final submit routinely exceeded it.
+  const [draftId] = useState(() => crypto.randomUUID());
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [photosUploading, setPhotosUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const steps: StepKey[] = useMemo(() => {
     const base: StepKey[] = ['business', 'contact', 'website'];
     if (hasExistingWebsite === false) base.push('details');
@@ -115,14 +128,49 @@ export function BuildWizard() {
     setStepIndex((i) => Math.max(i - 1, 0));
   }
 
-  function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    setLogoPreview(file ? URL.createObjectURL(file) : null);
+  async function uploadFile(file: File, kind: 'logo' | 'photo'): Promise<string> {
+    const body = new FormData();
+    body.set('file', file);
+    body.set('draftId', draftId);
+    body.set('kind', kind);
+    const res = await fetch('/api/build/upload', { method: 'POST', body });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Upload failed. Please try again.');
+    return data.url as string;
   }
 
-  function handlePhotosChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoPreview(URL.createObjectURL(file));
+    setUploadError(null);
+    setLogoUploading(true);
+    try {
+      setLogoUrl(await uploadFile(file, 'logo'));
+    } catch (err) {
+      setLogoPreview(null);
+      setLogoUrl(null);
+      setUploadError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function handlePhotosChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []).slice(0, MAX_PHOTOS);
+    if (files.length === 0) return;
     setPhotoPreviews(files.map((f) => URL.createObjectURL(f)));
+    setUploadError(null);
+    setPhotosUploading(true);
+    try {
+      setPhotoUrls(await Promise.all(files.map((f) => uploadFile(f, 'photo'))));
+    } catch (err) {
+      setPhotoPreviews([]);
+      setPhotoUrls([]);
+      setUploadError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+    } finally {
+      setPhotosUploading(false);
+    }
   }
 
   return (
@@ -273,6 +321,19 @@ export function BuildWizard() {
             <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Add your logo and photos.</h1>
             <p className="text-sm text-gray-500">Optional — we&apos;ll design something great even with zero photos.</p>
 
+            {/*
+              Files upload immediately on selection (see uploadFile/
+              handleLogoChange/handlePhotosChange above) — these inputs are
+              plain file pickers with no `name`, so the browser never
+              includes their raw bytes in the final form submission. The
+              already-uploaded URLs travel as the hidden text inputs below
+              instead.
+            */}
+            <input type="hidden" name="logoUrl" value={logoUrl ?? ''} />
+            {photoUrls.map((url) => (
+              <input key={url} type="hidden" name="photoUrls" value={url} />
+            ))}
+
             <div>
               <label className={labelClass}>Logo</label>
               <label className="flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 bg-white px-5 py-6 text-sm text-gray-500 hover:border-(--color-brand) transition-colors">
@@ -281,8 +342,14 @@ export function BuildWizard() {
                 ) : (
                   <Upload size={20} />
                 )}
-                <span>{logoPreview ? 'Change logo' : 'Upload a logo'}</span>
-                <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleLogoChange} />
+                <span>{logoUploading ? 'Uploading…' : logoPreview ? 'Change logo' : 'Upload a logo'}</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  disabled={logoUploading}
+                  onChange={handleLogoChange}
+                />
               </label>
             </div>
 
@@ -290,8 +357,21 @@ export function BuildWizard() {
               <label className={labelClass}>Business photos <span className="text-gray-400 font-normal">(up to {MAX_PHOTOS})</span></label>
               <label className="flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 bg-white px-5 py-6 text-sm text-gray-500 hover:border-(--color-brand) transition-colors">
                 <ImagePlus size={20} />
-                <span>{photoPreviews.length > 0 ? `${photoPreviews.length} photo(s) selected` : 'Upload photos'}</span>
-                <input type="file" name="photos" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={handlePhotosChange} />
+                <span>
+                  {photosUploading
+                    ? 'Uploading…'
+                    : photoPreviews.length > 0
+                      ? `${photoPreviews.length} photo(s) selected`
+                      : 'Upload photos'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  multiple
+                  className="hidden"
+                  disabled={photosUploading}
+                  onChange={handlePhotosChange}
+                />
               </label>
               {photoPreviews.length > 0 && (
                 <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -303,9 +383,9 @@ export function BuildWizard() {
             </div>
           </StepSection>
 
-          {(stepError || state?.error) && (
+          {(stepError || uploadError || state?.error) && (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {stepError ?? state?.error}
+              {stepError ?? uploadError ?? state?.error}
             </div>
           )}
 
@@ -354,16 +434,22 @@ export function BuildWizard() {
               // "Enter submits the form" behavior. `disabled` removes it
               // from consideration entirely, closing that gap without
               // reintroducing the type-flip bug this button used to share a
-              // DOM slot with.
-              disabled={!isLastStep || pending}
+              // DOM slot with. Also disabled while a photo/logo upload is
+              // still in flight — submitting before it resolves would ship
+              // the form without that file's URL.
+              disabled={!isLastStep || pending || logoUploading || photosUploading}
               className={
                 isLastStep
                   ? 'inline-flex items-center gap-2 rounded-xl bg-(--color-brand) px-8 py-3.5 text-sm font-bold text-white shadow-md hover:bg-(--color-brand-dark) transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
                   : 'hidden'
               }
             >
-              {pending ? 'Building your website…' : 'Build My Website'}
-              {!pending && <ArrowRight size={16} />}
+              {pending
+                ? 'Building your website…'
+                : logoUploading || photosUploading
+                  ? 'Finishing upload…'
+                  : 'Build My Website'}
+              {!pending && !logoUploading && !photosUploading && <ArrowRight size={16} />}
             </button>
           </div>
         </form>
