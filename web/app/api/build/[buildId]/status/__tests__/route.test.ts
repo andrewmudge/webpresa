@@ -68,6 +68,7 @@ describe('GET /api/build/[buildId]/status', () => {
       label: 'Analyzing your current website',
       position: 2,
       totalSteps: 6,
+      hasExistingWebsite: true,
     });
     // Never leaks internal step names, provider names, or raw ScanExecution status.
     expect(JSON.stringify(body)).not.toContain('crawling');

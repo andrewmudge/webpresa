@@ -32,7 +32,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ buil
       return NextResponse.json({ outcome: 'ready', slug: status.slug });
     case 'in_progress': {
       const progress = resolveProgressLabel(status.currentStep, status.hasExistingWebsite);
-      return NextResponse.json({ outcome: 'in_progress', ...progress });
+      // hasExistingWebsite is just "did the visitor say they already have a
+      // site" — that's information they themselves gave the wizard, not a
+      // provider/implementation detail, so it's fine to echo back. The
+      // client uses it to pick which cosmetic progress copy to show (see
+      // BuildProgress.tsx) since the real currentStep transitions are too
+      // coarse/infrequent on their own to look alive on a fast poll.
+      return NextResponse.json({ outcome: 'in_progress', ...progress, hasExistingWebsite: status.hasExistingWebsite });
     }
   }
 }
