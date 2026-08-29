@@ -1509,7 +1509,7 @@ Repeat with `--profile webpresa-prod --context env=prod` (and `npm run diff:ses:
 
 ## OpenSRS Storefront (domain purchase) deployment guidance
 
-**Application code written, not yet deployed or manually verified** — see `implementation.md`, "Part 3 — Domain purchasing via OpenSRS Storefront," for the full design (supersedes an earlier draft targeting OpenSRS's raw reseller API, which was never built). `WebpresaDataStack` gains the `webpresa-{env}-opensrs-storefront` secret (empty CDK placeholder) and two new tables (`customer-domain-profiles`, `domain-purchase-intents`); `WebpresaVercelAccessStack` grants `webpresa-vercel-{env}` read access to all three. None of this has been `cdk deploy`'d yet — review the `cdk diff` output and get explicit approval first, per `AGENTS.md`.
+**Deployed to dev (2026-08-28), PTE reseller-side setup mostly complete — not yet manually verified end-to-end with a real purchase.** See `implementation.md`, "Part 3 — Domain purchasing via OpenSRS Storefront," for the full design (supersedes an earlier draft targeting OpenSRS's raw reseller API, which was never built). `WebpresaDataStack` (the `webpresa-{env}-opensrs-storefront` secret and two new tables, `customer-domain-profiles`/`domain-purchase-intents`) and `WebpresaVercelAccessStack` (read grants on all three) are both deployed to dev — `cdk diff` reviewed, approved, and applied for both stacks. Prod is untouched.
 
 ### Reseller-side setup (Storefront Manager — manual, not CDK)
 
@@ -1522,7 +1522,7 @@ Do this in the **PTE test environment** first (`manage.test.shopco.com`-equivale
 5. Create one permanent DNS Template (Settings → Advanced Settings → Domain Defaults → DNS Templates): `A @ → 76.76.21.21`, `CNAME www → cname.vercel-dns.com`. **Done (2026-08-28)** in both environments — confirmed the same DNS values apply to both, since environment targeting comes from `gitBranch` at Vercel-attach time, not from the DNS Template itself:
    - **PTE Template ID:** `c74352a0-1c4c-42af-818d-af9de91e346b` (`https://webpresa.test.shopco.com?dnstemplateid=c74352a0-1c4c-42af-818d-af9de91e346b`) — set as `OPENSRS_DNS_TEMPLATE_ID` in Vercel **Preview** and in local `.env.local`.
    - **Live Template ID:** `e518ea9f-42d4-4935-b9ce-7e13e3f77519` (`https://domains.webpresa.com?dnstemplateid=e518ea9f-42d4-4935-b9ce-7e13e3f77519`) — set as `OPENSRS_DNS_TEMPLATE_ID` in Vercel **Production**.
-6. Configure a webhook (Settings → Advanced Settings → Add Webhook) for the Domain Events / Order Events category pointing at this deployment's `/api/webhooks/opensrs` — PTE's webhook points at the dev/Preview URL (append `?x-vercel-protection-bypass=<secret>`, same requirement as the Stripe dev webhook — see "Stage 18" above), the live store's webhook (configured only at go-live) points at Production, no bypass needed. Save the returned "webhook key." **Not yet done.**
+6. Configure a webhook (Settings → Advanced Settings → Add Webhook) for the **Domain Events → "Domain registration"** category pointing at this deployment's `/api/webhooks/opensrs` — PTE's webhook points at the dev/Preview URL (append `?x-vercel-protection-bypass=<secret>`, same requirement as the Stripe dev webhook — see "Stage 18" above, no `x-vercel-set-bypass-cookie` needed since a webhook is a stateless server-to-server POST, not a browser session), the live store's webhook (configured only at go-live) points at Production, no bypass needed. **Done (2026-08-28)** for PTE — registered at `https://webpresa-git-dev-andrew-mudges-projects.vercel.app/api/webhooks/opensrs?x-vercel-protection-bypass=<bypass-secret>` (confirmed reachable and correctly rejecting an unsigned test request with `400` before registering), real webhook key populated into `webpresa-dev-opensrs-storefront`.
 
 ### Populating the real secret value
 
@@ -1533,24 +1533,26 @@ aws secretsmanager put-secret-value \
   --profile webpresa-dev
 ```
 
-Never populate `webpresa-prod-opensrs-storefront` with real live-store credentials until deliberately going live — see `implementation.md`'s "Environment isolation" note under Part 3.
+**Done (2026-08-28)** for dev — both `apiKey` and `webhookKey` are real PTE values. Never populate `webpresa-prod-opensrs-storefront` with real live-store credentials until deliberately going live — see `implementation.md`'s "Environment isolation" note under Part 3.
 
 ### New Vercel environment variables
 
 | Variable | Value |
 |---|---|
-| `CUSTOMER_DOMAIN_PROFILES_TABLE_NAME` | CloudFormation export `webpresa-dev-customer-domain-profiles-name` |
-| `DOMAIN_PURCHASE_INTENTS_TABLE_NAME` | CloudFormation export `webpresa-dev-domain-purchase-intents-name` |
-| `OPENSRS_STOREFRONT_SECRET_NAME` | `webpresa-dev-opensrs-storefront` (dev) / `webpresa-prod-opensrs-storefront` (prod) |
-| `OPENSRS_STOREFRONT_API_BASE_URL` | OpenSRS Storefront's REST API base URL — not yet confirmed against real API docs (see `implementation.md`'s "Documentation gap"); PTE and live likely differ |
+| `CUSTOMER_DOMAIN_PROFILES_TABLE_NAME` | `webpresa-dev-customer-domain-profiles` — **set in Preview (2026-08-28)** |
+| `DOMAIN_PURCHASE_INTENTS_TABLE_NAME` | `webpresa-dev-domain-purchase-intents` — **set in Preview (2026-08-28)** |
+| `OPENSRS_STOREFRONT_SECRET_NAME` | `webpresa-dev-opensrs-storefront` (dev, **set in Preview 2026-08-28**) / `webpresa-prod-opensrs-storefront` (prod, not yet set) |
+| `OPENSRS_STOREFRONT_API_BASE_URL` | Confirmed (2026-08-28) against OpenSRS's real public docs: `https://api.test.shopco.com` (PTE, **set in Preview**) / `https://api.shopco.com` (live, not yet set) |
 | `OPENSRS_DNS_TEMPLATE_ID` | **Set (2026-08-28)** — see reseller-side setup step 5 above for the real PTE/live Template IDs, added to Vercel Preview/Production respectively via `vercel env add` |
+
+Adding a Preview env var does not retroactively apply to an already-built deployment — each addition above required a `vercel redeploy` afterward to actually take effect (confirmed the hard way: the webhook route 500'd until redeployed). Always redeploy after adding/changing a Preview env var here before testing against it.
 
 ### Manual verification procedure (PTE only)
 
-1. Complete reseller-side setup steps 1–6 above in the PTE environment.
-2. Populate `webpresa-dev-opensrs-storefront` with the real PTE API key + webhook key.
-3. `cdk diff`/`cdk deploy` `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` (after approval), add the new env vars to Vercel Preview, redeploy.
-4. Create a throwaway dev `Business`, complete onboarding through to the Domain step, click "Buy a new domain."
+1. Complete reseller-side setup steps 1–6 above in the PTE environment. **Steps 1, 3, 5, 6 done (2026-08-28)**; step 4 (branding CSS) still outstanding.
+2. Populate `webpresa-dev-opensrs-storefront` with the real PTE API key + webhook key. **Done.**
+3. `cdk diff`/`cdk deploy` `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` (after approval), add the new env vars to Vercel Preview, redeploy. **Done.**
+4. Create a throwaway dev `Business` (with a real address and phone number — required by OpenSRS's customer API, see `implementation.md`'s "Documentation gap"), complete onboarding through to the Domain step, click "Buy a new domain."
 5. Confirm the browser lands in the PTE Storefront already signed in (no login/signup screen) with the DNS Template applied.
 6. Complete a purchase using a Stripe test card (Storefront's sandbox mode).
 7. Confirm the webhook fires: check `webpresa-dev-domain-purchase-intents` for the intent transitioning to `'fulfilled'`, and `webpresa-dev-domain-connections` for a new `source: 'webpresa_registered'` record.

@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation';
 import { requireCustomerSession, requireActiveSubscription } from '@/lib/auth/customer-authorization';
 import { getBusinessById } from '@/lib/db/businesses';
+import type { Business } from '@/domain/models/business';
 import { listPreviewsForBusiness } from '@/lib/db/site-previews';
 import { updateCustomerBusinessInfo } from '@/lib/customer-editing/business-info';
 import { updateCustomerSectionContent } from '@/lib/customer-editing/section-content';
@@ -161,6 +162,13 @@ export async function connectExistingDomainAction(businessId: string, formData: 
   redirect(`/app/onboarding/${businessId}/domain`);
 }
 
+export type ResolveOpenSrsCustomerResult =
+  | { outcome: 'resolved'; opensrsCustomerId: string }
+  /** OpenSRS requires an address/phone on the customer record and this app never collects one
+   *  personally — the business's own address/phone is used instead (see below), so a business
+   *  missing either blocks account creation until the customer fills them in. */
+  | { outcome: 'missing_business_contact_info' };
+
 /**
  * Resolves (creating if necessary) the ONE OpenSRS Storefront customer
  * account for this Cognito identity — never a second account, and never a
@@ -168,10 +176,23 @@ export async function connectExistingDomainAction(businessId: string, formData: 
  * `resolveStripeCustomerIdForCustomer` (`app/account/checkout/actions.ts`)
  * exactly, including its lost-race handling (see
  * `lib/db/customer-domain-profiles.ts`).
+ *
+ * OpenSRS's real `POST /v1/customer` requires an address and phone number
+ * (confirmed against OpenSRS's docs, 2026-08-28) that this app has no
+ * personal-contact-info source for — the closest available data is the
+ * *business's own* address/phone, used here as a reasonable stand-in (only
+ * matters for whichever Business first triggers account creation; the
+ * customer can correct it themselves inside Storefront afterward). `phone`
+ * is passed through as-is, not verified E.164 as OpenSRS requires — a real
+ * gap, since this app doesn't normalize phone numbers anywhere today.
  */
-async function resolveOpenSrsCustomerId(userId: string, email: string): Promise<string> {
+async function resolveOpenSrsCustomerId(userId: string, email: string, business: Business): Promise<ResolveOpenSrsCustomerResult> {
   const existing = await getCustomerDomainProfile(userId);
-  if (existing) return existing.opensrsCustomerId;
+  if (existing) return { outcome: 'resolved', opensrsCustomerId: existing.opensrsCustomerId };
+
+  if (!business.address || !business.phone) {
+    return { outcome: 'missing_business_contact_info' };
+  }
 
   // Cognito rarely has a real name on file unless the customer has visited
   // Settings → Account (see architecture.md, "Account card"). Falling back
@@ -182,9 +203,20 @@ async function resolveOpenSrsCustomerId(userId: string, email: string): Promise<
   const firstName = profile?.firstName?.trim() || 'Webpresa';
   const lastName = profile?.lastName?.trim() || 'Customer';
 
-  const opensrsCustomerId = await createStorefrontCustomer({ email, firstName, lastName, externalUserId: userId });
+  const opensrsCustomerId = await createStorefrontCustomer({
+    email,
+    firstName,
+    lastName,
+    addressLine1: business.address.line1,
+    city: business.address.city,
+    state: business.address.state,
+    postalCode: business.address.postalCode,
+    country: business.address.country,
+    phone: business.phone,
+    externalUserId: userId,
+  });
   const result = await createCustomerDomainProfile(userId, opensrsCustomerId);
-  return result.profile.opensrsCustomerId;
+  return { outcome: 'resolved', opensrsCustomerId: result.profile.opensrsCustomerId };
 }
 
 /**
@@ -215,14 +247,34 @@ export async function startDomainPurchaseAction(businessId: string): Promise<voi
     redirect(`${returnPath}?error=${encodeURIComponent('Domain purchase is not available yet. Please try again later.')}`);
   }
 
+  const business = await getBusinessById(businessId);
+  if (!business) redirect(returnPath);
+
+  // Resolved in its own try/catch, separate from the block below — its
+  // `missing_business_contact_info` outcome needs a `redirect()` of its own,
+  // which must never sit inside a try/catch (Next.js's `redirect()` throws
+  // internally; a surrounding catch would otherwise intercept it and show
+  // the wrong, generic error message instead).
+  let customerResult: ResolveOpenSrsCustomerResult;
+  try {
+    customerResult = await resolveOpenSrsCustomerId(session.sub, session.email, business);
+  } catch (err) {
+    console.error('[opensrs] start_purchase_failed', { businessId, err });
+    redirect(`${returnPath}?error=${encodeURIComponent('Unable to open the domain store right now. Please try again.')}`);
+  }
+
+  if (customerResult.outcome === 'missing_business_contact_info') {
+    redirect(
+      `${returnPath}?error=${encodeURIComponent('Add a business address and phone number in Settings before buying a domain.')}`,
+    );
+  }
+
   let finalUrl: string;
   try {
-    const opensrsCustomerId = await resolveOpenSrsCustomerId(session.sub, session.email);
-
     const intent = createDomainPurchaseIntent({ businessId, userId: session.sub });
     await putDomainPurchaseIntent(intent);
 
-    const { url } = await getStorefrontSsoUrl(opensrsCustomerId);
+    const { url } = await getStorefrontSsoUrl(customerResult.opensrsCustomerId);
     const separator = url.includes('?') ? '&' : '?';
     finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}&extuserid=${encodeURIComponent(intent.intentId)}`;
   } catch (err) {

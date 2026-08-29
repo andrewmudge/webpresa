@@ -9,16 +9,15 @@ import { getOpenSrsStorefrontSecret } from '@/lib/secrets';
  * matching this repo's existing "hand-written adapter isolated in one
  * module" pattern for Firecrawl/Lob (see `lib/lob/client.ts`).
  *
- * **Endpoint paths below are best-effort, not confirmed against real
- * OpenSRS Storefront API documentation** — `open_srs.md`'s pasted docs only
- * explicitly document the SSO URL endpoint's path
- * (`POST /v1/customer/{customer_id}/sso_url`) and the JSON body shape for
- * customer creation (`external_user_id` alongside `first_name`/`last_name`/
- * `email`/`username`), not the create-customer endpoint's own path/method.
- * Confirm `CREATE_CUSTOMER_PATH` (and the response field actually named
- * `customer_id` vs. something else) against Storefront Manager's own
- * Developers/API section before relying on this in the PTE environment —
- * see `web/docs/open_srs.md`'s noted documentation gap.
+ * Endpoints and payload shapes below are confirmed (2026-08-28) against
+ * OpenSRS's real public support docs ("API: Managing Customers"):
+ * `POST /v1/customer` (singular) takes `first_name`/`last_name`/`email`/
+ * `username`/`address1`/`city`/`state`/`postal_code`/`country`/`phone` as
+ * required fields plus optional `external_user_id`, and returns the new
+ * customer's UUID as a bare JSON string (not an object) — both corrected
+ * here from an earlier best-effort guess. `POST /v1/customer/{customer_id}/sso_url`
+ * (`{ url, expires_at }`) matches what `web/docs/open_srs.md` already
+ * documented.
  *
  * Environment isolation: `OPENSRS_STOREFRONT_SECRET_NAME` (dev → PTE
  * credentials, prod → live-store credentials) already resolves through
@@ -32,7 +31,7 @@ import { getOpenSrsStorefrontSecret } from '@/lib/secrets';
  * resource-name consistency guard above is the isolation boundary instead.
  */
 
-const CREATE_CUSTOMER_PATH = '/v1/customers';
+const CREATE_CUSTOMER_PATH = '/v1/customer';
 
 function resolveApiBaseUrl(): string {
   const baseUrl = process.env.OPENSRS_STOREFRONT_API_BASE_URL;
@@ -76,27 +75,40 @@ interface CreateStorefrontCustomerParams {
   email: string;
   firstName: string;
   lastName: string;
+  /** Required by OpenSRS; sourced from the business's own address/phone, since this app never
+   *  collects a customer's personal address — see `resolveOpenSrsCustomerId`'s doc comment.
+   *  `phone` is passed through as-is; NOT verified to be E.164 as OpenSRS requires — a real
+   *  gap flagged here rather than silently assumed correct, since this app doesn't normalize
+   *  phone numbers anywhere today. */
+  addressLine1: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  /** 2-letter ISO 3166-1 alpha-2 country code. */
+  country: string;
+  phone: string;
   /** Cognito `sub` — the durable Webpresa customer identity. */
   externalUserId: string;
 }
 
-interface CreateStorefrontCustomerResponse {
-  customer_id: string;
-}
-
-/** Creates a new Storefront customer, tagged with this person's Cognito `sub` via `external_user_id` — see `web/docs/open_srs.md`, "Link your own customer ID to Storefront." */
+/** Creates a new Storefront customer, tagged with this person's Cognito `sub` via `external_user_id` — see `web/docs/open_srs.md`, "Link your own customer ID to Storefront." Returns the bare customer-id UUID string OpenSRS responds with. */
 export async function createStorefrontCustomer(params: CreateStorefrontCustomerParams): Promise<string> {
-  const response = await openSrsRequest<CreateStorefrontCustomerResponse>(CREATE_CUSTOMER_PATH, {
+  return openSrsRequest<string>(CREATE_CUSTOMER_PATH, {
     method: 'POST',
     body: JSON.stringify({
       email: params.email,
       first_name: params.firstName,
       last_name: params.lastName,
       username: `webpresa_${params.externalUserId}`,
+      address1: params.addressLine1,
+      city: params.city,
+      state: params.state,
+      postal_code: params.postalCode,
+      country: params.country,
+      phone: params.phone,
       external_user_id: params.externalUserId,
     }),
   });
-  return response.customer_id;
 }
 
 interface SsoUrlResponse {
