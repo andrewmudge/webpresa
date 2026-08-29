@@ -11,6 +11,7 @@ import {
   SECRET_CLAIM_TOKEN,
   SECRET_VERCEL_API,
   SECRET_MARKETING_CLICK_TOKEN,
+  SECRET_OPENSRS_STOREFRONT,
 } from './client';
 
 /**
@@ -86,6 +87,19 @@ export interface MarketingClickTokenSecret {
   encryptionKey: string;
 }
 
+/**
+ * OpenSRS Storefront integration — `apiKey` authenticates
+ * `lib/opensrs/client.ts`'s calls (customer creation, SSO URL minting);
+ * `webhookKey` verifies `POST /api/webhooks/opensrs` deliveries. Both are
+ * per-environment (PTE/test in dev, live store in prod) — see this
+ * interface's resolver, `SECRET_OPENSRS_STOREFRONT`, for why this is a
+ * distinct secret from the reserved `opensrs-api` name.
+ */
+export interface OpenSrsStorefrontSecret {
+  apiKey: string;
+  webhookKey: string;
+}
+
 export async function getOpenAiSecret(): Promise<OpenAiSecret> {
   return (await getSecretJson(SECRET_OPENAI())) as unknown as OpenAiSecret;
 }
@@ -124,4 +138,8 @@ export async function getVercelApiSecret(): Promise<VercelApiSecret> {
 
 export async function getMarketingClickTokenSecret(): Promise<MarketingClickTokenSecret> {
   return (await getSecretJson(SECRET_MARKETING_CLICK_TOKEN())) as unknown as MarketingClickTokenSecret;
+}
+
+export async function getOpenSrsStorefrontSecret(): Promise<OpenSrsStorefrontSecret> {
+  return (await getSecretJson(SECRET_OPENSRS_STOREFRONT())) as unknown as OpenSrsStorefrontSecret;
 }

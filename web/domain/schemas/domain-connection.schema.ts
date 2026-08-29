@@ -25,6 +25,15 @@ const DomainProviderDomainSchema = z.object({
   status: z.enum(DOMAIN_PROVIDER_DOMAIN_STATUSES),
 });
 
+const DomainRegistrationDetailsSchema = z.object({
+  orderId: z.string().min(1),
+  purchasedAt: IsoTimestampSchema,
+  expiresAt: IsoTimestampSchema.optional(),
+  autoRenew: z.boolean().optional(),
+  registrationPriceCents: z.number().int().nonnegative().optional(),
+  registrationCurrency: z.string().length(3).optional(),
+});
+
 export const DomainConnectionSchema = z.object({
   normalizedDomain: z.string().min(1),
   domainConnectionId: z.string().regex(/^domain_/),
@@ -47,6 +56,7 @@ export const DomainConnectionSchema = z.object({
   activatedAt: IsoTimestampSchema.optional(),
   failureCategory: z.enum(DOMAIN_FAILURE_CATEGORIES).optional(),
   failureMessage: z.string().max(1000).optional(),
+  registration: DomainRegistrationDetailsSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

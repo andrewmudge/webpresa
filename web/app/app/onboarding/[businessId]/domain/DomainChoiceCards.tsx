@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Globe, Link2, ShoppingCart } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { deferDomainAction, connectExistingDomainAction } from '../actions';
+import { deferDomainAction, connectExistingDomainAction, startDomainPurchaseAction } from '../actions';
 
 const REGISTRAR_OPTIONS = [
   { value: 'godaddy', label: 'GoDaddy' },
@@ -67,15 +67,18 @@ function ChoiceCard({
 
 /**
  * The no-connection-yet Domain-step choice UI (implementation.md, Stage
- * 19.x, Part 1/2). "Use my Webpresa address for now" is the default
+ * 19.x, Part 1/2/3). "Use my Webpresa address for now" is the default
  * selection and sits first — it's the choice most customers will actually
- * make in this stage, since real domain purchase (Part 3) doesn't exist
- * yet. "Use a domain I already own" starts collapsed (title + one-line
- * subtitle only) and expands inline once selected, rather than always
- * showing its input fields.
+ * make in this stage. "Use a domain I already own" and "Buy a new domain"
+ * both start collapsed (title + one-line subtitle only) and expand inline
+ * once selected, rather than always showing their input fields/actions.
+ * "Buy a new domain" hands off to OpenSRS Storefront (see
+ * `startDomainPurchaseAction`) — the customer lands back on this same page
+ * once a purchased domain's webhook has created a `DomainConnection`
+ * (`page.tsx` swaps to `DomainStatusPanel` automatically at that point).
  */
 export function DomainChoiceCards({ businessId, displayUrl }: { businessId: string; displayUrl: string }) {
-  const [selected, setSelected] = useState<'webpresa' | 'existing'>('webpresa');
+  const [selected, setSelected] = useState<'webpresa' | 'existing' | 'buy'>('webpresa');
 
   return (
     <div className="space-y-3">
@@ -144,18 +147,26 @@ export function DomainChoiceCards({ businessId, displayUrl }: { businessId: stri
         </form>
       </ChoiceCard>
 
-      <div className="flex items-start gap-3 rounded-2xl border border-(--color-border) bg-white p-5 opacity-60">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
-          <ShoppingCart size={18} />
-        </span>
-        <span>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-semibold text-gray-900">Buy a new domain</span>
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">Coming soon</span>
-          </span>
-          <span className="mt-0.5 block text-sm text-gray-500">Search for and purchase the perfect domain for your business.</span>
-        </span>
-      </div>
+      <ChoiceCard
+        selected={selected === 'buy'}
+        onSelect={() => setSelected('buy')}
+        icon={<ShoppingCart size={18} />}
+        title="Buy a new domain"
+        subtitle="Search for and purchase the perfect domain for your business."
+      >
+        <form action={startDomainPurchaseAction.bind(null, businessId)}>
+          <p className="mb-3 text-xs text-gray-500">
+            You&apos;ll search for and buy your domain through our domain store, signed in automatically — no
+            separate account to create. It&apos;s connected to your website automatically once purchased.
+          </p>
+          <button
+            type="submit"
+            className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark)"
+          >
+            Search for a domain
+          </button>
+        </form>
+      </ChoiceCard>
     </div>
   );
 }

@@ -18,6 +18,12 @@ import {
 import { startDomainConnection } from '@/lib/domains/connect';
 import type { DomainRegistrarProvider } from '@/domain/models/domain-connection';
 import { DOMAIN_REGISTRAR_PROVIDERS } from '@/domain/models/domain-connection';
+import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
+import { getCustomerDomainProfile, createCustomerDomainProfile } from '@/lib/db/customer-domain-profiles';
+import { putDomainPurchaseIntent } from '@/lib/db/domain-purchase-intents';
+import { createDomainPurchaseIntent } from '@/domain/factories/domain-purchase-intent.factory';
+import { createStorefrontCustomer, getStorefrontSsoUrl } from '@/lib/opensrs/client';
+import { OPENSRS_DNS_TEMPLATE_ID } from '@/lib/opensrs/constants';
 
 /**
  * Every onboarding mutation independently re-derives session → ownership →
@@ -153,6 +159,78 @@ export async function connectExistingDomainAction(businessId: string, formData: 
     redirect(`/app/onboarding/${businessId}/domain?error=${encodeURIComponent(result.message)}`);
   }
   redirect(`/app/onboarding/${businessId}/domain`);
+}
+
+/**
+ * Resolves (creating if necessary) the ONE OpenSRS Storefront customer
+ * account for this Cognito identity — never a second account, and never a
+ * per-Business Storefront customer. Mirrors
+ * `resolveStripeCustomerIdForCustomer` (`app/account/checkout/actions.ts`)
+ * exactly, including its lost-race handling (see
+ * `lib/db/customer-domain-profiles.ts`).
+ */
+async function resolveOpenSrsCustomerId(userId: string, email: string): Promise<string> {
+  const existing = await getCustomerDomainProfile(userId);
+  if (existing) return existing.opensrsCustomerId;
+
+  // Cognito rarely has a real name on file unless the customer has visited
+  // Settings → Account (see architecture.md, "Account card"). Falling back
+  // to generic placeholders here is a deliberate, honest choice — Storefront
+  // requires *some* first/last name to create the account, and the
+  // customer can correct it themselves inside Storefront afterward.
+  const profile = await adminGetCustomerProfileBySub(userId);
+  const firstName = profile?.firstName?.trim() || 'Webpresa';
+  const lastName = profile?.lastName?.trim() || 'Customer';
+
+  const opensrsCustomerId = await createStorefrontCustomer({ email, firstName, lastName, externalUserId: userId });
+  const result = await createCustomerDomainProfile(userId, opensrsCustomerId);
+  return result.profile.opensrsCustomerId;
+}
+
+/**
+ * Part 3 (OpenSRS Storefront): sends the customer into Storefront's hosted
+ * domain search/checkout, already signed in via a one-time SSO URL — never
+ * a second signup/login screen (see `lib/opensrs/client.ts`). A
+ * `DomainPurchaseIntent` correlates whichever purchase Storefront's webhook
+ * later reports back to this specific Business (see
+ * `app/api/webhooks/opensrs/route.ts`), since a customer may own several
+ * Businesses and Storefront's own session state doesn't carry that.
+ *
+ * The DNS Template (`dnstemplateid`) is what makes the purchased domain
+ * automatically point at this app — no manual DNS step, unlike the
+ * existing-domain flow above. **Whether Storefront's SSO URL response
+ * accepts appended query params is not yet confirmed against the real PTE
+ * environment** — verify this before relying on it; if it doesn't work, the
+ * fallback is landing the customer on Storefront's plain domain-search page
+ * (still signed in) with these params attached there instead.
+ */
+export async function startDomainPurchaseAction(businessId: string): Promise<void> {
+  const session = await requireCustomerSession();
+  await requireActiveSubscription(session.sub, businessId);
+
+  const returnPath = `/app/onboarding/${businessId}/domain`;
+
+  if (!OPENSRS_DNS_TEMPLATE_ID) {
+    console.error('[opensrs] dns_template_id_unset', { businessId });
+    redirect(`${returnPath}?error=${encodeURIComponent('Domain purchase is not available yet. Please try again later.')}`);
+  }
+
+  let finalUrl: string;
+  try {
+    const opensrsCustomerId = await resolveOpenSrsCustomerId(session.sub, session.email);
+
+    const intent = createDomainPurchaseIntent({ businessId, userId: session.sub });
+    await putDomainPurchaseIntent(intent);
+
+    const { url } = await getStorefrontSsoUrl(opensrsCustomerId);
+    const separator = url.includes('?') ? '&' : '?';
+    finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}&extuserid=${encodeURIComponent(intent.intentId)}`;
+  } catch (err) {
+    console.error('[opensrs] start_purchase_failed', { businessId, err });
+    redirect(`${returnPath}?error=${encodeURIComponent('Unable to open the domain store right now. Please try again.')}`);
+  }
+
+  redirect(finalUrl);
 }
 
 /**

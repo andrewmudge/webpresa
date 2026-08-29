@@ -2,8 +2,10 @@ import type { MutableTimestampedRecord } from './common';
 
 /**
  * A custom domain attached to one Business (Stage 19.x, Part 2 — existing-
- * domain connection; Part 3 adds `source: 'webpresa_registered'` and a
- * `registration` sub-object additively).
+ * domain connection; the OpenSRS Storefront integration adds
+ * `source: 'webpresa_registered'` and a `registration` sub-object
+ * additively — see `lib/opensrs/client.ts` and
+ * `app/api/webhooks/opensrs/route.ts`).
  *
  * Standalone record, not fields on `Business` — a business may eventually
  * have an apex domain, a `www` alias, redirects, and domain history.
@@ -15,7 +17,7 @@ import type { MutableTimestampedRecord } from './common';
 export const DOMAIN_CONNECTION_SOURCES = ['customer_owned', 'webpresa_registered'] as const;
 export type DomainConnectionSource = (typeof DOMAIN_CONNECTION_SOURCES)[number];
 
-/** Display-only — tailors customer instructions, grants no registrar access. `'opensrs'` is unused until Part 3. */
+/** Display-only — tailors customer instructions, grants no registrar access. */
 export const DOMAIN_REGISTRAR_PROVIDERS = [
   'godaddy',
   'wix',
@@ -123,5 +125,17 @@ export interface DomainConnection extends MutableTimestampedRecord {
   failureCategory?: DomainFailureCategory;
   failureMessage?: string;
 
-  // Part 3 adds a `registration` sub-object here, additively.
+  /** Present only when `source === 'webpresa_registered'` — the OpenSRS Storefront purchase this connection came from. */
+  registration?: DomainRegistrationDetails;
+}
+
+/** Populated from the OpenSRS Storefront webhook once a purchase completes — see `app/api/webhooks/opensrs/route.ts`. */
+export interface DomainRegistrationDetails {
+  /** OpenSRS Storefront's order id — the idempotency key for webhook replay. */
+  orderId: string;
+  purchasedAt: string;
+  expiresAt?: string;
+  autoRenew?: boolean;
+  registrationPriceCents?: number;
+  registrationCurrency?: string;
 }

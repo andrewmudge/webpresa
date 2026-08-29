@@ -35,8 +35,8 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('table count', () => {
-  it('creates exactly twenty-three DynamoDB tables (Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables)', () => {
-    dev.resourceCountIs('AWS::DynamoDB::Table', 23);
+  it('creates exactly twenty-five DynamoDB tables (Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables; OpenSRS Storefront integration adds CustomerDomainProfiles and DomainPurchaseIntents)', () => {
+    dev.resourceCountIs('AWS::DynamoDB::Table', 25);
   });
 });
 
@@ -501,9 +501,9 @@ describe('dev removal policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('CloudFormation outputs', () => {
-  it('creates 63 outputs — 46 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables), 2 bucket outputs, 12 secret ARN outputs (Google federation adds GoogleOAuthSecret), 3 Cognito outputs (Google federation adds HostedUiDomain)', () => {
+  it('creates 68 outputs — 50 table outputs (Stage 21 adds Campaigns, CampaignRecipients, ScanHits; Stage 22 adds PostcardWebhookEvents; Stage 24 adds StripeWebhookFailures and OperationsDismissals; Marketing stage adds 7 marketing-* tables; OpenSRS Storefront integration adds CustomerDomainProfiles and DomainPurchaseIntents), 2 bucket outputs, 13 secret ARN outputs (Google federation adds GoogleOAuthSecret; OpenSRS Storefront integration adds OpenSrsStorefrontSecret), 3 Cognito outputs (Google federation adds HostedUiDomain)', () => {
     const outputs = dev.findOutputs('*');
-    expect(Object.keys(outputs)).toHaveLength(63);
+    expect(Object.keys(outputs)).toHaveLength(68);
   });
 });
 
@@ -738,8 +738,8 @@ describe('assets bucket', () => {
 // ---------------------------------------------------------------------------
 
 describe('secrets', () => {
-  it('creates exactly twelve secrets', () => {
-    dev.resourceCountIs('AWS::SecretsManager::Secret', 12);
+  it('creates exactly thirteen secrets', () => {
+    dev.resourceCountIs('AWS::SecretsManager::Secret', 13);
   });
 
   const devSecretNames = [
@@ -754,6 +754,7 @@ describe('secrets', () => {
     'webpresa-dev-vercel-protection-bypass',
     'webpresa-dev-internal-api',
     'webpresa-dev-google-oauth',
+    'webpresa-dev-opensrs-storefront',
   ];
 
   it.each(devSecretNames)('dev secret %s exists', (name) => {

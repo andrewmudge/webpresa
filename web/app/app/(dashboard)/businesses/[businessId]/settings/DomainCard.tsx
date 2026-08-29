@@ -47,6 +47,12 @@ export function DomainCard({ businessId, slug, domainConnection }: Props) {
           <dt className="text-gray-500 shrink-0">Custom domain</dt>
           <dd className="text-gray-900 text-right break-all">{domainConnection?.domainName ?? '—'}</dd>
         </div>
+        {domainConnection?.source === 'webpresa_registered' && (
+          <div className="flex justify-between gap-2">
+            <dt className="text-gray-500 shrink-0">Purchased through</dt>
+            <dd className="text-gray-900 text-right">Webpresa</dd>
+          </div>
+        )}
       </dl>
 
       <Link

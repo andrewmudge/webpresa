@@ -36,6 +36,8 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly marketingMessagesTable: dynamodb.ITable;
   readonly marketingClicksTable: dynamodb.ITable;
   readonly marketingSesEventsTable: dynamodb.ITable;
+  readonly customerDomainProfilesTable: dynamodb.ITable;
+  readonly domainPurchaseIntentsTable: dynamodb.ITable;
   readonly assetsBucket: s3.IBucket;
   readonly stockImagesBucket: s3.IBucket;
   readonly openAiSecret: secretsmanager.ISecret;
@@ -49,6 +51,7 @@ export interface WebpresaVercelAccessStackProps extends cdk.StackProps {
   readonly vercelProtectionBypassSecret: secretsmanager.ISecret;
   readonly internalApiSecret: secretsmanager.ISecret;
   readonly marketingClickTokenSecret: secretsmanager.ISecret;
+  readonly opensrsStorefrontSecret: secretsmanager.ISecret;
   readonly screenshotLambdaFunction: lambda.IFunction;
   /** Stage 22 Phase 2 — invoked synchronously from web/lib/postcards/render.ts. */
   readonly postcardRenderLambdaFunction: lambda.IFunction;
@@ -124,6 +127,8 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
       props.scanHitsTable,
       props.stripeWebhookFailuresTable,
       props.operationsDismissalsTable,
+      props.customerDomainProfilesTable,
+      props.domainPurchaseIntentsTable,
     ];
 
     // Marketing stage tables/secret/SES statement live in their own
@@ -190,6 +195,7 @@ export class WebpresaVercelAccessStack extends cdk.Stack {
             props.captureTokenSecret.secretArn,
             props.vercelProtectionBypassSecret.secretArn,
             props.internalApiSecret.secretArn,
+            props.opensrsStorefrontSecret.secretArn,
           ],
         }),
         // Stage 17 — customer identity. Minimal, explicit action list rather

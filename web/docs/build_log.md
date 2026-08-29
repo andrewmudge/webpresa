@@ -9394,4 +9394,92 @@ web/docs/build_log.md                        MODIFIED — this entry
 infra/: npm run build — clean; npm test — 248 tests, all passing; npx cdk diff (dev, prod) reviewed before each deploy
 ```
 
+---
+
+**Date:** 2026-08-27
+
+**OpenSRS Storefront domain-purchase integration — implemented, not yet deployed to AWS or reseller-side configured.** Replaces the onboarding Domain step's inert "Buy a new domain — Coming soon" card with a real integration against **OpenSRS Storefront** (a hosted, reseller-branded checkout product) — supersedes an earlier, never-built draft of `implementation.md`'s "Part 3" that targeted OpenSRS's raw reseller API (IP-allowlisted Lambda behind a VPC+fck-nat, XML/MD5-signed requests, an SQS purchase worker). Storefront hosts the entire search → cart → registrant-contact → payment flow itself, so almost none of that infrastructure was needed. Planned via a dedicated plan-mode session (three parallel Explore agents surveying the existing domain-connection flow, customer/Cognito auth model, and theme/secrets conventions), with two decisions confirmed with the user up front: the "match our theme" ask means a one-time global CSS reskin of Storefront in Webpresa's own platform brand (not per-business — Storefront's Custom Code is store-wide), and Storefront should live at a custom Webpresa subdomain rather than the default `*.shopco.com` address.
+
+Three goals from the request: **(1) no second account** — `CustomerDomainProfile` (mirrors `CustomerBillingProfile` exactly) maps a Cognito `sub` to one OpenSRS Storefront customer, and `startDomainPurchaseAction` always redirects via a one-time SSO URL, never a signup screen; **(2) themed page** — addressed entirely as reseller-side manual setup (Custom Code CSS + custom hostname), no app code; **(3) webhook + auto-DNS** — a single permanent DNS Template (created by hand in Storefront Manager) applied automatically at registration via the `dnstemplateid` query-string mechanism handles DNS with zero webhook involvement; `app/api/webhooks/opensrs/route.ts` (structured like the Stripe/Lob webhook handlers) only needs to attach the domain in Vercel (`addProjectDomain`, reused unchanged from Part 2) and create the `DomainConnection` record, after which Part 2's existing `reconcileDomainConnection`/`/api/domains/status`/`DomainStatusPanel` machinery takes over unchanged.
+
+A new `DomainPurchaseIntent` table correlates one SSO redirect to the Business it was started for — Storefront's own `extuserid` query-string parameter is documented as a single stable value stored on the customer record, not a per-purchase id, so a fresh `intentId` is generated per redirect and passed as `extuserid` instead, letting the webhook resolve which Business a purchase belongs to (a customer may own several).
+
+**Two real documentation gaps, both flagged inline in the code and in `implementation.md`'s "Documentation gap" section**: the pasted `web/docs/open_srs.md` reference material doesn't include OpenSRS's actual Developer/API docs (webhook payload schema, signature-verification mechanics, create-customer endpoint path) — the real "Storefront Webhook Notifications" article is gated behind reseller-support login. A public support-site search did confirm real event categories exist (**Order Events** incl. "Completed order," **Domain Events** incl. "Domain registration") and the webhook configuration path (Settings → Advanced Settings → Add Webhook → returns a "webhook key"), which the implementation is built against, but the exact header/algorithm and payload field names (`lib/opensrs/verify-webhook.ts`'s HMAC-SHA256-over-raw-body, and the route handler's `event_type`/`domain`/`order_id`/`external_user_id` field guesses) **must be confirmed against a real registered webhook delivery in the PTE test environment** before this is considered done — not before, since none of that content is fetchable without a reseller login this session doesn't have.
+
+Environment isolation (explicitly requested): `webpresa-dev-opensrs-storefront` holds PTE (test) credentials, `webpresa-prod-opensrs-storefront` stays an empty CDK placeholder until a deliberate, separate go-live step — mirrors the existing Stripe test/live secret split exactly, and both secret/table names already pass through the existing `assertResourceEnvironmentConsistency()` cross-environment guard with no new code needed.
+
+## Files changed
+
+```
+# Infra (CDK)
+infra/lib/stacks/data-stack.ts                       MODIFIED — CustomerDomainProfiles + DomainPurchaseIntents tables, opensrs-storefront secret
+infra/lib/stacks/vercel-access-stack.ts              MODIFIED — grants for the above (data-access policy, not Lambda-only — Storefront's REST API has no known IP-allowlist requirement)
+infra/bin/webpresa.ts                                MODIFIED — wires the new tables/secret through
+infra/test/vercel-access-stack.test.ts               MODIFIED — fixture passes the 2 new tables + 1 new secret; resource-count assertions updated (34→38 DynamoDB resources, 10→11 secrets)
+infra/test/data-stack.test.ts                        MODIFIED — table/output/secret counts updated (23→25 tables, 63→68 outputs, 12→13 secrets)
+
+# Domain layer
+web/domain/models/customer-domain-profile.ts          NEW
+web/domain/schemas/customer-domain-profile.schema.ts  NEW
+web/domain/models/domain-purchase-intent.ts           NEW
+web/domain/schemas/domain-purchase-intent.schema.ts   NEW
+web/domain/factories/domain-purchase-intent.factory.ts   NEW
+web/domain/models/domain-connection.ts                MODIFIED — registration sub-object (additive, already-reserved shape)
+web/domain/schemas/domain-connection.schema.ts        MODIFIED — DomainRegistrationDetailsSchema
+
+# Core library
+web/lib/db/customer-domain-profiles.ts                NEW — mirrors lib/db/customer-billing.ts exactly
+web/lib/db/domain-purchase-intents.ts                 NEW
+web/lib/db/client.ts                                   MODIFIED — 2 new TABLE_* exports
+web/lib/secrets/{client,index}.ts                     MODIFIED — opensrs-storefront secret accessor
+web/lib/opensrs/{client,constants,verify-webhook}.ts  NEW — thin JSON REST client (not the raw reseller API's XML/MD5 protocol), DNS Template ID constant, webhook signature verification
+
+# Routes
+web/app/app/onboarding/[businessId]/actions.ts        MODIFIED — startDomainPurchaseAction, resolveOpenSrsCustomerId
+web/app/app/onboarding/[businessId]/domain/DomainChoiceCards.tsx   MODIFIED — "Buy a new domain" is now a real, wired-up choice card
+web/app/api/webhooks/opensrs/route.ts                 NEW
+
+# Dashboard UI
+web/app/app/(dashboard)/businesses/[businessId]/settings/DomainCard.tsx   MODIFIED — "Purchased through Webpresa" for source: 'webpresa_registered'
+
+# Config
+web/.env.local.example                                MODIFIED — new OpenSRS Storefront section
+
+# Docs
+web/docs/implementation.md                            MODIFIED — Part 3 rewritten for Storefront (supersedes the raw-reseller-API draft); Part 4/Deferred work references updated
+web/docs/architecture.md                               MODIFIED — Part 3 status updated
+web/docs/deployment.md                                 MODIFIED — new "OpenSRS Storefront (domain purchase) deployment guidance" section
+web/docs/build_log.md                                  MODIFIED — this entry
+
+# Tests (new)
+web/lib/db/__tests__/customer-domain-profiles.test.ts   — mirrors customer-billing.test.ts's conditional-write/race coverage
+web/lib/db/__tests__/domain-purchase-intents.test.ts
+web/app/api/webhooks/opensrs/__tests__/route.test.ts    — signature verification, unresolvable/unknown payloads, ownership mismatch, domain conflict, happy path, idempotent replay, failed-attempt retry, internal error
+```
+
+## Verification
+
+```
+infra/:
+  npm test              — 250 tests, all passing (after fixing the 2 stale fixture/count files above)
+  npx cdk synth WebpresaDevDataStack, WebpresaDevVercelAccessStack   — both clean, no errors
+  npx cdk diff           — NOT run; no active AWS SSO session in this environment (`aws sso login` not attempted,
+                           per this repo's rule to never deploy without the user present to approve)
+
+web/:
+  npm run lint       — clean
+  npx tsc --noEmit   — clean
+  npm test            — 183 test files, 1845 tests, all passing (including all 10 new webhook tests)
+  npm run build        — production build succeeds; /api/webhooks/opensrs registered as a route
+```
+
+## Not yet done
+
+- **Not deployed to any AWS account** — no `cdk deploy` was run.
+- **No reseller-side Storefront setup at all** — Stripe connect, domain pricing, custom hostname, brand CSS, DNS Template, or webhook registration. All of this is manual, inside Storefront Manager, and only the account holder can do it (see `deployment.md`'s new guidance section for the exact steps).
+- Real secret values (`webpresa-dev-opensrs-storefront`'s `apiKey`/`webhookKey`, `OPENSRS_STOREFRONT_API_BASE_URL`, `OPENSRS_DNS_TEMPLATE_ID`) are all unpopulated placeholders/unset.
+- The webhook's exact event/payload schema and signature-verification mechanics are unconfirmed against real OpenSRS documentation (gated behind reseller-support login) — must be verified against a real PTE delivery before this is considered done, per `implementation.md`'s "Documentation gap" note.
+- Whether Storefront's SSO URL response accepts appended `dnstemplateid`/`extuserid` query params is unconfirmed — needs empirical verification in PTE; a fallback approach is noted inline in `startDomainPurchaseAction`'s doc comment if it doesn't.
+- No end-to-end manual test against real OpenSRS/Vercel infra — only unit-level, fully mocked coverage exists so far.
+
 Real deploys, not just synth: dev Phase A + Phase B, prod Phase A + Phase B, all confirmed via CloudFormation outputs. `COGNITO_HOSTED_UI_DOMAIN` (`https://auth.webpresa.com` for prod, the default Amazon domain for dev) and `GOOGLE_OAUTH_STATE_SECRET` confirmed present in the correct Vercel environments via `vercel env ls`. Not yet done: the actual end-to-end sign-in test against prod (password sign-up → Google sign-in, same account) — blocked on DNS propagation for the second `auth.webpresa.com` CNAME and the app code landing on `main`.

@@ -70,6 +70,8 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     marketingMessagesTable: dataStack.marketingMessagesTable,
     marketingClicksTable: dataStack.marketingClicksTable,
     marketingSesEventsTable: dataStack.marketingSesEventsTable,
+    customerDomainProfilesTable: dataStack.customerDomainProfilesTable,
+    domainPurchaseIntentsTable: dataStack.domainPurchaseIntentsTable,
     assetsBucket: dataStack.assetsBucket,
     stockImagesBucket: stockImagesStack.bucket,
     stockImagesTable: stockImagesStack.table,
@@ -84,6 +86,7 @@ function buildStacks(appId: string, config: (typeof ENVIRONMENTS)['dev']) {
     vercelProtectionBypassSecret: dataStack.vercelProtectionBypassSecret,
     internalApiSecret: dataStack.internalApiSecret,
     marketingClickTokenSecret: dataStack.marketingClickTokenSecret,
+    opensrsStorefrontSecret: dataStack.opensrsStorefrontSecret,
     screenshotLambdaFunction: screenshotStack.screenshotLambda.function,
     postcardRenderLambdaFunction: postcardRenderStack.postcardRenderLambda.function,
     scanWorkflowStateMachine: scanWorkflowStack.stateMachine,
@@ -170,8 +173,9 @@ describe('data-access policy statements', () => {
       ]),
     );
     expect(statement.Action).toHaveLength(7);
-    // 17 tables × (table + index/*) = 34 resource entries.
-    expect(statement.Resource).toHaveLength(34);
+    // 19 tables × (table + index/*) = 38 resource entries (17 + OpenSRS
+    // Storefront's CustomerDomainProfiles/DomainPurchaseIntents).
+    expect(statement.Resource).toHaveLength(38);
   });
 
   it('grants ses:SendEmail with an unscoped resource (Stage 20) — no Secrets Manager entry, since SES authenticates via IAM only', () => {
@@ -215,13 +219,13 @@ describe('data-access policy statements', () => {
     expect(statement.Action).not.toContain('s3:GetObject');
   });
 
-  it('grants secretsmanager:GetSecretValue on all 10 non-Marketing secrets, including claim-token (Stage 17) and vercel-api (Stage 19.x) — marketing-click-token lives in its own policy below', () => {
+  it('grants secretsmanager:GetSecretValue on all 11 non-Marketing secrets, including claim-token (Stage 17), vercel-api (Stage 19.x), and opensrs-storefront — marketing-click-token lives in its own policy below', () => {
     const policies = dev.findResources('AWS::IAM::ManagedPolicy', {
       Properties: { ManagedPolicyName: 'webpresa-dev-vercel-data-access' },
     });
     const policy = Object.values(policies)[0] as { Properties: { PolicyDocument: { Statement: Array<{ Sid: string; Resource: unknown[] }> } } };
     const statement = policy.Properties.PolicyDocument.Statement.find((s) => s.Sid === 'SecretsManager')!;
-    expect(statement.Resource).toHaveLength(10);
+    expect(statement.Resource).toHaveLength(11);
   });
 
   it('grants a minimal, explicit set of Cognito actions scoped to the customer User Pool (Stage 17)', () => {

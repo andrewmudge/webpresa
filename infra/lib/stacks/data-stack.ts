@@ -81,6 +81,8 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly marketingMessagesTable: dynamodb.Table;
   public readonly marketingClicksTable: dynamodb.Table;
   public readonly marketingSesEventsTable: dynamodb.Table;
+  public readonly customerDomainProfilesTable: dynamodb.Table;
+  public readonly domainPurchaseIntentsTable: dynamodb.Table;
   public readonly customerUserPool: cognito.UserPool;
   public readonly customerUserPoolClient: cognito.UserPoolClient;
   public readonly customerUserPoolHostedUiDomain: string;
@@ -96,6 +98,7 @@ export class WebpresaDataStack extends cdk.Stack {
   public readonly vercelProtectionBypassSecret: secretsmanager.Secret;
   public readonly internalApiSecret: secretsmanager.Secret;
   public readonly marketingClickTokenSecret: secretsmanager.Secret;
+  public readonly opensrsStorefrontSecret: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: WebpresaDataStackProps) {
     super(scope, id, props);
@@ -479,6 +482,47 @@ export class WebpresaDataStack extends cdk.Stack {
       ],
     });
     this.domainConnectionsTable = domainConnections.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // CustomerDomainProfiles (OpenSRS Storefront integration)
+    //   PK: userId (Cognito `sub`)
+    //   No GSI — every lookup is a direct GetItem by userId, always
+    //   available from the authenticated customer session. Mirrors
+    //   CustomerBillingProfiles above exactly: the canonical
+    //   userId → opensrsCustomerId mapping, one row per customer ever,
+    //   created via a conditional PutItem the first time that customer
+    //   starts a domain purchase (see web/lib/db/customer-domain-profiles.ts)
+    //   — this is what lets a customer land in Storefront via SSO instead of
+    //   creating a second account.
+    // ───────────────────────────────────────────────────────────────────────
+    const customerDomainProfiles = new WebpresaTable(this, 'CustomerDomainProfiles', {
+      config,
+      tableName: 'customer-domain-profiles',
+      partitionKey: { name: 'userId', type: S },
+    });
+    this.customerDomainProfilesTable = customerDomainProfiles.table;
+
+    // ───────────────────────────────────────────────────────────────────────
+    // DomainPurchaseIntents (OpenSRS Storefront integration)
+    //   PK: intentId (random token, not a natural key — see the model's own
+    //     doc comment for why this can't be keyed on businessId/userId: one
+    //     customer may start more than one purchase over time)
+    //   TTL: expiresAt — short-lived correlation records only; a customer
+    //     may own multiple Businesses, and Storefront's own `extuserid`
+    //     mechanism is a single stable per-customer field, not suited to
+    //     per-purchase correlation, so this table is what lets the OpenSRS
+    //     webhook (which only carries back whatever extuserid value was set
+    //     at SSO-redirect time) determine which Business a purchase is for.
+    //   No GSI — every lookup is a direct GetItem by intentId, the value
+    //     round-tripped through Storefront's extuserid parameter.
+    // ───────────────────────────────────────────────────────────────────────
+    const domainPurchaseIntents = new WebpresaTable(this, 'DomainPurchaseIntents', {
+      config,
+      tableName: 'domain-purchase-intents',
+      partitionKey: { name: 'intentId', type: S },
+      timeToLiveAttribute: 'ttl',
+    });
+    this.domainPurchaseIntentsTable = domainPurchaseIntents.table;
 
     // ───────────────────────────────────────────────────────────────────────
     // Campaigns (Stage 21 — Campaign and QR Tracking)
@@ -944,5 +988,24 @@ export class WebpresaDataStack extends cdk.Stack {
       jsonKeys: ['encryptionKey'],
     });
     this.marketingClickTokenSecret = marketingClickToken.secret;
+
+    // OpenSRS Storefront integration — API key + webhook key for the hosted
+    // domain-purchase storefront (replaces the earlier raw-reseller-API
+    // design's now-superseded `opensrs-api` secret name, which stays
+    // reserved and untouched). `apiKey` authenticates
+    // web/lib/opensrs/client.ts's calls; `webhookKey` verifies
+    // POST /api/webhooks/opensrs deliveries. Granted to the Vercel app's own
+    // IAM identity below (not Lambda-only) since Storefront's REST API has
+    // no known IP-allowlist requirement, unlike the raw reseller API. The
+    // dev secret is populated with PTE (test) storefront credentials; the
+    // prod secret stays an empty placeholder until a deliberate, separate
+    // go-live step — see deployment.md.
+    const opensrsStorefront = new WebpresaSecret(this, 'OpenSrsStorefrontSecret', {
+      config,
+      secretName: 'opensrs-storefront',
+      description: 'OpenSRS Storefront API + webhook credentials (domain purchase integration)',
+      jsonKeys: ['apiKey', 'webhookKey'],
+    });
+    this.opensrsStorefrontSecret = opensrsStorefront.secret;
   }
 }

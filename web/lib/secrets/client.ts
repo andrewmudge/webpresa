@@ -82,6 +82,17 @@ export const SECRET_VERCEL_API = () => getSecretName('VERCEL_API_SECRET_NAME');
 // capture-token above: a random placeholder at creation, a real value
 // populated out-of-band.
 export const SECRET_MARKETING_CLICK_TOKEN = () => getSecretName('MARKETING_CLICK_TOKEN_SECRET_NAME');
+// OpenSRS Storefront integration — API key + webhook key for the hosted
+// domain-purchase storefront (see web/lib/opensrs/client.ts and
+// web/app/api/webhooks/opensrs/route.ts). Deliberately a distinct secret
+// name from the already-reserved `webpresa-{env}-opensrs-api`, which
+// implementation.md's (superseded) raw-reseller-API design grants only to a
+// dedicated Lambda's execution role — Storefront's REST API has no known
+// IP-allowlist requirement, so this secret is granted to the Vercel app's
+// own IAM identity like Stripe/Lob above. `webpresa-dev-*` holds PTE (test)
+// storefront credentials; `webpresa-prod-*` stays an empty placeholder until
+// a deliberate, separate go-live step populates it — see deployment.md.
+export const SECRET_OPENSRS_STOREFRONT = () => getSecretName('OPENSRS_STOREFRONT_SECRET_NAME');
 
 // ---------------------------------------------------------------------------
 // Cached JSON secret retrieval

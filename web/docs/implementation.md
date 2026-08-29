@@ -3045,189 +3045,98 @@ Do not immediately remove the DNS/Vercel project-domain assignment when a subscr
 
 ---
 
-## Part 3 — Domain purchasing via OpenSRS
+## Part 3 — Domain purchasing via OpenSRS Storefront
+
+**Supersedes an earlier draft of this part** that targeted OpenSRS's raw reseller API (IP-allowlisted Lambda behind a VPC+fck-nat, hand-rolled XML/MD5-signed requests, an SQS purchase worker, a custom one-time Stripe Checkout session). **OpenSRS Storefront** is a different OpenSRS product — a fully hosted, reseller-branded storefront that owns the entire search → cart → registrant-contact → payment flow itself, on its own checkout pages, against its own connected Stripe integration (not Webpresa's subscription Stripe setup). That makes almost all of the raw-API design's infrastructure (Lambda/VPC/NAT/XML/SQS, a `DomainPurchaseAttempt` split-status model, a second Stripe Checkout flow) unnecessary — see `web/docs/open_srs.md` for the source Storefront documentation this part is built from.
 
 ### Objective
 
-Let a customer without an existing domain search, price, and buy one directly during onboarding, using **OpenSRS** as the registrar/reseller backend — Webpresa purchases and manages the domain as reseller, with the customer's business as the registrant of record, and DNS is configured automatically (no manual customer step, unlike Part 2's existing-domain flow).
+Let a customer without an existing domain buy one directly during onboarding, using **OpenSRS Storefront** as the hosted registrar checkout — Webpresa purchases and manages the domain as reseller (via its own OpenSRS reseller account funding Storefront), with the customer's business as the registrant of record, and DNS is configured automatically at registration (no manual customer step, unlike Part 2's existing-domain flow) via a permanent, reseller-wide DNS Template.
 
-### Part 3.0 — Prerequisites and architecture checkpoints (resolve before writing any client code)
+### One-time reseller-side setup (Storefront Manager — not application code)
 
-1. **OpenSRS reseller account** (business-side signup, prepaid balance, API username/key, IP-allowlisted access, sandbox/test environment) — provisioned outside this codebase, the same way Stage 18's Stripe Products/Prices are created via Dashboard/CLI, not CDK.
-2. **Fixed-egress compute decision — resolved.** OpenSRS's reseller API restricts access by source IP **in the live environment, for every action** — not only registration. This matters because it also gates the *interactive search step* (`LOOKUP`/`get_price`/`name_suggest`), which happens synchronously as a customer types a domain name during onboarding, not only the async purchase step. Decision: **Option B — a single dedicated AWS Lambda with static egress**, consistent with this repo's existing infra precedent (Stage 14 screenshot Lambda, Stage 16 Step Functions workflow: "Vercel serves the app; a purpose-built AWS Lambda handles one constrained backend job").
-   - **Egress mechanism**: the Lambda runs in a VPC private subnet routed through **[fck-nat](https://github.com/AndrewGuenther/fck-nat)** (an open-source NAT-instance CDK construct), not a managed NAT Gateway — a managed NAT Gateway costs ~$33/month sitting idle regardless of traffic (AWS's flat hourly rate), which is disproportionate for a feature with low purchase volume at this stage; fck-nat is a self-managed EC2 NAT instance (~$3-5/month, ~90% cheaper) with an Auto Scaling Group for auto-replace-on-failure. Trade-off accepted deliberately: this is a self-managed component (AMI/patching) rather than an AWS-managed one, in exchange for the cost difference. If purchase/search volume grows enough that the ops overhead outweighs the savings, swapping to a managed NAT Gateway is a small, isolated infra change (same VPC/subnet shape, only the NAT construct changes).
-   - **One Lambda, two invoke modes** — this single Lambda owns *all* OpenSRS interaction (not just purchase), invoked two different ways depending on latency needs:
-     - **Search/pricing** (`LOOKUP`, `get_price`, `name_suggest`): synchronous `lambda:InvokeFunction` (`RequestResponse`) directly from the Next.js app — fast enough for interactive UI, and reuses the same pattern already established for the Vercel-hosted app's IAM identity (`webpresa-vercel-{env}`) having direct, least-privilege AWS SDK access to other AWS resources (see `vercel-access-stack.ts`). No API Gateway — it would add a new AWS service pattern this codebase doesn't otherwise use, for no capability the direct-invoke IAM grant doesn't already provide.
-     - **Purchase execution** (`sw_register`, DNS zone commands, Vercel attach): asynchronous, triggered by an SQS message the Stripe webhook enqueues (see "Stripe webhook changes," below) — decoupled from the webhook's request/response cycle.
-   - **Code location — corrects an assumption in the "Major deliverables" list below**: because only this Lambda has the fixed IP, the actual OpenSRS request/XML/signing implementation must live inside the Lambda's own standalone source tree, `infra/lambda/domain-purchase-worker/` — mirroring Stage 14's screenshot Lambda, which is "a standalone deployable, independent of both `web/` and `infra/`'s own npm projects (no workspace tooling exists in this repo)." `web/lib/opensrs/client.ts` on the Vercel side is therefore **not** a raw HTTP client to OpenSRS — it's a thin invoker: builds the `InvokeCommand`/`SendMessageCommand` payload and calls the Lambda/SQS queue. The XML envelope building, MD5 signature, and Zod-mapped response parsing all live in `infra/lambda/domain-purchase-worker/src/opensrs/`.
-3. **OpenSRS DNS-hosting verification** — researched against current public OpenSRS documentation (`domains.opensrs.guide`, `support.opensrs.com`); **still to be reconfirmed against the live reseller account's own settings once provisioned**, since default-nameserver behavior is itself reseller-configurable:
-   - New registrations default to one of three reseller-configured nameserver modes: OpenSRS nameservers (`ns1/ns2/ns3.systemdns.com`), "Park with Ads," or custom nameservers — set in the Reseller Control Panel's default domain settings, and overridable per-registration via `sw_register`'s `custom_nameservers`/`nameserver_list` params. This part requires the OpenSRS-nameservers mode (custom nameservers disable DNS/zone management entirely).
-   - DNS is enabled per-domain via `create_dns_zone`, then records set via `set_dns_zone` (apex A record, `www` CNAME), read back via `get_dns_zone`; `force_dns_nameservers` reverts a domain to OpenSRS's DNS nameservers if it was pointed elsewhere. Public docs don't state a hard activation delay before `create_dns_zone` can run post-registration — worker logic must not assume it's instant; treat a transient failure here as retryable, same as `configurationStatus = failed`.
-   - Default parking/ad records are removed by `set_dns_zone` overwriting the zone's records outright, or `reset_dns_zone` to fall back to a template — no separate "delete parking" action.
-   - Apex and `www` records must be created via `set_dns_zone` before Vercel domain verification/certificate issuance can succeed, exactly as Part 2 requires for customer-managed DNS.
-4. **Exact API surface** — researched and confirmed against current public documentation; endpoint hosts differ from this spec's earlier placeholder names and are corrected here:
-   - Transport: HTTPS POST of a custom XML `OPS_envelope` document (not JSON) — `Content-Type: text/xml`, `X-Username` header, `X-Signature` header (double MD5: `MD5(MD5(xml + api_key) + api_key)`). This is a materially different wire format than this codebase's other JSON-based clients (Firecrawl/Google Places); the OpenSRS client's `client.ts` must build/parse XML, then map the parsed result into a plain object before Zod validation — Zod still validates the *mapped* shape, same as elsewhere.
-   - Test host: `https://horizon.opensrs.net:55443` (no IP allowlist required — matches this project's local/CI dev needs). Live host: `https://rr-n1-tor.opensrs.net:55443` (source IP must be allowlisted in the Reseller Control Panel — this is what Part 3.0 checkpoint 2's fixed-egress decision exists for).
-   - Actions used by this part: `LOOKUP` (object `DOMAIN`) for availability — note `response_code = 211` ("domain taken") still returns `is_success = 1`, so availability must be read from `response_code`/the `status` attribute, never from `is_success` alone; `get_price` for registration/renewal pricing (a separate call from `LOOKUP`, which does not return price); `name_suggest` for search suggestions; `sw_register` (object `DOMAIN`) for purchase, which requires a `contact_set` (owner/admin/billing/tech) and an OpenSRS-specific `reg_username`/`reg_password` pair for the registrant's OpenSRS control-panel login — the latter must be generated server-side per purchase and never persisted or logged (see Security requirements); `create_dns_zone`/`set_dns_zone`/`get_dns_zone` for DNS.
-   - Every response carries `is_success`, `response_code`, `response_text` — the `OpensrsErrorCategory` taxonomy in `errors.ts` should map off `response_code`, not string-match `response_text`.
+Done by hand in the **PTE test environment** first (`manage.test.shopco.com`-equivalent), confirmed end to end, then repeated on the live store as a separate, later, deliberate go-live step:
+
+1. Connect Stripe (Settings → Payments) — can be the same Stripe account already used for Webpresa subscriptions; Storefront treats it as a separate connected integration, so this never touches the existing subscription billing path.
+2. Review domain pricing (Settings → Pricing).
+3. General settings: store name, support email, and a **custom Storefront hostname** (e.g. `domains.webpresa.com`, via CNAME) so checkout doesn't show a generic `*.shopco.com`-style address.
+4. **Branding — global CSS reskin** (Settings → Advanced Settings → Custom Code → Header): a single `<style>` block using Webpresa's own platform brand colors (`#11455E` primary / `#CE9059` accent, from `web/app/globals.css`) — this is a store-wide setting, not per-business, so it reskins Storefront to feel like part of Webpresa rather than matching any individual customer's own site theme.
+5. **One permanent DNS Template** (Settings → Advanced Settings → Domain Defaults → DNS Templates) — a single template serving every Business (all Businesses route through the same shared Vercel target; tenant resolution happens inside this app via `resolveActiveDomainRoute`, not via different DNS values per business):
+   - `A @ → 76.76.21.21`
+   - `CNAME www → cname.vercel-dns.com`
+   (Same values `lib/vercel/domains.ts`'s `buildRoutingInstructions` already computes for Part 2.) Its Template ID becomes the permanent `OPENSRS_DNS_TEMPLATE_ID` environment variable — see `lib/opensrs/constants.ts`.
+
+### Environment isolation
+
+Every layer mirrors this codebase's existing Stripe test/live split: `webpresa-dev-opensrs-storefront` holds PTE (test) storefront credentials; `webpresa-prod-opensrs-storefront` stays an empty CDK placeholder until a deliberate, separate go-live step populates it (see `web/docs/deployment.md`, "OpenSRS Storefront deployment guidance"). Which secret is read is resolved automatically per Vercel environment via `OPENSRS_STOREFRONT_SECRET_NAME`, and both it and every table name already pass through `assertResourceEnvironmentConsistency()` (`lib/env/resource-consistency.ts`), the same cross-environment guard every other secret/table in this app relies on. Webhook registration is per-environment and manual (PTE store's webhook → dev/Preview URL with `?x-vercel-protection-bypass=`, matching the existing Stripe dev-webhook requirement; live store's webhook → Production URL, no bypass needed).
 
 ### Major deliverables
 
-- **`infra/lambda/domain-purchase-worker/`** — standalone Lambda deployable (own `package.json`, no workspace tooling, mirroring `infra/lambda/screenshot-capture/`) that owns 100% of the OpenSRS wire protocol: `src/opensrs/client.ts` (XML `OPS_envelope` request building, `X-Signature` MD5 signing, response parsing + Zod validation, `OpensrsErrorCategory` taxonomy keyed off `response_code`) plus feature-specific callers — `search.ts`, `purchase.ts`, `dns.ts`, `contacts.ts` — same file-splitting convention as Firecrawl/Google Places, just relocated to where the fixed IP actually is. `src/handler.ts` dispatches on invoke source: a direct `RequestResponse` invoke (search/pricing) vs. an SQS-triggered event (purchase execution). **No pluggable multi-registrar interface ships in this stage** — only OpenSRS exists as a backend, and building an abstraction for a hypothetical second registrar with no concrete second implementation contradicts this project's own anti-premature-abstraction convention; extracting an interface later, if a second registrar is ever actually needed, is cheap. The canonical `DomainConnection`/`DomainPurchaseAttempt` models do keep provider-neutral *field names* (`registrarProvider`, `registrarOrderId`, `providerRequestId` — already generic, not OpenSRS-shaped), which costs nothing now and avoids a rename later.
-- **`web/lib/opensrs/`** — thin invoker on the Vercel side, *not* an OpenSRS HTTP client (see Part 3.0 checkpoint 2): `client.ts` wraps `@aws-sdk/client-lambda`'s `InvokeCommand` (search/pricing, synchronous) and `@aws-sdk/client-sqs`'s `SendMessageCommand` (purchase handoff, async); `search.ts`/`purchase.ts` are the feature-specific callers `lib/domains/*` orchestration functions import, matching this codebase's usual client/feature-file split.
-- New VPC (private + public subnet, single AZ — this Lambda's traffic doesn't justify multi-AZ redundancy cost) with **fck-nat** (not a managed NAT Gateway — see Part 3.0 checkpoint 2 for the cost rationale) providing the Lambda's static egress IP; the IAM identity `webpresa-vercel-{env}` gets `lambda:InvokeFunction` on this Lambda and `sqs:SendMessage` on the purchase queue, added to `vercel-access-stack.ts` alongside its existing grants — no new IAM identity.
-- New SQS queue `webpresa-{env}-domain-purchase-queue` (+ DLQ) — the Stripe webhook's handoff mechanism to the async purchase path; the Lambda's SQS event-source mapping is its trigger, mirroring the DLQ-on-failure pattern the screenshot Lambda already establishes, but via SQS-as-trigger rather than SQS-as-failure-destination.
-- New Secrets Manager secret `webpresa-{env}-opensrs-api` (`{ username, apiKey, environment: 'test' | 'live' }`) via `WebpresaSecret`; granted only to the domain-purchase-worker Lambda's execution role (`GetSecretValue` only) — never to `webpresa-vercel-{env}`, since the Vercel-hosted app never talks to OpenSRS directly.
-- `DomainPurchaseAttempt` model, Zod schema, factory, and repository — split payment/registration/configuration status (see below), since a single flat `status` can't distinguish failures that need very different recovery responses.
-- New DynamoDB table `webpresa-{env}-domain-purchase-attempts` — partition key `domainPurchaseAttemptId`; GSI `business-id-index` (PK `businessId`, SK `createdAt`).
-- The Domain step (same route since Part 1) gains its third choice: "Buy a new domain."
-- Domain search UI (deterministic name suggestions from the business's confirmed name/city/state/service — captured in Part 1's Review step, which is why Review runs before Domain).
-- Registrant-contact collection (`DomainRegistrantContact`) with explicit customer review before submission.
-- A new, separate one-time Stripe Checkout Session (`mode: 'payment'`, `billingPurpose: 'domain_purchase'`), with a Stripe idempotency key derived from the purchase-attempt ID.
-- The Stripe webhook's new `domain_purchase` branch (fast-ack + async handoff, detailed below).
-- `SUPPORTED_PURCHASE_TLDS` — an application-owned allowlist (`.com`, `.net`, `.org` to start; others added only after their eligibility/contact requirements are individually verified). No ccTLDs at launch unless their requirements are explicitly implemented.
-- A documented registrant/admin/tech/billing contact-role policy (see below).
-- `DomainConnection.source: 'webpresa_registered'`, `registrarProvider: 'opensrs'`, and a `registration` sub-object (additive to Part 2's shape).
-- Additional `DomainFailureCategory` values: `domain_unavailable`, `unsupported_tld`, `premium_domain`, `registrar_search_failed`, `purchase_payment_failed`, `purchase_provider_failed`, `registration_contact_required`.
-- Admin: view purchase-attempt status, begin refund recovery.
+- **`web/lib/opensrs/`** — a thin hand-written JSON REST client (`client.ts`, matching this codebase's existing Firecrawl/Lob "isolated hand-written adapter" convention, not the raw reseller API's XML/MD5 wire protocol): `createStorefrontCustomer()` and `getStorefrontSsoUrl()`. `constants.ts` holds the single permanent `OPENSRS_DNS_TEMPLATE_ID`. `verify-webhook.ts` verifies inbound webhook signatures (see "Documentation gap" below).
+- New Secrets Manager secret `webpresa-{env}-opensrs-storefront` (`{ apiKey, webhookKey }`) via `WebpresaSecret` — granted to `webpresa-vercel-{env}` like Stripe/Lob (not Lambda-only; Storefront's REST API has no documented IP-allowlist requirement, unlike the raw reseller API). Deliberately a distinct secret name from the still-reserved `webpresa-{env}-opensrs-api` (untouched — that name stays reserved for the raw reseller API design, should it ever be built for some other purpose).
+- **`CustomerDomainProfile`** model/schema/repository (`domain/models/customer-domain-profile.ts`, `lib/db/customer-domain-profiles.ts`) — the canonical Cognito-`sub` → OpenSRS-Storefront-customer-id mapping, mirroring `CustomerBillingProfile` exactly (same conditional-`PutItem` / lost-race handling). This is what lets a customer land in Storefront via a one-time SSO URL instead of ever creating a second account. New table `webpresa-{env}-customer-domain-profiles`, partition key `userId`.
+- **`DomainPurchaseIntent`** model/schema/factory/repository (`domain/models/domain-purchase-intent.ts`, `lib/db/domain-purchase-intents.ts`) — a short-lived, TTL-bounded (`ttl`, ~7 days, matching Storefront's own documented query-string session lifetime) correlation record linking one SSO redirect to the Business it was started for. Storefront's own `extuserid` query-string parameter is documented as a single stable value stored directly on the Storefront customer record (not a per-purchase correlation id), so this table repurposes it instead: a fresh `intentId` is generated per redirect and passed as `extuserid`, letting the webhook determine which Business a purchase belongs to (a customer may own several). New table `webpresa-{env}-domain-purchase-intents`, partition key `intentId`, TTL on `ttl`.
+- `startDomainPurchaseAction(businessId)` (`app/app/onboarding/[businessId]/actions.ts`) — the Domain step's third choice, mirroring `createBillingPortalSessionAction`'s auth/redirect shape exactly: require session + active subscription, resolve (creating if necessary) the customer's one OpenSRS Storefront account, create a `DomainPurchaseIntent`, mint an SSO URL, append `?dnstemplateid=...&extuserid={intentId}`, redirect.
+- `app/api/webhooks/opensrs/route.ts` — structured like `app/api/webhooks/stripe/route.ts`/`app/api/webhooks/lob/route.ts`: verify signature (400 only on failure), resolve the `DomainPurchaseIntent` → Business, re-verify ownership, attach the domain via the existing `addProjectDomain()` (`lib/vercel/domains.ts`), create the `DomainConnection` record, and return 200 (ack, never retried forever) on any recognized-but-unusable payload vs. 500 only on a genuine internal error (e.g. the Vercel attach itself failing — a redelivery then retries the attach rather than treating it as already handled, via the `status === 'failed'` branch).
+- `DomainConnection.source: 'webpresa_registered'`, `registrarProvider: 'opensrs'`, and a `registration` sub-object (additive to Part 2's shape — see below). No new `DomainFailureCategory` values were needed: the webhook's only failure mode is the same Vercel-attach failure Part 2 already models (`vercel_auth_failed`/`vercel_domain_add_failed`), since Storefront itself handles every purchase-time failure (payment, availability, contact validation) before ever notifying Webpresa.
+- The Domain step (`DomainChoiceCards.tsx`) gains its third, real choice: "Buy a new domain."
+- `DomainCard.tsx` (dashboard settings) shows "Purchased through Webpresa" for `source === 'webpresa_registered'` connections, distinct from a customer-connected domain — no other UI change; both sources share the same `DomainConnection` state machine (`DomainStatusPanel.tsx` needs no source-specific logic, since a Storefront-purchased domain's DNS is already correct at webhook time and so never enters the `awaiting_dns` manual-instructions state Part 2's flow shows).
 
 ### Additive model change to `DomainConnection`
 
 ```ts
 registration?: {
-  orderId?: string;
-  purchasedAt?: string;
+  orderId: string; // OpenSRS Storefront's order id — the webhook's idempotency key
+  purchasedAt: string;
   expiresAt?: string;
-  autoRenew: boolean;
+  autoRenew?: boolean;
   registrationPriceCents?: number;
   registrationCurrency?: string;
-  renewalPriceCents?: number;
-  renewalCurrency?: string;
 };
 ```
 
-No `provider` field inside `registration` — `DomainConnection.registrarProvider` (already reserved on the model, currently "display-only") is the single field that identifies the registrar; duplicating `'opensrs'` inside `registration` too would be redundant since the two values can never disagree while OpenSRS is the only backend.
+No `provider` field inside `registration` — `DomainConnection.registrarProvider` (already reserved on the model) is the single field that identifies the registrar; duplicating `'opensrs'` inside `registration` too would be redundant.
 
-### `DomainPurchaseAttempt` model
+### Domain purchase flow
 
-A single flat `status` field can't distinguish "payment succeeded but registration definitively failed" (refund) from "payment succeeded, registration outcome unknown" (query and wait — never blindly refund or retry) from "domain registered fine, only Vercel/DNS configuration failed" (retry configuration, no refund at all). Splitting these into independent fields is what makes the compensation logic below actually correct:
-
-```ts
-interface DomainPurchaseAttempt extends MutableTimestampedRecord {
-  domainPurchaseAttemptId: string;
-  businessId: string;
-  userId: string;
-  domainName: string;
-
-  quote: {
-    quoteId: string;
-    registrationPriceCents: number;
-    renewalPriceCents?: number;
-    currency: string;
-    registrationYears: number;
-    retrievedAt: string;
-    expiresAt: string;
-  };
-
-  paymentStatus: 'not_started' | 'pending' | 'paid' | 'failed' | 'refund_required' | 'refunded';
-  registrationStatus: 'not_started' | 'pending' | 'registered' | 'failed' | 'uncertain';
-  configurationStatus: 'not_started' | 'pending' | 'completed' | 'failed';
-
-  stripeCheckoutSessionId?: string;
-  stripePaymentIntentId?: string;
-
-  registrarProvider: 'opensrs';
-  registrarOrderId?: string;
-  providerRequestId?: string;
-
-  domainConnectionId?: string;
-
-  // Lease-based claiming so a duplicate/retried Stripe webhook delivery, or a
-  // retried worker invocation, can never trigger two registrar purchases for
-  // the same attempt.
-  purchaseExecutionId?: string;
-  purchaseStartedAt?: string;
-  purchaseLeaseExpiresAt?: string;
-
-  acceptedTermsVersion: string;
-  acceptedTermsAt: string;
-
-  failureCategory?: DomainFailureCategory;
-  customerSafeMessage?: string; // never raw provider text — see Security requirements
-  providerErrorCode?: string;
-}
-```
-
-ID convention: `domainpurchase_<uuid>`. A worker transitions `registrationStatus` from `not_started`/expired-lease to `pending` only after first checking the registrar's own order status — never a blind retry after a timeout.
-
-Do not persist a registrar password, customer registrar session, raw payment credential, or full OpenSRS response anywhere. If `DomainRegistrantContact` must be persisted beyond the purchase transaction, treat it as sensitive PII: encrypt at rest, minimize fields, never log it, never return it outside authorized account/domain pages, document retention/deletion.
-
-### Domain search and purchase flow
-
-1. **Search**: suggested names derived from the business's confirmed Review-step data. Server queries OpenSRS for availability, registration price, renewal price, premium status, supported registration period, restricted to `SUPPORTED_PURCHASE_TLDS`. Display exact returned pricing — never a hardcoded assumption.
-2. **Premium domains**: not purchasable through the one-click path — shown as "additional review required."
-3. **Registrant contact**: collect only the fields the registrar/TLD requires; explicit review before submission. Default contact-role policy (confirm against OpenSRS's actual reseller policies before shipping): **registrant and admin contact = the customer's business**; **technical and billing contact = a Webpresa operational contact**. Never duplicate the same personal details into every role unless the registrar requires it. State plainly in the UI that ICANN may require the registrant to verify their contact email after registration, and what happens if they don't (a domain can be suspended for an unverified WHOIS contact).
-4. **Payment**: the UI surfaces `quote.expiresAt` as soft, non-committal freshness messaging ("price confirmed a moment ago — we'll double-check before you pay") rather than a hard countdown implying a guaranteed price hold, since OpenSRS's actual quote-freshness behavior isn't confirmed until Part 3.0 checkpoint 4 is resolved. Server rechecks availability/price immediately before creating the Checkout Session; customer explicitly accepts price/renewal terms (`acceptedTermsVersion`/`acceptedTermsAt`); one-time Stripe Checkout Session created with the purchase-attempt ID as the Stripe idempotency key.
-5. **Price/availability changes**: recheck immediately before payment and again immediately before the registrar call; reject if unavailable; require reconfirmation if price changed materially; never blindly retry an uncertain purchase result — query order status first.
-6. **Compensation**, expressed per split status:
-   - `paymentStatus = paid`, `registrationStatus = failed` (registrar definitively confirms unavailable/rejected) → `paymentStatus = refund_required`; never fabricate an active domain; notify the customer; offer another search; refund through a controlled admin/automated path. **Must be tested.**
-   - `paymentStatus = paid`, `registrationStatus = uncertain` (registrar timed out or returned an ambiguous result) → query the registrar's own order/domain status before doing anything else; never auto-refund or auto-retry while uncertain.
-   - `registrationStatus = registered`, `configurationStatus = failed` (domain registered fine, Vercel attach or DNS setup failed) → retry configuration; **no refund** — the customer already owns a valid domain.
-   - `registrationStatus = registered`, DNS configuration still `pending` → not a failure; the customer may continue onboarding while it finishes (mirrors Part 2's "don't block on DNS propagation" rule).
-7. **Post-purchase**: domain attached to the Vercel project and DNS configured automatically via the OpenSRS client — no manual DNS step for the customer, unlike Part 2. Certificate issuance proceeds exactly as Part 2's `connected → certificate_pending → active` path; `reconcileDomainConnection` is reused unchanged.
-
-### Stripe webhook changes
-
-`app/api/webhooks/stripe/route.ts` today checks `metadata.billingPurpose === 'website_subscription'` and explicitly ignores (`ignored_purpose`, logged) anything else; its reconciliation step re-fetches a Stripe *Subscription* object, meaningless for a one-time payment. This part adds a distinct, fast-acknowledging branch:
-
-```text
-Stripe webhook (domain_purchase)
-  → validate signature/event
-  → conditionally mark DomainPurchaseAttempt.paymentStatus = 'paid' (idempotent —
-    a webhook redelivery must not re-trigger anything)
-  → hand off one purchase execution (async — see Part 3.0's egress decision)
-  → return 2xx immediately
-
-Purchase worker (separate execution context)
-  → conditionally claim the attempt (lease fields, above)
-  → recheck availability/order state with OpenSRS
-  → call OpenSRS to register
-  → configure DNS, attach to Vercel
-  → persist the outcome (registrationStatus / configurationStatus)
-```
-
-The webhook request itself never stays open through OpenSRS registration, DNS setup, Vercel attachment, and certificate checks — that's why the split-status model and lease fields exist. `BILLING_PURPOSES` in `domain/constants/plans.ts` already reserves `'domain_purchase'`; no change needed there.
+1. Customer selects "Buy a new domain" on the Domain step → `startDomainPurchaseAction(businessId)`.
+2. Server resolves (creating via `createStorefrontCustomer()` if this is the customer's first domain purchase ever, across any Business they own) their one OpenSRS Storefront customer account, tagged with their Cognito `sub` via `external_user_id` (see `web/docs/open_srs.md`, "Link your own customer ID to Storefront").
+3. Server creates a `DomainPurchaseIntent` and mints a one-time SSO URL (`getStorefrontSsoUrl()`), appending the permanent `dnstemplateid` and this intent's id as `extuserid`, then redirects — the customer lands in Storefront **already signed in**, with no second signup/login screen, and the DNS Template pre-selected for whatever domain they register.
+4. The customer searches, reviews registrant contact info, and pays entirely inside Storefront's own hosted checkout — Webpresa's app is not involved in any of this, and never touches payment for the domain itself (Storefront's connected Stripe integration collects it directly).
+5. Storefront applies the pre-selected DNS Template automatically at registration — the purchased domain's DNS already points at Vercel's shared target before Webpresa is ever notified.
+6. Storefront's webhook notifies `app/api/webhooks/opensrs/route.ts`, which resolves the `DomainPurchaseIntent` → Business, calls `addProjectDomain()` to attach the domain in Vercel (this is what actually makes Vercel serve/certificate it — DNS alone isn't enough), and creates the `DomainConnection` record (`status: 'connected'`).
+7. From there, the existing Part 2 machinery takes over unchanged: `reconcileDomainConnection`'s `connected → certificate_pending → active` path, `/api/domains/status` polling, `DomainStatusPanel`.
 
 ### Registration ownership policy
 
-Recommended, to be confirmed with final legal terms (Stage 26) before this part ships: *"A customer-paid domain belongs to the customer's business. Webpresa manages it operationally through its OpenSRS reseller account while the account is active, and provides a reasonable transfer-out process after identity verification and settlement of outstanding domain charges."* The dashboard must state this plainly. Do not ship this part with ownership left ambiguous in either the UI or the terms.
+Recommended, to be confirmed with final legal terms (Stage 26) before this part ships live: *"A customer-paid domain belongs to the customer's business. Webpresa manages it operationally through its OpenSRS reseller account (via Storefront) while the account is active, and provides a reasonable transfer-out process after identity verification and settlement of outstanding domain charges."* The dashboard must state this plainly.
 
 ### Renewal — interim policy for this stage
 
-OpenSRS's own auto-renew, if enabled, draws from **Webpresa's reseller balance**, not the customer's payment method directly — enabling it without a separate customer-facing renewal charge means Webpresa silently absorbs every renewal indefinitely. Full automated recurring renewal billing through Stripe is **out of scope for this part** (a dedicated later implementation, since it needs its own price-recheck-then-charge workflow and grace-period handling). For this stage: store expiration/renewal state and next renewal price when available; explain annual renewal plainly to the customer; keep OpenSRS auto-renew under an explicit, documented interim policy decision rather than silently assuming the Stripe Customer on file funds it; do not ship automated customer-renewal-charging in this part.
+Renewal, auto-renew, and any recurring renewal billing are entirely OpenSRS Storefront's own concern (Storefront bills the customer's card on file directly per its own documented renewal-reminder/reactivation flow) — unlike the raw-reseller-API design this part supersedes, Webpresa's reseller balance is never silently on the hook for a renewal Webpresa itself didn't separately charge for. No renewal-specific code ships in this part.
+
+### Documentation gap — confirm before finalizing the webhook
+
+`web/docs/open_srs.md` references a "Developers section" and a webhook capability by name, but not the exact event catalog, payload schema, or signature-verification mechanics — the real article ("Storefront Webhook Notifications") is gated behind reseller-support login. What's confirmed (from OpenSRS's public support-site search index): webhooks are configured under Storefront Settings → Advanced Settings → Add Webhook, with **Order Events** (including "Completed order") and **Domain Events** (including "Domain registration") as real event categories, and registering one returns a "webhook key." `lib/opensrs/verify-webhook.ts` and the route handler's `extractEventType`/`extractDomain`/`extractOrderId`/`extractIntentId` functions implement a reasonable best-effort shape (HMAC-SHA256 over the raw body; `event_type`/`domain`/`order_id`/`external_user_id` JSON fields) that **must be confirmed against a real registered webhook delivery in the PTE environment** before this part is considered done — register the webhook, trigger a real test purchase, inspect the actual delivered headers/body, and adjust.
 
 ### Security requirements
 
-- Same domain-uniqueness/takeover protections as Part 2 (the `normalizedDomain` partition key + conditional write), applied to the purchased domain too.
-- OpenSRS credentials and raw registrant contact data are never sent to the browser, logged, or returned outside authorized pages.
-- Purchase-attempt/`domainConnectionId` pairs re-verified server-side on every mutation.
-- Safe logging: purchase-attempt ID, Stripe event/session ID, OpenSRS order ID, safe failure category, `customerSafeMessage` — never the OpenSRS API key, full registrant contact, or a raw provider response/error string (`providerErrorCode` only).
+- Same domain-uniqueness/takeover protections as Part 2 (the `normalizedDomain` partition key + conditional write), applied to a purchased domain too — the webhook route never overwrites an existing `DomainConnection` for a different order/business, only ever creates fresh or retries its own prior attempt.
+- OpenSRS Storefront credentials are never sent to the browser, logged, or returned outside authorized pages. No registrant contact data is ever collected or stored by Webpresa at all — Storefront collects and holds it entirely on its own side.
+- `DomainPurchaseIntent`/business ownership re-verified server-side inside the webhook handler, never trusted from the payload alone.
+- Safe logging: intent id, business id, OpenSRS order id, event type, safe failure category — never the OpenSRS API key, webhook key, or a raw provider response body.
 
 ### Testing requirements
 
-- Quote expiration; premium-domain blocking; `SUPPORTED_PURCHASE_TLDS` enforcement; safe-retry classification (unit).
-- Purchase-attempt persistence and conditional status transitions across all three split-status fields (repository).
-- All four compensation branches from step 6 above — paid+failed, paid+uncertain, registered+configuration-failed, registered+DNS-pending (integration — required, not optional).
-- Lease-based concurrent-worker safety: two overlapping purchase-execution attempts for the same `DomainPurchaseAttempt` never both call the registrar.
-- Webhook: `domain_purchase` events reconcile independently of `website_subscription` events; a duplicate Stripe webhook delivery is a no-op the second time.
-- Authorization: customer cannot purchase a domain for a business they don't own; `billing_recovery`/`none` cannot initiate a purchase.
+- `CustomerDomainProfile`/`DomainPurchaseIntent` conditional-write and lost-race handling (repository unit tests — mirrors `customer-billing.test.ts`).
+- Webhook: invalid signature → 400 before any DB lookup; unresolvable/unknown event or intent → 200, no-op; ownership mismatch → 200, no Vercel call; a duplicate delivery for an already-connected domain → 200, no second Vercel call; a redelivery after a prior Vercel-attach failure retries the attach; a genuine Vercel-attach failure → 500 with the connection recorded `failed`.
+- Authorization: `startDomainPurchaseAction` requires an owning, actively-subscribed customer, same as every other onboarding action in this file.
 
 ### Acceptance criteria
 
-- A `full`-mode customer can search (within `SUPPORTED_PURCHASE_TLDS`), price-check, pay for, and receive a fully DNS-configured, Vercel-attached domain with no manual DNS step.
-- Each of the four compensation scenarios above resolves to the correct, distinct outcome — a configuration-only failure never triggers a refund; a definitive registration failure never leaves a fake active domain.
-- A duplicate Stripe webhook delivery never results in two registrar purchase attempts.
-- The recurring website subscription's entitlement is never affected by a domain-purchase event, and vice versa.
+- A `full`-mode customer can click "Buy a new domain," land in Storefront already signed in (no second account), and — once a purchase completes and Storefront's webhook fires — see the domain connected and eventually reach "Live," with no manual DNS step.
+- A duplicate webhook delivery never creates two `DomainConnection` records or double-attaches the domain in Vercel.
+- The recurring website subscription's entitlement is never affected by a domain purchase, and vice versa — Storefront's checkout is entirely separate from Webpresa's own Stripe subscription flow.
 - `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build` pass in `web/`; `cdk diff`/`cdk synth` pass in `infra/`.
 
 ---
@@ -3244,7 +3153,7 @@ Beyond replacing Part 1's placeholder tour with the full illustrated orientation
 - Full cross-flow verification across all three domain choices (existing/purchase/defer) and their sub-states (active, pending-DNS, pending-configuration, deferred), domain-aware publish messaging, public-URL preference, dashboard domain card, resume behavior — exercised together, not just per-part in isolation.
 - `tourCompletedAt` and `tourSkippedAt` recorded as distinct outcomes (already on the Part 1 model) — "finished the tour" and "intentionally skipped it" stay analytically distinguishable.
 - A persistent replay entry point: `/app/onboarding/[businessId]/tour?mode=replay`, server-validated, renders the same illustrated cards **without mutating onboarding state** — no new page/route tree, no onboarding reset.
-- A derived (not stored) `domainOutcome` used by the final completion check — `'active_existing' | 'active_purchased' | 'pending_existing' | 'pending_purchased' | 'deferred'`, computed from current `DomainConnection`/`DomainPurchaseAttempt` state rather than persisted redundantly, matching Stage 19's existing convention of deriving dashboard status (Live/Draft changes/No live site) rather than storing it. The customer is never blocked while DNS propagates or a certificate issues; but a purchase stuck at `paymentStatus = paid`, `registrationStatus = uncertain` shows a purchase-processing/recovery state, never a casually "complete" domain step.
+- A derived (not stored) `domainOutcome` used by the final completion check — `'active_existing' | 'active_purchased' | 'pending_existing' | 'pending_purchased' | 'deferred'`, computed from current `DomainConnection`/`DomainPurchaseIntent` state rather than persisted redundantly, matching Stage 19's existing convention of deriving dashboard status (Live/Draft changes/No live site) rather than storing it. The customer is never blocked while DNS propagates or a certificate issues; but a `DomainPurchaseIntent` stuck `pending` past a generous window (OpenSRS Storefront's webhook never arrived) shows a purchase-processing/recovery state, never a casually "complete" domain step.
 
 ### Acceptance criteria
 
@@ -3263,10 +3172,10 @@ Prefer: website address, connect your domain, buy a new domain, domain provider,
 ## Deferred work
 
 - Registrar transfer (moving a domain's registrar of record to Webpresa/OpenSRS for an already-elsewhere-registered domain).
-- A scheduled EventBridge domain-reconciliation job (Stage 23, once it exists) — Parts 2/3 ship with page-load/manual reconciliation only.
+- A scheduled EventBridge domain-reconciliation job (Stage 23, once it exists) — Parts 2/3 ship with page-load/manual reconciliation only, plus a simple stuck-`DomainPurchaseIntent` log/alert for Part 3 (see Part 3's "Documentation gap" section).
 - A pluggable multi-registrar provider interface — only OpenSRS is implemented in this stage; revisit only if a second registrar backend is actually needed.
-- Automated recurring domain-renewal billing through Stripe (see Part 3's "Renewal — interim policy for this stage").
-- Automated renewal-reminder emails and self-service transfer-out tooling (the data model must not prevent them; no UI ships here).
+- Automated recurring domain-renewal billing through Stripe (moot for Part 3 as designed — OpenSRS Storefront handles renewal billing entirely itself; see Part 3's "Renewal — interim policy for this stage").
+- Automated renewal-reminder emails and self-service transfer-out tooling (Storefront already sends its own renewal reminders to the customer directly; Webpresa-side tooling, if ever needed, is future work).
 - Wildcard `{slug}.webpresa.com` subdomains.
 - A customer-facing full domain-lifecycle management center beyond the Settings summary + admin card.
 - `requirePlanCapability()`, analytics/traffic reporting, Google Business Profile management, team members/shared editing, ownership transfer, `/app/account` (Cognito email/password/sign-out beyond the sidebar's existing sign-out action).
