@@ -161,7 +161,7 @@ export default async function OnboardingReviewPage({ params, searchParams }: Pro
           <OnboardingPrimaryButton
             action={completeReviewAction.bind(null, businessId)}
             externalFormId={REVIEW_FORM_ID}
-            label={business.email ? 'Continue to domain' : 'Continue to notifications'}
+            label="Continue to notifications"
             pendingLabel="Saving…"
           />
         }

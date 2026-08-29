@@ -64,16 +64,10 @@ export async function completeReviewAction(businessId: string, formData: FormDat
 
   await completeReviewStep(businessId);
 
-  // The `leads` step asks where to send new-lead notifications. If Review
-  // just left `Business.email` set, reuse it (matching how the two fields
-  // are meant to start in sync) and skip straight past — the step is never
-  // shown to a customer who already has a notification address. Otherwise
-  // send them to the step so they can provide one.
-  if (business.email) {
-    await updateCustomerLeadNotificationEmail(businessId, business.email);
-    await completeLeadsStep(businessId);
-    redirect(`/app/onboarding/${businessId}/domain`);
-  }
+  // The `leads` step asks where to send new-lead notifications — always
+  // shown, even when `Business.email` is already set, since a business's
+  // public contact email and the address they actually want lead
+  // notifications sent to aren't guaranteed to be the same.
   redirect(`/app/onboarding/${businessId}/leads`);
 }
 

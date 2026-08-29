@@ -1,9 +1,12 @@
 /**
  * Unit tests for the `leads` onboarding step's slice of `actions.ts`:
- * `completeReviewAction`'s new auto-skip branch, and `completeLeadsAction`
- * itself. Every DB/auth/editing dependency is mocked; `redirect` is mocked
- * to throw (Next's own behavior), matching the pattern used elsewhere in
- * this codebase for testing Server Actions that always redirect.
+ * `completeReviewAction` (always proceeds to the `leads` step — an earlier
+ * auto-skip-when-business.email-is-set branch was removed 2026-08-29, since
+ * a business's public contact email and its lead-notification address
+ * aren't guaranteed to be the same), and `completeLeadsAction` itself.
+ * Every DB/auth/editing dependency is mocked; `redirect` is mocked to throw
+ * (Next's own behavior), matching the pattern used elsewhere in this
+ * codebase for testing Server Actions that always redirect.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -77,17 +80,17 @@ beforeEach(() => {
   mockUpdateCustomerLeadNotificationEmail.mockResolvedValue(undefined);
 });
 
-describe('completeReviewAction — leads step auto-skip', () => {
-  it('copies business.email into leadNotificationEmail, auto-completes leads, and skips straight to domain', async () => {
+describe('completeReviewAction', () => {
+  it('always redirects to the leads step, even when business.email is already set', async () => {
     mockGetBusinessById.mockResolvedValueOnce({ phone: undefined, email: 'owner@acme.com' });
 
-    await expect(completeReviewAction(BUSINESS_ID, formData({}))).rejects.toThrow(`REDIRECT:/app/onboarding/${BUSINESS_ID}/domain`);
+    await expect(completeReviewAction(BUSINESS_ID, formData({}))).rejects.toThrow(`REDIRECT:/app/onboarding/${BUSINESS_ID}/leads`);
 
-    expect(mockUpdateCustomerLeadNotificationEmail).toHaveBeenCalledWith(BUSINESS_ID, 'owner@acme.com');
-    expect(mockCompleteLeadsStep).toHaveBeenCalledWith(BUSINESS_ID);
+    expect(mockUpdateCustomerLeadNotificationEmail).not.toHaveBeenCalled();
+    expect(mockCompleteLeadsStep).not.toHaveBeenCalled();
   });
 
-  it('redirects to the leads step instead when business.email is unset', async () => {
+  it('redirects to the leads step when business.email is unset', async () => {
     mockGetBusinessById.mockResolvedValueOnce({ phone: '512-555-0100', email: undefined });
 
     await expect(completeReviewAction(BUSINESS_ID, formData({}))).rejects.toThrow(`REDIRECT:/app/onboarding/${BUSINESS_ID}/leads`);
