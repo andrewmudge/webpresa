@@ -1,6 +1,6 @@
 import { getOpenSrsStorefrontSecret } from '@/lib/secrets';
 import { OPENSRS_SIGNATURE_HEADER, verifyOpenSrsWebhookSignature } from '@/lib/opensrs/verify-webhook';
-import { getDomainPurchaseIntent, putDomainPurchaseIntent } from '@/lib/db/domain-purchase-intents';
+import { listDomainPurchaseIntentsByStorefrontUsername, putDomainPurchaseIntent } from '@/lib/db/domain-purchase-intents';
 import type { DomainPurchaseIntent } from '@/domain/models/domain-purchase-intent';
 import { getBusinessById } from '@/lib/db/businesses';
 import { getDomainConnectionByNormalizedDomain, createDomainConnectionRecord, putDomainConnection } from '@/lib/db/domain-connections';
@@ -20,12 +20,28 @@ import { log } from '@/lib/logging/log';
  * `record.status === 'failed'` branch below re-attempts the Vercel attach
  * on redelivery rather than treating it as already handled).
  *
- * **Event type name and payload field names are not confirmed against real
- * OpenSRS documentation** — see `lib/opensrs/verify-webhook.ts`'s doc
- * comment for the same gap. Adjust `ALLOWED_EVENT_TYPES` and the
- * `extract*` functions below once a real payload has been inspected in the
- * PTE environment (register the webhook, trigger a real test purchase,
- * read the actual delivered body).
+ * Field names below are confirmed (2026-08-29) against a real "Send Test"
+ * delivery in PTE:
+ * `{ event, event_id, username, changes_by, is_success, domain_name,
+ *   created_date, record_type, data }`. **Not confirmed**: the exact
+ * `event` string value for a genuine "Domain registration" (the test
+ * delivery's `event` field just said the literal placeholder "Event name").
+ * Storefront's own docs say a webhook subscribes per *category* and
+ * receives every event in it — the registration webhook was configured
+ * against the "Domain registration" entry under Domain Events, but per that
+ * documented behavior this endpoint may actually receive every Domain
+ * Events event (DNS changes, nameserver updates, contact changes, etc.),
+ * not just registrations. `isLikelyRegistrationEvent` below is a
+ * conservative, flagged-as-unconfirmed heuristic (case-insensitive
+ * substring match on "registration") rather than an exact string compare,
+ * to fail closed (ignore) rather than misfire on an unrelated domain event
+ * — tighten this once a real registration delivery's exact `event` value
+ * is confirmed.
+ *
+ * Correlation is via `username` (see `listDomainPurchaseIntentsByStorefrontUsername`),
+ * not `external_user_id`/`extuserid` — confirmed the real payload carries no
+ * such field at all, contrary to this integration's original design (see
+ * `domain/models/domain-purchase-intent.ts`'s doc comment).
  *
  * Never involved in DNS setup — the domain already points at Vercel via
  * the permanent DNS Template applied automatically at registration (see
@@ -36,23 +52,34 @@ import { log } from '@/lib/logging/log';
  * `/api/domains/status`, `DomainStatusPanel`) takes over unchanged.
  */
 
-const ALLOWED_EVENT_TYPES = new Set<string>(['domain.registered']);
-
-function extractEventType(payload: Record<string, unknown>): string | undefined {
-  return typeof payload.event_type === 'string' ? payload.event_type : undefined;
+function extractEvent(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.event === 'string' ? payload.event : undefined;
 }
 
-function extractDomain(payload: Record<string, unknown>): string | undefined {
-  return typeof payload.domain === 'string' ? payload.domain : undefined;
+function extractRecordType(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.record_type === 'string' ? payload.record_type : undefined;
 }
 
-function extractOrderId(payload: Record<string, unknown>): string | undefined {
-  return typeof payload.order_id === 'string' ? payload.order_id : undefined;
+function extractIsSuccess(payload: Record<string, unknown>): boolean {
+  return payload.is_success === true || payload.is_success === 'true';
 }
 
-/** Round-trips the `intentId` this app generated and passed as `extuserid` at SSO-redirect time — see `startDomainPurchaseAction`. */
-function extractIntentId(payload: Record<string, unknown>): string | undefined {
-  return typeof payload.external_user_id === 'string' ? payload.external_user_id : undefined;
+function isLikelyRegistrationEvent(payload: Record<string, unknown>): boolean {
+  const event = extractEvent(payload);
+  return extractRecordType(payload) === 'domain' && extractIsSuccess(payload) && !!event && event.toLowerCase().includes('registration');
+}
+
+function extractDomainName(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.domain_name === 'string' ? payload.domain_name : undefined;
+}
+
+/** The webhook delivery's own id — used as the idempotency key (there is no separate Storefront "order id" in this payload shape). */
+function extractEventId(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.event_id === 'string' ? payload.event_id : undefined;
+}
+
+function extractUsername(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.username === 'string' ? payload.username : undefined;
 }
 
 /** Best-effort — never let a diagnostic write turn an otherwise-handled webhook into a second, unrelated failure. */
@@ -71,12 +98,11 @@ export async function POST(request: Request): Promise<Response> {
   const { webhookKey } = await getOpenSrsStorefrontSecret();
   const valid = verifyOpenSrsWebhookSignature({ rawBody, signatureHeader: signature, webhookKey });
   if (!valid) {
-    // TEMPORARY (remove once the real signature header/algorithm is
-    // confirmed — see implementation.md's "Documentation gap"): dumps every
-    // header name + value and the raw body so a real PTE delivery can be
-    // inspected directly, since `lib/opensrs/verify-webhook.ts`'s
-    // HMAC-SHA256/`x-opensrs-signature` guess is unconfirmed and just
-    // failed against a real delivery. PTE-only test data, not production.
+    // TEMPORARY (remove once a real "Domain registration" delivery — not
+    // just a "Send Test" — has been processed successfully end to end):
+    // dumps headers + body for any delivery that still fails verification,
+    // in case the confirmed x-signature/sha256= scheme has an edge case
+    // this hasn't hit yet. PTE-only test data, not production.
     console.warn('[opensrs][DEBUG] unverified webhook delivery', {
       headers: Object.fromEntries(request.headers.entries()),
       rawBody,
@@ -93,24 +119,25 @@ export async function POST(request: Request): Promise<Response> {
     return new Response('Invalid payload', { status: 400 });
   }
 
-  const eventType = extractEventType(payload);
-  if (!eventType || !ALLOWED_EVENT_TYPES.has(eventType)) {
-    return new Response(null, { status: 200 }); // acknowledged, intentionally ignored
+  if (!isLikelyRegistrationEvent(payload)) {
+    return new Response(null, { status: 200 }); // acknowledged, intentionally ignored (some other Domain Events event)
   }
+  const event = extractEvent(payload) as string;
 
-  const intentId = extractIntentId(payload);
-  const rawDomain = extractDomain(payload);
-  const orderId = extractOrderId(payload);
+  const storefrontUsername = extractUsername(payload);
+  const rawDomain = extractDomainName(payload);
+  const eventId = extractEventId(payload);
 
-  if (!intentId || !rawDomain || !orderId) {
-    log({ level: 'warn', event: 'opensrs.webhook.unresolvable_payload', component: 'opensrs-webhook', operation: eventType });
+  if (!storefrontUsername || !rawDomain || !eventId) {
+    log({ level: 'warn', event: 'opensrs.webhook.unresolvable_payload', component: 'opensrs-webhook', operation: event });
     return new Response(null, { status: 200 });
   }
 
-  const intent = await getDomainPurchaseIntent(intentId);
+  const candidateIntents = await listDomainPurchaseIntentsByStorefrontUsername(storefrontUsername);
+  const intent = candidateIntents.find((candidate) => candidate.status === 'pending');
   if (!intent) {
-    // Expired (TTL) or never existed — can't correlate to a Business.
-    log({ level: 'warn', event: 'opensrs.webhook.unknown_intent', component: 'opensrs-webhook', operation: eventType });
+    // No matching pending intent — expired (TTL), already fulfilled, or never existed.
+    log({ level: 'warn', event: 'opensrs.webhook.unknown_intent', component: 'opensrs-webhook', operation: event });
     return new Response(null, { status: 200 });
   }
 
@@ -119,24 +146,24 @@ export async function POST(request: Request): Promise<Response> {
     // Defense in depth, same posture as the Stripe webhook's metadata-
     // trust-but-verify — ownership may have changed since the intent was
     // created (e.g. `releaseOwnership`).
-    log({ level: 'error', event: 'opensrs.webhook.ownership_mismatch', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType });
+    log({ level: 'error', event: 'opensrs.webhook.ownership_mismatch', component: 'opensrs-webhook', businessId: intent.businessId, operation: event });
     return new Response(null, { status: 200 });
   }
 
   const normalizedDomain = normalizeDomainInput(rawDomain);
   if (!isValidDomain(normalizedDomain)) {
-    log({ level: 'error', event: 'opensrs.webhook.invalid_domain', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType });
+    log({ level: 'error', event: 'opensrs.webhook.invalid_domain', component: 'opensrs-webhook', businessId: intent.businessId, operation: event });
     return new Response(null, { status: 200 });
   }
 
   let record = await getDomainConnectionByNormalizedDomain(normalizedDomain);
 
-  if (record && record.registration?.orderId !== orderId) {
-    // Already tracked under a different order (or a pre-existing
+  if (record && record.registration?.orderId !== eventId) {
+    // Already tracked under a different event (or a pre-existing
     // customer_owned connection) — never silently overwrite. Surfaced
     // loudly for manual investigation; acknowledged so OpenSRS doesn't
     // retry forever on a conflict no retry can resolve.
-    log({ level: 'error', event: 'opensrs.webhook.domain_conflict', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType });
+    log({ level: 'error', event: 'opensrs.webhook.domain_conflict', component: 'opensrs-webhook', businessId: intent.businessId, operation: event });
     return new Response(null, { status: 200 });
   }
 
@@ -156,14 +183,14 @@ export async function POST(request: Request): Promise<Response> {
       desiredRedirect: 'www_to_apex',
       primaryHostname: normalizedDomain,
       aliasHostnames: [],
-      registration: { orderId, purchasedAt: now },
+      registration: { orderId: eventId, purchasedAt: now },
       createdAt: now,
       updatedAt: now,
     };
     const createdNew = await createDomainConnectionRecord(draft);
     record = createdNew ? draft : await getDomainConnectionByNormalizedDomain(normalizedDomain);
     if (!record) {
-      log({ level: 'error', event: 'opensrs.webhook.reservation_failed', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType });
+      log({ level: 'error', event: 'opensrs.webhook.reservation_failed', component: 'opensrs-webhook', businessId: intent.businessId, operation: event });
       return new Response(null, { status: 500 });
     }
   }
@@ -193,7 +220,7 @@ export async function POST(request: Request): Promise<Response> {
     await putDomainConnection(updated);
     await markIntentFulfilled(intent, normalizedDomain);
 
-    log({ event: 'opensrs.webhook.processed', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType, status: 'connected' });
+    log({ event: 'opensrs.webhook.processed', component: 'opensrs-webhook', businessId: intent.businessId, operation: event, status: 'connected' });
     return new Response(null, { status: 200 });
   } catch (err) {
     const now = nowIso();
@@ -207,7 +234,7 @@ export async function POST(request: Request): Promise<Response> {
     await putDomainConnection(failed);
 
     const message = err instanceof Error ? err.message : 'unknown';
-    log({ level: 'error', event: 'opensrs.webhook.attach_failed', component: 'opensrs-webhook', businessId: intent.businessId, operation: eventType, message });
+    log({ level: 'error', event: 'opensrs.webhook.attach_failed', component: 'opensrs-webhook', businessId: intent.businessId, operation: event, message });
     return new Response(null, { status: 500 });
   }
 }

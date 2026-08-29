@@ -23,7 +23,7 @@ import { adminGetCustomerProfileBySub } from '@/lib/auth/customer-cognito';
 import { getCustomerDomainProfile, createCustomerDomainProfile } from '@/lib/db/customer-domain-profiles';
 import { putDomainPurchaseIntent } from '@/lib/db/domain-purchase-intents';
 import { createDomainPurchaseIntent } from '@/domain/factories/domain-purchase-intent.factory';
-import { createStorefrontCustomer, getStorefrontSsoUrl } from '@/lib/opensrs/client';
+import { createStorefrontCustomer, getStorefrontSsoUrl, deriveStorefrontUsername } from '@/lib/opensrs/client';
 import { OPENSRS_DNS_TEMPLATE_ID } from '@/lib/opensrs/constants';
 
 /**
@@ -271,12 +271,23 @@ export async function startDomainPurchaseAction(businessId: string): Promise<voi
 
   let finalUrl: string;
   try {
-    const intent = createDomainPurchaseIntent({ businessId, userId: session.sub });
+    const intent = createDomainPurchaseIntent({
+      businessId,
+      userId: session.sub,
+      storefrontUsername: deriveStorefrontUsername(session.sub),
+    });
     await putDomainPurchaseIntent(intent);
 
+    // No `extuserid` param here (unlike an earlier version) — confirmed
+    // 2026-08-29 against a real webhook delivery that it isn't carried back
+    // at all, so it can't correlate anything; `external_user_id` is already
+    // set once at customer-creation time (`createStorefrontCustomer`),
+    // which is `extuserid`'s actual documented purpose anyway. Correlation
+    // now happens via `storefrontUsername` — see the intent model's doc
+    // comment.
     const { url } = await getStorefrontSsoUrl(customerResult.opensrsCustomerId);
     const separator = url.includes('?') ? '&' : '?';
-    finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}&extuserid=${encodeURIComponent(intent.intentId)}`;
+    finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}`;
   } catch (err) {
     console.error('[opensrs] start_purchase_failed', { businessId, err });
     redirect(`${returnPath}?error=${encodeURIComponent('Unable to open the domain store right now. Please try again.')}`);

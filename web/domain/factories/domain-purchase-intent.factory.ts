@@ -8,9 +8,11 @@ const TTL_SECONDS = 7 * 24 * 60 * 60;
 export interface CreateDomainPurchaseIntentInput {
   businessId: string;
   userId: string;
+  /** See the model's doc comment — the webhook's actual correlation key. */
+  storefrontUsername: string;
 }
 
-/** Creates a fresh `'pending'` DomainPurchaseIntent — the caller passes `intentId` as Storefront's `extuserid` next. */
+/** Creates a fresh `'pending'` DomainPurchaseIntent — looked up later by `storefrontUsername`, not `intentId` (see model doc comment). */
 export function createDomainPurchaseIntent(input: CreateDomainPurchaseIntentInput): DomainPurchaseIntent {
   const nowSeconds = Math.floor(Date.now() / 1000);
 
@@ -18,6 +20,7 @@ export function createDomainPurchaseIntent(input: CreateDomainPurchaseIntentInpu
     intentId: generateId('dpi_'),
     businessId: input.businessId,
     userId: input.userId,
+    storefrontUsername: input.storefrontUsername,
     status: 'pending',
     ttl: nowSeconds + TTL_SECONDS,
     createdAt: nowIso(),

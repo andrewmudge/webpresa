@@ -507,20 +507,29 @@ export class WebpresaDataStack extends cdk.Stack {
     //   PK: intentId (random token, not a natural key — see the model's own
     //     doc comment for why this can't be keyed on businessId/userId: one
     //     customer may start more than one purchase over time)
-    //   TTL: expiresAt — short-lived correlation records only; a customer
-    //     may own multiple Businesses, and Storefront's own `extuserid`
-    //     mechanism is a single stable per-customer field, not suited to
-    //     per-purchase correlation, so this table is what lets the OpenSRS
-    //     webhook (which only carries back whatever extuserid value was set
-    //     at SSO-redirect time) determine which Business a purchase is for.
-    //   No GSI — every lookup is a direct GetItem by intentId, the value
-    //     round-tripped through Storefront's extuserid parameter.
+    //   TTL: ttl — short-lived correlation records only.
+    //   GSI: storefront-username-index (PK: storefrontUsername, SK:
+    //     createdAt) — the webhook's actual correlation path. A real PTE
+    //     test delivery (2026-08-29) confirmed OpenSRS's webhook payload
+    //     carries no external_user_id/extuserid field at all (contrary to
+    //     this table's original design) — it does carry `username`, which
+    //     this app generates deterministically per Cognito `sub` (see
+    //     `lib/opensrs/client.ts`'s `deriveStorefrontUsername`), so the
+    //     webhook looks up the most recent `'pending'` intent for that
+    //     username here to determine which Business a purchase is for.
     // ───────────────────────────────────────────────────────────────────────
     const domainPurchaseIntents = new WebpresaTable(this, 'DomainPurchaseIntents', {
       config,
       tableName: 'domain-purchase-intents',
       partitionKey: { name: 'intentId', type: S },
       timeToLiveAttribute: 'ttl',
+      globalSecondaryIndexes: [
+        {
+          indexName: 'storefront-username-index',
+          partitionKey: { name: 'storefrontUsername', type: S },
+          sortKey: createdAtSortKey,
+        },
+      ],
     });
     this.domainPurchaseIntentsTable = domainPurchaseIntents.table;
 

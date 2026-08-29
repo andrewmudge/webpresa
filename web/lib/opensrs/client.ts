@@ -146,7 +146,7 @@ async function openSrsRequest<T>(path: string, init: RequestInit = {}): Promise<
  * rather than the sub itself, prefixed to stay obviously Webpresa-sourced
  * within Storefront's own customer list.
  */
-function deriveStorefrontUsername(externalUserId: string): string {
+export function deriveStorefrontUsername(externalUserId: string): string {
   return `wp${createHash('sha256').update(externalUserId).digest('hex').slice(0, 18)}`;
 }
 

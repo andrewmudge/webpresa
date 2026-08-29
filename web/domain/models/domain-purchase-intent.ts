@@ -7,17 +7,17 @@ import type { TimestampedRecord } from './common';
  * `app/api/webhooks/opensrs/route.ts`).
  *
  * Not keyed on `businessId`/`userId` — a customer may start more than one
- * domain purchase over time (for the same or different Businesses), and
- * Storefront's own `extuserid` query-string parameter is documented as a
- * single stable value stored directly on the Storefront customer record
- * (overwritten by whatever link was most recently followed), not a
- * per-purchase correlation id. This table repurposes `extuserid` as exactly
- * that instead: `intentId` is generated fresh for each SSO redirect and
- * passed as `extuserid`, so whichever event the OpenSRS webhook later
- * delivers can look up which Business/customer it belongs to — the
- * `CustomerDomainProfile` mapping already covers "which OpenSRS customer is
- * this person," so `extuserid`'s documented customer-linking purpose isn't
- * needed for that; this table is purely for business-level correlation.
+ * domain purchase over time (for the same or different Businesses). The
+ * original design correlated via a fresh id passed as Storefront's
+ * `extuserid` query-string parameter, round-tripped through the webhook —
+ * **confirmed wrong against a real PTE test delivery (2026-08-29): the
+ * actual webhook payload carries no `external_user_id`/`extuserid` field at
+ * all.** It does carry `username`, so this record is keyed for lookup by
+ * `storefrontUsername` (a value deterministic per Cognito `sub` — see
+ * `lib/opensrs/client.ts`'s `deriveStorefrontUsername`) instead: the webhook
+ * looks up the most recent `'pending'` intent for that username via the
+ * `storefront-username-index` GSI (sorted by `createdAt`) to resolve which
+ * Business a purchase belongs to.
  *
  * `ttl` bounds this to Storefront's own documented session lifetime (its
  * query-string parameters stay active for 7 days) rather than accumulating
@@ -27,10 +27,12 @@ export const DOMAIN_PURCHASE_INTENT_STATUSES = ['pending', 'fulfilled', 'expired
 export type DomainPurchaseIntentStatus = (typeof DOMAIN_PURCHASE_INTENT_STATUSES)[number];
 
 export interface DomainPurchaseIntent extends TimestampedRecord {
-  /** Partition key — random token, round-tripped through Storefront's `extuserid` parameter. Format: `dpi_<uuid>` */
+  /** Partition key — random token. Format: `dpi_<uuid>`. No longer round-tripped through Storefront (see doc comment above) — kept as the record's own stable identity. */
   intentId: string;
   businessId: string;
   userId: string;
+  /** GSI partition key (`storefront-username-index`) — see doc comment above for why this, not `userId`/`extuserid`, is the webhook's actual correlation key. */
+  storefrontUsername: string;
   status: DomainPurchaseIntentStatus;
   /** Epoch seconds — DynamoDB TTL attribute, ~7 days out from creation (matches Storefront's own session lifetime). */
   ttl: number;
