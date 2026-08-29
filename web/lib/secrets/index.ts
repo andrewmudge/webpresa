@@ -88,14 +88,20 @@ export interface MarketingClickTokenSecret {
 }
 
 /**
- * OpenSRS Storefront integration — `apiKey` authenticates
- * `lib/opensrs/client.ts`'s calls (customer creation, SSO URL minting);
- * `webhookKey` verifies `POST /api/webhooks/opensrs` deliveries. Both are
- * per-environment (PTE/test in dev, live store in prod) — see this
- * interface's resolver, `SECRET_OPENSRS_STOREFRONT`, for why this is a
- * distinct secret from the reserved `opensrs-api` name.
+ * OpenSRS Storefront integration — `clientId` + `apiKey` (functioning as the
+ * OAuth Client Secret; kept under its original field name to avoid
+ * re-keying the already-populated dev secret) authenticate
+ * `lib/opensrs/client.ts`'s OAuth 2.0 client-credentials token exchange
+ * (confirmed 2026-08-29 against real OpenSRS docs — Storefront rejects a
+ * raw API key used directly as a Bearer token with `401 invalid
+ * authentication token`; the key must first be exchanged for a short-lived
+ * access token). `webhookKey` verifies `POST /api/webhooks/opensrs`
+ * deliveries. All three are per-environment (PTE/test in dev, live store in
+ * prod) — see this interface's resolver, `SECRET_OPENSRS_STOREFRONT`, for
+ * why this is a distinct secret from the reserved `opensrs-api` name.
  */
 export interface OpenSrsStorefrontSecret {
+  clientId: string;
   apiKey: string;
   webhookKey: string;
 }
