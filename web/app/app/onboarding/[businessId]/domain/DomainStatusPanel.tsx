@@ -37,6 +37,16 @@ interface Props {
  * DNS change") starts automatic polling against `/api/domains/status` —
  * the customer never has to click again to see it progress through to
  * "Your domain is live."
+ *
+ * That manual click doesn't apply to a Part 3 (OpenSRS Storefront) purchase
+ * — DNS is already correct via the permanent DNS Template by the time the
+ * webhook creates the connection at `'connected'`, so there's no DNS action
+ * for the customer to confirm and the `awaiting_dns`-only button never
+ * shows. Confirmed as a real bug (2026-08-29): a purchased domain sat at
+ * `'connected'` indefinitely with nothing ever re-checking it. Polling now
+ * also auto-starts whenever the initial status is already past
+ * `awaiting_dns` and not yet terminal, so a Storefront-purchased domain
+ * watches itself through to `'active'` with no click needed.
  */
 export function DomainStatusPanel({
   businessId,
@@ -50,7 +60,7 @@ export function DomainStatusPanel({
   const [status, setStatus] = useState(initialStatus);
   const [records, setRecords] = useState(initialVerificationRecords);
   const [, setFailureCategory] = useState(initialFailureCategory);
-  const [polling, setPolling] = useState(false);
+  const [polling, setPolling] = useState(() => initialStatus !== 'awaiting_dns' && initialStatus !== 'draft' && !TERMINAL_STATUSES.has(initialStatus));
   const [checking, setChecking] = useState(false);
   const [isContinuePending, startContinueTransition] = useTransition();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
