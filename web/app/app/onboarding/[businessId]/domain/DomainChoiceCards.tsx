@@ -75,13 +75,17 @@ function ChoiceCard({
  * both start collapsed (title + one-line subtitle only) and expand inline
  * once selected, rather than always showing their input fields/actions.
  * "Buy a new domain" hands off to OpenSRS Storefront (see
- * `startDomainPurchaseAction`) in a **new tab** — opened synchronously
- * (`window.open('', '_blank')`) before the action's `await`, the standard
- * pattern for surviving popup blockers, then navigated to the real SSO URL
- * once the action resolves. This keeps the original Webpresa tab in place
- * rather than navigating it away entirely (there's no way back from
- * Storefront otherwise — confirmed no return-URL mechanism exists). The
- * parent (`DomainStepPanel`) swaps this card out for a waiting view via
+ * `startDomainPurchaseAction`) in a **new tab**, behind a deliberate
+ * confirm step — clicking "Search for a domain" only shows a notice
+ * explaining what's about to happen; the tab doesn't open until "Continue"
+ * (a second, separate click). `window.open('', '_blank')` runs
+ * synchronously inside *that* click handler, before the action's `await` —
+ * the standard pattern for surviving popup blockers — then navigates to the
+ * real SSO URL once the action resolves. This keeps the original Webpresa
+ * tab in place rather than navigating it away entirely (there's no way back
+ * from Storefront otherwise — confirmed no return-URL mechanism exists,
+ * though a Storefront-side Custom Code footer link now provides one too).
+ * The parent (`DomainStepPanel`) swaps this card out for a waiting view via
  * `onPurchaseStarted` the moment the tab opens successfully.
  */
 export function DomainChoiceCards({
@@ -94,9 +98,15 @@ export function DomainChoiceCards({
   onPurchaseStarted: () => void;
 }) {
   const [selected, setSelected] = useState<'webpresa' | 'existing' | 'buy'>('webpresa');
+  const [confirming, setConfirming] = useState(false);
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState<string | null>(null);
 
+  // Deliberately two clicks, not one — "Search for a domain" only shows the
+  // notice below; opening the tab happens on the *next*, separate click
+  // ("Continue"). Each is its own genuine user gesture, so `window.open`
+  // inside handleBuyDomain (triggered by Continue) stays popup-blocker-safe
+  // exactly like the original single-click version did.
   async function handleBuyDomain() {
     setBuyError(null);
     setBuying(true);
@@ -113,9 +123,11 @@ export function DomainChoiceCards({
       }
       popup?.close();
       setBuyError(result.message);
+      setConfirming(false);
     } catch {
       popup?.close();
       setBuyError(GENERIC_PURCHASE_ERROR);
+      setConfirming(false);
     } finally {
       setBuying(false);
     }
@@ -206,14 +218,40 @@ export function DomainChoiceCards({
               {buyError}
             </p>
           )}
-          <button
-            type="button"
-            onClick={handleBuyDomain}
-            disabled={buying}
-            className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50"
-          >
-            {buying ? 'Opening…' : 'Search for a domain'}
-          </button>
+          {confirming ? (
+            <div className="space-y-3">
+              <p className="rounded-lg bg-(--color-brand-muted) px-3 py-2 text-xs text-(--color-brand)">
+                You&apos;ll be directed to Webpresa&apos;s domain store in a new tab. After purchasing your domain,
+                you can return to this page — it&apos;ll update automatically once your domain is connected.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleBuyDomain}
+                  disabled={buying}
+                  className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50"
+                >
+                  {buying ? 'Opening…' : 'Continue'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={buying}
+                  className="rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark)"
+            >
+              Search for a domain
+            </button>
+          )}
         </div>
       </ChoiceCard>
     </div>
