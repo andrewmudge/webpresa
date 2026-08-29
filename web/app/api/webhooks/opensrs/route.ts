@@ -71,6 +71,16 @@ export async function POST(request: Request): Promise<Response> {
   const { webhookKey } = await getOpenSrsStorefrontSecret();
   const valid = verifyOpenSrsWebhookSignature({ rawBody, signatureHeader: signature, webhookKey });
   if (!valid) {
+    // TEMPORARY (remove once the real signature header/algorithm is
+    // confirmed — see implementation.md's "Documentation gap"): dumps every
+    // header name + value and the raw body so a real PTE delivery can be
+    // inspected directly, since `lib/opensrs/verify-webhook.ts`'s
+    // HMAC-SHA256/`x-opensrs-signature` guess is unconfirmed and just
+    // failed against a real delivery. PTE-only test data, not production.
+    console.warn('[opensrs][DEBUG] unverified webhook delivery', {
+      headers: Object.fromEntries(request.headers.entries()),
+      rawBody,
+    });
     log({ level: 'warn', event: 'opensrs.webhook.invalid_signature', component: 'opensrs-webhook' });
     return new Response('Invalid signature', { status: 400 });
   }
