@@ -11,8 +11,7 @@ import { OnboardingProgress } from '../OnboardingProgress';
 import { OnboardingStepLayout } from '../OnboardingStepLayout';
 import { OnboardingActionBar } from '../OnboardingActionBar';
 import { WebsitePreviewPanel } from '../WebsitePreviewPanel';
-import { DomainChoiceCards } from './DomainChoiceCards';
-import { DomainStatusPanel } from './DomainStatusPanel';
+import { DomainStepPanel } from './DomainStepPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,21 +79,7 @@ export default async function OnboardingDomainPage({ params, searchParams }: Pro
       )}
 
       <OnboardingStepLayout
-        left={
-          connection ? (
-            <DomainStatusPanel
-              businessId={businessId}
-              domainName={connection.domainName}
-              normalizedDomain={connection.normalizedDomain}
-              domainConnectionId={connection.domainConnectionId}
-              initialStatus={connection.status}
-              initialVerificationRecords={connection.verificationRecords ?? []}
-              initialFailureCategory={connection.failureCategory ?? null}
-            />
-          ) : (
-            <DomainChoiceCards businessId={businessId} displayUrl={displayUrl} />
-          )
-        }
+        left={<DomainStepPanel businessId={businessId} displayUrl={displayUrl} connection={connection} />}
         right={
           <div className="lg:sticky lg:top-6">
             <WebsitePreviewPanel

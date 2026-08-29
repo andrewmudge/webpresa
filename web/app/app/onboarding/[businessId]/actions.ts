@@ -213,6 +213,10 @@ async function resolveOpenSrsCustomerId(userId: string, email: string, business:
   return { outcome: 'resolved', opensrsCustomerId: result.profile.opensrsCustomerId };
 }
 
+export type StartDomainPurchaseResult = { outcome: 'redirect'; url: string } | { outcome: 'error'; message: string };
+
+const GENERIC_PURCHASE_ERROR = 'Unable to open the domain store right now. Please try again.';
+
 /**
  * Part 3 (OpenSRS Storefront): sends the customer into Storefront's hosted
  * domain search/checkout, already signed in via a one-time SSO URL — never
@@ -224,46 +228,41 @@ async function resolveOpenSrsCustomerId(userId: string, email: string, business:
  *
  * The DNS Template (`dnstemplateid`) is what makes the purchased domain
  * automatically point at this app — no manual DNS step, unlike the
- * existing-domain flow above. **Whether Storefront's SSO URL response
- * accepts appended query params is not yet confirmed against the real PTE
- * environment** — verify this before relying on it; if it doesn't work, the
- * fallback is landing the customer on Storefront's plain domain-search page
- * (still signed in) with these params attached there instead.
+ * existing-domain flow above. Confirmed working (2026-08-29) against a real
+ * PTE purchase — Storefront's SSO URL does accept the appended query param.
+ *
+ * Returns a result instead of redirecting (unlike every other onboarding
+ * action) — the caller (`DomainChoiceCards`) opens Storefront in a *new*
+ * tab rather than navigating the current one away from Webpresa entirely,
+ * so this can't just `redirect()` the current request. This also means
+ * no `redirect()`-inside-`try/catch` hazard to route around, unlike the
+ * version of this function that shipped initially — every path is a plain
+ * `return`.
  */
-export async function startDomainPurchaseAction(businessId: string): Promise<void> {
+export async function startDomainPurchaseAction(businessId: string): Promise<StartDomainPurchaseResult> {
   const session = await requireCustomerSession();
   await requireActiveSubscription(session.sub, businessId);
 
-  const returnPath = `/app/onboarding/${businessId}/domain`;
-
   if (!OPENSRS_DNS_TEMPLATE_ID) {
     console.error('[opensrs] dns_template_id_unset', { businessId });
-    redirect(`${returnPath}?error=${encodeURIComponent('Domain purchase is not available yet. Please try again later.')}`);
+    return { outcome: 'error', message: 'Domain purchase is not available yet. Please try again later.' };
   }
 
   const business = await getBusinessById(businessId);
-  if (!business) redirect(returnPath);
+  if (!business) return { outcome: 'error', message: GENERIC_PURCHASE_ERROR };
 
-  // Resolved in its own try/catch, separate from the block below — its
-  // `missing_business_contact_info` outcome needs a `redirect()` of its own,
-  // which must never sit inside a try/catch (Next.js's `redirect()` throws
-  // internally; a surrounding catch would otherwise intercept it and show
-  // the wrong, generic error message instead).
   let customerResult: ResolveOpenSrsCustomerResult;
   try {
     customerResult = await resolveOpenSrsCustomerId(session.sub, session.email, business);
   } catch (err) {
     console.error('[opensrs] start_purchase_failed', { businessId, err });
-    redirect(`${returnPath}?error=${encodeURIComponent('Unable to open the domain store right now. Please try again.')}`);
+    return { outcome: 'error', message: GENERIC_PURCHASE_ERROR };
   }
 
   if (customerResult.outcome === 'missing_business_contact_info') {
-    redirect(
-      `${returnPath}?error=${encodeURIComponent('Add a business address and phone number in Settings before buying a domain.')}`,
-    );
+    return { outcome: 'error', message: 'Add a business address and phone number in Settings before buying a domain.' };
   }
 
-  let finalUrl: string;
   try {
     const intent = createDomainPurchaseIntent({
       businessId,
@@ -281,13 +280,12 @@ export async function startDomainPurchaseAction(businessId: string): Promise<voi
     // comment.
     const { url } = await getStorefrontSsoUrl(customerResult.opensrsCustomerId);
     const separator = url.includes('?') ? '&' : '?';
-    finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}`;
+    const finalUrl = `${url}${separator}dnstemplateid=${encodeURIComponent(OPENSRS_DNS_TEMPLATE_ID)}`;
+    return { outcome: 'redirect', url: finalUrl };
   } catch (err) {
     console.error('[opensrs] start_purchase_failed', { businessId, err });
-    redirect(`${returnPath}?error=${encodeURIComponent('Unable to open the domain store right now. Please try again.')}`);
+    return { outcome: 'error', message: GENERIC_PURCHASE_ERROR };
   }
-
-  redirect(finalUrl);
 }
 
 /**

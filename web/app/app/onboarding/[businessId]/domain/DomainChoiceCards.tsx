@@ -5,6 +5,8 @@ import { Globe, Link2, ShoppingCart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { deferDomainAction, connectExistingDomainAction, startDomainPurchaseAction } from '../actions';
 
+const GENERIC_PURCHASE_ERROR = 'Unable to open the domain store right now. Please try again.';
+
 const REGISTRAR_OPTIONS = [
   { value: 'godaddy', label: 'GoDaddy' },
   { value: 'wix', label: 'Wix' },
@@ -73,12 +75,51 @@ function ChoiceCard({
  * both start collapsed (title + one-line subtitle only) and expand inline
  * once selected, rather than always showing their input fields/actions.
  * "Buy a new domain" hands off to OpenSRS Storefront (see
- * `startDomainPurchaseAction`) — the customer lands back on this same page
- * once a purchased domain's webhook has created a `DomainConnection`
- * (`page.tsx` swaps to `DomainStatusPanel` automatically at that point).
+ * `startDomainPurchaseAction`) in a **new tab** — opened synchronously
+ * (`window.open('', '_blank')`) before the action's `await`, the standard
+ * pattern for surviving popup blockers, then navigated to the real SSO URL
+ * once the action resolves. This keeps the original Webpresa tab in place
+ * rather than navigating it away entirely (there's no way back from
+ * Storefront otherwise — confirmed no return-URL mechanism exists). The
+ * parent (`DomainStepPanel`) swaps this card out for a waiting view via
+ * `onPurchaseStarted` the moment the tab opens successfully.
  */
-export function DomainChoiceCards({ businessId, displayUrl }: { businessId: string; displayUrl: string }) {
+export function DomainChoiceCards({
+  businessId,
+  displayUrl,
+  onPurchaseStarted,
+}: {
+  businessId: string;
+  displayUrl: string;
+  onPurchaseStarted: () => void;
+}) {
   const [selected, setSelected] = useState<'webpresa' | 'existing' | 'buy'>('webpresa');
+  const [buying, setBuying] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
+
+  async function handleBuyDomain() {
+    setBuyError(null);
+    setBuying(true);
+    // Must be the first thing that happens — a `window.open` after any
+    // `await` is treated as not directly triggered by the click and gets
+    // silently blocked by most browsers' popup blockers.
+    const popup = window.open('', '_blank');
+    try {
+      const result = await startDomainPurchaseAction(businessId);
+      if (result.outcome === 'redirect') {
+        if (popup) popup.location.href = result.url;
+        onPurchaseStarted();
+        return;
+      }
+      popup?.close();
+      setBuyError(result.message);
+    } catch {
+      popup?.close();
+      setBuyError(GENERIC_PURCHASE_ERROR);
+    } finally {
+      setBuying(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -154,18 +195,26 @@ export function DomainChoiceCards({ businessId, displayUrl }: { businessId: stri
         title="Buy a new domain"
         subtitle="Search for and purchase the perfect domain for your business."
       >
-        <form action={startDomainPurchaseAction.bind(null, businessId)}>
+        <div>
           <p className="mb-3 text-xs text-gray-500">
-            You&apos;ll search for and buy your domain through our domain store, signed in automatically — no
-            separate account to create. It&apos;s connected to your website automatically once purchased.
+            You&apos;ll search for and buy your domain through our domain store, opened in a new tab and signed in
+            automatically — no separate account to create. It&apos;s connected to your website automatically once
+            purchased.
           </p>
+          {buyError && (
+            <p role="alert" className="mb-3 text-xs text-red-700">
+              {buyError}
+            </p>
+          )}
           <button
-            type="submit"
-            className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark)"
+            type="button"
+            onClick={handleBuyDomain}
+            disabled={buying}
+            className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50"
           >
-            Search for a domain
+            {buying ? 'Opening…' : 'Search for a domain'}
           </button>
-        </form>
+        </div>
       </ChoiceCard>
     </div>
   );

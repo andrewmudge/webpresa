@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react';
-import type { DomainConnectionStatus, DomainDnsInstruction, DomainFailureCategory } from '@/domain/models/domain-connection';
+import type { DomainConnectionStatus, DomainConnectionSource, DomainDnsInstruction, DomainFailureCategory } from '@/domain/models/domain-connection';
 import { completeExistingDomainAction } from '../actions';
 
 const POLL_INTERVAL_MS = 7000;
@@ -21,6 +21,31 @@ const PROGRESS_COPY: Record<DomainConnectionStatus, string> = {
   expired: 'This domain connection has expired.',
 };
 
+/**
+ * A freshly-*purchased* domain (`source: 'webpresa_registered'`) can take
+ * meaningfully longer here than a domain the customer already owned and is
+ * just connecting — a brand-new domain needs its NS delegation to
+ * propagate *and* OpenSRS's own control-plane-to-DNS sync to catch up,
+ * confirmed directly against live DNS during testing (2026-08-29) to take
+ * well beyond the "a few minutes" `PROGRESS_COPY` implies for the
+ * already-established-domain case. Only overrides the two statuses where
+ * that distinction actually matters; every other status's copy is already
+ * accurate for both sources.
+ */
+const PURCHASED_DOMAIN_PROGRESS_COPY: Partial<Record<DomainConnectionStatus, string>> = {
+  verifying:
+    "Setting up your new domain — this can take longer than a domain you already own, since it was just registered. Often just a few minutes, but it's completely normal if it takes longer. No action needed — feel free to continue setting up your site in the meantime.",
+  certificate_pending: 'Almost there — securing your website. New domains occasionally take a bit longer here too.',
+};
+
+function resolveProgressCopy(status: DomainConnectionStatus, source: DomainConnectionSource): string {
+  if (source === 'webpresa_registered') {
+    const override = PURCHASED_DOMAIN_PROGRESS_COPY[status];
+    if (override) return override;
+  }
+  return PROGRESS_COPY[status];
+}
+
 interface Props {
   businessId: string;
   domainName: string;
@@ -29,6 +54,7 @@ interface Props {
   initialStatus: DomainConnectionStatus;
   initialVerificationRecords: DomainDnsInstruction[];
   initialFailureCategory: DomainFailureCategory | null;
+  source: DomainConnectionSource;
 }
 
 /**
@@ -56,6 +82,7 @@ export function DomainStatusPanel({
   initialStatus,
   initialVerificationRecords,
   initialFailureCategory,
+  source,
 }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [records, setRecords] = useState(initialVerificationRecords);
@@ -116,7 +143,7 @@ export function DomainStatusPanel({
             <span className="h-2 w-2 rounded-full bg-(--color-brand) animate-pulse" aria-hidden="true" />
           )}
           <p className={`text-sm ${isLive ? 'text-green-700 font-medium' : isTerminalFailure ? 'text-red-700' : 'text-gray-600'}`}>
-            {showRecordUpdatedButton ? AWAITING_DNS_IDLE_COPY : PROGRESS_COPY[status]}
+            {showRecordUpdatedButton ? AWAITING_DNS_IDLE_COPY : resolveProgressCopy(status, source)}
           </p>
         </div>
 
