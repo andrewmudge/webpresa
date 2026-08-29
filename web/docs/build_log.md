@@ -9483,3 +9483,71 @@ web/:
 - No end-to-end manual test against real OpenSRS/Vercel infra — only unit-level, fully mocked coverage exists so far.
 
 Real deploys, not just synth: dev Phase A + Phase B, prod Phase A + Phase B, all confirmed via CloudFormation outputs. `COGNITO_HOSTED_UI_DOMAIN` (`https://auth.webpresa.com` for prod, the default Amazon domain for dev) and `GOOGLE_OAUTH_STATE_SECRET` confirmed present in the correct Vercel environments via `vercel env ls`. Not yet done: the actual end-to-end sign-in test against prod (password sign-up → Google sign-in, same account) — blocked on DNS propagation for the second `auth.webpresa.com` CNAME and the app code landing on `main`.
+
+---
+
+**Date:** 2026-08-29
+
+**OpenSRS Storefront integration — deployed to dev and manually verified end-to-end against a real PTE purchase.** Continuation of the 2026-08-27 build, done live alongside the user's own real test run in Storefront Manager and the actual app. Real behavior corrected several guesses from the original design, discovered one at a time by reading actual `401`/`invalid_client`/`invalid_signature` errors and, critically, by fetching OpenSRS's real (non-gated) public support docs mid-session — a meaningfully better source than the gated article this integration originally had to guess around.
+
+**Real fixes, in the order they were hit:**
+1. **`createStorefrontCustomer()`'s endpoint was wrong** — `POST /v1/customer` (singular), not `/v1/customers`; requires `address1`/`city`/`state`/`postal_code`/`country`/`phone` in addition to name/email/username (the client wasn't sending any of them); the response is a bare UUID string, not `{customer_id: ...}`. Since this app has no personal-contact-info source for a customer as a person, `resolveOpenSrsCustomerId()` now sources address/phone from the *Business's* own contact info instead, and blocks the purchase with a clear redirect if either is missing.
+2. **`username` exceeded OpenSRS's 20-char cap** — the original `webpresa_<36-char-Cognito-sub>` was 45 chars. Fixed with `deriveStorefrontUsername()`, a short deterministic hash-based value.
+3. **Authentication is OAuth 2.0 client-credentials, not a raw API key as a Bearer token** — sending the raw key directly got a real `401 invalid authentication token`. Real flow (confirmed via web search against OpenSRS's own docs): exchange `clientId`+`apiKey` (functioning as the OAuth Client Secret) via HTTP Basic Auth for a short-lived token at `POST https://auth.test.shopco.com/oauth2/token`, then use that token as the Bearer credential. Required getting a second credential (`clientId`) from the user, added to the secret and to the `OpenSrsStorefrontSecret` interface without needing to re-key `apiKey` (kept its original field name to avoid resetting the already-populated real value, mirroring the existing `LobSecret.webhookSecret` precedent for exactly this situation).
+4. **The webhook's real payload carries no `external_user_id`/`extuserid` field at all** — confirmed via a real "Send Test" delivery, captured through temporary debug logging (headers + raw body dumped on any signature-verification failure, removed once confirmed working end to end). This broke the original correlation design entirely, which depended on round-tripping a generated id through Storefront's `extuserid` query param. Reworked around the payload's real `username` field instead: `DomainPurchaseIntent` gained a `storefrontUsername` field (deterministic per Cognito `sub`, same value `deriveStorefrontUsername()` computes) and a new `storefront-username-index` GSI, so the webhook looks up the most recent `'pending'` intent for whichever username the payload carries. Also confirmed real field names throughout: `event`/`domain_name`/`event_id` (not `event_type`/`domain`/`order_id`), and that a webhook subscribes per *category* (not per individual event) per Storefront's own docs — `isLikelyRegistrationEvent()` filters via `record_type === 'domain'` plus a case-insensitive substring match on `"registration"` rather than an exact-string compare, since this endpoint can receive any Domain Events event, not just registrations.
+5. **Signature header/format were wrong** — real header is `x-signature`, formatted `sha256=<hex digest>` (the prefix must be stripped before comparing), not the originally-guessed `x-opensrs-signature` with a bare digest.
+6. **A stale copy-pasted `put-secret-value` command from earlier in the session's own scrollback overwrote the just-fixed 3-key secret back down to 2 keys**, silently breaking auth again (`invalid_client`) — caught by checking `list-secret-version-ids` and re-populating. No code fix; documented as a gotcha in `deployment.md` (Secrets Manager has no merge semantics — `put-secret-value` always replaces the whole blob).
+7. **An unrelated onboarding bug found along the way, fixed on request**: the Review step's "Continue" button previously read "Continue to domain" and silently skipped the Leads/notifications step whenever `Business.email` was already set, on the assumption that a business's public contact email doubles as its lead-notification address. The user correctly called this out as a bad assumption (the two can legitimately differ) — removed the skip branch entirely; Review now always proceeds to the Leads step.
+
+**End-to-end result**: a real domain (`ctest.info`) was purchased through the full flow in PTE — SSO into Storefront with no second account, checkout entirely on Storefront's side, DNS Template pre-applied automatically, webhook delivered/signature-verified/correlated/processed — and reached `DomainConnection.status: 'connected'` (Vercel already reporting `providerDomains[0].status: 'verified'`) on the very first attempt with the corrected code. Not yet watched through to the final `'active'` transition or confirmed in the dashboard's `DomainCard.tsx`.
+
+## Files changed (since the 2026-08-27 entry)
+
+```
+infra/lib/stacks/data-stack.ts                        MODIFIED — storefront-username-index GSI on DomainPurchaseIntents
+web/lib/opensrs/client.ts                              MODIFIED — OAuth 2.0 client-credentials flow, fixed /v1/customer endpoint + required fields + response parsing, deriveStorefrontUsername
+web/lib/opensrs/verify-webhook.ts                      MODIFIED — real x-signature header + sha256= prefix handling
+web/lib/secrets/index.ts                               MODIFIED — clientId added to OpenSrsStorefrontSecret
+web/domain/models/domain-purchase-intent.ts            MODIFIED — storefrontUsername field, correlation redesign documented
+web/domain/schemas/domain-purchase-intent.schema.ts    MODIFIED
+web/domain/factories/domain-purchase-intent.factory.ts MODIFIED
+web/lib/db/domain-purchase-intents.ts                  MODIFIED — listDomainPurchaseIntentsByStorefrontUsername (new GSI query)
+web/app/api/webhooks/opensrs/route.ts                  MODIFIED — real field names, username-based correlation, isLikelyRegistrationEvent heuristic; temporary debug logging added then removed
+web/app/app/onboarding/[businessId]/actions.ts         MODIFIED — storefrontUsername passed to intent creation, extuserid dropped from SSO redirect; Review step no longer skips Leads
+web/app/app/onboarding/[businessId]/review/page.tsx    MODIFIED — "Continue to notifications" label no longer conditional
+web/docs/{implementation,deployment,architecture}.md   MODIFIED — real confirmed behavior replaces earlier best-effort guesses throughout
+web/docs/build_log.md                                  MODIFIED — this entry
+
+# Tests (updated)
+web/app/api/webhooks/opensrs/__tests__/route.test.ts           MODIFIED — real payload shape, signature format, username-based correlation
+web/lib/db/__tests__/domain-purchase-intents.test.ts           MODIFIED — storefrontUsername field, new GSI query test
+web/app/app/onboarding/[businessId]/__tests__/actions.test.ts  MODIFIED — Review step always redirects to leads
+```
+
+## Verification
+
+```
+web/:
+  npm run lint       — clean
+  npx tsc --noEmit   — clean
+  npm test            — 183 test files, 1850 tests, all passing
+  npm run build        — production build succeeds
+
+infra/:
+  npm test — 250 tests, all passing
+  cdk diff/cdk deploy WebpresaDevDataStack (storefront-username-index GSI) — reviewed, applied
+
+Real infra changes deployed to dev:
+  - Initial: WebpresaDevDataStack (opensrs-storefront secret, customer-domain-profiles + domain-purchase-intents tables), WebpresaDevVercelAccessStack (grants)
+  - Follow-up: WebpresaDevDataStack again (storefront-username-index GSI added to domain-purchase-intents)
+  - Vercel Preview env vars: CUSTOMER_DOMAIN_PROFILES_TABLE_NAME, DOMAIN_PURCHASE_INTENTS_TABLE_NAME, OPENSRS_STOREFRONT_SECRET_NAME, OPENSRS_STOREFRONT_API_BASE_URL, OPENSRS_DNS_TEMPLATE_ID
+  - Secret webpresa-dev-opensrs-storefront populated with real clientId/apiKey/webhookKey
+  - Reseller-side PTE setup: Stripe connected, DNS Template created, webhook registered — all by the user in Storefront Manager
+```
+
+## Not yet done
+
+- Live/prod is completely untouched — no reseller-side live Storefront setup, no `webpresa-prod-opensrs-storefront` secret populated, no prod DNS Template or webhook.
+- Custom Code branding CSS (the reskin matching Webpresa's brand colors) — CSS was drafted and handed to the user during this session but its final applied state in PTE wasn't confirmed back.
+- The domain's final `'active'` transition (past `'connected'`) and `DomainCard.tsx`'s "Purchased through Webpresa" display weren't watched through to completion in this session.
+- No automated test coverage for `startDomainPurchaseAction` itself (the Server Action) — only its downstream pieces (webhook route, repository functions) have dedicated tests; real-world verification substituted for unit coverage here given the live debugging context.

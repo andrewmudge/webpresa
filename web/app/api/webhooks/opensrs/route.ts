@@ -20,23 +20,20 @@ import { log } from '@/lib/logging/log';
  * `record.status === 'failed'` branch below re-attempts the Vercel attach
  * on redelivery rather than treating it as already handled).
  *
- * Field names below are confirmed (2026-08-29) against a real "Send Test"
- * delivery in PTE:
- * `{ event, event_id, username, changes_by, is_success, domain_name,
- *   created_date, record_type, data }`. **Not confirmed**: the exact
- * `event` string value for a genuine "Domain registration" (the test
- * delivery's `event` field just said the literal placeholder "Event name").
- * Storefront's own docs say a webhook subscribes per *category* and
- * receives every event in it — the registration webhook was configured
- * against the "Domain registration" entry under Domain Events, but per that
- * documented behavior this endpoint may actually receive every Domain
- * Events event (DNS changes, nameserver updates, contact changes, etc.),
- * not just registrations. `isLikelyRegistrationEvent` below is a
- * conservative, flagged-as-unconfirmed heuristic (case-insensitive
- * substring match on "registration") rather than an exact string compare,
- * to fail closed (ignore) rather than misfire on an unrelated domain event
- * — tighten this once a real registration delivery's exact `event` value
- * is confirmed.
+ * Field names and values below are fully confirmed (2026-08-29) — first
+ * against a "Send Test" delivery in PTE, then end to end against a real
+ * completed domain purchase (`ctest.info`), which successfully verified,
+ * correlated, attached in Vercel, and reached `DomainConnection.status:
+ * 'connected'` on the first real attempt: `{ event, event_id, username,
+ * changes_by, is_success, domain_name, created_date, record_type, data }`,
+ * with `event: "Domain registration"` verbatim for a genuine registration.
+ * `isLikelyRegistrationEvent` below still uses a case-insensitive substring
+ * match on "registration" rather than an exact string compare — Storefront's
+ * own docs say a webhook subscribes per *category* and receives every event
+ * in it, so this endpoint may still receive other Domain Events (DNS
+ * changes, nameserver updates, contact changes, etc.) this substring
+ * approach correctly filters out without needing their exact string values
+ * confirmed too.
  *
  * Correlation is via `username` (see `listDomainPurchaseIntentsByStorefrontUsername`),
  * not `external_user_id`/`extuserid` — confirmed the real payload carries no
@@ -98,15 +95,6 @@ export async function POST(request: Request): Promise<Response> {
   const { webhookKey } = await getOpenSrsStorefrontSecret();
   const valid = verifyOpenSrsWebhookSignature({ rawBody, signatureHeader: signature, webhookKey });
   if (!valid) {
-    // TEMPORARY (remove once a real "Domain registration" delivery — not
-    // just a "Send Test" — has been processed successfully end to end):
-    // dumps headers + body for any delivery that still fails verification,
-    // in case the confirmed x-signature/sha256= scheme has an edge case
-    // this hasn't hit yet. PTE-only test data, not production.
-    console.warn('[opensrs][DEBUG] unverified webhook delivery', {
-      headers: Object.fromEntries(request.headers.entries()),
-      rawBody,
-    });
     log({ level: 'warn', event: 'opensrs.webhook.invalid_signature', component: 'opensrs-webhook' });
     return new Response('Invalid signature', { status: 400 });
   }

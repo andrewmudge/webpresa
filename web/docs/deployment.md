@@ -1509,7 +1509,7 @@ Repeat with `--profile webpresa-prod --context env=prod` (and `npm run diff:ses:
 
 ## OpenSRS Storefront (domain purchase) deployment guidance
 
-**Deployed to dev (2026-08-28), PTE reseller-side setup mostly complete — not yet manually verified end-to-end with a real purchase.** See `implementation.md`, "Part 3 — Domain purchasing via OpenSRS Storefront," for the full design (supersedes an earlier draft targeting OpenSRS's raw reseller API, which was never built). `WebpresaDataStack` (the `webpresa-{env}-opensrs-storefront` secret and two new tables, `customer-domain-profiles`/`domain-purchase-intents`) and `WebpresaVercelAccessStack` (read grants on all three) are both deployed to dev — `cdk diff` reviewed, approved, and applied for both stacks. Prod is untouched.
+**Deployed to dev, manually verified end-to-end against a real PTE purchase (2026-08-29).** A real domain (`ctest.info`) was bought through the full flow — SSO into Storefront with no second account, checkout entirely in Storefront, webhook delivery verified/correlated/processed — and reached `DomainConnection.status: 'connected'` (Vercel already reporting it `verified`) on the first real attempt. See `implementation.md`, "Part 3 — Domain purchasing via OpenSRS Storefront," for the full design (supersedes an earlier draft targeting OpenSRS's raw reseller API, which was never built) and its "Documentation gap" section for everything that was corrected against real behavior along the way (OAuth 2.0 client-credentials auth, real webhook payload shape, `username`-based correlation). `WebpresaDataStack` (the `webpresa-{env}-opensrs-storefront` secret, `customer-domain-profiles`/`domain-purchase-intents` tables, the latter's `storefront-username-index` GSI) and `WebpresaVercelAccessStack` (read grants on all three) are both deployed to dev — every `cdk diff` reviewed, approved, and applied. Prod is untouched.
 
 ### Reseller-side setup (Storefront Manager — manual, not CDK)
 
@@ -1529,11 +1529,13 @@ Do this in the **PTE test environment** first (`manage.test.shopco.com`-equivale
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id webpresa-dev-opensrs-storefront \
-  --secret-string '{"apiKey":"<PTE API key>","webhookKey":"<webhook key from step 6>"}' \
+  --secret-string '{"clientId":"<PTE OAuth Client ID>","apiKey":"<PTE API key, functions as the OAuth Client Secret>","webhookKey":"<webhook key from step 6>"}' \
   --profile webpresa-dev
 ```
 
-**Done (2026-08-28)** for dev — both `apiKey` and `webhookKey` are real PTE values. Never populate `webpresa-prod-opensrs-storefront` with real live-store credentials until deliberately going live — see `implementation.md`'s "Environment isolation" note under Part 3.
+**Done (2026-08-29)** for dev — `clientId`, `apiKey`, and `webhookKey` are all real PTE values (`clientId` added after discovering auth is OAuth 2.0 client-credentials, not a raw API key — see `implementation.md`'s "Documentation gap"). Never populate `webpresa-prod-opensrs-storefront` with real live-store credentials until deliberately going live — see `implementation.md`'s "Environment isolation" note under Part 3.
+
+**Gotcha (hit 2026-08-29):** re-running an *older* copy of this command from earlier in a chat scrollback (from before `clientId` existed) silently overwrote the secret back down to two keys, breaking auth (`invalid_client`) until caught and re-fixed. Secrets Manager has no merge semantics — `put-secret-value` always replaces the entire JSON blob. Always use the current full command, never a stale one from history.
 
 ### New Vercel environment variables
 
@@ -1550,14 +1552,14 @@ Adding a Preview env var does not retroactively apply to an already-built deploy
 ### Manual verification procedure (PTE only)
 
 1. Complete reseller-side setup steps 1–6 above in the PTE environment. **Steps 1, 3, 5, 6 done (2026-08-28)**; step 4 (branding CSS) still outstanding.
-2. Populate `webpresa-dev-opensrs-storefront` with the real PTE API key + webhook key. **Done.**
+2. Populate `webpresa-dev-opensrs-storefront` with the real PTE `clientId`/API key/webhook key. **Done.**
 3. `cdk diff`/`cdk deploy` `WebpresaDevDataStack` and `WebpresaDevVercelAccessStack` (after approval), add the new env vars to Vercel Preview, redeploy. **Done.**
-4. Create a throwaway dev `Business` (with a real address and phone number — required by OpenSRS's customer API, see `implementation.md`'s "Documentation gap"), complete onboarding through to the Domain step, click "Buy a new domain."
-5. Confirm the browser lands in the PTE Storefront already signed in (no login/signup screen) with the DNS Template applied.
-6. Complete a purchase using a Stripe test card (Storefront's sandbox mode).
-7. Confirm the webhook fires: check `webpresa-dev-domain-purchase-intents` for the intent transitioning to `'fulfilled'`, and `webpresa-dev-domain-connections` for a new `source: 'webpresa_registered'` record.
-8. Confirm the domain eventually reaches `status: 'active'` (via the existing `/api/domains/status` polling) and serves the business's site.
-9. Confirm `DomainCard.tsx` on that business's dashboard settings shows "Purchased through Webpresa."
+4. Create a throwaway dev `Business` (with a real address and phone number — required by OpenSRS's customer API, see `implementation.md`'s "Documentation gap"), complete onboarding through to the Domain step, click "Buy a new domain." **Done.**
+5. Confirm the browser lands in the PTE Storefront already signed in (no login/signup screen) with the DNS Template applied. **Confirmed (2026-08-29)** — SSO redirect worked, customer stayed signed in through checkout.
+6. Complete a purchase using a Stripe test card (Storefront's sandbox mode). **Done** — `ctest.info` purchased successfully ("Purchase Complete" page).
+7. Confirm the webhook fires: check `webpresa-dev-domain-purchase-intents` for the intent transitioning to `'fulfilled'`, and `webpresa-dev-domain-connections` for a new `source: 'webpresa_registered'` record. **Confirmed (2026-08-29)** — real delivery verified/correlated/processed on the first attempt, `DomainConnection` created with `status: 'connected'`, `providerDomains[0].status: 'verified'` (Vercel already sees correct DNS from the template, no manual step needed).
+8. Confirm the domain eventually reaches `status: 'active'` (via the existing `/api/domains/status` polling) and serves the business's site. **Not yet confirmed** — `ctest.info` was `'connected'`/Vercel-`'verified'` moments after purchase; certificate issuance and the final `'active'` transition weren't watched through to completion.
+9. Confirm `DomainCard.tsx` on that business's dashboard settings shows "Purchased through Webpresa." **Not yet confirmed.**
 
 ### Expected failure behavior
 
