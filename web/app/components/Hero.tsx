@@ -118,8 +118,8 @@ export default function Hero() {
               variants={fadeUp}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold text-gray-900 leading-[1.05] tracking-tight mb-6"
             >
-              Your website is already built.{" "}
-              <span className="text-brand">Go see it.</span>
+              A professional website.{" "}
+              <span className="text-brand">Without the work.</span>
             </motion.h1>
 
             {/* Subheadline */}
@@ -130,7 +130,7 @@ export default function Hero() {
               variants={fadeUp}
               className="text-lg sm:text-xl text-gray-500 leading-relaxed mb-8 max-w-lg mx-auto lg:mx-0"
             >
-              Enter the code from your postcard to see your site and make it yours.
+              We take the time and complexity out of building your website. Got a postcard? Yours is already waiting. Starting fresh? We&apos;ll build it for you.
             </motion.p>
 
             {/* CTAs */}
@@ -151,10 +151,10 @@ export default function Hero() {
               </motion.div>
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link
-                  href="#how-it-works"
+                  href="/build"
                   className="inline-flex items-center justify-center bg-white text-gray-800 font-semibold text-base px-7 py-3.5 rounded-xl border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors duration-200"
                 >
-                  See How It Works
+                  Build My Website
                 </Link>
               </motion.div>
             </motion.div>
