@@ -11,9 +11,10 @@ interface Props {
 
 /**
  * Truthful domain status only — never fabricates DNS detail the backend
- * doesn't provide (implementation.md's Domain card requirements). Reuses
- * the existing onboarding domain route rather than forking a second
- * domain-management surface (Stage 19.x, Part 2's documented boundary).
+ * doesn't provide (implementation.md's Domain card requirements). "Manage
+ * Domain" links to a dedicated Settings-scoped domain page (`settings/domain`),
+ * not the onboarding wizard's Domain step — a completed customer never gets
+ * routed back into onboarding chrome for domain management.
  */
 const STATUS_DISPLAY: Partial<Record<DomainConnectionStatus, { label: string; tone: BadgeTone }>> = {
   draft: { label: 'Pending setup', tone: 'gray' },
@@ -56,7 +57,7 @@ export function DomainCard({ businessId, slug, domainConnection }: Props) {
       </dl>
 
       <Link
-        href={`/app/onboarding/${businessId}/domain`}
+        href={`/app/businesses/${businessId}/settings/domain`}
         className="w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium bg-(--color-brand) text-white hover:bg-(--color-brand-dark) transition-colors"
       >
         Manage Domain

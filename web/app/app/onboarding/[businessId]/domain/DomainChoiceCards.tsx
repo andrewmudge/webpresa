@@ -87,15 +87,25 @@ function ChoiceCard({
  * though a Storefront-side Custom Code footer link now provides one too).
  * The parent (`DomainStepPanel`) swaps this card out for a waiting view via
  * `onPurchaseStarted` the moment the tab opens successfully.
+ *
+ * Also reused, unmodified apart from its two overridable action props, by
+ * Settings' post-onboarding "change domain" flow (`SettingsDomainPanel`) —
+ * `startDomainPurchaseAction` needs no override since it already returns a
+ * result instead of redirecting.
  */
 export function DomainChoiceCards({
   businessId,
   displayUrl,
   onPurchaseStarted,
+  deferAction = deferDomainAction,
+  connectExistingAction = connectExistingDomainAction,
 }: {
   businessId: string;
   displayUrl: string;
   onPurchaseStarted: () => void;
+  /** Overridable so Settings' post-onboarding "change domain" flow can redirect back to Settings instead of the onboarding wizard — see `SettingsDomainPanel`. */
+  deferAction?: (businessId: string) => Promise<void>;
+  connectExistingAction?: (businessId: string, formData: FormData) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<'webpresa' | 'existing' | 'buy'>('webpresa');
   const [confirming, setConfirming] = useState(false);
@@ -146,7 +156,7 @@ export function DomainChoiceCards({
           <p className="truncate rounded-lg border border-(--color-border) bg-gray-50 px-3 py-2 font-mono text-xs text-gray-600">
             {displayUrl}
           </p>
-          <form action={deferDomainAction.bind(null, businessId)}>
+          <form action={deferAction.bind(null, businessId)}>
             <button
               type="submit"
               className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark)"
@@ -164,7 +174,7 @@ export function DomainChoiceCards({
         title="Use a domain I already own"
         subtitle="Connect a website address from GoDaddy, Wix, Squarespace, or another provider."
       >
-        <form action={connectExistingDomainAction.bind(null, businessId)} className="space-y-3">
+        <form action={connectExistingAction.bind(null, businessId)} className="space-y-3">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-700">Your domain</span>
             <input

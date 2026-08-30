@@ -46,6 +46,8 @@ function resolveProgressCopy(status: DomainConnectionStatus, source: DomainConne
   return PROGRESS_COPY[status];
 }
 
+type ManageOnStorefrontResult = { outcome: 'redirect'; url: string } | { outcome: 'error'; message: string };
+
 interface Props {
   businessId: string;
   domainName: string;
@@ -55,7 +57,21 @@ interface Props {
   initialVerificationRecords: DomainDnsInstruction[];
   initialFailureCategory: DomainFailureCategory | null;
   source: DomainConnectionSource;
+  /**
+   * 'settings' swaps the onboarding-only "Continue to publish" button for
+   * post-onboarding domain-management actions (manage on Storefront, change
+   * domain) — see `SettingsDomainPanel`, the only caller that passes this.
+   */
+  variant?: 'onboarding' | 'settings';
+  /** 'settings' only — mints a fresh SSO link into Storefront's own portal (auto-renew, DNS records) for an already-purchased domain. */
+  manageOnStorefrontAction?: (businessId: string) => Promise<ManageOnStorefrontResult>;
+  /** 'settings' only — hard-disconnects the current domain so a different one can be chosen. */
+  disconnectAction?: (businessId: string) => Promise<{ message?: string } | undefined>;
+  /** 'settings' only — called after a successful disconnect so the parent can swap back to `DomainChoiceCards`. */
+  onChangeDomain?: () => void;
 }
+
+const GENERIC_STOREFRONT_ERROR = 'Unable to open the domain store right now. Please try again.';
 
 /**
  * Real-time domain verification (implementation.md, Stage 19.x, Part 2).
@@ -83,6 +99,10 @@ export function DomainStatusPanel({
   initialVerificationRecords,
   initialFailureCategory,
   source,
+  variant = 'onboarding',
+  manageOnStorefrontAction,
+  disconnectAction,
+  onChangeDomain,
 }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [records, setRecords] = useState(initialVerificationRecords);
@@ -91,6 +111,48 @@ export function DomainStatusPanel({
   const [checking, setChecking] = useState(false);
   const [isContinuePending, startContinueTransition] = useTransition();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [managing, setManaging] = useState(false);
+  const [manageError, setManageError] = useState<string | null>(null);
+  const [confirmingChange, setConfirmingChange] = useState(false);
+  const [isDisconnectPending, startDisconnectTransition] = useTransition();
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
+
+  async function handleManageOnStorefront() {
+    if (!manageOnStorefrontAction) return;
+    setManageError(null);
+    setManaging(true);
+    // Same popup-blocker-safe pattern as `DomainChoiceCards.handleBuyDomain`
+    // — `window.open` must be the first thing that happens, before any `await`.
+    const popup = window.open('', '_blank');
+    try {
+      const result = await manageOnStorefrontAction(businessId);
+      if (result.outcome === 'redirect') {
+        if (popup) popup.location.href = result.url;
+        return;
+      }
+      popup?.close();
+      setManageError(result.message);
+    } catch {
+      popup?.close();
+      setManageError(GENERIC_STOREFRONT_ERROR);
+    } finally {
+      setManaging(false);
+    }
+  }
+
+  function handleConfirmChangeDomain() {
+    if (!disconnectAction) return;
+    setDisconnectError(null);
+    startDisconnectTransition(async () => {
+      const result = await disconnectAction(businessId);
+      if (result?.message) {
+        setDisconnectError(result.message);
+        return;
+      }
+      onChangeDomain?.();
+    });
+  }
 
   const checkStatus = useCallback(async () => {
     setChecking(true);
@@ -176,18 +238,95 @@ export function DomainStatusPanel({
         )}
       </div>
 
-      <button
-        type="button"
-        disabled={isContinuePending}
-        onClick={() => startContinueTransition(() => completeExistingDomainAction(businessId, domainConnectionId, new FormData()))}
-        className={
-          isLive
-            ? 'w-full rounded-lg bg-(--color-brand) px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50 sm:w-auto'
-            : 'text-sm font-medium text-gray-500 underline disabled:opacity-50'
-        }
-      >
-        {isLive ? 'Continue to publish' : "Continue — I'll finish this later"}
-      </button>
+      {variant === 'onboarding' && (
+        <button
+          type="button"
+          disabled={isContinuePending}
+          onClick={() => startContinueTransition(() => completeExistingDomainAction(businessId, domainConnectionId, new FormData()))}
+          className={
+            isLive
+              ? 'w-full rounded-lg bg-(--color-brand) px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50 sm:w-auto'
+              : 'text-sm font-medium text-gray-500 underline disabled:opacity-50'
+          }
+        >
+          {isLive ? 'Continue to publish' : "Continue — I'll finish this later"}
+        </button>
+      )}
+
+      {variant === 'settings' && (
+        <div className="space-y-3">
+          {source === 'webpresa_registered' && manageOnStorefrontAction && (
+            <div className="rounded-2xl border border-(--color-border) bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900">Manage on our domain store</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Update auto-renew, DNS records, and other settings for this domain directly in our domain store,
+                opened in a new tab. If you&apos;ve bought domains for more than one Webpresa website, you may see
+                those there too — it&apos;s one account across all of them.
+              </p>
+              {manageError && (
+                <p role="alert" className="mt-2 text-xs text-red-700">
+                  {manageError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleManageOnStorefront}
+                disabled={managing}
+                className="mt-3 rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+              >
+                {managing ? 'Opening…' : 'Manage on our domain store'}
+              </button>
+            </div>
+          )}
+
+          {disconnectAction && (
+            <div className="rounded-2xl border border-(--color-border) bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900">Change domain</h3>
+              {!confirmingChange ? (
+                <>
+                  <p className="mt-1 text-xs text-gray-500">Connect a different domain, or use your Webpresa address instead.</p>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingChange(true)}
+                    className="mt-3 rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    Change domain
+                  </button>
+                </>
+              ) : (
+                <div className="mt-1 space-y-3">
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    This disconnects {domainName} from this website{source === 'webpresa_registered' ? " — you'll still own it and it'll keep auto-renewing, it just won't point here anymore" : ''}. You can connect a different domain, or reconnect this one later.
+                  </p>
+                  {disconnectError && (
+                    <p role="alert" className="text-xs text-red-700">
+                      {disconnectError}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleConfirmChangeDomain}
+                      disabled={isDisconnectPending}
+                      className="rounded-lg bg-(--color-brand) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--color-brand-dark) disabled:opacity-50"
+                    >
+                      {isDisconnectPending ? 'Disconnecting…' : 'Confirm'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingChange(false)}
+                      disabled={isDisconnectPending}
+                      className="rounded-lg border border-(--color-border) bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

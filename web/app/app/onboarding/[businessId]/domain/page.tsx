@@ -34,13 +34,15 @@ export default async function OnboardingDomainPage({ params, searchParams }: Pro
   const { mode } = await requireBusinessAccess(session.sub, businessId);
   if (mode !== 'full') redirect(`/app/businesses/${businessId}`);
 
-  // Unlike Review/Publish/Tour, this route is deliberately re-enterable
-  // after onboarding has already completed — the dashboard's persistent
-  // "Connect your domain" setup item links straight back here, and domain
-  // setup must be resumable independently of the rest of the wizard (see
-  // implementation.md, Stage 19.x, "Deferred-domain flow").
+  // Once onboarding is complete, domain management moves entirely into
+  // Settings — this route never re-shows wizard chrome after the fact (see
+  // `settings/domain/page.tsx`). Any stale link/bookmark to this step from a
+  // completed customer bounces there instead.
   const onboarding = await ensureCustomerOnboarding(businessId, session.sub);
-  if (onboarding.status !== 'completed' && !canAccessOnboardingStep(onboarding.completedSteps, 'domain')) {
+  if (onboarding.status === 'completed') {
+    redirect(`/app/businesses/${businessId}/settings/domain`);
+  }
+  if (!canAccessOnboardingStep(onboarding.completedSteps, 'domain')) {
     redirect(`/app/onboarding/${businessId}/review`);
   }
 

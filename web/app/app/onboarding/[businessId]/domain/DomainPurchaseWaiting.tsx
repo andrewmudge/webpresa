@@ -21,7 +21,14 @@ const POLL_INTERVAL_MS = 7000; // matches DomainStatusPanel's existing cadence
  * than inventing a new one — it already does exactly the right thing here
  * too: mark the domain step deferred and move the customer forward.
  */
-export function DomainPurchaseWaiting({ businessId }: { businessId: string }) {
+export function DomainPurchaseWaiting({
+  businessId,
+  deferAction = deferDomainAction,
+}: {
+  businessId: string;
+  /** Overridable — see `DomainChoiceCards`' identical prop; Settings passes its own so this redirects back to Settings instead of the onboarding wizard. */
+  deferAction?: (businessId: string) => Promise<void>;
+}) {
   const router = useRouter();
 
   useEffect(() => {
@@ -40,7 +47,7 @@ export function DomainPurchaseWaiting({ businessId }: { businessId: string }) {
         you&apos;re done). This page will update automatically once your domain is connected — no need to come
         back and refresh.
       </p>
-      <form action={deferDomainAction.bind(null, businessId)} className="mt-4">
+      <form action={deferAction.bind(null, businessId)} className="mt-4">
         <button type="submit" className="text-sm font-medium text-gray-500 underline">
           Continue — I&apos;ll finish this later
         </button>
