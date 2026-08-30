@@ -7,11 +7,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { mockGetByDomain, mockCreateRecord, mockPut, mockAddProjectDomain } = vi.hoisted(() => ({
+const { mockGetByDomain, mockCreateRecord, mockPut, mockAddProjectDomain, mockGetProjectDomainStatus } = vi.hoisted(() => ({
   mockGetByDomain: vi.fn(),
   mockCreateRecord: vi.fn(),
   mockPut: vi.fn(),
   mockAddProjectDomain: vi.fn(),
+  mockGetProjectDomainStatus: vi.fn(),
 }));
 
 vi.mock('@/lib/db/domain-connections', () => ({
@@ -22,10 +23,12 @@ vi.mock('@/lib/db/domain-connections', () => ({
 
 vi.mock('@/lib/vercel/domains', () => ({
   addProjectDomain: mockAddProjectDomain,
+  getProjectDomainStatus: mockGetProjectDomainStatus,
   buildRoutingInstructions: () => [{ recordType: 'A', name: '@', value: '76.76.21.21', purpose: 'routing', required: true }],
 }));
 
 import { startDomainConnection } from '@/lib/domains/connect';
+import { VercelApiError } from '@/lib/vercel/errors';
 
 const PARAMS = {
   businessId: 'biz_1',
@@ -39,6 +42,7 @@ beforeEach(() => {
   mockCreateRecord.mockReset();
   mockPut.mockReset();
   mockAddProjectDomain.mockReset();
+  mockGetProjectDomainStatus.mockReset();
 });
 
 describe('startDomainConnection', () => {
@@ -145,6 +149,54 @@ describe('startDomainConnection', () => {
     mockGetByDomain.mockResolvedValueOnce(null);
     mockCreateRecord.mockResolvedValueOnce(true);
     mockAddProjectDomain.mockRejectedValueOnce(new Error('boom'));
+
+    const result = await startDomainConnection(PARAMS);
+
+    expect(result.outcome).toBe('provider_error');
+    expect(mockPut).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+  });
+
+  it('retries a previously-failed record instead of short-circuiting like other non-draft statuses', async () => {
+    mockGetByDomain.mockResolvedValueOnce({
+      normalizedDomain: 'coastalplumbing.com',
+      businessId: 'biz_1',
+      status: 'failed',
+      primaryHostname: 'coastalplumbing.com',
+      aliasHostnames: [],
+    });
+    mockAddProjectDomain.mockResolvedValueOnce({ vercelProjectDomainId: 'coastalplumbing.com', verified: true, verificationRecords: [] });
+
+    const result = await startDomainConnection(PARAMS);
+
+    expect(mockAddProjectDomain).toHaveBeenCalledWith('coastalplumbing.com', expect.anything());
+    expect(result.outcome).toBe('connected');
+    if (result.outcome === 'connected') {
+      expect(result.connection.status).toBe('awaiting_dns');
+    }
+  });
+
+  it('treats a domain already attached to our own Vercel project as success instead of failing', async () => {
+    mockGetByDomain.mockResolvedValueOnce(null);
+    mockCreateRecord.mockResolvedValueOnce(true);
+    mockAddProjectDomain.mockRejectedValueOnce(new VercelApiError('domain_already_in_use', 'already attached', { httpStatus: 409 }));
+    mockGetProjectDomainStatus.mockResolvedValueOnce({ verified: true, misconfigured: false, verificationRecords: [] });
+
+    const result = await startDomainConnection(PARAMS);
+
+    expect(mockGetProjectDomainStatus).toHaveBeenCalledWith('coastalplumbing.com');
+    expect(result.outcome).toBe('connected');
+    if (result.outcome === 'connected') {
+      expect(result.connection.status).toBe('awaiting_dns');
+      expect(result.connection.providerDomains?.[0]).toEqual(expect.objectContaining({ hostname: 'coastalplumbing.com', status: 'verified' }));
+    }
+    expect(mockPut).toHaveBeenCalledWith(expect.objectContaining({ status: 'awaiting_dns' }));
+  });
+
+  it('surfaces the original conflict when a 409 domain is not actually on our project', async () => {
+    mockGetByDomain.mockResolvedValueOnce(null);
+    mockCreateRecord.mockResolvedValueOnce(true);
+    mockAddProjectDomain.mockRejectedValueOnce(new VercelApiError('domain_already_in_use', 'already attached', { httpStatus: 409 }));
+    mockGetProjectDomainStatus.mockRejectedValueOnce(new VercelApiError('not_found', 'not found', { httpStatus: 404 }));
 
     const result = await startDomainConnection(PARAMS);
 
