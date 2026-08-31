@@ -125,8 +125,9 @@ Copy `web/.env.local.example` to `web/.env.local` for local development.
 | `VERCEL_API_SECRET_NAME` | Deterministic name — `webpresa-dev-vercel-api` | Secrets Manager (Stage 19.x, Part 2) — deployed 2026-07-31, real `{ accessToken, teamId, projectId }` populated (`teamId`/`projectId` sourced from `web/.vercel/project.json`). **The `accessToken` is a personal access token scoped to the `andrew-mudges-projects` team and expires 2026-10-29** — rotate it before then (generate a new token at vercel.com/account/tokens, then `aws secretsmanager put-secret-value --secret-id webpresa-dev-vercel-api --secret-string '{"accessToken":"...","teamId":"...","projectId":"..."}' --profile webpresa-dev`) or domain-connection calls in `lib/vercel/client.ts` will start failing with `VercelApiError('auth', ...)`. |
 | `WEBPRESA_VERCEL_DOMAIN_GIT_BRANCH` | `dev` | Stage 19.x, Part 2 (added 2026-07-31) — added to Vercel's **Preview environment only** (left unset in Production). Passed as `gitBranch` on every `addProjectDomain()` call so a newly connected customer domain serves this app's `dev` branch instead of silently falling through to Vercel's Production default — see "Domain-to-branch targeting" below. Must be removed (or the whole mechanism revisited) once Stage 17+ is genuinely deployed to Production. |
 | `BUILD_SESSION_SECRET` | `openssl rand -base64 32` | Self-service build funnel (`/build`) — signs the short-lived build-session cookie (`lib/auth/build-session.ts`); its own dedicated secret, separate from `CLAIM_ATTEMPT_SECRET`/`CUSTOMER_SESSION_SECRET`/`GOOGLE_OAUTH_STATE_SECRET`. **Not yet added to Vercel** — until it is, `submitBuildAction` throws immediately after a successful business-create/photo-upload/scan-trigger (right when it tries to sign the cookie), surfacing to the visitor as a generic 500/"Server Components render" error on the final step. Same missing-secret failure mode as `CUSTOMER_SESSION_SECRET`/`CLAIM_ATTEMPT_SECRET` below. |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Cloud Console — a **new**, separate key from `GOOGLE_PLACES_SECRET_NAME`'s | Admin Postcard Map (`/admin/analytics`) — see "Postcard Map (Admin Analytics)" below. The one deliberate exception to the "never `NEXT_PUBLIC_`" rule directly below this table: a Google Maps JavaScript API key is designed to run in the browser, secured by an HTTP-referrer restriction in Cloud Console rather than secrecy. **Not yet added to Vercel** — until it is, the map card renders a "not configured" placeholder; nothing else on the page is affected. |
 
-Never put these in client-side code or commit `.env` files that contain real values.
+Every credential above this line must stay server-only — never in client-side code, never `NEXT_PUBLIC_`, and never committed in a `.env` file that holds real values. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is the sole, deliberate exception, for the reason given in its row above — it does not license adding another one without the same explicit reasoning.
 
 ---
 
@@ -1570,3 +1571,42 @@ Adding a Preview env var does not retroactively apply to an already-built deploy
 | Webhook signature invalid | `400`, no processing, logged `opensrs.webhook.invalid_signature` — same posture as the Stripe/Lob webhooks |
 | Webhook references an unknown/expired `DomainPurchaseIntent` | `200` (acknowledged, never retried forever) — the intent's 7-day TTL means a very late webhook delivery is expected to occasionally miss |
 | Vercel domain attach fails inside the webhook | `500` (so a retrying sender can redeliver); the `DomainConnection` is recorded `status: 'failed'`; a redelivery (or any future manual retry) re-attempts the attach rather than treating the connection as already handled |
+
+---
+
+## Postcard Map (Admin Analytics) — Google Maps JavaScript API deployment guidance
+
+**Application code implemented.** No AWS/CDK change — no new table, secret, or IAM grant. The only infrastructure this needs lives entirely in Google Cloud and Vercel, and (per this project's "do not deploy infrastructure unless explicitly instructed" rule) has **not yet been provisioned**. Until it is, `PostcardMapCard.tsx` on `/admin/analytics` renders a "Map isn't configured yet" placeholder — nothing else on the page is affected.
+
+### Why this key is different from every other one in this app
+
+Every other third-party credential in this codebase (`GOOGLE_PLACES_SECRET_NAME`, `FIRECRAWL_SECRET_NAME`, `STRIPE_SECRET_NAME`, etc.) is a server-only value fetched from Secrets Manager, never seen by the browser. The Google Maps **JavaScript** API is fundamentally different: it has to run client-side, so its key is *meant* to be public — Google's own security model for it is an **HTTP-referrer restriction** in Cloud Console, not secrecy. That's why this is the one place in the app using `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (see `.env.local.example` and `architecture.md`'s "Postcard Map" section for the full rationale) rather than a Secrets Manager entry — a value that's supposed to reach the browser has no reason to route through AWS at all.
+
+**Never reuse `webpresa-{env}-google-places`'s API key for this.** That key is explicitly documented above (Stage 12, "API key restrictions") as restricted to Places API (New) only and never to be reused for another integration. This needs its own, separate Google Cloud API key.
+
+### Google Cloud Console setup (manual — not automatable from this repo)
+
+1. In the same Google Cloud project already used for Places API (New) (see Stage 12 above), enable the **Maps JavaScript API**.
+2. Create a **new API key**, separate from the Places server key. Restrict it:
+   - **Application restrictions:** HTTP referrers — `https://webpresa.com/*`, `https://www.webpresa.com/*`, the Vercel preview domain (`https://webpresa-git-dev-andrew-mudges-projects.vercel.app/*`), and `http://localhost:3000/*` for local development.
+   - **API restrictions:** Maps JavaScript API only.
+3. Set a Google Cloud Billing budget alert for it (same convention as Stage 12's Places API guidance) — Maps JavaScript API bills per map load past its free monthly credit.
+
+### Vercel / local environment variable
+
+Not a Secrets Manager entry — a plain Vercel environment variable, since it's designed to reach the browser bundle:
+
+```bash
+npx vercel env add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY production
+npx vercel env add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY preview
+```
+
+Also add it to local `.env.local` (see `.env.local.example`) for local development. A missing value is expected to degrade gracefully (see above). Unlike a server-only env var, though, Next.js inlines `NEXT_PUBLIC_` values into the client bundle at **build** time, not request time — so setting/changing this on Vercel requires a new deployment (`vercel redeploy`, or the next real deploy) before the key actually reaches the browser and the real map replaces the placeholder.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` unset | `PostcardMapCard` renders a "Map isn't configured yet" placeholder; rest of `/admin/analytics` unaffected |
+| Key present but Maps JavaScript API not enabled, or referrer restriction doesn't match the requesting origin | Google's own JS loader fails client-side (console error, gray "For development purposes only" watermark or a blank map tile area) — not a Webpresa error, verify Cloud Console setup |
+| A business's postal code has no known ZIP centroid | That business is silently excluded from the map (`resolveZipCentroid` returns `undefined`) — not a page error |

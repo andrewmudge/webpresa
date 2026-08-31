@@ -10,6 +10,7 @@ import { BestTemplateCallout } from './BestTemplateCallout';
 import { PostcardPerformanceTable } from './PostcardPerformanceTable';
 import { CustomerHealthCard } from './CustomerHealthCard';
 import { CancellationReasonsCard } from './CancellationReasonsCard';
+import { PostcardMapCard } from './PostcardMapCard';
 
 interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -66,6 +67,8 @@ export default async function AnalyticsPage({ searchParams }: Props) {
             <CustomerHealthCard health={data.customerHealth} />
             <CancellationReasonsCard reasons={data.cancellationReasons} />
           </div>
+
+          <PostcardMapCard pins={data.mapPins} />
         </div>
       )}
     </div>

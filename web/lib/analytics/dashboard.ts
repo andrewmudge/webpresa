@@ -10,6 +10,7 @@ import { resolvePostcardTemplateVariant } from '@/lib/postcards/template';
 import { resolveDateRange } from './date-range';
 import { computeChangePct, countActiveAsOf, mrrCentsAsOf, computeMrrBreakdown, computeChurnRate, computeSubscriberMix, computeCustomerHealth } from './calculations';
 import { attributePostcardOutcomes, aggregateTemplatePerformance, pickBestPerformingTemplate, getCancellationReasons } from './attribution';
+import { computeMapPins } from './map-pins';
 import { MIN_TEMPLATE_SAMPLE_SIZE, type AnalyticsFilters, type AnalyticsDashboardViewModel, type KpiValue } from './dashboard-types';
 
 /**
@@ -66,6 +67,12 @@ async function computeDashboard(filters: AnalyticsFilters): Promise<AnalyticsDas
   const subscriberMix = computeSubscriberMix(businesses);
   const customerHealth = computeCustomerHealth(businesses, window, now);
 
+  // Deliberately the unfiltered `allBusinesses`/`allPostcards` — the map
+  // card has its own independent, client-side industry filter and always
+  // starts by showing every mailed business, regardless of this page's
+  // date-range/industry FilterBar selection.
+  const mapPins = computeMapPins(allBusinesses, allPostcards);
+
   const nowIso = now.toISOString();
   const activeCustomersPrevious = window.previousEnd !== undefined ? countActiveAsOf(businesses, window.previousEnd, nowIso) : null;
   const mrrPrevious = window.previousEnd !== undefined ? mrrCentsAsOf(businesses, window.previousEnd, nowIso) : null;
@@ -106,6 +113,7 @@ async function computeDashboard(filters: AnalyticsFilters): Promise<AnalyticsDas
     subscriberMix,
     customerHealth,
     cancellationReasons: getCancellationReasons(),
+    mapPins,
   };
 }
 

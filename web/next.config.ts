@@ -29,15 +29,24 @@ const assetsBucketRegion = process.env.AWS_REGION ?? 'us-east-1';
 
 const CSP = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
-  "style-src 'self' 'unsafe-inline'",
+  // `https://maps.googleapis.com` — the Postcard Map card's Google Maps
+  // JavaScript API loader (`app/admin/(dashboard)/analytics/PostcardMapCard.tsx`).
+  // No other page in this app loads a third-party script.
+  `script-src 'self' 'unsafe-inline' https://maps.googleapis.com${isDev ? " 'unsafe-eval'" : ''}`,
+  // `https://fonts.googleapis.com` — the Maps JS UI chrome (zoom controls,
+  // attribution) pulls in its own Roboto stylesheet.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   // `blob:` — the self-service `/build` wizard's own logo/photo previews
   // (`URL.createObjectURL(file)` in `app/build/BuildWizard.tsx`), rendered
   // client-side before any upload happens; nothing else in the app creates
-  // object URLs for images.
-  `img-src 'self' data: blob: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost} https://*.s3.${assetsBucketRegion}.amazonaws.com https://*.s3.amazonaws.com`,
-  "font-src 'self' data:",
-  "connect-src 'self'",
+  // object URLs for images. `https://*.googleapis.com`/`https://*.gstatic.com`
+  // — Google Maps tile imagery; `data:` already covers the map pin marker
+  // icons (inline SVG data URIs).
+  `img-src 'self' data: blob: https://images.unsplash.com https://*.googleusercontent.com https://${stockImagesCdnHost} https://*.s3.${assetsBucketRegion}.amazonaws.com https://*.s3.amazonaws.com https://*.googleapis.com https://*.gstatic.com`,
+  // `https://fonts.gstatic.com` — the actual Roboto font files the Maps JS stylesheet above references.
+  "font-src 'self' data: https://fonts.gstatic.com",
+  // `https://*.googleapis.com` — Maps JS's own tile/data requests once loaded.
+  "connect-src 'self' https://*.googleapis.com",
   "frame-src 'self'",
   "frame-ancestors 'self'",
   "object-src 'none'",

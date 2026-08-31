@@ -1,5 +1,6 @@
 import type { Industry } from '@/domain/constants/industries';
 import type { PostcardTemplateVariant } from '@/domain/models/postcard';
+import type { BusinessStatus } from '@/domain/models/business';
 
 /**
  * Stage 29 — Admin Analytics Dashboard. Client-safe types/constants only
@@ -132,6 +133,25 @@ export interface AnalyticsFilterOptions {
   campaigns: { campaignId: string; name: string }[];
 }
 
+/**
+ * Postcard map card — most-advanced-funnel-stage-wins color: cancelled (red)
+ * beats customer (green) beats engaged/claimed (purple) beats a postcard
+ * that's only reached `mailed`/`delivered` so far (blue). See
+ * `computeMapPins` (`lib/analytics/map-pins.ts`) for the exact derivation.
+ */
+export type PostcardPinColor = 'blue' | 'purple' | 'green' | 'red';
+
+export interface PostcardMapPin {
+  businessId: string;
+  name: string;
+  industry: Industry;
+  /** ZIP-centroid approximation (`lib/geo/zip-centroid.ts`), not a street-level geocode. */
+  latitude: number;
+  longitude: number;
+  color: PostcardPinColor;
+  businessStatus: BusinessStatus;
+}
+
 export interface AnalyticsDashboardViewModel {
   window: ResolvedDateWindow;
   filterOptions: AnalyticsFilterOptions;
@@ -150,4 +170,5 @@ export interface AnalyticsDashboardViewModel {
   subscriberMix: SubscriberMixResult;
   customerHealth: CustomerHealthResult;
   cancellationReasons: CancellationReasonsResult;
+  mapPins: PostcardMapPin[];
 }
