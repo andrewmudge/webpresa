@@ -55,15 +55,7 @@ export default async function PostcardRenderPage({ params }: Props) {
   const business = await getBusinessById(postcard.businessId);
   if (!business) notFound();
 
-  if (side === 'back') {
-    return <PostcardBack recipientName={business.name} recipientAddress={business.address} showGuides={false} />;
-  }
-
-  const [recipient, beforeShots, afterShots] = await Promise.all([
-    postcard.campaignRecipientId ? getCampaignRecipientById(postcard.campaignRecipientId) : Promise.resolve(null),
-    getLatestExistingSiteScreenshots(postcard.businessId),
-    getLatestPreviewScreenshots(postcard.businessId),
-  ]);
+  const recipient = postcard.campaignRecipientId ? await getCampaignRecipientById(postcard.campaignRecipientId) : null;
 
   let qrDataUri: string | undefined;
   let accessCodeDisplay: string | undefined;
@@ -72,6 +64,23 @@ export default async function PostcardRenderPage({ params }: Props) {
     qrDataUri = `data:image/png;base64,${png.toString('base64')}`;
     accessCodeDisplay = formatCampaignCodeForDisplay(recipient.campaignCode);
   }
+
+  if (side === 'back') {
+    return (
+      <PostcardBack
+        recipientName={business.name}
+        recipientAddress={business.address}
+        qrDataUri={qrDataUri}
+        accessCodeDisplay={accessCodeDisplay}
+        showGuides={false}
+      />
+    );
+  }
+
+  const [beforeShots, afterShots] = await Promise.all([
+    getLatestExistingSiteScreenshots(postcard.businessId),
+    getLatestPreviewScreenshots(postcard.businessId),
+  ]);
 
   return (
     <PostcardFront

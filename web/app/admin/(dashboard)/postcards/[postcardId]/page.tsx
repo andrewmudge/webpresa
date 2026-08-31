@@ -95,7 +95,12 @@ export default async function PostcardDetailPage({ params }: Props) {
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Back — click to enlarge</p>
             <PostcardZoom label="Back">
-              <PostcardBack recipientName={business.name} recipientAddress={business.address} />
+              <PostcardBack
+                recipientName={business.name}
+                recipientAddress={business.address}
+                qrDataUri={qrDataUri}
+                accessCodeDisplay={accessCodeDisplay}
+              />
             </PostcardZoom>
           </div>
 
