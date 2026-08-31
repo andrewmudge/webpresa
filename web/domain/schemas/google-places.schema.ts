@@ -24,7 +24,7 @@ const AddressComponentSchema = z.object({
   languageCode: z.string().optional(),
 });
 
-const LatLngSchema = z.object({
+export const LatLngSchema = z.object({
   latitude: z.number(),
   longitude: z.number(),
 });
@@ -86,6 +86,17 @@ export type GooglePlaceReview = z.infer<typeof GooglePlaceReviewSchema>;
 
 export const GooglePlaceDetailsReviewsResponseSchema = z.object({
   reviews: z.array(GooglePlaceReviewSchema).optional(),
+});
+
+/**
+ * A separate Place Details call requesting only the `location` field —
+ * `getPlaceLocation()` in `lib/google-places/client.ts`, used both by new
+ * Discover imports' free coordinate (already on the Text Search response)
+ * and by `scripts/backfill-business-location.ts` for existing businesses
+ * that predate that field being persisted.
+ */
+export const GooglePlaceDetailsLocationResponseSchema = z.object({
+  location: LatLngSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------

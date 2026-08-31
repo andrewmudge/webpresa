@@ -38,6 +38,11 @@ export async function importGooglePlaceCandidate(
       ...(result.googleMapsUrl ? { googleMapsUrl: result.googleMapsUrl } : {}),
       ...(result.rating !== undefined ? { googleRating: result.rating } : {}),
       ...(result.userRatingCount !== undefined ? { googleReviewCount: result.userRatingCount } : {}),
+      // Free — already came back on the Text Search response fetched to
+      // build this candidate, no extra API call. Precise, unlike the
+      // ZIP-centroid fallback the Postcard Map uses when absent.
+      ...(result.latitude !== undefined ? { googlePlaceLatitude: result.latitude } : {}),
+      ...(result.longitude !== undefined ? { googlePlaceLongitude: result.longitude } : {}),
     };
 
     await putBusiness(record);

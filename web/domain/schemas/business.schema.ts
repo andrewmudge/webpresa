@@ -57,6 +57,8 @@ export const BusinessSchema = z.object({
   /** Optional — a Business remains valid with no googlePlaceId. */
   googlePlaceId: z.string().optional(),
   googleMapsUrl: z.string().url().optional(),
+  googlePlaceLatitude: z.number().optional(),
+  googlePlaceLongitude: z.number().optional(),
   source: z.enum(BUSINESS_SOURCES),
   status: z.enum(BUSINESS_STATUSES),
   scores: BusinessScoresSchema.optional(),

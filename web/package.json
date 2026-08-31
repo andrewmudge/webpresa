@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "screenshot": "node scripts/screenshot.mjs",
     "backfill:business-status:dev": "tsx --conditions=react-server --env-file=.env.local scripts/backfill-business-status.ts",
-    "backfill:business-status:prod": "tsx --conditions=react-server --env-file=.env.prod.local scripts/backfill-business-status.ts"
+    "backfill:business-status:prod": "tsx --conditions=react-server --env-file=.env.prod.local scripts/backfill-business-status.ts",
+    "backfill:business-location:dev": "tsx --conditions=react-server --env-file=.env.local scripts/backfill-business-location.ts",
+    "backfill:business-location:prod": "tsx --conditions=react-server --env-file=.env.prod.local scripts/backfill-business-location.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1085.0",

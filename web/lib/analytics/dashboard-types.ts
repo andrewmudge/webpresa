@@ -145,7 +145,15 @@ export interface PostcardMapPin {
   businessId: string;
   name: string;
   industry: Industry;
-  /** ZIP-centroid approximation (`lib/geo/zip-centroid.ts`), not a street-level geocode. */
+  /**
+   * The real Google Places coordinate when the business has one
+   * (`Business.googlePlaceLatitude`/`googlePlaceLongitude`), else a
+   * ZIP-centroid approximation (`lib/geo/zip-centroid.ts`) — not a
+   * street-level geocode in that fallback case. Either way, may be nudged
+   * a small deterministic amount when it collides with another pin's
+   * resolved coordinate — see `spreadCollidingPins` in
+   * `lib/analytics/map-pins.ts`.
+   */
   latitude: number;
   longitude: number;
   color: PostcardPinColor;

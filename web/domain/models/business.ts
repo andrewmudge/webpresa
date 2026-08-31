@@ -167,6 +167,16 @@ export interface Business extends MutableTimestampedRecord {
    */
   googlePlaceId?: string;
   googleMapsUrl?: string;
+  /**
+   * Real coordinates returned by Google Places at import (or backfill)
+   * time — precise, unlike the ZIP-centroid fallback `computeMapPins`
+   * (`lib/analytics/map-pins.ts`) uses when this is absent (see
+   * `lib/geo/zip-centroid.ts`). Only ever populated for
+   * `source: 'google_places'` businesses; every other source falls back
+   * to the ZIP centroid.
+   */
+  googlePlaceLatitude?: number;
+  googlePlaceLongitude?: number;
   /** How this record entered the system. */
   source: BusinessSource;
   status: BusinessStatus;

@@ -3,6 +3,7 @@ import { getGooglePlacesSecret } from '@/lib/secrets';
 import {
   GooglePlacesTextSearchResponseSchema,
   GooglePlaceDetailsReviewsResponseSchema,
+  GooglePlaceDetailsLocationResponseSchema,
   type GooglePlaceApiResult,
   type GooglePlaceReview,
 } from '@/domain/schemas/google-places.schema';
@@ -69,6 +70,14 @@ const REVIEWS_FIELD_MASK = [
   'reviews.relativePublishTimeDescription',
   'reviews.publishTime',
 ].join(',');
+
+/**
+ * Field mask for the location-only Place Details call — `location` sits in
+ * the same base/identity SKU tier as the fields already requested by
+ * `FIELD_MASK` above (unlike `rating`/`userRatingCount`/reviews' higher-cost
+ * tier), so this is the cheapest possible Place Details request.
+ */
+const LOCATION_FIELD_MASK = 'location';
 
 export const GOOGLE_PLACES_ERROR_CATEGORIES = [
   'invalid_key',
@@ -248,4 +257,31 @@ export async function getPlaceReviews(placeId: string): Promise<GooglePlaceRevie
   );
 
   return parsed.reviews ?? [];
+}
+
+/**
+ * Runs a Google Place Details (New) request for a single place's
+ * coordinates only — the cheapest possible field mask. Used both by
+ * `importGooglePlaceCandidate` (free — piggybacks on the Text Search
+ * response already fetched for a new import, no extra call needed there)
+ * and by `scripts/backfill-business-location.ts` to backfill coordinates
+ * for existing businesses that predate `Business.googlePlaceLatitude`/
+ * `googlePlaceLongitude` being persisted. Never called from the browser.
+ */
+export async function getPlaceLocation(placeId: string): Promise<{ latitude: number; longitude: number } | undefined> {
+  const { apiKey } = await getGooglePlacesSecret();
+
+  const parsed = await requestPlacesApi(
+    `${PLACES_DETAILS_URL}/${encodeURIComponent(placeId)}`,
+    {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': LOCATION_FIELD_MASK,
+      },
+    },
+    GooglePlaceDetailsLocationResponseSchema,
+  );
+
+  return parsed.location;
 }

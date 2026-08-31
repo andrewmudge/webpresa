@@ -14,7 +14,7 @@ vi.mock('@/lib/secrets', () => ({
 
 vi.mock('server-only', () => ({}));
 
-import { searchPlacesText, getPlaceReviews, GooglePlacesApiError } from '../client';
+import { searchPlacesText, getPlaceReviews, getPlaceLocation, GooglePlacesApiError } from '../client';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -194,6 +194,43 @@ describe('getPlaceReviews', () => {
       vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: { status: 'PERMISSION_DENIED' } }) }),
     );
     await expect(getPlaceReviews('place_1')).rejects.toMatchObject({ category: 'permission_denied' });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('getPlaceLocation', () => {
+  it('sends a GET request to the Place Details endpoint with a location-only field mask', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ location: { latitude: 30.2672, longitude: -97.7431 } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const location = await getPlaceLocation('place_1');
+
+    expect(location).toEqual({ latitude: 30.2672, longitude: -97.7431 });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://places.googleapis.com/v1/places/place_1');
+    expect(init.method).toBe('GET');
+    expect(init.headers['X-Goog-Api-Key']).toBe('test-key');
+    expect(init.headers['X-Goog-FieldMask']).toBe('location');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns undefined when the place has no location', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    await expect(getPlaceLocation('place_1')).resolves.toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('categorizes a non-2xx response the same way the other Place Details call does', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({ error: { status: 'RESOURCE_EXHAUSTED' } }) }),
+    );
+    await expect(getPlaceLocation('place_1')).rejects.toMatchObject({ category: 'quota_exceeded' });
     vi.unstubAllGlobals();
   });
 });
