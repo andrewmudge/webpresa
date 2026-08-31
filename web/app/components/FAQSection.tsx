@@ -118,6 +118,7 @@ export default function FAQSection() {
   return (
     <section
       ref={ref}
+      id="faq"
       className="bg-[#FAFAFA] py-24 lg:py-32"
       aria-labelledby="faq-heading"
     >
