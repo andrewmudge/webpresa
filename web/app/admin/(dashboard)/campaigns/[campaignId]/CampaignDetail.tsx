@@ -792,6 +792,8 @@ function PostcardControl({
       <PostcardBackThumbnail
         recipientName={assets?.businessName ?? ''}
         recipientAddress={assets?.recipientAddress}
+        qrDataUri={assets?.qrDataUri}
+        accessCodeDisplay={assets?.accessCodeDisplay}
         href={assets?.backUrl}
         width={128}
       />

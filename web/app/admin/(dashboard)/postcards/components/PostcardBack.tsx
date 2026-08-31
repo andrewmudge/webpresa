@@ -61,10 +61,12 @@ const QR_BLOCK_TOP_CQH = POSTCARD_SAFE_ZONE_INSET_PERCENT.y + 1;
 const INK_FREE_ZONE_TOP_CQH = 100 - POSTCARD_INK_FREE_ZONE_PERCENT.height - POSTCARD_INK_FREE_ZONE_PERCENT.bottom;
 const QR_BLOCK_MAX_HEIGHT_CQH = INK_FREE_ZONE_TOP_CQH - 1 - QR_BLOCK_TOP_CQH;
 
-// QR box: 1.8" wide — a clearly-scannable, visually dominant square, roomier
-// than PostcardFront's ~1" footer QR since this block owns a whole column
-// instead of a footer corner.
-const QR_BOX_WIDTH_INCHES = 1.8;
+// QR box: 1.53" wide (1.8" shrunk 15% — 2026-08-31 feedback: the icon+text
+// rows below were wider than QR_BLOCK_WIDTH_CQW at the original 1.8" scale,
+// so the access-code pill's right edge was getting clipped by this block's
+// own `overflow-hidden`; shrinking every element in the block uniformly,
+// not just the QR image, is what actually frees the margin those rows need).
+const QR_BOX_WIDTH_INCHES = 1.53;
 const QR_BOX_WIDTH_CQW = QR_BOX_WIDTH_INCHES * ONE_INCH_CQW;
 
 /**
@@ -144,6 +146,10 @@ export default function PostcardBack({ recipientName, recipientAddress, qrDataUr
               <br />
               look professional and attract more customers.
             </p>
+
+            <p className="mt-[1.2cqh] text-[1.6cqw] font-extrabold" style={{ color: POSTCARD_NAVY }}>
+              See it Live. Make it Yours for <span style={{ color: POSTCARD_BLUE }}>$39/mo.</span>
+            </p>
           </div>
 
           <div className="flex flex-1 flex-col justify-center">
@@ -220,37 +226,37 @@ export default function PostcardBack({ recipientName, recipientAddress, qrDataUr
             <PostcardQrWithBadge qrDataUri={qrDataUri} />
           </div>
 
-          <p className="mt-[1.5cqh] text-[1.7cqw] font-black uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
+          <p className="mt-[1.28cqh] text-[1.45cqw] font-black uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
             Scan to view your website
           </p>
 
-          <p className="mt-[1cqh] text-[1.1cqw] font-semibold uppercase tracking-wide text-gray-400">— OR —</p>
+          <p className="mt-[0.85cqh] text-[0.94cqw] font-semibold uppercase tracking-wide text-gray-400">— OR —</p>
 
-          <div className="mt-[1.3cqh] flex items-center gap-[0.8cqw]">
-            <span className="flex h-[2.4cqw] w-[2.4cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
-              <Globe className="h-[1.3cqw] w-[1.3cqw] text-white" />
+          <div className="mt-[1.11cqh] flex items-center gap-[0.68cqw]">
+            <span className="flex h-[2.04cqw] w-[2.04cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
+              <Globe className="h-[1.11cqw] w-[1.11cqw] text-white" />
             </span>
             <div className="text-left">
-              <p className="text-[1cqw] font-bold uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
+              <p className="text-[0.85cqw] font-bold uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
                 GO TO:
               </p>
-              <p className="text-[2cqw] font-bold leading-tight" style={{ color: POSTCARD_BLUE }}>
+              <p className="text-[1.7cqw] font-bold leading-tight" style={{ color: POSTCARD_BLUE }}>
                 webpresa.com/access
               </p>
             </div>
           </div>
 
-          <div className="mt-[1.3cqh] flex items-center gap-[0.8cqw]">
-            <span className="flex h-[2.4cqw] w-[2.4cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
-              <Lock className="h-[1.3cqw] w-[1.3cqw] text-white" />
+          <div className="mt-[1.11cqh] flex items-center gap-[0.68cqw]">
+            <span className="flex h-[2.04cqw] w-[2.04cqw] shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: POSTCARD_BLUE_LIGHT }}>
+              <Lock className="h-[1.11cqw] w-[1.11cqw] text-white" />
             </span>
             <div className="text-left">
-              <p className="text-[1cqw] font-bold uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
+              <p className="text-[0.85cqw] font-bold uppercase tracking-wide" style={{ color: POSTCARD_NAVY }}>
                 ENTER YOUR ACCESS CODE:
               </p>
               {accessCodeDisplay && (
                 <span
-                  className="mt-[0.2cqh] inline-block rounded-lg border-2 bg-white px-[0.9cqw] py-[0.25cqh] font-mono text-[1.7cqw] font-bold tracking-widest"
+                  className="mt-[0.17cqh] inline-block rounded-lg border-2 bg-white px-[0.77cqw] py-[0.21cqh] font-mono text-[1.45cqw] font-bold tracking-widest"
                   style={{ borderColor: POSTCARD_BLUE, color: POSTCARD_NAVY }}
                 >
                   {accessCodeDisplay}

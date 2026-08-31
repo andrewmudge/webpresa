@@ -10,15 +10,24 @@ import type { Address } from '@/domain/models/common';
 export interface PostcardBackThumbnailProps {
   recipientName: string;
   recipientAddress?: Address;
+  /** Same value passed to the sibling `PostcardFrontThumbnail` — see `PostcardBack`'s own prop doc comments. */
+  qrDataUri?: string;
+  accessCodeDisplay?: string;
   /** Signed S3 URL for the rendered back PDF — omit while rendering hasn't happened yet. */
   href?: string;
   width?: number;
 }
 
-export default function PostcardBackThumbnail({ recipientName, recipientAddress, href, width = 160 }: PostcardBackThumbnailProps) {
+export default function PostcardBackThumbnail({ recipientName, recipientAddress, qrDataUri, accessCodeDisplay, href, width = 160 }: PostcardBackThumbnailProps) {
   const content = (
     <div style={{ width, pointerEvents: 'none' }}>
-      <PostcardBack recipientName={recipientName} recipientAddress={recipientAddress} showGuides={false} />
+      <PostcardBack
+        recipientName={recipientName}
+        recipientAddress={recipientAddress}
+        qrDataUri={qrDataUri}
+        accessCodeDisplay={accessCodeDisplay}
+        showGuides={false}
+      />
     </div>
   );
 
