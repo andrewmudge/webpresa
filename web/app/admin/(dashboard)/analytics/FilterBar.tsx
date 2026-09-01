@@ -1,5 +1,6 @@
 import { DATE_RANGE_PRESETS, DATE_RANGE_PRESET_LABELS } from '@/lib/analytics/dashboard-types';
 import type { AnalyticsFilters, AnalyticsFilterOptions } from '@/lib/analytics/dashboard-types';
+import type { VisitorsFilters } from '@/lib/analytics/vercel-visitors';
 import { formatTemplateLabel } from './format';
 
 const selectClass =
@@ -12,10 +13,28 @@ const inputClass = selectClass;
  * `undefined` only when the initial data load itself failed (the page's
  * error banner is shown separately) — every select still renders with
  * whatever values are already in the URL so filtering can be retried.
+ *
+ * `visitorsFilters` is the `WebsiteVisitorsCard`'s own independent
+ * date-range state, carried here only as hidden inputs so submitting this
+ * form doesn't reset it (a GET submit replaces the whole query string with
+ * just the fields inside the submitted form). The reverse also holds —
+ * `WebsiteVisitorsCard`'s own form carries hidden inputs for these fields'
+ * current values.
  */
-export function FilterBar({ filters, filterOptions }: { filters: AnalyticsFilters; filterOptions?: AnalyticsFilterOptions }) {
+export function FilterBar({
+  filters,
+  filterOptions,
+  visitorsFilters,
+}: {
+  filters: AnalyticsFilters;
+  filterOptions?: AnalyticsFilterOptions;
+  visitorsFilters: VisitorsFilters;
+}) {
   return (
     <form method="GET" className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+      <input type="hidden" name="visitorsRange" value={visitorsFilters.range} />
+      <input type="hidden" name="visitorsFrom" value={visitorsFilters.customFrom ?? ''} />
+      <input type="hidden" name="visitorsTo" value={visitorsFilters.customTo ?? ''} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div>
           <label htmlFor="datePreset" className="block text-xs font-medium text-gray-500 mb-1">

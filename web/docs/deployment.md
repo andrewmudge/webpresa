@@ -1610,3 +1610,34 @@ Also add it to local `.env.local` (see `.env.local.example`) for local developme
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` unset | `PostcardMapCard` renders a "Map isn't configured yet" placeholder; rest of `/admin/analytics` unaffected |
 | Key present but Maps JavaScript API not enabled, or referrer restriction doesn't match the requesting origin | Google's own JS loader fails client-side (console error, gray "For development purposes only" watermark or a blank map tile area) — not a Webpresa error, verify Cloud Console setup |
 | A business's postal code has no known ZIP centroid | That business is silently excluded from the map (`resolveZipCentroid` returns `undefined`) — not a page error |
+
+---
+
+## Website Visitors (Admin Analytics) — Vercel Web Analytics deployment guidance
+
+**Application code implemented.** No AWS/CDK change, no new secret — reuses the existing `VERCEL_API_SECRET_NAME` secret's `projectId` field (already populated, previously unused by the domains-only code that reads the rest of that secret). The only setup this needs is one manual toggle in the Vercel dashboard.
+
+### One-time manual step (not automatable from this repo)
+
+1. Vercel dashboard → the `webpresa` project → **Analytics** in the sidebar → **Enable**.
+2. That's it — no CLI/API equivalent is documented for this step. Until it's done, `WebsiteVisitorsCard` on `/admin/analytics` shows a "No visitor data yet" placeholder; nothing else on the page is affected.
+
+### What actually gets tracked
+
+Only two pages, on whichever deployment(s) `@vercel/analytics` is loaded on: the homepage (`/`) and the self-service build funnel's landing page (`/build`, never `/build/[buildId]`) — scoped by `app/components/TrackedPageAnalytics.tsx`'s runtime path check, mounted once in the root layout. Every other route (`/admin`, `/app`, `/b/[slug]`, `/api`, etc.) never fires the tracking script. This was a deliberate choice, not an oversight: `/b/[slug]` (customer-generated business sites) can get real postcard-campaign-driven traffic that would otherwise dominate both the visitor numbers and the Vercel team's shared Web Analytics event quota — events are billed/quota'd per team, across every project on the account, not per-project.
+
+### Reporting-window / plan caveat
+
+Vercel's Web Analytics `visits/aggregate` API only returns data within the account's plan-gated reporting window: **Hobby — 1 month, Pro — 12 months, Pro + Web Analytics Plus add-on ($10/mo) — 24 months.** The card's `year` preset needs at least Pro to actually show 12 months of data — on Hobby it will silently return less than requested (querying further back than the window doesn't error, it just returns nothing for the missing period). This code doesn't detect or warn about which plan the team is on; if the `year`/`6month` presets look sparse, check the team's plan before assuming a bug.
+
+### Dev preview domain
+
+Vercel's Deployment Protection sits in front of the entire `dev` preview deployment at the edge (see Stage 14's "Vercel Deployment Protection bypass" above) — this can block the analytics script's own request the same way it blocks any other unauthenticated request to a protected preview. Per explicit product decision, this is acceptable: dev-domain visitor tracking is a nice-to-have for the person building this, not a requirement, and no bypass-header plumbing was added for it.
+
+### Expected failure behavior
+
+| Condition | Expected behavior |
+|---|---|
+| Web Analytics not yet enabled in the Vercel dashboard | `getWebsiteVisitorTrend()`'s API call fails; caught independently in `page.tsx` (via `Promise.allSettled`, isolated from the rest of the dashboard's own data load), logged (`analytics.visitors.load_failed`), and the card shows its empty-data placeholder — never a page-level error |
+| `VERCEL_API_SECRET_NAME`'s access token expired or lacks Web Analytics access | Same graceful degradation as above — `VercelApiError('auth', ...)` surfaces only as a safe log line, never to the admin UI |
+| `year`/`6month` preset requested on a Hobby-plan team | Chart renders with only the data within the 1-month reporting window; no error, just less data than the preset implies (see caveat above) |
