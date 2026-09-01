@@ -200,13 +200,54 @@ describe('generatePreviewContent — success', () => {
     expect(result.theme.servicesImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
   });
 
-  it('leaves servicesImageUrl unset when no photo was uploaded', async () => {
+  it('leaves servicesImageUrl unset when no photo was uploaded and the industry has no default', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ industry: 'hvac', photoUrls: undefined });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.servicesImageUrl).toBeUndefined();
+  });
+
+  it('falls back to the curated plumbing default images when nothing else resolves for about/why-choose-us/services', async () => {
     mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
     const business = makeBusiness({ photoUrls: undefined });
 
     const result = await generatePreviewContent(business);
 
+    expect(result.theme.aboutImageUrl).toBe('/default-images/plumb2.jpg');
+    expect(result.theme.servicesImageUrl).toBe('/default-images/plumb1.jpg');
+    expect(result.theme.aboutSectionImageUrl).toBe('/default-images/plumb3.jpg');
+  });
+
+  it('leaves about/why-choose-us/services unset when no photo was uploaded and the industry has no default', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ industry: 'hvac', photoUrls: undefined });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.aboutImageUrl).toBeUndefined();
     expect(result.theme.servicesImageUrl).toBeUndefined();
+    expect(result.theme.aboutSectionImageUrl).toBeUndefined();
+  });
+
+  it('prefers an uploaded photo over the plumbing default image', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: ['/api/assets/businesses/biz_1/assets/photos/0.jpg'] });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.aboutImageUrl).toBe('/api/assets/businesses/biz_1/assets/photos/0.jpg');
+    expect(result.theme.aboutImageUrl).not.toBe('/default-images/plumb2.jpg');
+  });
+
+  it('lets an admin override force no photo for the about slot via "none" even when the plumbing default would otherwise apply', async () => {
+    mockParse.mockResolvedValueOnce({ choices: [{ message: { parsed: VALID_MODEL_OUTPUT } }] });
+    const business = makeBusiness({ photoUrls: undefined, whyChooseUsPhotoUrl: 'none' });
+
+    const result = await generatePreviewContent(business);
+
+    expect(result.theme.aboutImageUrl).toBeUndefined();
   });
 
   it('includes generationMetadata with the resolved model name', async () => {

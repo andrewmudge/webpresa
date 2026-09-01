@@ -9,6 +9,7 @@ import { PreviewContentSchema, SitePreviewSchema } from '@/domain/schemas/site-p
 import { buildDefaultCta } from '@/app/admin/(dashboard)/businesses/[businessId]/cta-defaults';
 import { resolveBusinessTheme } from '@/lib/theme/select-theme';
 import { resolveHeroImages } from '@/lib/image/resolve-hero-image';
+import { getDefaultSectionImage } from '@/lib/image/default-section-images';
 import { buildGenerationContext, type GenerationContext } from '@/lib/firecrawl/generation-context';
 import { classifySocialPlatform } from '@/lib/social-links';
 import { getOpenAiClient, getOpenAiModel } from './client';
@@ -257,10 +258,13 @@ export async function generatePreviewContent(
   // An admin override (see Business model) takes priority over the
   // automatic pick; overriding to 'none' forces that slot's non-photo
   // fallback even when photos exist. Scan-accepted images (Stage 13) are a
-  // final, lowest-priority fallback tier — admin-uploaded photos always win
-  // over anything discovered on the business's own website. Never sourced
-  // from Google Places (Stage 12 never downloads photos at all). The hero
-  // slot has its own separate tier chain — see resolveHeroImages below. ---
+  // lower-priority fallback tier — admin-uploaded photos always win over
+  // anything discovered on the business's own website. Never sourced from
+  // Google Places (Stage 12 never downloads photos at all). A curated
+  // per-industry default image (`lib/image/default-section-images.ts`) is
+  // the final fallback tier, used only when nothing above resolved — today
+  // that's plumbing only. The hero slot has its own separate tier chain —
+  // see resolveHeroImages below. ---
   const acceptedScanImages = (options.enrichment?.scanImages ?? []).filter(
     (img): img is typeof img & { url: string } => img.status === 'accepted' && !!img.url,
   );
@@ -280,6 +284,7 @@ export async function generatePreviewContent(
     business.photoUrls?.[1],
     business.photoUrls?.[0],
     otherScanImageUrls[0],
+    getDefaultSectionImage(business.industry, 'whyChooseUs'),
   );
   const servicesImageUrl = resolvePhotoSlot(
     business.servicesPhotoUrl,
@@ -287,6 +292,7 @@ export async function generatePreviewContent(
     business.photoUrls?.[1],
     business.photoUrls?.[0],
     otherScanImageUrls[1] ?? otherScanImageUrls[0],
+    getDefaultSectionImage(business.industry, 'featuredService'),
   );
   const aboutSectionImageUrl = resolvePhotoSlot(
     business.aboutPhotoUrl,
@@ -294,6 +300,7 @@ export async function generatePreviewContent(
     business.photoUrls?.[1],
     business.photoUrls?.[0],
     otherScanImageUrls[2] ?? otherScanImageUrls[0],
+    getDefaultSectionImage(business.industry, 'about'),
   );
 
   // --- Social links: Business-entered wins outright (same "Business is
