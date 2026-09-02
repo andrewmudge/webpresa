@@ -3,14 +3,31 @@ import type { MarketingCampaign } from '@/domain/models/marketing-campaign';
 import type { MarketingOutreach } from '@/domain/models/marketing-outreach';
 import type { MarketingMessage } from '@/domain/models/marketing-message';
 import type { Business } from '@/domain/models/business';
+import type { Postcard } from '@/domain/models/postcard';
 import { MARKETING_CAMPAIGN_ID } from './constants';
 import { ensureMarketingCampaignExists } from './campaign';
 import { listOutreachForCampaign } from '@/lib/db/marketing-outreach';
 import { listAllMarketingMessages } from '@/lib/db/marketing-messages';
 import { listAllBusinesses } from '@/lib/db/businesses';
+import { listAllPostcards } from '@/lib/db/postcards';
 
+/**
+ * `postcardsDelivered` and `businessesEnrolled` are deliberately independent
+ * numbers that can diverge, and often will — see `web/docs/architecture.md`,
+ * "Marketing — SES Drip Campaign". `postcardsDelivered` is a true count of
+ * `Postcard` records Lob has confirmed delivered (`status === 'delivered'`),
+ * matching Lob's own dashboard terminology. `businessesEnrolled` counts
+ * `MarketingOutreach` rows — businesses that passed `checkMarketingEligibility()`
+ * at the moment their postcard's delivery webhook was processed. A delivered
+ * postcard's business can miss enrollment for several legitimate,
+ * documented reasons (already claimed/customer, no email on file, email
+ * suppressed, postcard already engaged, campaign disabled at that moment) —
+ * `businessesEnrolled` will always be `<= postcardsDelivered` but is not
+ * expected to equal it.
+ */
 export interface MarketingKpis {
   postcardsDelivered: number;
+  businessesEnrolled: number;
   email1Sent: number;
   email2Sent: number;
   email3Sent: number;
@@ -35,7 +52,7 @@ export interface MarketingDashboardData {
   rows: OutreachRow[];
 }
 
-function computeKpis(rows: OutreachRow[], messages: MarketingMessage[]): MarketingKpis {
+export function computeKpis(rows: OutreachRow[], messages: MarketingMessage[], postcards: Postcard[]): MarketingKpis {
   let email1Sent = 0;
   let email2Sent = 0;
   let email3Sent = 0;
@@ -65,7 +82,8 @@ function computeKpis(rows: OutreachRow[], messages: MarketingMessage[]): Marketi
   }
 
   return {
-    postcardsDelivered: rows.length,
+    postcardsDelivered: postcards.filter((postcard) => postcard.status === 'delivered').length,
+    businessesEnrolled: rows.length,
     email1Sent,
     email2Sent,
     email3Sent,
@@ -88,10 +106,11 @@ function computeKpis(rows: OutreachRow[], messages: MarketingMessage[]): Marketi
  */
 export async function getMarketingDashboardData(): Promise<MarketingDashboardData> {
   const campaign = await ensureMarketingCampaignExists();
-  const [outreachList, messages, businesses] = await Promise.all([
+  const [outreachList, messages, businesses, postcards] = await Promise.all([
     listOutreachForCampaign(MARKETING_CAMPAIGN_ID),
     listAllMarketingMessages(),
     listAllBusinesses(),
+    listAllPostcards(),
   ]);
 
   const businessById = new Map(businesses.map((business) => [business.businessId, business]));
@@ -108,5 +127,5 @@ export async function getMarketingDashboardData(): Promise<MarketingDashboardDat
     messages: (messagesByBusiness.get(outreach.businessId) ?? []).slice().sort((a, b) => a.emailSequence - b.emailSequence),
   }));
 
-  return { campaign, kpis: computeKpis(rows, messages), rows };
+  return { campaign, kpis: computeKpis(rows, messages, postcards), rows };
 }

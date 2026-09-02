@@ -30,6 +30,7 @@ export function KpiGrid({ kpis, activeCampaigns }: { kpis: MarketingKpis; active
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
       <KpiTile label="Active Campaigns" value={activeCampaigns} />
       <KpiTile label="Postcards Delivered" value={kpis.postcardsDelivered} />
+      <KpiTile label="Businesses Enrolled" value={kpis.businessesEnrolled} />
       <KpiTile label="Email 1 Sent" value={kpis.email1Sent} href="/admin/marketing/outbox?sequence=1" />
       <KpiTile label="Email 2 Sent" value={kpis.email2Sent} href="/admin/marketing/outbox?sequence=2" />
       <KpiTile label="Email 3 Sent" value={kpis.email3Sent} href="/admin/marketing/outbox?sequence=3" />
