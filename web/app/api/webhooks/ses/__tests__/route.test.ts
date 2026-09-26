@@ -14,6 +14,7 @@ const {
   mockPutMarketingSesEventIfNotExists,
   mockGetMarketingMessageBySesMessageId,
   mockApplyMarketingMessageSesRollup,
+  mockRecordMarketingMessageOpenRollup,
   mockPutMarketingSuppressionIfNotExists,
   mockTransitionOutreachToTerminal,
 } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const {
   mockPutMarketingSesEventIfNotExists: vi.fn(),
   mockGetMarketingMessageBySesMessageId: vi.fn(),
   mockApplyMarketingMessageSesRollup: vi.fn(),
+  mockRecordMarketingMessageOpenRollup: vi.fn(),
   mockPutMarketingSuppressionIfNotExists: vi.fn(),
   mockTransitionOutreachToTerminal: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock('@/lib/db/marketing-ses-events', () => ({ putMarketingSesEventIfNotExist
 vi.mock('@/lib/db/marketing-messages', () => ({
   getMarketingMessageBySesMessageId: mockGetMarketingMessageBySesMessageId,
   applyMarketingMessageSesRollup: mockApplyMarketingMessageSesRollup,
+  recordMarketingMessageOpenRollup: mockRecordMarketingMessageOpenRollup,
 }));
 vi.mock('@/lib/db/marketing-suppressions', () => ({ putMarketingSuppressionIfNotExists: mockPutMarketingSuppressionIfNotExists }));
 vi.mock('@/lib/db/marketing-outreach', () => ({ transitionOutreachToTerminal: mockTransitionOutreachToTerminal }));
@@ -159,6 +162,17 @@ describe('POST /api/webhooks/ses — event handling', () => {
     expect(response.status).toBe(200);
     expect(mockPutMarketingSuppressionIfNotExists).toHaveBeenCalledWith(expect.objectContaining({ reason: 'complaint' }));
     expect(mockTransitionOutreachToTerminal).toHaveBeenCalledWith(expect.objectContaining({ suppressionReason: 'complaint' }));
+  });
+
+  it('Open increments the open rollup at the SES-reported open time, without touching sesEventStatus or suppressing', async () => {
+    const response = await POST(
+      makeNotification({ eventType: 'Open', mail: { messageId: 'ses-1' }, open: { timestamp: '2026-09-26T14:00:00.000Z' } }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockRecordMarketingMessageOpenRollup).toHaveBeenCalledWith(MESSAGE.businessId, MESSAGE.sortKey, '2026-09-26T14:00:00.000Z');
+    expect(mockApplyMarketingMessageSesRollup).not.toHaveBeenCalled();
+    expect(mockPutMarketingSuppressionIfNotExists).not.toHaveBeenCalled();
+    expect(mockTransitionOutreachToTerminal).not.toHaveBeenCalled();
   });
 
   it('Reject is recorded but does not suppress', async () => {

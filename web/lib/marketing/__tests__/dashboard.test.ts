@@ -95,4 +95,22 @@ describe('computeKpis', () => {
     expect(kpis.postcardsDelivered).toBe(13);
     expect(kpis.businessesEnrolled).toBe(4);
   });
+
+  it('counts emailsOpened as messages with at least one open, not total opens — and treats a pre-tracking message (no openCount) as unopened', () => {
+    const base: MarketingMessage = {
+      messageId: 'mktgmsg_1',
+      businessId: 'biz_1',
+      marketingCampaignId: 'mktgcampaign_1',
+      emailSequence: 1,
+      sortKey: 'mktgcampaign_1#1',
+      outcome: 'sent',
+      attemptedAt: '2026-09-01T00:00:00.000Z',
+      clickCount: 0,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    };
+    const messages = [{ ...base, openCount: 5 }, { ...base, openCount: 1 }, { ...base, openCount: 0 }, base];
+
+    expect(computeKpis([], messages, []).emailsOpened).toBe(2);
+  });
 });

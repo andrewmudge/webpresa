@@ -5,7 +5,7 @@ import type { EmailSequence } from '@/domain/models/email-template';
 export const dynamic = 'force-dynamic';
 
 /** Shared column template — the header row and every `<summary>` row must use the exact same grid so columns line up (a plain `<table>` can't be mixed with `<details>/<summary>` body rows, since table layout and grid layout size columns independently). */
-const OUTBOX_GRID_COLS = 'grid grid-cols-[1.5fr_0.7fr_1.2fr_1.5fr_2fr_0.6fr]';
+const OUTBOX_GRID_COLS = 'grid grid-cols-[1.5fr_0.7fr_1.2fr_1.5fr_2fr_0.6fr_0.6fr]';
 
 interface SearchParams {
   sequence?: string;
@@ -69,6 +69,7 @@ export default async function MarketingOutboxPage({ searchParams }: Props) {
             <span>Sent</span>
             <span>Recipient</span>
             <span>Subject</span>
+            <span>Opens</span>
             <span>Clicks</span>
           </div>
           <div className="divide-y divide-gray-50">
@@ -82,6 +83,7 @@ export default async function MarketingOutboxPage({ searchParams }: Props) {
                   <span className="text-gray-400 text-xs">{message.sentAt ? new Date(message.sentAt).toLocaleString() : '—'}</span>
                   <span className="text-gray-600 truncate">{message.recipientEmail ?? <span className="text-gray-300">—</span>}</span>
                   <span className="text-gray-600 truncate">{message.subjectSnapshot ?? <span className="text-gray-300">—</span>}</span>
+                  <span className="text-gray-600">{message.openCount ?? 0}</span>
                   <span className="text-gray-600">{message.clickCount}</span>
                 </summary>
                 <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 space-y-4">

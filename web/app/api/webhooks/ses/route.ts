@@ -1,7 +1,7 @@
 import { verifySnsMessageSignature, type SnsMessageEnvelope } from '@/lib/ses/verify-sns-signature';
 import { createMarketingSesEvent } from '@/domain/factories/marketing-ses-event.factory';
 import { putMarketingSesEventIfNotExists } from '@/lib/db/marketing-ses-events';
-import { getMarketingMessageBySesMessageId, applyMarketingMessageSesRollup } from '@/lib/db/marketing-messages';
+import { getMarketingMessageBySesMessageId, applyMarketingMessageSesRollup, recordMarketingMessageOpenRollup } from '@/lib/db/marketing-messages';
 import { createMarketingSuppression } from '@/domain/factories/marketing-suppression.factory';
 import { putMarketingSuppressionIfNotExists } from '@/lib/db/marketing-suppressions';
 import { transitionOutreachToTerminal } from '@/lib/db/marketing-outreach';
@@ -23,6 +23,7 @@ interface SesEventPayload {
   mail: { messageId: string; timestamp?: string };
   bounce?: { bounceType: string; bouncedRecipients?: Array<{ emailAddress: string }> };
   complaint?: { complainedRecipients?: Array<{ emailAddress: string }> };
+  open?: { timestamp?: string };
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -111,6 +112,9 @@ export async function POST(request: Request): Promise<Response> {
             lastEventType: 'hard_bounce',
           });
         }
+      } else if (eventType === 'Open') {
+        // SES reports one Open per pixel load — repeat opens are counted, never deduped per message.
+        await recordMarketingMessageOpenRollup(message.businessId, message.sortKey, sesEvent.open?.timestamp ?? occurredAt);
       } else if (eventType === 'Complaint') {
         await applyMarketingMessageSesRollup(message.businessId, message.sortKey, { sesEventStatus: 'complained', complainedAt: occurredAt });
         const recipientEmail = sesEvent.complaint?.complainedRecipients?.[0]?.emailAddress;

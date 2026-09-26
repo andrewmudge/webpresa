@@ -93,7 +93,7 @@ export class WebpresaSesStack extends cdk.Stack {
       eventDestination: {
         name: `webpresa-${config.suffix}-ses-events-sns`,
         enabled: true,
-        matchingEventTypes: ['send', 'delivery', 'bounce', 'complaint', 'reject'],
+        matchingEventTypes: ['send', 'delivery', 'bounce', 'complaint', 'reject', 'open'],
         snsDestination: {
           topicArn: this.eventTopic.topicArn,
         },

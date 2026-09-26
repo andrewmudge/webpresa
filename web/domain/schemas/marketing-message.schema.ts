@@ -26,6 +26,9 @@ export const MarketingMessageSchema = z.object({
   clickCount: z.number().int().nonnegative(),
   firstClickAt: IsoTimestampSchema.optional(),
   lastClickAt: IsoTimestampSchema.optional(),
+  openCount: z.number().int().nonnegative().optional(),
+  firstOpenAt: IsoTimestampSchema.optional(),
+  lastOpenAt: IsoTimestampSchema.optional(),
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
 });

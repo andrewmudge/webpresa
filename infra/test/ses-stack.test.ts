@@ -69,11 +69,11 @@ describe('SNS subscription', () => {
 });
 
 describe('Configuration Set event destination', () => {
-  it('matches send/delivery/bounce/complaint/reject only — never open or click (this feature does its own click attribution, and open-rate is de-emphasized)', () => {
+  it('matches send/delivery/bounce/complaint/reject/open — never click (this feature does its own click attribution via /e/[token]; enabling SES click tracking would rewrite those links)', () => {
     dev.hasResourceProperties('AWS::SES::ConfigurationSetEventDestination', {
       EventDestination: Match.objectLike({
         Enabled: true,
-        MatchingEventTypes: ['send', 'delivery', 'bounce', 'complaint', 'reject'],
+        MatchingEventTypes: ['send', 'delivery', 'bounce', 'complaint', 'reject', 'open'],
       }),
     });
   });

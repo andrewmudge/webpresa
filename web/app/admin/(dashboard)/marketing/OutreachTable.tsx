@@ -113,6 +113,7 @@ function OutreachDetail({ row }: { row: OutreachRow }) {
               {message.outcome === 'sent' ? (
                 <>
                   sent{message.sesEventStatus ? ` (${message.sesEventStatus})` : ''}
+                  {message.openCount ? ` · opened ${message.openCount}×` : ''}
                   {message.clickCount > 0 ? ` · ${message.clickCount} click${message.clickCount === 1 ? '' : 's'}` : ''}
                 </>
               ) : (

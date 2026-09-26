@@ -155,3 +155,19 @@ export async function recordMarketingMessageClickRollup(businessId: string, sort
     }),
   );
 }
+
+/** SES `Open` event rollup — deliberately separate from `applyMarketingMessageSesRollup` so an open never overwrites `sesEventStatus` (a message stays `'delivered'`). Unconditional increment for the same reason as that function: the caller's `putMarketingSesEventIfNotExists` is the dedup guard. */
+export async function recordMarketingMessageOpenRollup(businessId: string, sortKey: string, openedAt: string): Promise<void> {
+  const client = getDynamoDBClient();
+  await client.send(
+    new UpdateCommand({
+      TableName: TABLE_MARKETING_MESSAGES(),
+      Key: { businessId, sortKey },
+      ConditionExpression: 'attribute_exists(businessId)',
+      UpdateExpression:
+        'SET openCount = if_not_exists(openCount, :zero) + :one, ' +
+        'firstOpenAt = if_not_exists(firstOpenAt, :openedAt), lastOpenAt = :openedAt, updatedAt = :openedAt',
+      ExpressionAttributeValues: { ':zero': 0, ':one': 1, ':openedAt': openedAt },
+    }),
+  );
+}

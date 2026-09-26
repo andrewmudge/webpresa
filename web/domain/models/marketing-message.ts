@@ -51,4 +51,8 @@ export interface MarketingMessage extends MutableTimestampedRecord {
   clickCount: number;
   firstClickAt?: string;
   lastClickAt?: string;
+  /** SES `Open` event rollup (tracking pixel). Absent on messages sent before open tracking was enabled. Unreliable by nature — image-proxying clients (Apple Mail Privacy Protection) inflate it, image-blocking clients hide real opens. */
+  openCount?: number;
+  firstOpenAt?: string;
+  lastOpenAt?: string;
 }

@@ -20,10 +20,10 @@ function KpiTile({ label, value, href }: { label: string; value: number; href?: 
 }
 
 /**
- * Deliberately no open-rate tile — modern email privacy features make
- * open-rate data unreliable; clicks/claims/paid conversions matter more
- * (see `implementation.md`, Marketing stage, "Marketing dashboard — top
- * summary").
+ * "Emails Opened" is a count, not a rate — opens are directionally useful
+ * but unreliable (Apple Mail Privacy Protection pre-loads the pixel,
+ * image-blocking clients hide real opens), so clicks/claims/paid
+ * conversions remain the signals that matter.
  */
 export function KpiGrid({ kpis, activeCampaigns }: { kpis: MarketingKpis; activeCampaigns: number }) {
   return (
@@ -34,6 +34,7 @@ export function KpiGrid({ kpis, activeCampaigns }: { kpis: MarketingKpis; active
       <KpiTile label="Email 1 Sent" value={kpis.email1Sent} href="/admin/marketing/outbox?sequence=1" />
       <KpiTile label="Email 2 Sent" value={kpis.email2Sent} href="/admin/marketing/outbox?sequence=2" />
       <KpiTile label="Email 3 Sent" value={kpis.email3Sent} href="/admin/marketing/outbox?sequence=3" />
+      <KpiTile label="Emails Opened" value={kpis.emailsOpened} />
       <KpiTile label="Email Clicks" value={kpis.emailClicks} />
       <KpiTile label="Postcard Engagements" value={kpis.postcardEngagements} />
       <KpiTile label="Claims" value={kpis.claims} />

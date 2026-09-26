@@ -32,6 +32,8 @@ export interface MarketingKpis {
   email2Sent: number;
   email3Sent: number;
   emailClicks: number;
+  /** Sent messages with at least one SES `Open` event (unique per message, not total pixel loads). Only covers messages sent after open tracking was enabled. */
+  emailsOpened: number;
   postcardEngagements: number;
   claims: number;
   customers: number;
@@ -57,6 +59,7 @@ export function computeKpis(rows: OutreachRow[], messages: MarketingMessage[], p
   let email2Sent = 0;
   let email3Sent = 0;
   let emailClicks = 0;
+  let emailsOpened = 0;
   let bounces = 0;
 
   for (const message of messages) {
@@ -66,6 +69,7 @@ export function computeKpis(rows: OutreachRow[], messages: MarketingMessage[], p
       else if (message.emailSequence === 3) email3Sent += 1;
     }
     emailClicks += message.clickCount;
+    if ((message.openCount ?? 0) > 0) emailsOpened += 1;
     if (message.sesEventStatus === 'bounced') bounces += 1;
   }
 
@@ -88,6 +92,7 @@ export function computeKpis(rows: OutreachRow[], messages: MarketingMessage[], p
     email2Sent,
     email3Sent,
     emailClicks,
+    emailsOpened,
     postcardEngagements,
     claims,
     customers,
